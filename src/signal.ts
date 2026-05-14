@@ -7,6 +7,7 @@ import {
   type Computed as R3Computed,
   type Signal as R3Signal,
 } from 'r3'
+import { requestFlush } from './scheduler'
 
 /** The underlying r3 node behind any pulse signal or computed accessor. */
 type R3Node<T> = R3Signal<T> | R3Computed<T>
@@ -40,7 +41,8 @@ export function signal<T>(initial: T): Signal<T> {
   return makeAccessor(r3Signal(initial))
 }
 
-/** Write a new value into a signal. */
+/** Write a new value into a signal and request a scheduler flush. */
 export function setSignal<T>(s: Signal<T>, value: T): void {
   r3SetSignal(s[NODE] as R3Signal<T>, value)
+  requestFlush()
 }
