@@ -1,5 +1,6 @@
 import { expect, test } from 'vitest'
 import { signal, setSignal } from '../src/signal'
+import { computed } from '../src/computed'
 
 test('signal holds an initial value', () => {
   const count = signal(0)
@@ -17,4 +18,10 @@ test('signal works with non-number values', () => {
   expect(name()).toBe('alice')
   setSignal(name, 'bob')
   expect(name()).toBe('bob')
+})
+
+test('setSignal rejects a computed (type-level)', () => {
+  const c = computed(() => 1)
+  // @ts-expect-error - setSignal must not accept a read-only computed
+  setSignal(c, 2)
 })

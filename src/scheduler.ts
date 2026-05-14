@@ -20,7 +20,7 @@ export function microtaskScheduler(flushFn: FlushFn): Scheduler {
       if (queued) return
       queued = true
       queueMicrotask(() => {
-        queued = false
+        queued = false // reset before flush so writes during the flush re-queue
         flushFn()
       })
     },

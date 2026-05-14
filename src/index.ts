@@ -9,4 +9,4 @@ export {
   type FlushFn,
   type Scheduler,
 } from './scheduler'
-export { setSignal, signal, type Signal } from './signal'
+export { setSignal, signal, type Signal, type WritableSignal } from './signal'
