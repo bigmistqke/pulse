@@ -1,4 +1,5 @@
 import { effect } from '../effect'
+import { onCleanup } from '../owner'
 
 /**
  * Insert `value` as a child (or children) of `parent`.
@@ -61,6 +62,16 @@ export function insertChild(parent: Node, value: unknown): void {
  * `class:`, `style:`) and reactive function values are added in later tasks.
  */
 export function bindProp(el: Element, name: string, value: unknown): void {
+  // on:event — direct addEventListener; the handler is not reactive
+  if (name.startsWith('on:')) {
+    const event = name.slice(3)
+    if (typeof value !== 'function') return
+    const handler = value as EventListener
+    el.addEventListener(event, handler)
+    onCleanup(() => el.removeEventListener(event, handler))
+    return
+  }
+  // default — setAttribute, no reactivity yet
   if (value === null || value === undefined || value === false) return
   el.setAttribute(name, String(value))
 }
