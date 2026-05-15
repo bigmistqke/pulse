@@ -2,6 +2,7 @@ export { isPending, latest, read, use, NotReadyYet, type Resolved } from './asyn
 export { computed } from './computed'
 export { effect } from './effect'
 export {
+  catchError,
   createRoot,
   getOwner,
   onCleanup,
