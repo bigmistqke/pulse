@@ -43,6 +43,15 @@ Severity: **(small)** trivial cleanups · **(worth)** worth doing soon · **(lat
 - **(later) Document the within-generator restart-from-top semantics in `src/computed.ts`.** A comment near the `'fast-forward'` branch explaining that within a `function*` body, the runtime re-invokes the generator from the top on each kick (relying on the driver's WeakMap to fast-forward settled yields). Cross-stage caching is the per-stage r3 computed; intra-generator caching is explicitly deferred.
   Source: Plan 2b final review.
 
+### DOM-layer findings (Plan 3a)
+
+- **(worth) `h()` called outside any owner silently leaks listeners and reactive bindings.** `on:`/`prop:`/`attr:`/`class:`/`style:` reactive paths register `effect`s, and `on:` registers cleanup via `onCleanup` — all of which silently no-op when `currentOwner === null`. Users who build nodes at module scope and only later mount via `render()` get permanent listeners + ever-running effects. Either (a) document "always call `h`/JSX inside a `render` scope" in the `render` JSDoc, or (b) defer the `bindProp` reactive wiring until first mount. The doc-only path is the cheap fix.
+  Source: Plan 3a final review (Minor).
+- **(small) `render(component, target)` leaks the root owner if `component()` throws synchronously.** The root owner created by `createRoot` is unreferenced — the throw escapes before `dispose` is returned to the caller. Trivial; wrap the `component()` invocation in `try/catch` that disposes the owner before re-throwing.
+  Source: Plan 3a final review (Minor).
+- **(later) No top-level reactive return from a component.** `Component<P> = (props: P) => Node | Node[]` cannot return a bare function for the renderer to treat reactively — `render` invokes `component()` and appends the result directly. Solid's `() => count` at root works because Solid's `render` does the wrapping. Workaround today: return an element containing the reactive child (`() => h('span', null, count)` works, `() => count` does not). Document before Plan 3b.
+  Source: Plan 3a final review (Future).
+
 ### API ergonomics
 
 - **(worth) Widen `use` to accept an accessor too.** Today `use<T>(x: T | Promise<T>): T` requires `use(signal())`. Accept `Accessor<T | Promise<T>>` as a third arm so `use(signal)` works directly. Rationale: symmetry with `read` (the generator-side universal resolver already accepts signals, promises, or plain values) and one less call-site asterisk in real-world bindings. Implementation is one branch: `if (typeof x === 'function') x = x()`. Real footgun: if `T extends Function`, the value would be called accidentally — rare; users with a function value can box it. Backward-compatible: `use(value())` keeps working because the existing union arm still matches. Touch: `src/async.ts` + a test + `CONTEXT.md` `use` entry.
