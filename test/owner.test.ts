@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'vitest'
-import { createRoot, getOwner, onCleanup, runWithOwner } from '../src/owner'
+import { catchError, createRoot, getOwner, onCleanup, runWithOwner } from '../src/owner'
 import { flush, microtaskScheduler, setScheduler } from '../src/scheduler'
 
 afterEach(() => setScheduler(microtaskScheduler(flush)))
@@ -90,4 +90,74 @@ test('dispose is idempotent — calling twice does not throw or re-run cleanups'
     dispose() // second call must not re-run cleanups
   })
   expect(log).toEqual(['cleaned'])
+})
+
+test('catchError invokes the handler on a synchronous throw inside fn', () => {
+  const errors: unknown[] = []
+  const result = catchError(
+    () => { throw new Error('boom') },
+    (e) => errors.push(e),
+  )
+  expect(errors).toHaveLength(1)
+  expect((errors[0] as Error).message).toBe('boom')
+  expect(result).toBeUndefined() // fn threw, no return value
+})
+
+test('catchError returns fn return value when fn does not throw', () => {
+  const result = catchError(() => 42, () => {})
+  expect(result).toBe(42)
+})
+
+test('nested catchError: inner handler catches its own subtree', () => {
+  const inner: unknown[] = []
+  const outer: unknown[] = []
+  catchError(() => {
+    catchError(
+      () => { throw new Error('inner') },
+      (e) => inner.push(e),
+    )
+  }, (e) => outer.push(e))
+  expect(inner).toHaveLength(1)
+  expect(outer).toHaveLength(0) // outer NOT involved
+})
+
+test('handler that throws escalates to the next outer boundary', () => {
+  const outer: unknown[] = []
+  catchError(() => {
+    catchError(
+      () => { throw new Error('inner') },
+      () => { throw new Error('re-thrown by inner handler') },
+    )
+  }, (e) => outer.push(e))
+  expect(outer).toHaveLength(1)
+  expect((outer[0] as Error).message).toBe('re-thrown by inner handler')
+})
+
+test('unhandled throw (no boundary) propagates', () => {
+  expect(() => {
+    catchError(
+      () => { throw new Error('inner') },
+      () => { throw new Error('escalated') },
+    )
+  }).toThrow('escalated')
+})
+
+test('catchError sub-owner is disposed when its parent root is disposed', () => {
+  const log: string[] = []
+  createRoot((dispose) => {
+    catchError(() => {
+      onCleanup(() => log.push('inner cleanup'))
+    }, () => {})
+    onCleanup(() => log.push('outer cleanup'))
+    dispose()
+  })
+  // Bottom-up: inner sub-owner disposed first, then outer's own cleanups.
+  expect(log).toEqual(['inner cleanup', 'outer cleanup'])
+})
+
+test('catchError throws when called inside a disposed owner', () => {
+  createRoot((dispose) => {
+    dispose()
+    expect(() => catchError(() => {}, () => {})).toThrow(/disposed/)
+  })
 })

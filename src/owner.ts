@@ -2,7 +2,13 @@ import { getContext, type Disposable, onCleanup as r3OnCleanup } from 'r3'
 
 /** A lifecycle scope. Owns reactive nodes created within it and their cleanup callbacks. */
 export interface Owner {
-  /** Disposers for owned reactive nodes (effects, computeds). Bottom-up on dispose. */
+  /** The parent owner in the lifecycle tree, or `null` for a root. */
+  readonly parent: Owner | null
+  /** Optional error handler (set by `catchError`). When a reactive node owned
+   *  by this owner (or a descendant) throws, the throw walks up via `parent`
+   *  links to find the nearest handler. */
+  readonly errorHandler: ((error: unknown) => void) | null
+  /** Disposers for owned reactive nodes (effects, computeds) and sub-owners. */
   readonly children: Array<{ dispose: () => void }>
   /** Owner-level cleanup callbacks registered via `onCleanup` outside any r3 context. */
   readonly cleanups: Disposable[]
@@ -12,8 +18,39 @@ export interface Owner {
 
 let currentOwner: Owner | null = null
 
-function newOwner(): Owner {
-  return { children: [], cleanups: [], disposed: false }
+function newOwner(
+  parent: Owner | null = null,
+  errorHandler: ((error: unknown) => void) | null = null,
+): Owner {
+  return { parent, errorHandler, children: [], cleanups: [], disposed: false }
+}
+
+/**
+ * Walk up the owner chain from `start`, invoking the first `errorHandler`
+ * encountered. If the handler itself throws, continue walking from that
+ * owner's `parent` with the new error. If no handler eventually catches,
+ * the final error is re-thrown.
+ *
+ * Internal: called by `effect`/`computed` wrappers on a non-`NotReadyYet` throw.
+ */
+export function routeError(start: Owner | null, error: unknown): void {
+  let owner = start
+  while (owner !== null) {
+    const handler = owner.errorHandler
+    if (handler !== null) {
+      try {
+        handler(error)
+        return // handled
+      } catch (newError) {
+        owner = owner.parent
+        error = newError
+        continue
+      }
+    }
+    owner = owner.parent
+  }
+  // No handler caught — re-throw the final error.
+  throw error
 }
 
 /** Returns the current ambient owner, or `null` if outside any root. */
@@ -50,6 +87,41 @@ export function createRoot<T>(fn: (dispose: () => void) => T): T {
   const owner = newOwner()
   const dispose = () => disposeOwner(owner)
   return runWithOwner(owner, () => fn(dispose))
+}
+
+/**
+ * Create a sub-owner with an error handler attached, then run `fn` with the
+ * sub-owner as ambient. Reactive nodes (effects, computeds) created inside
+ * `fn` parent to this sub-owner; when they throw a non-`NotReadyYet` error,
+ * the throw walks up the owner chain and the nearest handler is invoked.
+ *
+ * The sub-owner is registered as a disposable child of `currentOwner` — so
+ * the parent's `dispose()` cascades down to it automatically. If called
+ * outside any root, the sub-owner has no parent and lives until GC.
+ *
+ * `fn` itself is wrapped in `try/catch`: synchronous throws inside `fn` are
+ * also routed through `routeError`. Returns `fn`'s return value, or
+ * `undefined` if `fn` threw and the handler caught.
+ */
+export function catchError<T>(
+  fn: () => T,
+  handler: (error: unknown) => void,
+): T | undefined {
+  if (currentOwner !== null && currentOwner.disposed) {
+    throw new Error('cannot create a sub-owner inside a disposed owner')
+  }
+  const sub = newOwner(currentOwner, handler)
+  if (currentOwner !== null) {
+    currentOwner.children.push({ dispose: () => disposeOwner(sub) })
+  }
+  return runWithOwner(sub, () => {
+    try {
+      return fn()
+    } catch (e) {
+      routeError(sub, e)
+      return undefined
+    }
+  })
 }
 
 function disposeOwner(owner: Owner): void {

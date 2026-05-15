@@ -119,27 +119,36 @@ last resolved value; it does **not** revert to `undefined` while a newer promise
 is pending (stale-while-revalidate).
 
 **Owner**:
-A lifecycle scope for reactive nodes (effects and computeds). Created by
-`createRoot((dispose) => …)` — runs the callback with the new owner as ambient;
-returns the callback's return value. Calling `dispose()` cleans up everything
-created within: bottom-up disposal of owned children, each child's `onCleanup`
-callbacks fire, each child's r3 node is detached via `r3.unwatched(node)`
-(cascading upstream cleanup is automatic). `getOwner()` returns the current
-ambient owner (or `null` outside any root). `runWithOwner(owner, fn)` is the
-explicit override for cross-tree work. `createRoot` always creates a *root* —
-nesting does not parent inner to outer (matches Solid; it is the "opt out of
-parent disposal" primitive). Outside any root, reactive nodes are permissive —
-they work as before, just live forever. Use-after-dispose (creating a node in
-or running with a disposed owner) throws. **Signals are not owned** — they are
-plain data with no lifecycle.
+A lifecycle scope for reactive nodes (effects and computeds), forming a tree.
+Created by `createRoot((dispose) => …)` — runs the callback with the new owner
+as ambient; returns the callback's return value. Calling `dispose()` cleans up
+everything created within: bottom-up disposal of owned children, each child's
+`onCleanup` callbacks fire, each child's r3 node is detached via
+`r3.unwatched(node)` (cascading upstream cleanup is automatic). `getOwner()`
+returns the current ambient owner (or `null` outside any root).
+`runWithOwner(owner, fn)` is the explicit override for cross-tree work.
+`createRoot` always creates a *root* — nesting does not parent inner to outer
+(matches Solid; it is the "opt out of parent disposal" primitive). Owners may
+have a parent (a child owner is created by `catchError` — see Error Boundary);
+parent disposal cascades to children automatically. Outside any root, reactive
+nodes are permissive — they work as before, just live forever. Use-after-dispose
+(creating a node in or running with a disposed owner) throws. **Signals are not
+owned** — they are plain data with no lifecycle.
 
 **Error Boundary**:
-A graph node that registers as the error sink for its subtree. It catches both
-synchronous throws (a stage throwing, or reading an errored computed
-re-throwing) and async rejections routed to it during scheduler resumption, and
-renders a fallback for its subtree. pulse v1 has Error Boundaries but no Loading
-boundaries — pending is handled per-node as a value. (v2 adds a Loading/Suspense
-boundary alongside, additively.)
+A sub-`Owner` with an attached error handler. Created by
+`catchError(fn, handler)`: a child of the current owner is created with
+`handler` registered, `fn` runs with it as ambient, and reactive nodes created
+inside parent to this sub-owner. When such a node throws a non-`NotReadyYet`
+error (a stage throwing synchronously, an effect body throwing, or a
+`reuse-value` stash re-throwing a settled rejection), its wrapper walks up the
+owner chain via `parent` links and invokes the nearest handler. If the handler
+itself throws, the throw walks further up to the next outer boundary.
+A throwing node **stays alive but frozen** — its r3 value is whatever it was
+before the throw, and it may re-run if its tracked deps change; the handler is
+observational only, recovery state is user-managed via signals. v1 has Error
+Boundaries but no Loading boundaries — pending is handled per-node as a value.
+(v2 adds a Loading/Suspense boundary alongside, additively.)
 _Note_: throwing is reserved for genuine errors, never for expected states like
 pending. Pending is a `Promise<T>` value; errors throw.
 
