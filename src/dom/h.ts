@@ -1,7 +1,7 @@
 import { bindProp, insertChild } from './bindings'
 
-export type Component<P = Record<string, unknown>> = (props: P) => Node | Node[]
-export type Tag = string | Component | symbol
+export type Component<P = any> = (props: P) => Node | Node[]
+export type Tag = string | ((props: any) => Node | Node[]) | symbol
 
 export const Fragment: unique symbol = Symbol('Fragment')
 
@@ -14,7 +14,7 @@ export const Fragment: unique symbol = Symbol('Fragment')
  */
 export function h(tag: Tag, props: Record<string, unknown> | null, ...children: unknown[]): Node | Node[] {
   if (tag === Fragment) {
-    return children
+    return children as Node[]
   }
   if (typeof tag === 'function') {
     const merged: Record<string, unknown> = props ? { ...props } : {}
