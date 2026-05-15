@@ -9,22 +9,20 @@
 ## 1. Motivation and scope
 
 Plan 3a shipped the DOM rendering primitives (`render`, `h`, JSX runtime,
-prop bindings). Plan 3b adds the two control-flow components master spec §9
-names — **`Show`** and **`For`** — built on the per-run sub-owner pattern
-proved in Plan 3a's Task 5 fix.
+prop bindings). Plan 3b adds the control-flow components master spec §9
+names — **`Show`**, **`Switch`/`Match`**, **`For`** — built on the per-run
+sub-owner pattern proved in Plan 3a's Task 5 fix.
 
 **In scope:**
 
 - `Show` component — conditional rendering with type-narrowed function child
+- `Switch` + `Match` components — multi-branch conditional rendering
 - `For` component — keyed list rendering (reference-keyed, v1)
 - `mapArray` internal utility — the reactive list-with-identity-preserving-
   disposal engine that `For` is a thin wrapper around
 
 **Deferred (separate plans):**
 
-- `Switch` / `Match` — explicitly dropped. A function child plus if/else
-  covers every case ergonomically, and pulse's "function = reactive" rule
-  makes `{() => cond() ? <A/> : <B/>}` idiomatic. Not worth a primitive.
 - `Index` — Solid's stable-slot variant of `For`. Pulse v1 ships reference-
   keyed only; a future plan may add `keyed={false}` as an opt-out matching
   Solid 2.x's unified shape.
@@ -36,17 +34,19 @@ proved in Plan 3a's Task 5 fix.
 
 ## 2. Architecture
 
-Three files:
+Four files:
 
 ```
 src/dom/
   show.ts        — Show component (~50 LOC)
+  switch.ts      — Switch + Match components (~60 LOC)
   for.ts         — For component (~30 LOC, thin wrapper over mapArray)
   map-array.ts   — internal mapArray utility (~80 LOC)
-  index.ts       — adds: export { Show, For }
-src/index.ts     — adds: export { Show, For } from './dom'
+  index.ts       — adds: export { Show, Switch, Match, For }
+src/index.ts     — adds: export { Show, Switch, Match, For } from './dom'
 test/dom/
   show.test.tsx
+  switch.test.tsx
   for.test.tsx
   map-array.test.ts  — DOM-free tests of the reconciliation engine
 ```
@@ -141,7 +141,106 @@ function Show<T>(props: ShowProps<T>): () => Node | Node[] | undefined {
 Returned as a function so the parent's `insertChild` treats it reactively
 (Plan 3a's "function = reactive" rule).
 
-## 4. `mapArray` — the list reconciliation engine
+## 4. `Switch` + `Match`
+
+### API
+
+```tsx
+<Switch fallback={<Spinner/>}>
+  <Match when={isError()}>
+    <ErrorView/>
+  </Match>
+  <Match when={user()}>
+    {u => <UserView user={u}/>}
+  </Match>
+</Switch>
+```
+
+The first `Match` whose `when` is truthy wins; if none match, `fallback`
+renders.
+
+**`Match<T>` props:**
+
+- `when: T | (() => T)` — same shape as `Show`'s `when` (falsy/pending →
+  this Match is skipped).
+- `children: Node | Node[] | ((value: Truthy<T>) => Node | Node[])` —
+  function form gives the narrowed value.
+
+**`Switch` props:**
+
+- `fallback?: Node | Node[]` — used when no `Match` is truthy.
+- `children` — one or more `Match` elements (or non-Match children, which
+  are silently ignored).
+
+### Semantics
+
+- **`Match` is a data marker, not a renderer.** It returns its props
+  tagged with an internal symbol so `Switch` can detect it. Stray
+  non-Match JSX children inside `<Switch>` are skipped.
+- **First-truthy wins.** `Switch` evaluates each `Match`'s `when` in
+  document order, picks the first truthy, renders that Match's children.
+- **Branch caching:** same-winner across re-runs preserves the rendered
+  subtree (matches `Show`'s rule). The winning Match is identified by
+  the Match-data object's identity, not by index — so reordering Matches
+  inside Switch still re-uses subtrees if the same Match object wins.
+- **Per-branch sub-owner:** each active branch (one Match or fallback)
+  runs under `createSubOwner(parentOwner)`. Winner change disposes the
+  old branch, mounts the new under a fresh sub-owner.
+- **Total and pure:** like Show, never throws, never suspends.
+
+### Implementation shape
+
+```ts
+const MATCH = Symbol('Match')
+type MatchData<T> = { [MATCH]: true; when: T | (() => T); children: ... }
+
+function Match<T>(props): MatchData<T> {
+  return { [MATCH]: true, ...props }
+}
+
+function Switch(props): () => Node | Node[] | undefined {
+  const parentOwner = getOwner()
+  let lastKey: MatchData<unknown> | 'fallback' | null = null
+  let cachedNode: Node | Node[] | undefined
+  let branchOwner: Owner | null = null
+
+  return () => {
+    const items = Array.isArray(props.children) ? props.children : [props.children]
+    let winner: MatchData<unknown> | null = null
+    let winnerValue: unknown = undefined
+    for (const item of items) {
+      if (!item || (item as MatchData<unknown>)[MATCH] !== true) continue
+      const m = item as MatchData<unknown>
+      const raw = typeof m.when === 'function' ? (m.when as () => unknown)() : m.when
+      if (raw && !isPromise(raw)) { winner = m; winnerValue = raw; break }
+    }
+
+    const key = winner ?? 'fallback'
+    if (key === lastKey) return cachedNode
+
+    if (branchOwner !== null) disposeOwner(branchOwner)
+    branchOwner = createSubOwner(parentOwner)
+    cachedNode = runWithOwner(branchOwner, () => {
+      if (winner === null) return props.fallback
+      return typeof winner.children === 'function'
+        ? winner.children(winnerValue)
+        : winner.children
+    })
+    lastKey = key
+    return cachedNode
+  }
+}
+```
+
+`Match`'s return type is **not** `Node | Node[]` — it's the tagged data
+object. `Switch`'s `children` prop is typed as `MatchData | MatchData[]`,
+not the generic `Node` children. This breaks the `Component<P> =
+(props: P) => Node | Node[]` contract for `Match` specifically. The
+pragmatic resolution: type `Match` with its own signature
+`Match<T>(props): MatchData<T>` (not via `Component`), and rely on
+`Switch`'s typed `children` prop to flag misuse at the call site.
+
+## 5. `mapArray` — the list reconciliation engine
 
 ### API (internal)
 
@@ -225,7 +324,7 @@ function mapArray<T, U>(...): () => U[] {
 `indexSig` is a pulse `signal(number)`; `mapFn` receives `() => indexSig()`
 as the index argument so the mapper body can read it reactively.
 
-## 5. `For`
+## 6. `For`
 
 ### API
 
@@ -263,10 +362,10 @@ single child sequence.
 The return value is a function — the parent's `insertChild` (Plan 3a)
 treats it reactively. The mapped Nodes returned each run preserve
 references for unchanged rows; `insertChild`'s clear-and-reinsert cycle
-detaches and reattaches them rather than recreating. See §6 for the
+detaches and reattaches them rather than recreating. See §7 for the
 known perf note.
 
-## 6. Performance — known v1 cost
+## 7. Performance — known v1 cost
 
 Each time `each`'s deps change, the outer reactive binding-effect:
 
@@ -288,7 +387,7 @@ trigger layout twice per change. For a 1000-row list, that's noticeable.
 This is tracked as a follow-up in `docs/follow-ups.md` rather than blocking
 Plan 3b.
 
-## 7. Testing
+## 8. Testing
 
 ### `mapArray` (no DOM)
 
@@ -319,6 +418,17 @@ In `test/dom/show.test.tsx`. ~7 tests:
 - Falsy → truthy: fresh sub-owner, fresh children invocation
 - Disposing the surrounding owner disposes the active branch's sub-owner
 
+### `Switch` + `Match` (DOM)
+
+In `test/dom/switch.test.tsx`. ~6 tests:
+- First truthy Match wins; later Matches skipped even if truthy
+- No Match truthy → fallback rendered
+- Non-Match children inside `<Switch>` ignored
+- Winner changes → old branch sub-owner disposed (e.g. `onCleanup` fires), new mounted
+- Same Match wins twice in a row → subtree preserved (children not re-called)
+- Match's function child receives narrowed truthy value
+- Disposing the surrounding owner disposes the active branch's sub-owner
+
 ### `For` (DOM)
 
 In `test/dom/for.test.tsx`. ~6 tests covering the DOM-side concerns
@@ -330,50 +440,48 @@ that `mapArray` doesn't already pin:
 - Reorder: same DOM nodes, repositioned via `insertBefore`
 - Pending `Promise<T[]>` → fallback rendered
 
-## 8. Public API surface
+## 9. Public API surface
 
 Added to `src/index.ts`:
 
 ```ts
-export { Show, For } from './dom'
+export { Show, Switch, Match, For } from './dom'
 ```
 
 Added to `src/dom/index.ts`:
 
 ```ts
 export { Show } from './show'
+export { Switch, Match } from './switch'
 export { For } from './for'
 ```
 
 `mapArray` stays unexported from `./dom` (internal-only). Promoting it
 later is non-breaking.
 
-## 9. Decisions log
+## 10. Decisions log
 
 | Decision | Resolution | Why |
 |---|---|---|
-| Scope | Show + For only | YAGNI on Switch (function child + if/else covers it); Index/Portal/SVG defer to later plans |
+| Scope | Show, Switch/Match, For | All three control-flow primitives master spec §9 names; Index/Portal/SVG defer to later plans |
 | `Show` children shape | Function or static; function receives narrowed value | Type-narrowing is the win over a bare ternary |
 | `Show` re-render policy | Cache per-branch subtree; only swap on truthy↔falsy transition | Avoids tearing down children when value changes within the same branch; matches Solid |
+| `Match` is data, not a renderer | Returns a tagged props object; `Switch` consumes it | The component contract `(props) => Node \| Node[]` can't express "marker"; the typed `Match<T>` signature replaces the generic `Component` contract |
+| `Switch` re-render policy | Same as `Show` — branch keyed by winning Match's object identity; same-winner re-runs preserve subtree | Consistent semantics across single- and multi-branch conditionals |
 | `For` keying | Reference identity only (v1) | Pulse's async-items story requires it; index-keyed mode deferred until needed |
 | `For` index | Accessor (`() => number`) | Reorders preserve row identity; mapper body can react to position changes |
 | `For` factoring | `mapArray` internal utility + thin `For` wrapper | Reconciliation testable in isolation, no DOM in those tests; future option to publicize |
 | Per-branch / per-row owners | `createSubOwner(parentOwner)` set ambient via `runWithOwner` | Reuses Plan 3a Task 5's proven pattern; no new owner machinery |
 | Perf | Full re-insert on each change; diff-insert deferred | Correct behaviour for v1; optimization is non-blocking follow-up |
 
-## 10. Relationship to master spec §9
+## 11. Relationship to master spec §9
 
-Master §9 names `Show`, `Switch`, `For` as control-flow components.
-This plan ships `Show` and `For`; **drops `Switch`** explicitly on YAGNI
-grounds (function-child + if/else is the idiomatic substitute). All
-semantic requirements from §9 hold:
+Master §9 names `Show`, `Switch`, `For` as control-flow components. This
+plan ships all three. All semantic requirements from §9 hold:
 
 - Total and pure — never throw, never suspend internally ✓
-- Pending coerced (`Show` falsy, `For` empty) ✓
+- Pending coerced (`Show`/`Switch` falsy → fallback; `For` empty → fallback) ✓
 - Local `fallback` prop covering empty + pending ✓
 - `For` reference-keyed (v1); two-phase keying deferred ✓
 
-No semantic divergence from §9. The only API simplification is the
-`Switch` drop, which §9 itself doesn't require (it lists `Switch` as a
-control-flow primitive but the §9 semantics — total coercion, fallback,
-no suspension — apply to `Show`/`For` only).
+No semantic divergence from §9.
