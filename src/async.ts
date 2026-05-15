@@ -1,8 +1,8 @@
 import { isPromise } from './is-promise'
-import { NODE, type Signal } from './signal'
+import { NODE, type Accessor, type Signal } from './signal'
 
 /** Reactive predicate: is the signal's current value a (pending) promise? */
-export function isPending(s: Signal<unknown>): boolean {
+export function isPending(s: Accessor<unknown>): boolean {
   return isPromise(s())
 }
 
@@ -18,7 +18,7 @@ const lastResolved = new WeakMap<object, unknown>()
  * revert to `undefined` while a newer promise is pending (stale-while-revalidate).
  * Reactive: reads `s()`, so it re-evaluates when the signal changes.
  */
-export function latest<T>(s: Signal<T>): Awaited<T> | undefined {
+export function latest<T>(s: Accessor<T>): Awaited<T> | undefined {
   const value = s()
   if (isPromise(value)) {
     return lastResolved.get(s) as Awaited<T> | undefined
@@ -90,15 +90,17 @@ export function use<T>(x: T): Awaited<T> {
 
 /**
  * The resolved-and-unwrapped type of a stage value or `read(x)` argument:
- * - If T is a Signal<U>, the result is Awaited<U>.
+ * - If T is a Signal<U> or Accessor<U> (a callable returning U), the result is Awaited<U>.
  * - If T is a Generator returning R, the result is Awaited<R>.
  * - Otherwise the result is Awaited<T>.
  */
 export type Resolved<T> = T extends Signal<infer U>
   ? Awaited<U>
-  : T extends Generator<unknown, infer R, unknown>
-    ? Awaited<R>
-    : Awaited<T>
+  : T extends () => infer U
+    ? Awaited<U>
+    : T extends Generator<unknown, infer R, unknown>
+      ? Awaited<R>
+      : Awaited<T>
 
 /** True if `x` looks like a pulse signal accessor (a function carrying NODE). */
 function isSignalAccessor(x: unknown): x is Signal<unknown> {

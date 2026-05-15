@@ -28,7 +28,7 @@ test('static h() outside any owner does NOT warn', () => {
 })
 
 test('reactive function child outside any owner warns', () => {
-  const count = signal(0)
+  const [count] = signal(0)
   h('div', null, count)
   expect(warnSpy).toHaveBeenCalledTimes(1)
   expect(warnSpy.mock.calls[0][0]).toMatch(/reactive child.*outside any owner/)
@@ -41,21 +41,21 @@ test('on: event listener outside any owner warns', () => {
 })
 
 test('reactive prop binding outside any owner warns', () => {
-  const v = signal('a')
+  const [v] = signal('a')
   h('input', { 'prop:value': v })
   expect(warnSpy).toHaveBeenCalledTimes(1)
   expect(warnSpy.mock.calls[0][0]).toMatch(/prop binding.*outside any owner/)
 })
 
 test('reactive attr/class/style bindings outside any owner warn', () => {
-  const s = signal('x')
+  const [s] = signal('x')
   h('div', { title: s, 'attr:data-x': s, 'class:on': s, 'style:color': s })
   expect(warnSpy.mock.calls.length).toBe(4)
 })
 
 test('inside createRoot, no warnings', () => {
   createRoot(() => {
-    const v = signal('a')
+    const [v] = signal('a')
     h('div', { title: v, 'on:click': () => {} }, v)
     expect(warnSpy).not.toHaveBeenCalled()
   })

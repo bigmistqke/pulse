@@ -5,7 +5,6 @@ import {
   flush,
   microtaskScheduler,
   setScheduler,
-  setSignal,
   signal,
   syncScheduler,
 } from '../../src/index'
@@ -42,11 +41,11 @@ test('components compose with reactive children', () => {
   const Label = (props: { value: () => unknown }) =>
     h('span', null, props.value) as HTMLElement
   createRoot(() => {
-    const n = signal(1)
+    const [n, setN] = signal(1)
     const node = h(Label, { value: n }) as HTMLElement
     document.body.append(node)
     expect(node.textContent).toBe('1')
-    setSignal(n, 2)
+    setN(2)
     expect(node.textContent).toBe('2')
   })
 })

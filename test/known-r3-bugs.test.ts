@@ -13,7 +13,7 @@
  */
 
 import { expect, test } from 'vitest'
-import { computed, setSignal, signal } from '../src/index'
+import { computed, signal } from '../src/index'
 
 /**
  * r3 phantom re-trigger after a partial-throw run.
@@ -25,7 +25,7 @@ import { computed, setSignal, signal } from '../src/index'
  * With Plan 2c's `try/finally`, `context` and `flags` are restored on throw —
  * but the post-`try` cleanup is still skipped. So a body that reads `a` then
  * throws (before reading `b`) leaves `b` linked from the previous successful
- * run. A subsequent `setSignal(b, …)` re-triggers the computed even though the
+ * run. A subsequent setter for `b` re-triggers the computed even though the
  * body no longer reads `b`.
  *
  * After the r3 fix, this test will pass (runs stays at 2), which makes
@@ -35,8 +35,8 @@ import { computed, setSignal, signal } from '../src/index'
  * after a throw in `recompute`").
  */
 test.fails('r3 phantom re-trigger: throwing body retains deps it did not re-read', () => {
-  const a = signal(0)
-  const b = signal(0)
+  const [a, setA] = signal(0)
+  const [b, setB] = signal(0)
   let throwOnNext = false
   let runs = 0
 
@@ -54,16 +54,16 @@ test.fails('r3 phantom re-trigger: throwing body retains deps it did not re-read
 
   // Force a throwing run: body throws between read(a) and read(b).
   throwOnNext = true
-  setSignal(a, 1)
+  setA(1)
   expect(() => c()).toThrow('mid-run throw')
   expect(runs).toBe(2)
 
   // Change `b`. With correct dep cleanup, `b` is no longer a dep of `c`
   // (the throwing run never re-read it), so `c` should NOT be re-triggered.
-  // With current r3, `b` stays linked → setSignal(b) marks `c` dirty →
+  // With current r3, `b` stays linked → setter marks `c` dirty →
   // a subsequent `c()` re-runs the body → `runs` becomes 3.
   throwOnNext = false
-  setSignal(b, 1)
+  setB(1)
   c()
   expect(runs).toBe(2) // BUG: actually becomes 3 today.
 })

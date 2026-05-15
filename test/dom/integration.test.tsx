@@ -5,7 +5,6 @@ import {
   microtaskScheduler,
   render,
   setScheduler,
-  setSignal,
   signal,
   syncScheduler,
   use,
@@ -23,7 +22,7 @@ test('use-throw inside a binding holds the previous DOM (stale-but-stable)', asy
 
   let resolveFirst!: (v: string) => void
   const first = new Promise<string>((r) => { resolveFirst = r })
-  const value = signal<string | Promise<string>>(first)
+  const [value, setValue] = signal<string | Promise<string>>(first)
 
   const dispose = render(
     () => <div>{() => use(value())}</div>,
@@ -42,7 +41,7 @@ test('use-throw inside a binding holds the previous DOM (stale-but-stable)', asy
   // Set a new pending promise: the binding suspends again, but holds 'hello'.
   let resolveSecond!: (v: string) => void
   const second = new Promise<string>((r) => { resolveSecond = r })
-  setSignal(value, second)
+  setValue(second)
   expect(target.textContent).toBe('hello') // stale-but-stable
 
   resolveSecond('world')
@@ -58,7 +57,7 @@ test('a throw inside a reactive binding is caught by an enclosing catchError', (
   document.body.append(target)
 
   const caught: unknown[] = []
-  const trigger = signal(false)
+  const [trigger, setTrigger] = signal(false)
 
   const dispose = render(() => {
     return catchError(
@@ -75,7 +74,7 @@ test('a throw inside a reactive binding is caught by an enclosing catchError', (
   }, target)
 
   expect(target.textContent).toBe('safe')
-  setSignal(trigger, true)
+  setTrigger(true)
   expect(caught.length).toBe(1)
   expect((caught[0] as Error).message).toBe('boom')
 
@@ -86,7 +85,7 @@ test('dispose tears down nested catchError children', () => {
   const target = document.createElement('section')
   document.body.append(target)
 
-  const count = signal(0)
+  const [count, setCount] = signal(0)
   let runs = 0
 
   const dispose = render(() => {
@@ -104,10 +103,10 @@ test('dispose tears down nested catchError children', () => {
   }, target)
 
   expect(runs).toBe(1)
-  setSignal(count, 1)
+  setCount(1)
   expect(runs).toBe(2)
   dispose()
-  setSignal(count, 2)
+  setCount(2)
   expect(runs).toBe(2) // disposed; no further runs
   expect(target.children.length).toBe(0)
 })

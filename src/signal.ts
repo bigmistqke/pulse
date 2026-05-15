@@ -4,6 +4,7 @@ import {
   setSignal as r3SetSignal,
   signal as r3Signal,
   stabilize,
+  untrack,
   type Computed as R3Computed,
   type Signal as R3Signal,
 } from 'r3'
@@ -16,19 +17,17 @@ type R3Node<T> = R3Signal<T> | R3Computed<T>
 /** Internal key under which a pulse accessor stashes its r3 node. */
 export const NODE = Symbol('pulse.node')
 
-/** Nominal brand distinguishing writable signals from read-only computeds. */
-declare const WRITABLE: unique symbol
-
 /** A pulse signal or computed: an accessor function carrying its r3 node. */
 export interface Signal<T> {
   (): T
   [NODE]: R3Node<T>
 }
 
-/** A writable pulse signal: branded subtype of Signal that setSignal will accept. */
-export interface WritableSignal<T> extends Signal<T> {
-  readonly [WRITABLE]: true
-}
+/** A callable that reads a reactive signal or computed value. */
+export type Accessor<T> = () => T
+
+/** A function that writes a new value into a signal, or updates it via a function. */
+export type Setter<T> = (next: T | ((prev: T) => T)) => void
 
 /**
  * Wrap an r3 node in a pull-on-read accessor.
@@ -46,24 +45,30 @@ export function makeAccessor<T>(node: R3Node<T>): Signal<T> {
 }
 
 /**
- * Per-signal generation counter. Every `setSignal` bumps it; a scheduled
- * write-back captures the generation at schedule time and applies only if it
- * still matches — so a superseded (stale) promise cannot clobber a newer value.
+ * Per-signal generation counter. Every write bumps it; a scheduled write-back
+ * captures the generation at schedule time and applies only if it still matches —
+ * so a superseded (stale) promise cannot clobber a newer value.
  */
 const generation = new WeakMap<object, number>()
 
 /**
  * If `value` is a promise, schedule its resolved value to be written back into
- * `s` once it settles — unless `s` has been re-assigned since (generation guard).
- * A rejected promise does not write back; the signal keeps holding the rejected
- * promise and `use` surfaces the rejection when the value is read.
+ * the signal once it settles — unless the signal has been re-assigned since
+ * (generation guard). A rejected promise does not write back; the signal keeps
+ * holding the rejected promise and `use` surfaces the rejection when the value
+ * is read.
  */
-function scheduleWriteBack(s: WritableSignal<unknown>, value: unknown): void {
+function scheduleWriteBack(
+  node: R3Signal<unknown>,
+  genKey: object,
+  value: unknown,
+  write: (v: unknown) => void,
+): void {
   if (!isPromise(value)) return
-  const captured = generation.get(s) ?? 0
+  const captured = generation.get(genKey) ?? 0
   value.then(
     (resolved) => {
-      if ((generation.get(s) ?? 0) === captured) setSignal(s, resolved)
+      if ((generation.get(genKey) ?? 0) === captured) write(resolved)
     },
     () => {
       // Rejected: write-back is happy-path only (error boundaries are Plan 2c).
@@ -71,18 +76,30 @@ function scheduleWriteBack(s: WritableSignal<unknown>, value: unknown): void {
   )
 }
 
-/** Create a writable reactive signal. */
-export function signal<T>(initial: T): WritableSignal<Awaited<T> | T> {
-  const s = makeAccessor(r3Signal(initial)) as WritableSignal<Awaited<T> | T>
-  generation.set(s, 0)
-  scheduleWriteBack(s, initial)
-  return s
-}
+/** Create a writable reactive signal, returning an [accessor, setter] tuple. */
+export function signal<T>(initial: T): [Accessor<Awaited<T> | T>, Setter<Awaited<T> | T>] {
+  const r3Node = r3Signal(initial) as R3Signal<Awaited<T> | T>
+  const accessor = makeAccessor(r3Node) as Signal<Awaited<T> | T>
+  // Use the accessor object as the generation key (stable object identity).
+  const genKey = accessor
+  generation.set(genKey, 0)
 
-/** Write a new value into a signal and request a scheduler flush. */
-export function setSignal<T>(s: WritableSignal<T>, value: T): void {
-  generation.set(s, (generation.get(s) ?? 0) + 1)
-  r3SetSignal(s[NODE] as R3Signal<T>, value)
-  scheduleWriteBack(s, value)
-  requestFlush()
+  const write = (value: Awaited<T> | T): void => {
+    generation.set(genKey, (generation.get(genKey) ?? 0) + 1)
+    r3SetSignal(r3Node, value)
+    scheduleWriteBack(r3Node as R3Signal<unknown>, genKey, value, write as (v: unknown) => void)
+    requestFlush()
+  }
+
+  const setter: Setter<Awaited<T> | T> = (next) => {
+    const value =
+      typeof next === 'function'
+        ? (next as (prev: Awaited<T> | T) => Awaited<T> | T)(untrack(() => accessor()))
+        : next
+    write(value)
+  }
+
+  scheduleWriteBack(r3Node as R3Signal<unknown>, genKey, initial, write as (v: unknown) => void)
+
+  return [accessor, setter]
 }

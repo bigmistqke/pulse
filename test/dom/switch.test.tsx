@@ -6,7 +6,6 @@ import {
   onCleanup,
   render,
   setScheduler,
-  setSignal,
   signal,
   syncScheduler,
 } from '../../src/index'
@@ -69,7 +68,7 @@ test('non-Match children inside Switch are ignored', () => {
 test('Match function child receives narrowed value', () => {
   const target = document.createElement('section')
   document.body.append(target)
-  const user = signal<{ name: string } | null>({ name: 'Ada' })
+  const [user] = signal<{ name: string } | null>({ name: 'Ada' })
   const dispose = render(
     () => (
       <Switch fallback={<p>none</p>}>
@@ -85,7 +84,7 @@ test('Match function child receives narrowed value', () => {
 test('winner change disposes old branch sub-owner', () => {
   const target = document.createElement('section')
   document.body.append(target)
-  const which = signal<'a' | 'b' | 'none'>('a')
+  const [which, setWhich] = signal<'a' | 'b' | 'none'>('a')
   let aCleaned = false
   let bCleaned = false
   const dispose = render(
@@ -104,11 +103,11 @@ test('winner change disposes old branch sub-owner', () => {
     target,
   )
   expect(target.textContent).toBe('a')
-  setSignal(which, 'b')
+  setWhich('b')
   expect(target.textContent).toBe('b')
   expect(aCleaned).toBe(true)
   expect(bCleaned).toBe(false)
-  setSignal(which, 'none')
+  setWhich('none')
   expect(target.textContent).toBe('none')
   expect(bCleaned).toBe(true)
   dispose()

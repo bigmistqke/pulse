@@ -5,7 +5,6 @@ import {
   microtaskScheduler,
   render,
   setScheduler,
-  setSignal,
   signal,
   syncScheduler,
 } from '../../src/index'
@@ -37,14 +36,14 @@ test('render dispose removes the mounted nodes', () => {
 test('render dispose tears down binding-effects', () => {
   const target = document.createElement('section')
   document.body.append(target)
-  const count = signal(0)
+  const [count, setCount] = signal(0)
   const renders = vi.fn(() => count())
   const dispose = render(() => h('p', null, renders), target)
   expect(renders).toHaveBeenCalledTimes(1)
-  setSignal(count, 1)
+  setCount(1)
   expect(renders).toHaveBeenCalledTimes(2)
   dispose()
-  setSignal(count, 2)
+  setCount(2)
   expect(renders).toHaveBeenCalledTimes(2) // no further runs after dispose
 })
 
@@ -64,10 +63,10 @@ test('render supports a component returning an array', () => {
 test('render accepts a top-level reactive (function) return', () => {
   const target = document.createElement('section')
   document.body.append(target)
-  const count = signal(0)
+  const [count, setCount] = signal(0)
   const dispose = render(() => count, target)
   expect(target.textContent).toBe('0')
-  setSignal(count, 7)
+  setCount(7)
   flush()
   expect(target.textContent).toBe('7')
   dispose()

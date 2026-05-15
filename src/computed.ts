@@ -3,7 +3,7 @@ import { isGeneratorFunction, track, type Resolved } from './async'
 import { runStage } from './driver'
 import { isPromise } from './is-promise'
 import { getOwner, routeError, registerWithOwner } from './owner'
-import { makeAccessor, NODE, setSignal, signal, type Signal } from './signal'
+import { makeAccessor, NODE, signal, type Signal } from './signal'
 
 /** A pipeline stage of any shape: sync, async, or generator. The return type
  *  is whatever the function returns — sync `R`, async `Promise<R>`, or
@@ -108,8 +108,8 @@ function makeStageNode(
   const myOwner = getOwner()
   let lastGoodValue: unknown = undefined
   // `kick` lets a settled promise re-trigger this stage's r3 computed.
-  const kick = signal(0)
-  // `kickCount` increments per kick so each `setSignal(kick, ...)` is a distinct value
+  const [kick, setKick] = signal(0)
+  // `kickCount` increments per kick so each setKick(...) is a distinct value
   // (r3's setSignal bails on `el.value === v`, so writing the same value would be a no-op).
   let kickCount = 0
   let suspendedOn: Promise<unknown> | null = null
@@ -182,7 +182,7 @@ function makeStageNode(
               // re-invoke the stage, and the driver's WeakMap-backed `track`
               // will see the yielded promise as settled and fast-forward.
               suspendedOn = null
-              setSignal(kick, ++kickCount)
+              setKick(++kickCount)
             }
           }
           p.then(rerun, rerun)

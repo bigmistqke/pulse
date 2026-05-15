@@ -5,7 +5,6 @@ import {
   flush,
   microtaskScheduler,
   setScheduler,
-  setSignal,
   signal,
   syncScheduler,
 } from '../../src/index'
@@ -18,7 +17,7 @@ afterEach(() => {
 
 test('function child renders the current value as text', () => {
   createRoot(() => {
-    const count = signal(0)
+    const [count] = signal(0)
     const el = h('div', null, count) as HTMLElement
     document.body.append(el)
     expect(el.textContent).toBe('0')
@@ -27,28 +26,28 @@ test('function child renders the current value as text', () => {
 
 test('function child re-renders when its signal changes', () => {
   createRoot(() => {
-    const count = signal(0)
+    const [count, setCount] = signal(0)
     const el = h('div', null, count) as HTMLElement
     document.body.append(el)
-    setSignal(count, 7)
+    setCount(7)
     expect(el.textContent).toBe('7')
   })
 })
 
 test('function child replaces previous DOM each run', () => {
   createRoot(() => {
-    const which = signal<'a' | 'b'>('a')
+    const [which, setWhich] = signal<'a' | 'b'>('a')
     const el = h('div', null, () => which() === 'a' ? 'aaa' : 'bbb') as HTMLElement
     document.body.append(el)
     expect(el.textContent).toBe('aaa')
-    setSignal(which, 'b')
+    setWhich('b')
     expect(el.textContent).toBe('bbb')
   })
 })
 
 test('function child can return a DOM node', () => {
   createRoot(() => {
-    const which = signal<'x' | 'y'>('x')
+    const [which, setWhich] = signal<'x' | 'y'>('x')
     const el = h('div', null, () => {
       const span = document.createElement('span')
       span.textContent = which()
@@ -56,26 +55,26 @@ test('function child can return a DOM node', () => {
     }) as HTMLElement
     document.body.append(el)
     expect(el.querySelector('span')?.textContent).toBe('x')
-    setSignal(which, 'y')
+    setWhich('y')
     expect(el.querySelector('span')?.textContent).toBe('y')
   })
 })
 
 test('function child preserves marker order for static siblings', () => {
   createRoot(() => {
-    const mid = signal('M')
+    const [mid, setMid] = signal('M')
     const el = h('div', null, 'L', mid, 'R') as HTMLElement
     document.body.append(el)
     expect(el.textContent).toBe('LMR')
-    setSignal(mid, 'm')
+    setMid('m')
     expect(el.textContent).toBe('LmR')
   })
 })
 
 test('nested reactive child does not leak the inner effect on outer re-run', () => {
   createRoot(() => {
-    const outer = signal(0)
-    const inner = signal(0)
+    const [outer, setOuter] = signal(0)
+    const [inner, setInner] = signal(0)
     let innerRuns = 0
     const el = h('div', null, () => {
       outer() // outer dep
@@ -89,13 +88,13 @@ test('nested reactive child does not leak the inner effect on outer re-run', () 
     expect(innerRuns).toBe(1)
     // Trigger outer re-run multiple times. If the inner effect leaks,
     // each old nested effect remains subscribed to `inner`.
-    setSignal(outer, 1)
-    setSignal(outer, 2)
-    setSignal(outer, 3)
+    setOuter(1)
+    setOuter(2)
+    setOuter(3)
     // Now bump inner. With proper disposal, exactly one (the latest) inner
     // effect re-runs. With leak, all four (or however many accumulated) fire.
     const before = innerRuns
-    setSignal(inner, 100)
+    setInner(100)
     expect(innerRuns - before).toBe(1)
   })
 })

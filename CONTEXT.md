@@ -12,14 +12,17 @@ capability, not a data-loading feature.
 ## Language
 
 **Signal**:
-Plain reactive data holder. Its value type is `T | Promise<T>` — a signal may
-hold a promise, which is how "a value in the future" is represented (no invented
-pending sentinel).
+Plain reactive data holder. Created via `const [count, setCount] = signal(0)`.
+The getter `count()` reads the current value; the setter `setCount(value)` writes
+a new value, or `setCount(prev => next)` updates from the previous value (updater
+form). Value type is `T | Promise<T>` — a signal may hold a promise, which is
+how "a value in the future" is represented (no invented pending sentinel).
 _Avoid_: store (different concept), atom.
 
 **Accessor**:
-The bare call form of a signal — `count()` — used for synchronous reads outside
-generator computeds (sync computeds, effects, DOM).
+A callable that reads a reactive value — `count()` — used for synchronous reads
+outside generator computeds (sync computeds, effects, DOM). The first element of
+the `signal()` tuple. Type: `Accessor<T> = () => T`.
 
 **Computed**:
 A derived signal. Defined as a Pipeline of one or more Stages:

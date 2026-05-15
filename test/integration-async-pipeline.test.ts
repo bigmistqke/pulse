@@ -1,11 +1,11 @@
 import { expect, test } from 'vitest'
-import { computed, read, setSignal, signal, type Resolved } from '../src/index'
+import { computed, read, signal, type Resolved } from '../src/index'
 
 /** Resolve after all microtasks have drained (a macrotask boundary). */
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
 
 test('end-to-end: signal -> sync stage -> async stage -> generator stage', async () => {
-  const id = signal(1)
+  const [id] = signal(1)
   const pipeline = computed(
     () => id(),                               // stage 0: sync, reads a signal
     (n: number) => n * 10,                    // stage 1: sync transform
@@ -26,7 +26,7 @@ test('end-to-end: signal -> sync stage -> async stage -> generator stage', async
 })
 
 test('pipeline re-runs when its signal input changes', async () => {
-  const id = signal(1)
+  const [id, setId] = signal(1)
   const pipeline = computed(
     () => id(),
     async (n: number) => `value:${n}`,
@@ -34,7 +34,7 @@ test('pipeline re-runs when its signal input changes', async () => {
   await tick()
   expect(pipeline()).toBe('value:1')
 
-  setSignal(id, 2)
+  setId(2)
   // After the write, the async stage re-runs and is suspended again with a fresh promise.
   expect(pipeline()).toBeInstanceOf(Promise)
   await tick()

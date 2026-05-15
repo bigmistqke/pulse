@@ -2,11 +2,11 @@ import {
   For,
   Match,
   render,
-  setSignal,
   Show,
   signal,
   Switch,
-  type WritableSignal,
+  type Accessor,
+  type Setter,
 } from 'pulse'
 
 type Filter = 'all' | 'active' | 'completed'
@@ -14,37 +14,34 @@ type Filter = 'all' | 'active' | 'completed'
 type Todo = {
   id: number
   text: string
-  done: WritableSignal<boolean>
+  done: Accessor<boolean>
+  setDone: Setter<boolean>
 }
 
 let nextId = 0
 
-const todos = signal<Todo[]>([])
-const newText = signal('')
-const filter = signal<Filter>('all')
+const [todos, setTodos] = signal<Todo[]>([])
+const [newText, setNewText] = signal('')
+const [filter, setFilter] = signal<Filter>('all')
+
+function makeTodo(text: string): Todo {
+  const [done, setDone] = signal(false)
+  return { id: ++nextId, text, done, setDone }
+}
 
 function addTodo() {
   const text = newText().trim()
   if (!text) return
-  setSignal(todos, [
-    ...todos(),
-    { id: ++nextId, text, done: signal(false) },
-  ])
-  setSignal(newText, '')
+  setTodos((prev) => [...prev, makeTodo(text)])
+  setNewText('')
 }
 
 function removeTodo(id: number) {
-  setSignal(
-    todos,
-    todos().filter((t) => t.id !== id),
-  )
+  setTodos((prev) => prev.filter((t) => t.id !== id))
 }
 
 function clearCompleted() {
-  setSignal(
-    todos,
-    todos().filter((t) => !t.done()),
-  )
+  setTodos((prev) => prev.filter((t) => !t.done()))
 }
 
 const visibleTodos = () => {
@@ -66,7 +63,7 @@ function App() {
         attr:placeholder="What needs doing?"
         prop:value={newText}
         on:input={(e: Event) =>
-          setSignal(newText, (e.target as HTMLInputElement).value)
+          setNewText((e.target as HTMLInputElement).value)
         }
         on:keydown={(e: Event) => {
           if ((e as KeyboardEvent).key === 'Enter') addTodo()
@@ -80,7 +77,7 @@ function App() {
                 <input
                   attr:type="checkbox"
                   prop:checked={todo.done}
-                  on:change={() => setSignal(todo.done, !todo.done())}
+                  on:change={() => todo.setDone((d) => !d)}
                 />
                 <span class="text">{todo.text}</span>
                 <button class="remove" on:click={() => removeTodo(todo.id)}>×</button>
@@ -97,9 +94,9 @@ function App() {
             </Switch>
           </span>
           <div class="filters">
-            <button class:active={() => filter() === 'all'} on:click={() => setSignal(filter, 'all')}>All</button>
-            <button class:active={() => filter() === 'active'} on:click={() => setSignal(filter, 'active')}>Active</button>
-            <button class:active={() => filter() === 'completed'} on:click={() => setSignal(filter, 'completed')}>Completed</button>
+            <button class:active={() => filter() === 'all'} on:click={() => setFilter('all')}>All</button>
+            <button class:active={() => filter() === 'active'} on:click={() => setFilter('active')}>Active</button>
+            <button class:active={() => filter() === 'completed'} on:click={() => setFilter('completed')}>Completed</button>
           </div>
           <button class="clear" on:click={clearCompleted}>Clear completed</button>
         </footer>

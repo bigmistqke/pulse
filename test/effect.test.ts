@@ -7,7 +7,7 @@ import {
   setScheduler,
   syncScheduler,
 } from '../src/scheduler'
-import { signal, setSignal } from '../src/signal'
+import { signal } from '../src/signal'
 import { use } from '../src/async'
 
 /** Resolve after all microtasks have drained (a macrotask boundary). */
@@ -19,7 +19,7 @@ afterEach(() => setScheduler(microtaskScheduler(flush)))
 test('effect runs once immediately on creation', () => {
   setScheduler(syncScheduler(flush))
   const seen: number[] = []
-  const count = signal(0)
+  const [count] = signal(0)
   effect(() => { seen.push(count()) })
   expect(seen).toEqual([0])
 })
@@ -27,24 +27,24 @@ test('effect runs once immediately on creation', () => {
 test('effect re-runs when a dependency changes', () => {
   setScheduler(syncScheduler(flush))
   const seen: number[] = []
-  const count = signal(0)
+  const [count, setCount] = signal(0)
   effect(() => { seen.push(count()) })
-  setSignal(count, 1)
-  setSignal(count, 2)
+  setCount(1)
+  setCount(2)
   expect(seen).toEqual([0, 1, 2])
 })
 
 test('onCleanup runs before an effect re-runs', () => {
   setScheduler(syncScheduler(flush))
   const log: string[] = []
-  const count = signal(0)
+  const [count, setCount] = signal(0)
   effect(() => {
     const c = count()
     log.push(`run ${c}`)
     onCleanup(() => log.push(`cleanup ${c}`))
   })
   expect(log).toEqual(['run 0'])
-  setSignal(count, 1)
+  setCount(1)
   expect(log).toEqual(['run 0', 'cleanup 0', 'run 1'])
 })
 
@@ -62,11 +62,11 @@ test('an effect using a pending promise suspends, then runs when it settles', as
 
 test('an effect re-runs when a signal it uses is set to a new promise', async () => {
   setScheduler(syncScheduler(flush))
-  const s = signal<number | Promise<number>>(1)
+  const [s, setS] = signal<number | Promise<number>>(1)
   const seen: number[] = []
   effect(() => { seen.push(use(s())) })
   expect(seen).toEqual([1]) // s() is 1, use(1) -> 1
-  setSignal(s, Promise.resolve(2))
+  setS(Promise.resolve(2))
   expect(seen).toEqual([1]) // s() is now a pending promise -> suspended
   await tick()
   expect(seen).toEqual([1, 2]) // write-back flipped s to 2 -> effect re-ran (kick is a no-op via suspendedOn guard)
@@ -82,14 +82,14 @@ test('a genuine (non-NotReadyYet) error thrown in an effect is not swallowed', (
 test('owned effect is disposed when its root is disposed', () => {
   setScheduler(syncScheduler(flush))
   const log: number[] = []
-  const count = signal(0)
+  const [count, setCount] = signal(0)
   createRoot((dispose) => {
     effect(() => { log.push(count()) })
     expect(log).toEqual([0])
-    setSignal(count, 1)
+    setCount(1)
     expect(log).toEqual([0, 1])
     dispose()
-    setSignal(count, 2)
+    setCount(2)
     expect(log).toEqual([0, 1]) // disposed — does NOT re-run
   })
 })
@@ -97,7 +97,7 @@ test('owned effect is disposed when its root is disposed', () => {
 test('onCleanup inside an effect body registers per-run (r3 behaviour), not on the owner', () => {
   setScheduler(syncScheduler(flush))
   const log: string[] = []
-  const count = signal(0)
+  const [count, setCount] = signal(0)
   createRoot(() => {
     effect(() => {
       const c = count()
@@ -105,7 +105,7 @@ test('onCleanup inside an effect body registers per-run (r3 behaviour), not on t
       onCleanup(() => log.push(`cleanup ${c}`))
     })
     expect(log).toEqual(['run 0'])
-    setSignal(count, 1)
+    setCount(1)
     expect(log).toEqual(['run 0', 'cleanup 0', 'run 1'])
   })
 })
@@ -130,7 +130,7 @@ test('an effect created outside any catchError still propagates uncaught (Plan 2
 test('an effect re-throwing after a signal change routes the new throw too', () => {
   setScheduler(syncScheduler(flush))
   const errors: unknown[] = []
-  const trigger = signal(0)
+  const [trigger, setTrigger] = signal(0)
   catchError(() => {
     effect(() => {
       const v = trigger()
@@ -138,9 +138,9 @@ test('an effect re-throwing after a signal change routes the new throw too', () 
     })
   }, (e) => errors.push(e))
   expect(errors).toHaveLength(0)
-  setSignal(trigger, 1)
+  setTrigger(1)
   expect(errors).toHaveLength(1)
-  setSignal(trigger, 2)
+  setTrigger(2)
   expect(errors).toHaveLength(2)
   expect((errors[1] as Error).message).toBe('fail 2')
 })

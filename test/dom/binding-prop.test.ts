@@ -5,7 +5,6 @@ import {
   flush,
   microtaskScheduler,
   setScheduler,
-  setSignal,
   signal,
   syncScheduler,
 } from '../../src/index'
@@ -35,11 +34,11 @@ test('prop:disabled toggles the boolean property correctly', () => {
 
 test('prop: with function value is reactive', () => {
   createRoot(() => {
-    const v = signal('a')
+    const [v, setV] = signal('a')
     const el = h('input', { 'prop:value': v }) as HTMLInputElement
     document.body.append(el)
     expect(el.value).toBe('a')
-    setSignal(v, 'b')
+    setV('b')
     expect(el.value).toBe('b')
   })
 })

@@ -18,5 +18,5 @@ export {
   type FlushFn,
   type Scheduler,
 } from './scheduler'
-export { setSignal, signal, type Signal, type WritableSignal } from './signal'
+export { signal, type Accessor, type Setter, type Signal } from './signal'
 export { For, Fragment, h, Match, render, Show, Switch, type Truthy } from './dom'

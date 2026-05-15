@@ -1,12 +1,13 @@
 import { untrack } from 'r3'
 import { isPromise } from '../is-promise'
 import { createSubOwner, disposeOwner, getOwner, runWithOwner, type Owner } from '../owner'
-import { setSignal, signal, type WritableSignal } from '../signal'
+import { signal, type Accessor, type Setter } from '../signal'
 
 type Entry<T, U> = {
   item: T
   mapped: U
-  indexSig: WritableSignal<number>
+  indexAccessor: Accessor<number>
+  setIndex: Setter<number>
   owner: Owner
 }
 
@@ -48,12 +49,12 @@ export function mapArray<T, U>(
       const item = arr[i]
       let entry = entries.get(item)
       if (entry !== undefined) {
-        if (entry.indexSig() !== i) setSignal(entry.indexSig, i)
+        if (entry.indexAccessor() !== i) entry.setIndex(i)
       } else {
         const owner = createSubOwner(parentOwner)
-        const indexSig = signal(i)
-        const mapped = untrack(() => runWithOwner(owner, () => mapFn(item, () => indexSig())))
-        entry = { item, mapped, indexSig, owner }
+        const [indexAccessor, setIndex] = signal(i)
+        const mapped = untrack(() => runWithOwner(owner, () => mapFn(item, () => indexAccessor())))
+        entry = { item, mapped, indexAccessor, setIndex, owner }
       }
       next.set(item, entry)
       output.push(entry.mapped)

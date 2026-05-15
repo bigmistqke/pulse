@@ -1,7 +1,7 @@
 import { computed as r3Computed, unwatched, type Computed as R3Computed } from 'r3'
 import { NotReadyYet } from './async'
 import { getOwner, routeError, registerWithOwner } from './owner'
-import { setSignal, signal } from './signal'
+import { signal } from './signal'
 
 /**
  * Run a side-effecting function reactively. It runs once immediately, and
@@ -10,8 +10,8 @@ import { setSignal, signal } from './signal'
  * If the body throws `NotReadyYet` (via `use` on a pending promise), the effect
  * suspends: it holds — running nothing further this pass — and re-runs once the
  * carried promise settles. Re-running is driven by an internal "kick" signal the
- * body reads every pass; settling does `setSignal(kick, ...)`, marking the
- * effect dirty. Any other thrown value is a genuine error and is re-thrown.
+ * body reads every pass; settling calls setKick(...), marking the effect dirty.
+ * Any other thrown value is a genuine error and is re-thrown.
  *
  * `suspendedOn` tracks the promise the effect is currently suspended on (or
  * `null`). A successful run clears it; the kick callback only fires if
@@ -20,8 +20,8 @@ import { setSignal, signal } from './signal'
  */
 export function effect(fn: () => void): void {
   const myOwner = getOwner()
-  const kick = signal(0)
-  // `kickCount` increments per kick so each `setSignal(kick, ...)` is a distinct value
+  const [kick, setKick] = signal(0)
+  // `kickCount` increments per kick so each setKick(...) is a distinct value
   // (r3's setSignal bails on `el.value === v`, so writing the same value would be a no-op).
   let kickCount = 0
   let suspendedOn: Promise<unknown> | null = null
@@ -39,7 +39,7 @@ export function effect(fn: () => void): void {
           const rerun = () => {
             if (suspendedOn === p) {
               suspendedOn = null
-              setSignal(kick, ++kickCount)
+              setKick(++kickCount)
             }
           }
           p.then(rerun, rerun)

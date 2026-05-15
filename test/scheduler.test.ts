@@ -6,7 +6,7 @@ import {
   syncScheduler,
   type FlushFn,
 } from '../src/scheduler'
-import { signal, setSignal } from '../src/signal'
+import { signal } from '../src/signal'
 
 test('syncScheduler flushes immediately on request', () => {
   let flushes = 0
@@ -30,11 +30,11 @@ test('microtaskScheduler batches requests into a single flush', async () => {
   expect(flushes).toBe(1) // exactly one flush for the batch
 })
 
-test('setSignal requests a flush from the active scheduler', () => {
+test('setter requests a flush from the active scheduler', () => {
   let requests = 0
   setScheduler({ request: () => { requests++ } })
-  const s = signal(0)
-  setSignal(s, 1)
+  const [, setS] = signal(0)
+  setS(1)
   expect(requests).toBe(1)
   // restore the default so other test files are unaffected
   setScheduler(microtaskScheduler(flush))

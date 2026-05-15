@@ -4,7 +4,6 @@ import {
   flush,
   microtaskScheduler,
   setScheduler,
-  setSignal,
   signal,
   syncScheduler,
 } from '../../src/index'
@@ -17,11 +16,11 @@ afterEach(() => {
 
 test('JSX renders an element with reactive child', () => {
   createRoot(() => {
-    const count = signal(0)
+    const [count, setCount] = signal(0)
     const el = (<div>{count}</div>) as HTMLElement
     document.body.append(el)
     expect(el.textContent).toBe('0')
-    setSignal(count, 5)
+    setCount(5)
     expect(el.textContent).toBe('5')
   })
 })
@@ -29,7 +28,7 @@ test('JSX renders an element with reactive child', () => {
 test('JSX renders nested element with on: and class:', () => {
   let clicked = 0
   createRoot(() => {
-    const on = signal(false)
+    const [on, setOn] = signal(false)
     const el = (
       <button on:click={() => { clicked++ }} class:active={on}>
         ok
@@ -39,7 +38,7 @@ test('JSX renders nested element with on: and class:', () => {
     el.click()
     expect(clicked).toBe(1)
     expect(el.classList.contains('active')).toBe(false)
-    setSignal(on, true)
+    setOn(true)
     expect(el.classList.contains('active')).toBe(true)
   })
 })

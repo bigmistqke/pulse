@@ -5,7 +5,6 @@ import {
   flush,
   microtaskScheduler,
   setScheduler,
-  setSignal,
   signal,
   syncScheduler,
 } from '../../src/index'
@@ -27,13 +26,13 @@ test('class:name toggles a class based on truthiness', () => {
 
 test('class:name is reactive with a function value', () => {
   createRoot(() => {
-    const on = signal(false)
+    const [on, setOn] = signal(false)
     const el = h('div', { 'class:active': on }) as HTMLElement
     document.body.append(el)
     expect(el.classList.contains('active')).toBe(false)
-    setSignal(on, true)
+    setOn(true)
     expect(el.classList.contains('active')).toBe(true)
-    setSignal(on, false)
+    setOn(false)
     expect(el.classList.contains('active')).toBe(false)
   })
 })
@@ -48,22 +47,22 @@ test('style:name sets a single CSS property', () => {
 
 test('style:name is reactive with a function value', () => {
   createRoot(() => {
-    const c = signal('red')
+    const [c, setC] = signal('red')
     const el = h('div', { 'style:color': c }) as HTMLElement
     document.body.append(el)
     expect(el.style.color).toBe('red')
-    setSignal(c, 'blue')
+    setC('blue')
     expect(el.style.color).toBe('blue')
   })
 })
 
 test('style:name removes the property on nullish/false value', () => {
   createRoot(() => {
-    const c = signal<string | null>('red')
+    const [c, setC] = signal<string | null>('red')
     const el = h('div', { 'style:color': c }) as HTMLElement
     document.body.append(el)
     expect(el.style.color).toBe('red')
-    setSignal(c, null)
+    setC(null)
     expect(el.style.color).toBe('')
   })
 })

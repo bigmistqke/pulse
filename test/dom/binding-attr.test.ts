@@ -5,7 +5,6 @@ import {
   flush,
   microtaskScheduler,
   setScheduler,
-  setSignal,
   signal,
   syncScheduler,
 } from '../../src/index'
@@ -26,35 +25,35 @@ test('attr:name explicitly sets the attribute', () => {
 
 test('default (bare) prop with function value is reactive', () => {
   createRoot(() => {
-    const id = signal('a')
+    const [id, setId] = signal('a')
     const el = h('div', { id }) as HTMLElement
     document.body.append(el)
     expect(el.getAttribute('id')).toBe('a')
-    setSignal(id, 'b')
+    setId('b')
     expect(el.getAttribute('id')).toBe('b')
   })
 })
 
 test('reactive attr is removed when value goes null/false', () => {
   createRoot(() => {
-    const v = signal<string | null>('x')
+    const [v, setV] = signal<string | null>('x')
     const el = h('div', { title: v }) as HTMLElement
     document.body.append(el)
     expect(el.getAttribute('title')).toBe('x')
-    setSignal(v, null)
+    setV(null)
     expect(el.hasAttribute('title')).toBe(false)
-    setSignal(v, 'y')
+    setV('y')
     expect(el.getAttribute('title')).toBe('y')
   })
 })
 
 test('attr: with function value is reactive', () => {
   createRoot(() => {
-    const v = signal('one')
+    const [v, setV] = signal('one')
     const el = h('div', { 'attr:data-x': v }) as HTMLElement
     document.body.append(el)
     expect(el.getAttribute('data-x')).toBe('one')
-    setSignal(v, 'two')
+    setV('two')
     expect(el.getAttribute('data-x')).toBe('two')
   })
 })

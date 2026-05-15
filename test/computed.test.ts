@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest'
 import { computed } from '../src/computed'
 import { effect } from '../src/effect'
-import { signal, setSignal } from '../src/signal'
+import { signal } from '../src/signal'
 import { read } from '../src/async'
 import { flush, microtaskScheduler, setScheduler, syncScheduler } from '../src/scheduler'
 import { createRoot, catchError } from '../src/owner'
@@ -10,20 +10,20 @@ import { createRoot, catchError } from '../src/owner'
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
 
 test('computed derives an initial value from a signal', () => {
-  const count = signal(2)
+  const [count] = signal(2)
   const doubled = computed(() => count() * 2)
   expect(doubled()).toBe(4)
 })
 
 test('computed is pull-on-read correct after a write', () => {
-  const count = signal(2)
+  const [count, setCount] = signal(2)
   const doubled = computed(() => count() * 2)
-  setSignal(count, 3)
+  setCount(3)
   expect(doubled()).toBe(6)
 })
 
 test('computed threads a value through a multi-stage pipeline', () => {
-  const n = signal(3)
+  const [n] = signal(3)
   const result = computed(
     () => n() + 1,
     (v) => v * 2,
@@ -33,25 +33,25 @@ test('computed threads a value through a multi-stage pipeline', () => {
 })
 
 test('multi-stage pipeline recomputes on dependency change', () => {
-  const n = signal(3)
+  const [n, setN] = signal(3)
   const result = computed(
     () => n() + 1,
     (v) => v * 2,
   )
   expect(result()).toBe(8)
-  setSignal(n, 9)
+  setN(9)
   expect(result()).toBe(20)
 })
 
 test('a stage in the middle of the pipeline may also read signals', () => {
-  const base = signal(10)
-  const factor = signal(2)
+  const [base] = signal(10)
+  const [factor, setFactor] = signal(2)
   const result = computed(
     () => base(),
     (v) => v * factor(),
   )
   expect(result()).toBe(20)
-  setSignal(factor, 3)
+  setFactor(3)
   expect(result()).toBe(30)
 })
 
@@ -74,7 +74,7 @@ test('an async stage suspends the pipeline; the value flips to the resolved valu
 })
 
 test('a generator stage with yield* read of a settled value runs synchronously', () => {
-  const s = signal(3)
+  const [s] = signal(3)
   const c = computed(function* () {
     const x: number = yield* read(s)
     return x * 2
@@ -97,7 +97,7 @@ test('a generator stage suspends on a pending promise, resumes on settle', async
 
 test('cross-stage caching: a sync stage downstream of an unchanged stage is not re-run', () => {
   setScheduler(syncScheduler(flush))
-  const a = signal(1)
+  const [a] = signal(1)
   let calls = 0
   const c = computed(
     () => a(),
@@ -133,22 +133,22 @@ test('a generator stage that try/catches a rejected yield resumes normally', asy
 test('owned computed is disposed when its root is disposed', () => {
   setScheduler(syncScheduler(flush))
   const seen: number[] = []
-  const a = signal(1)
+  const [a, setA] = signal(1)
   createRoot((dispose) => {
     const d = computed(() => a() * 2)
     effect(() => { seen.push(d()) })
     expect(seen).toEqual([2])
-    setSignal(a, 3)
+    setA(3)
     expect(seen).toEqual([2, 6])
     dispose()
-    setSignal(a, 5)
+    setA(5)
     expect(seen).toEqual([2, 6]) // disposed — effect does NOT re-run
   })
   setScheduler(microtaskScheduler(flush))
 })
 
 test('stash is discarded if upstream value changes before kick consumes it', async () => {
-  const id = signal<number>(1)
+  const [id, setId] = signal<number>(1)
   let firstRelease!: (v: string) => void
 
   const c = computed(
@@ -168,11 +168,11 @@ test('stash is discarded if upstream value changes before kick consumes it', asy
 
   // Race: settle the first promise AND change `id` before the flush microtask runs.
   // - rerun is queued (will stash 'first:1' for input=1)
-  // - setSignal queues a flush
+  // - setId queues a flush
   // When the flush runs, stage 0 re-runs (id=2) first (by r3 height), then stage 1
   // sees input=2 — the stash (captured for input=1) must be discarded.
   firstRelease('first:1')
-  setSignal(id, 2)
+  setId(2)
 
   await tick()
 
@@ -194,7 +194,7 @@ test('a computed created inside catchError routes its throw to the handler', () 
 
 test('after a caught throw, the computed is frozen at its previous good value', () => {
   setScheduler(syncScheduler(flush))
-  const trigger = signal(0)
+  const [trigger, setTrigger] = signal(0)
   catchError(() => {
     const c = computed(() => {
       const t = trigger()
@@ -205,9 +205,9 @@ test('after a caught throw, the computed is frozen at its previous good value', 
     const observed: unknown[] = []
     effect(() => { observed.push(c()) })
     expect(observed).toEqual([0]) // t=0, c=0
-    setSignal(trigger, 1) // body throws; handler catches; lastGoodValue (0) preserved
+    setTrigger(1) // body throws; handler catches; lastGoodValue (0) preserved
     expect(observed).toEqual([0]) // unchanged — c's r3 value still 0
-    setSignal(trigger, 2) // recovers
+    setTrigger(2) // recovers
     expect(observed).toEqual([0, 20])
   }, () => {})
 })
@@ -219,7 +219,7 @@ test('a computed throw outside any catchError still propagates uncaught', () => 
 
 test('an unhandled-throw computed throws on every read until a successful re-run clears it', () => {
   setScheduler(syncScheduler(flush))
-  const trigger = signal(0)
+  const [trigger, setTrigger] = signal(0)
   const c = computed(() => {
     const t = trigger()
     if (t === 0) throw new Error('boom')
@@ -232,7 +232,7 @@ test('an unhandled-throw computed throws on every read until a successful re-run
   expect(() => c()).toThrow('boom')
 
   // Recover: dep changes such that the body no longer throws.
-  setSignal(trigger, 1)
+  setTrigger(1)
   // Now the read should return the new value cleanly.
   expect(c()).toBe(10)
   // And subsequent reads stay clean.
