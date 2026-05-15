@@ -6,7 +6,7 @@ export const Fragment = FragmentSymbol
  * Called by the TS transform for an element with zero or one child.
  * Children, when present, arrive on `props.children`.
  */
-export function jsx(tag: Tag, props: Record<string, unknown> | null): Node | Node[] {
+export function jsx(tag: Tag, props: Record<string, unknown> | null): Node | Node[] | (() => unknown) {
   return jsxImpl(tag, props)
 }
 
@@ -14,11 +14,11 @@ export function jsx(tag: Tag, props: Record<string, unknown> | null): Node | Nod
  * Called by the TS transform for an element with multiple static children.
  * `props.children` is already an array.
  */
-export function jsxs(tag: Tag, props: Record<string, unknown> | null): Node | Node[] {
+export function jsxs(tag: Tag, props: Record<string, unknown> | null): Node | Node[] | (() => unknown) {
   return jsxImpl(tag, props)
 }
 
-function jsxImpl(tag: Tag, props: Record<string, unknown> | null): Node | Node[] {
+function jsxImpl(tag: Tag, props: Record<string, unknown> | null): Node | Node[] | (() => unknown) {
   if (!props) return h(tag, null)
   const { children, ...rest } = props
   if (children === undefined) return h(tag, rest)
@@ -35,7 +35,7 @@ export function jsxDEV(
   props: Record<string, unknown> | null,
   _key: unknown,
   _isStaticChildren: boolean,
-): Node | Node[] {
+): Node | Node[] | (() => unknown) {
   return jsxImpl(tag, props)
 }
 
@@ -46,6 +46,6 @@ export namespace JSX {
   export interface IntrinsicElements {
     [tag: string]: Record<string, unknown>
   }
-  export type Element = Node | Node[]
+  export type Element = Node | Node[] | (() => unknown)
   export interface ElementChildrenAttribute { children: {} }
 }

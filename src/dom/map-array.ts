@@ -1,3 +1,4 @@
+import { untrack } from 'r3'
 import { isPromise } from '../is-promise'
 import { createSubOwner, disposeOwner, getOwner, runWithOwner, type Owner } from '../owner'
 import { setSignal, signal, type WritableSignal } from '../signal'
@@ -51,7 +52,7 @@ export function mapArray<T, U>(
       } else {
         const owner = createSubOwner(parentOwner)
         const indexSig = signal(i)
-        const mapped = runWithOwner(owner, () => mapFn(item, () => indexSig()))
+        const mapped = untrack(() => runWithOwner(owner, () => mapFn(item, () => indexSig())))
         entry = { item, mapped, indexSig, owner }
       }
       next.set(item, entry)

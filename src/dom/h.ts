@@ -1,7 +1,7 @@
 import { bindProp, insertChild } from './bindings'
 
-export type Component<P = any> = (props: P) => Node | Node[]
-export type Tag = string | ((props: any) => Node | Node[]) | symbol
+export type Component<P = any> = (props: P) => Node | Node[] | (() => unknown)
+export type Tag = string | ((props: any) => Node | Node[] | (() => unknown)) | symbol
 
 export const Fragment: unique symbol = Symbol('Fragment')
 
@@ -12,7 +12,7 @@ export const Fragment: unique symbol = Symbol('Fragment')
  * `props` keys are dispatched by prefix (Tasks 6–10); in this task only bare
  * names work and they all go through `setAttribute`.
  */
-export function h(tag: Tag, props: Record<string, unknown> | null, ...children: unknown[]): Node | Node[] {
+export function h(tag: Tag, props: Record<string, unknown> | null, ...children: unknown[]): Node | Node[] | (() => unknown) {
   if (tag === Fragment) {
     return children as Node[]
   }
