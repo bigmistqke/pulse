@@ -46,7 +46,7 @@ test/
 
 ## Conventions used throughout the plan
 
-- The user runs the existing test command: `npm test`. To run a subset, the snippets use `npm test -- <pattern>`.
+- The user runs the existing test command: `pnpm test`. To run a subset, the snippets use `pnpm test -- <pattern>`.
 - Each task ends with a single commit; commits do **not** carry AI co-author trailers (per repo memory).
 - TDD: write a failing test first, watch it fail, then write the minimal code to make it pass.
 - Existing 91 tests must remain green after every task.
@@ -64,7 +64,7 @@ test/
 - [ ] **Step 1: Install browser-mode devDependencies**
 
 ```bash
-npm install --save-dev @vitest/browser playwright
+pnpm add -D @vitest/browser playwright
 ```
 
 Expected: `package.json` gains `@vitest/browser` and `playwright` under `devDependencies`. Vitest version (`^3.1.3`) is unchanged.
@@ -132,20 +132,20 @@ test('browser-mode is wired: document.createElement works', () => {
 - [ ] **Step 4: Install Playwright's Chromium browser**
 
 ```bash
-npx playwright install chromium
+pnpm exec playwright install chromium
 ```
 
 Expected: download proceeds; "chromium … installed" message.
 
 - [ ] **Step 5: Run tests**
 
-Run: `npm test`
+Run: `pnpm test`
 Expected: both projects pass; `unit` runs the previous 91 tests; `dom` runs the 1 smoke test. Total: 92 passing.
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add package.json package-lock.json vitest.config.ts test/dom/smoke.test.ts
+git add package.json pnpm-lock.yaml vitest.config.ts test/dom/smoke.test.ts
 git commit -m "test: enable Vitest browser mode (Playwright) for DOM tests"
 ```
 
@@ -160,7 +160,7 @@ This refactor has no externally observable behaviour change — it lifts a reusa
 
 - [ ] **Step 1: Verify all 91 unit tests pass before changing anything**
 
-Run: `npm test -- --project unit`
+Run: `pnpm test -- --project unit`
 Expected: 91/91 pass.
 
 - [ ] **Step 2: Add the internal `createSubOwner` helper and route `catchError` through it**
@@ -224,12 +224,12 @@ export function catchError<T>(
 
 - [ ] **Step 3: Run all tests (refactor should be invisible)**
 
-Run: `npm test`
+Run: `pnpm test`
 Expected: 92/92 still pass (unit 91, dom 1). No test changes needed.
 
 - [ ] **Step 4: Run typecheck**
 
-Run: `npm run typecheck`
+Run: `pnpm typecheck`
 Expected: clean.
 
 - [ ] **Step 5: Commit**
@@ -299,7 +299,7 @@ test('h inserts DOM node children as-is', () => {
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `npm test -- --project dom h.test`
+Run: `pnpm test -- --project dom h.test`
 Expected: FAIL with "Cannot find module '../../src/dom/h'" or similar.
 
 - [ ] **Step 3: Implement `bindings.ts` (primitives only) and `h.ts`**
@@ -379,12 +379,12 @@ export { Fragment, h, type Component, type Tag } from './h'
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `npm test -- --project dom h.test`
+Run: `pnpm test -- --project dom h.test`
 Expected: PASS — all 6 cases.
 
 - [ ] **Step 5: Run full suite**
 
-Run: `npm test`
+Run: `pnpm test`
 Expected: 98/98 (unit 91, dom 7).
 
 - [ ] **Step 6: Commit**
@@ -429,7 +429,7 @@ test('h preserves order of mixed children', () => {
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `npm test -- --project dom h.test`
+Run: `pnpm test -- --project dom h.test`
 Expected: the three new tests FAIL with `insertChild: unsupported child value: object`.
 
 - [ ] **Step 3: Update `insertChild` to handle arrays**
@@ -457,7 +457,7 @@ export function insertChild(parent: Node, value: unknown): void {
 
 - [ ] **Step 4: Run tests**
 
-Run: `npm test -- --project dom h.test`
+Run: `pnpm test -- --project dom h.test`
 Expected: PASS — all 9 cases.
 
 - [ ] **Step 5: Commit**
@@ -559,7 +559,7 @@ test('function child preserves marker order for static siblings', () => {
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `npm test -- --project dom binding-children`
+Run: `pnpm test -- --project dom binding-children`
 Expected: FAIL — first test fails at the function-child path.
 
 - [ ] **Step 3: Implement reactive children in `bindings.ts`**
@@ -631,12 +631,12 @@ export function bindProp(el: Element, name: string, value: unknown): void {
 
 - [ ] **Step 4: Run the test to verify it passes**
 
-Run: `npm test -- --project dom binding-children`
+Run: `pnpm test -- --project dom binding-children`
 Expected: PASS — all 5 cases.
 
 - [ ] **Step 5: Run full suite**
 
-Run: `npm test`
+Run: `pnpm test`
 Expected: total tests = 103 (unit 91, dom 12).
 
 - [ ] **Step 6: Commit**
@@ -705,7 +705,7 @@ test('on:click listener is removed on owner dispose', () => {
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `npm test -- --project dom binding-events`
+Run: `pnpm test -- --project dom binding-events`
 Expected: FAIL — handler is never invoked (the `on:click` attribute is being set as an HTML attribute, not a listener).
 
 - [ ] **Step 3: Implement the `on:` prefix in `bindProp`**
@@ -737,12 +737,12 @@ Add the `onCleanup` import at the top of `src/dom/bindings.ts` (the existing top
 
 - [ ] **Step 4: Run the test**
 
-Run: `npm test -- --project dom binding-events`
+Run: `pnpm test -- --project dom binding-events`
 Expected: PASS — all 3 cases.
 
 - [ ] **Step 5: Run full suite**
 
-Run: `npm test`
+Run: `pnpm test`
 Expected: total = 106.
 
 - [ ] **Step 6: Commit**
@@ -816,7 +816,7 @@ test('prop: with function value is reactive', () => {
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `npm test -- --project dom binding-prop`
+Run: `pnpm test -- --project dom binding-prop`
 Expected: FAIL — value is being setAttribute'd, not assigned.
 
 - [ ] **Step 3: Update `bindProp` to handle `prop:`**
@@ -852,12 +852,12 @@ export function bindProp(el: Element, name: string, value: unknown): void {
 
 - [ ] **Step 4: Run the test**
 
-Run: `npm test -- --project dom binding-prop`
+Run: `pnpm test -- --project dom binding-prop`
 Expected: PASS — all 3 cases.
 
 - [ ] **Step 5: Run full suite**
 
-Run: `npm test`
+Run: `pnpm test`
 Expected: total = 109.
 
 - [ ] **Step 6: Commit**
@@ -946,7 +946,7 @@ test('attr: with function value is reactive', () => {
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `npm test -- --project dom binding-attr`
+Run: `pnpm test -- --project dom binding-attr`
 Expected: FAIL on the function-as-attribute cases (currently `setAttribute(name, String(fn))` produces literal `"function …"`).
 
 - [ ] **Step 3: Add a shared attribute-binding helper and route `attr:`/default through it**
@@ -1003,12 +1003,12 @@ export function bindProp(el: Element, name: string, value: unknown): void {
 
 - [ ] **Step 4: Run the test**
 
-Run: `npm test -- --project dom binding-attr`
+Run: `pnpm test -- --project dom binding-attr`
 Expected: PASS — all 4 cases.
 
 - [ ] **Step 5: Run full suite (existing `h.test.ts` still depends on static-default path)**
 
-Run: `npm test`
+Run: `pnpm test`
 Expected: total = 113. Existing `h.test.ts` static-attribute cases still pass (the static path still goes through `applyAttr`, which for non-true primitives is `setAttribute(name, String(value))`).
 
 - [ ] **Step 6: Commit**
@@ -1106,7 +1106,7 @@ test('style:name removes the property on nullish/false value', () => {
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `npm test -- --project dom binding-class-style`
+Run: `pnpm test -- --project dom binding-class-style`
 Expected: FAIL — class:/style: keys are being applied as plain attributes.
 
 - [ ] **Step 3: Extend `bindProp` with `class:` and `style:` prefixes**
@@ -1145,12 +1145,12 @@ Update `bindProp` in `src/dom/bindings.ts`. Insert these two prefix blocks immed
 
 - [ ] **Step 4: Run the test**
 
-Run: `npm test -- --project dom binding-class-style`
+Run: `pnpm test -- --project dom binding-class-style`
 Expected: PASS — all 5 cases.
 
 - [ ] **Step 5: Run full suite**
 
-Run: `npm test`
+Run: `pnpm test`
 Expected: total = 118.
 
 - [ ] **Step 6: Commit**
@@ -1204,7 +1204,7 @@ test('ref is invoked once even if its underlying value is a signal accessor (tre
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `npm test -- --project dom binding-ref`
+Run: `pnpm test -- --project dom binding-ref`
 Expected: FAIL — `ref` is being treated as a default attribute and the function value triggers a reactive attribute binding.
 
 - [ ] **Step 3: Handle `ref` in `bindProp`**
@@ -1221,12 +1221,12 @@ Insert this block at the top of `bindProp` in `src/dom/bindings.ts`, before any 
 
 - [ ] **Step 4: Run the test**
 
-Run: `npm test -- --project dom binding-ref`
+Run: `pnpm test -- --project dom binding-ref`
 Expected: PASS — both cases.
 
 - [ ] **Step 5: Run full suite**
 
-Run: `npm test`
+Run: `pnpm test`
 Expected: total = 120.
 
 - [ ] **Step 6: Commit**
@@ -1323,7 +1323,7 @@ test('Fragment composed inside an element flattens', () => {
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `npm test -- --project dom components`
+Run: `pnpm test -- --project dom components`
 Expected: FAIL — `h: non-string tags … are not supported yet`.
 
 - [ ] **Step 3: Support function tags and `Fragment` in `h`**
@@ -1359,12 +1359,12 @@ export function h(tag: Tag, props: Record<string, unknown> | null, ...children: 
 
 - [ ] **Step 4: Run the test**
 
-Run: `npm test -- --project dom components`
+Run: `pnpm test -- --project dom components`
 Expected: PASS — all 5 cases.
 
 - [ ] **Step 5: Run full suite**
 
-Run: `npm test`
+Run: `pnpm test`
 Expected: total = 125.
 
 - [ ] **Step 6: Commit**
@@ -1590,17 +1590,17 @@ export namespace JSX {
 
 - [ ] **Step 7: Run typecheck**
 
-Run: `npm run typecheck`
+Run: `pnpm typecheck`
 Expected: clean.
 
 - [ ] **Step 8: Run the test**
 
-Run: `npm test -- --project dom jsx-runtime`
+Run: `pnpm test -- --project dom jsx-runtime`
 Expected: PASS — all 3 cases.
 
 - [ ] **Step 9: Run full suite**
 
-Run: `npm test`
+Run: `pnpm test`
 Expected: total = 128.
 
 - [ ] **Step 10: Commit**
@@ -1695,7 +1695,7 @@ test('render supports a component returning an array', () => {
 
 - [ ] **Step 2: Run the test to verify it fails**
 
-Run: `npm test -- --project dom render`
+Run: `pnpm test -- --project dom render`
 Expected: FAIL — `render` is not exported.
 
 - [ ] **Step 3: Implement `render`**
@@ -1745,12 +1745,12 @@ export { Fragment, h, render } from './dom'
 
 - [ ] **Step 4: Run the test**
 
-Run: `npm test -- --project dom render`
+Run: `pnpm test -- --project dom render`
 Expected: PASS — all 4 cases.
 
 - [ ] **Step 5: Run full suite + typecheck**
 
-Run: `npm test && npm run typecheck`
+Run: `pnpm test && pnpm typecheck`
 Expected: total = 132; typecheck clean.
 
 - [ ] **Step 6: Commit**
@@ -1891,7 +1891,7 @@ test('dispose tears down nested catchError children', () => {
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
-Run: `npm test -- --project dom integration`
+Run: `pnpm test -- --project dom integration`
 Expected: the tests may pass or fail depending on the cumulative implementation; the most likely failures are:
 - The `use`-throw test failing if the binding effect doesn't survive the suspension (it should, via Plan 2a behaviour).
 - The error-boundary test failing if `catchError`'s return type doesn't accommodate JSX (it returns `T | undefined`).
@@ -1906,7 +1906,7 @@ No code change is anticipated. If a real bug surfaces, fix it at the source rath
 
 - [ ] **Step 4: Run full suite + typecheck**
 
-Run: `npm test && npm run typecheck`
+Run: `pnpm test && pnpm typecheck`
 Expected: total = 135; typecheck clean.
 
 - [ ] **Step 5: Commit**
@@ -1922,8 +1922,8 @@ git commit -m "test(dom): end-to-end use-throw + catchError + dispose-cascade in
 
 After Task 14:
 
-- [ ] **Run all tests** — `npm test` — expected ~135 passing across both projects.
-- [ ] **Run typecheck** — `npm run typecheck` — expected clean.
+- [ ] **Run all tests** — `pnpm test` — expected ~135 passing across both projects.
+- [ ] **Run typecheck** — `pnpm typecheck` — expected clean.
 - [ ] **Skim the public barrel** — `src/index.ts` now exports `Fragment`, `h`, `render` in addition to the previous symbols; `src/jsx-runtime.ts` exports `jsx`, `jsxs`, `Fragment`.
 - [ ] **Dispatch the final whole-implementation review** if running under `superpowers:subagent-driven-development`.
 
