@@ -1,6 +1,11 @@
 import { expect, test } from 'vitest'
 import { computed } from '../src/computed'
 import { signal, setSignal } from '../src/signal'
+import { read, use } from '../src/async'
+import { flush, microtaskScheduler, setScheduler, syncScheduler } from '../src/scheduler'
+
+/** Resolve after all microtasks have drained (a macrotask boundary). */
+const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
 
 test('computed derives an initial value from a signal', () => {
   const count = signal(2)
@@ -46,4 +51,79 @@ test('a stage in the middle of the pipeline may also read signals', () => {
   expect(result()).toBe(20)
   setSignal(factor, 3)
   expect(result()).toBe(30)
+})
+
+test('an async stage suspends the pipeline; the value flips to the resolved value on settle', async () => {
+  let release!: (v: number) => void
+  const c = computed(
+    () => 1,
+    async (v: number) => {
+      return new Promise<number>((resolve) => { release = resolve }).then((n) => n + v)
+    },
+  )
+  // Before settle: the pipeline's value is the in-flight promise (suspended).
+  const beforeSettle = c() as unknown
+  expect(beforeSettle).toBeInstanceOf(Promise)
+  release(10)
+  await tick()
+  // After settle: the rerun stashes the resolved value (reuse-value mode);
+  // the next r3 fn invocation returns it directly without re-invoking the async fn.
+  expect(c()).toBe(11)
+})
+
+test('a generator stage with yield* read of a settled value runs synchronously', () => {
+  const s = signal(3)
+  const c = computed(function* () {
+    const x: number = yield* read(s)
+    return x * 2
+  })
+  expect(c()).toBe(6)
+})
+
+test('a generator stage suspends on a pending promise, resumes on settle', async () => {
+  let release!: (v: number) => void
+  const p = new Promise<number>((resolve) => { release = resolve })
+  const c = computed(function* () {
+    const x: number = yield* read(p)
+    return x + 100
+  })
+  expect(c()).toBeInstanceOf(Promise)
+  release(5)
+  await tick()
+  expect(c()).toBe(105)
+})
+
+test('cross-stage caching: a sync stage downstream of an unchanged stage is not re-run', () => {
+  setScheduler(syncScheduler(flush))
+  const a = signal(1)
+  let calls = 0
+  const c = computed(
+    () => a(),
+    (v: number) => {
+      calls++
+      return v + 100
+    },
+  )
+  expect(c()).toBe(101)
+  expect(calls).toBe(1)
+  // Reading c() again does not re-run.
+  expect(c()).toBe(101)
+  expect(calls).toBe(1)
+  setScheduler(microtaskScheduler(flush))
+})
+
+test('a generator stage that try/catches a rejected yield resumes normally', async () => {
+  const reason = new Error('boom')
+  const p = Promise.reject(reason)
+  const c = computed(function* () {
+    try {
+      yield* read(p)
+      return 'unreachable'
+    } catch (e) {
+      return `caught: ${(e as Error).message}`
+    }
+  })
+  expect(c()).toBeInstanceOf(Promise)
+  await tick()
+  expect(c()).toBe('caught: boom')
 })
