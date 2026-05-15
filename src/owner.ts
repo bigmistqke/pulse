@@ -90,6 +90,28 @@ export function createRoot<T>(fn: (dispose: () => void) => T): T {
 }
 
 /**
+ * Internal: create a sub-owner parented to `parent` (or to no one when null),
+ * optionally with an `errorHandler` attached. Registers the new sub-owner as
+ * a disposable child of `parent` so the parent's `dispose()` cascades.
+ *
+ * Not exported from the public barrel. Used by `catchError` today; will be
+ * used by `Show`/`For` branch scopes in Plan 3b.
+ */
+export function createSubOwner(
+  parent: Owner | null,
+  errorHandler: ((error: unknown) => void) | null = null,
+): Owner {
+  if (parent !== null && parent.disposed) {
+    throw new Error('cannot create a sub-owner inside a disposed owner')
+  }
+  const sub = newOwner(parent, errorHandler)
+  if (parent !== null) {
+    parent.children.push({ dispose: () => disposeOwner(sub) })
+  }
+  return sub
+}
+
+/**
  * Create a sub-owner with an error handler attached, then run `fn` with the
  * sub-owner as ambient. Reactive nodes (effects, computeds) created inside
  * `fn` parent to this sub-owner; when they throw a non-`NotReadyYet` error,
@@ -107,13 +129,7 @@ export function catchError<T>(
   fn: () => T,
   handler: (error: unknown) => void,
 ): T | undefined {
-  if (currentOwner !== null && currentOwner.disposed) {
-    throw new Error('cannot create a sub-owner inside a disposed owner')
-  }
-  const sub = newOwner(currentOwner, handler)
-  if (currentOwner !== null) {
-    currentOwner.children.push({ dispose: () => disposeOwner(sub) })
-  }
+  const sub = createSubOwner(currentOwner, handler)
   return runWithOwner(sub, () => {
     try {
       return fn()
