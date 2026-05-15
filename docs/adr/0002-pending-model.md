@@ -7,7 +7,7 @@ Instead:
 **Pending is a value.** A signal's value is honestly `T | Promise<T>`. A pending
 async computation simply holds a `Promise<T>`. Consumers see the promise and
 decide what to do — there is no implicit throw and no loading boundary in v1.
-`isUnresolved(signal)` is the reactive predicate "is the current value a
+`isPending(signal)` is the reactive predicate "is the current value a
 Promise".
 
 **Write-back on settle.** When a held promise settles, its resolved value is

@@ -192,8 +192,11 @@ whether a flush has run or where the read happens. The scheduler batches
 
 A pending async computation simply holds a `Promise<T>`. Consumers see the
 promise and decide what to do. There is no implicit throw and no loading
-boundary in v1. `isUnresolved(signal)` is the reactive predicate "is the current
-value a Promise".
+boundary in v1. `isPending(signal)` is the reactive predicate "is the current
+value a Promise". `latest(signal)` is the stale-while-revalidate read: it
+returns `undefined` until the signal first resolves, then always the most recent
+resolved value — it never reverts to `undefined` while a newer promise is
+pending.
 
 ### Write-back on settle
 
@@ -377,7 +380,7 @@ shown when there is no content (`Show`: condition falsy; `For`: zero rows).
 Because pending coerces to empty/falsy, `fallback` transparently covers the
 pending case too, with no async-awareness in the primitive. One `fallback`
 therefore **conflates "genuinely empty" with "still pending"**; distinguishing
-them needs an explicit `isUnresolved` check or v2 `<Suspense>`.
+them needs an explicit `isPending` check or v2 `<Suspense>`.
 
 ### Keying
 

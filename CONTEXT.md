@@ -84,7 +84,7 @@ by reference (v1); two-phase re-keying is deferred to v2.
 Because pending coerces to empty/falsy, `fallback` transparently covers the
 pending case too, with no async-awareness in the primitive. One `fallback`
 therefore conflates "genuinely empty" with "still pending"; distinguishing them
-needs an explicit `isUnresolved` check or v2 `<Suspense>`.
+needs an explicit `isPending` check or v2 `<Suspense>`.
 
 **Scheduler**:
 The single injectable mechanism that flushes the effect graph and resumes
@@ -110,6 +110,13 @@ effect — i.e. unwanted subtree suspension. Allowed (not enforced), but a code
 smell everywhere outside an effect.
 _Contrast_: Solid's throwing is implicit and pervasive (every accessor); `use`
 is explicit, local, and grep-able.
+
+**isPending / latest**:
+Reactive read-side helpers for promise-holding signals. `isPending(s)` — is the
+signal's current value a pending promise? `latest(s)` — the most recent
+*resolved* value: `undefined` until the signal first resolves, then always the
+last resolved value; it does **not** revert to `undefined` while a newer promise
+is pending (stale-while-revalidate).
 
 **Error Boundary**:
 A graph node that registers as the error sink for its subtree. It catches both

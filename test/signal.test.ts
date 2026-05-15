@@ -1,6 +1,10 @@
 import { expect, test } from 'vitest'
 import { signal, setSignal } from '../src/signal'
 import { computed } from '../src/computed'
+import { isPending } from '../src/async'
+
+/** Resolve after all microtasks have drained (a macrotask boundary). */
+const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
 
 test('signal holds an initial value', () => {
   const count = signal(0)
@@ -24,4 +28,32 @@ test('setSignal rejects a computed (type-level)', () => {
   const c = computed(() => 1)
   // @ts-expect-error - setSignal must not accept a read-only computed
   setSignal(c, 2)
+})
+
+test('a signal created with a promise writes back the resolved value', async () => {
+  const s = signal(Promise.resolve(42))
+  expect(isPending(s)).toBe(true)
+  await tick()
+  expect(s()).toBe(42)
+  expect(isPending(s)).toBe(false)
+})
+
+test('setSignal with a promise writes back on settle', async () => {
+  const s = signal<number | Promise<number>>(0)
+  setSignal(s, Promise.resolve(99))
+  expect(isPending(s)).toBe(true)
+  await tick()
+  expect(s()).toBe(99)
+})
+
+test('a superseded promise does not write back', async () => {
+  const s = signal<number | Promise<number>>(0)
+  let release!: (v: number) => void
+  const slow = new Promise<number>((resolve) => { release = resolve })
+  setSignal(s, slow) // schedules a write-back for `slow`
+  setSignal(s, 7)    // supersedes it — bumps the generation
+  release(123)       // `slow` settles late
+  await tick()
+  expect(s()).toBe(7) // NOT 123 — the superseded write-back was skipped
+  expect(isPending(s)).toBe(false)
 })
