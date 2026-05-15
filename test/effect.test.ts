@@ -7,6 +7,10 @@ import {
   syncScheduler,
 } from '../src/scheduler'
 import { signal, setSignal } from '../src/signal'
+import { use } from '../src/async'
+
+/** Resolve after all microtasks have drained (a macrotask boundary). */
+const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
 
 // These tests use the synchronous scheduler so writes flush immediately.
 afterEach(() => setScheduler(microtaskScheduler(flush)))
@@ -41,4 +45,35 @@ test('onCleanup runs before an effect re-runs', () => {
   expect(log).toEqual(['run 0'])
   setSignal(count, 1)
   expect(log).toEqual(['run 0', 'cleanup 0', 'run 1'])
+})
+
+test('an effect using a pending promise suspends, then runs when it settles', async () => {
+  setScheduler(syncScheduler(flush))
+  const seen: number[] = []
+  let release!: (v: number) => void
+  const p = new Promise<number>((resolve) => { release = resolve })
+  effect(() => { seen.push(use(p)) })
+  expect(seen).toEqual([]) // suspended — use threw NotReadyYet, the body held
+  release(10)
+  await tick()
+  expect(seen).toEqual([10]) // re-ran with the resolved value
+})
+
+test('an effect re-runs when a signal it uses is set to a new promise', async () => {
+  setScheduler(syncScheduler(flush))
+  const s = signal<number | Promise<number>>(1)
+  const seen: number[] = []
+  effect(() => { seen.push(use(s())) })
+  expect(seen).toEqual([1]) // s() is 1, use(1) -> 1
+  setSignal(s, Promise.resolve(2))
+  expect(seen).toEqual([1]) // s() is now a pending promise -> suspended
+  await tick()
+  expect(seen).toEqual([1, 2]) // write-back flipped s to 2 -> effect re-ran (kick is a no-op via suspendedOn guard)
+})
+
+test('a genuine (non-NotReadyYet) error thrown in an effect is not swallowed', () => {
+  setScheduler(syncScheduler(flush))
+  expect(() => {
+    effect(() => { throw new Error('real error') })
+  }).toThrow('real error')
 })
