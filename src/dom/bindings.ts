@@ -56,10 +56,9 @@ export function insertChild(parent: Node, value: unknown): void {
 }
 
 /**
- * Apply one prop entry to `el`. In this task: only the default (bare-name)
- * path — `setAttribute(name, String(value))`, with null/undefined/false
- * meaning "no attribute set." Prefixes (`on:`, `prop:`, `attr:`,
- * `class:`, `style:`) and reactive function values are added in later tasks.
+ * Apply one prop entry to `el`. Handles `on:` and `prop:` prefixes;
+ * function values with `prop:` are reactive (wrapped in effect).
+ * Default path uses `setAttribute` without reactivity.
  */
 export function bindProp(el: Element, name: string, value: unknown): void {
   // on:event — direct addEventListener; the handler is not reactive
@@ -69,6 +68,16 @@ export function bindProp(el: Element, name: string, value: unknown): void {
     const handler = value as EventListener
     el.addEventListener(event, handler)
     onCleanup(() => el.removeEventListener(event, handler))
+    return
+  }
+  // prop:name — DOM property assignment; function value is reactive
+  if (name.startsWith('prop:')) {
+    const prop = name.slice(5)
+    if (typeof value === 'function') {
+      effect(() => { (el as any)[prop] = (value as () => unknown)() })
+    } else {
+      ;(el as any)[prop] = value
+    }
     return
   }
   // default — setAttribute, no reactivity yet
