@@ -1,8 +1,10 @@
 import { expect, test } from 'vitest'
 import { computed } from '../src/computed'
+import { effect } from '../src/effect'
 import { signal, setSignal } from '../src/signal'
 import { read } from '../src/async'
 import { flush, microtaskScheduler, setScheduler, syncScheduler } from '../src/scheduler'
+import { createRoot } from '../src/owner'
 
 /** Resolve after all microtasks have drained (a macrotask boundary). */
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
@@ -126,6 +128,23 @@ test('a generator stage that try/catches a rejected yield resumes normally', asy
   expect(c()).toBeInstanceOf(Promise)
   await tick()
   expect(c()).toBe('caught: boom')
+})
+
+test('owned computed is disposed when its root is disposed', () => {
+  setScheduler(syncScheduler(flush))
+  const seen: number[] = []
+  const a = signal(1)
+  createRoot((dispose) => {
+    const d = computed(() => a() * 2)
+    effect(() => { seen.push(d()) })
+    expect(seen).toEqual([2])
+    setSignal(a, 3)
+    expect(seen).toEqual([2, 6])
+    dispose()
+    setSignal(a, 5)
+    expect(seen).toEqual([2, 6]) // disposed — effect does NOT re-run
+  })
+  setScheduler(microtaskScheduler(flush))
 })
 
 test('stash is discarded if upstream value changes before kick consumes it', async () => {

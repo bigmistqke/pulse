@@ -1,5 +1,6 @@
-import { computed as r3Computed } from 'r3'
+import { computed as r3Computed, unwatched, type Computed as R3Computed } from 'r3'
 import { NotReadyYet } from './async'
+import { registerWithOwner } from './owner'
 import { setSignal, signal } from './signal'
 
 /**
@@ -47,8 +48,8 @@ export function effect(fn: () => void): void {
       throw e // a genuine error — propagate (error boundaries are a later plan)
     }
   }
-  r3Computed(body)
+  const node = r3Computed(body)
+  registerWithOwner({
+    dispose: () => unwatched(node as R3Computed<unknown>),
+  })
 }
-
-/** Register a cleanup function for the current effect/computed. r3's, re-exported. */
-export { onCleanup } from 'r3'

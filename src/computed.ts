@@ -1,7 +1,8 @@
-import { computed as r3Computed } from 'r3'
+import { computed as r3Computed, unwatched, type Computed as R3Computed } from 'r3'
 import { isGeneratorFunction, track, type Resolved } from './async'
 import { runStage } from './driver'
 import { isPromise } from './is-promise'
+import { registerWithOwner } from './owner'
 import { makeAccessor, setSignal, signal, type Signal } from './signal'
 
 /** A pipeline stage of any shape: sync, async, or generator. The return type
@@ -62,11 +63,19 @@ export function computed(...stages: Array<(value: any) => unknown>): Signal<unkn
 
   // Build the chain: stage 0 has no input; later stages read the previous accessor.
   let prevAccessor: Signal<unknown> | null = null
+  const r3Nodes: R3Computed<unknown>[] = []
   for (let i = 0; i < stages.length; i++) {
     const stage = stages[i]
     const inputAccessor = prevAccessor
-    prevAccessor = makeStageNode(stage, inputAccessor)
+    const { accessor, r3Node } = makeStageNode(stage, inputAccessor)
+    r3Nodes.push(r3Node)
+    prevAccessor = accessor
   }
+  registerWithOwner({
+    dispose: () => {
+      for (const node of r3Nodes) unwatched(node)
+    },
+  })
   return prevAccessor as Signal<unknown>
 }
 
@@ -89,7 +98,7 @@ type StashedResolution =
 function makeStageNode(
   stage: (value: any) => unknown,
   inputAccessor: Signal<unknown> | null,
-): Signal<unknown> {
+): { accessor: Signal<unknown>; r3Node: R3Computed<unknown> } {
   // `kick` lets a settled promise re-trigger this stage's r3 computed.
   const kick = signal(0)
   // `kickCount` increments per kick so each `setSignal(kick, ...)` is a distinct value
@@ -168,5 +177,6 @@ function makeStageNode(
     return outcome.value
   })
 
-  return makeAccessor(r3Node)
+  const accessor = makeAccessor(r3Node)
+  return { accessor, r3Node: r3Node as R3Computed<unknown> }
 }

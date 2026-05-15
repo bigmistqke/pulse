@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from 'vitest'
-import { effect, onCleanup } from '../src/effect'
+import { effect } from '../src/effect'
+import { onCleanup, createRoot } from '../src/owner'
 import {
   flush,
   microtaskScheduler,
@@ -76,4 +77,35 @@ test('a genuine (non-NotReadyYet) error thrown in an effect is not swallowed', (
   expect(() => {
     effect(() => { throw new Error('real error') })
   }).toThrow('real error')
+})
+
+test('owned effect is disposed when its root is disposed', () => {
+  setScheduler(syncScheduler(flush))
+  const log: number[] = []
+  const count = signal(0)
+  createRoot((dispose) => {
+    effect(() => { log.push(count()) })
+    expect(log).toEqual([0])
+    setSignal(count, 1)
+    expect(log).toEqual([0, 1])
+    dispose()
+    setSignal(count, 2)
+    expect(log).toEqual([0, 1]) // disposed — does NOT re-run
+  })
+})
+
+test('onCleanup inside an effect body registers per-run (r3 behaviour), not on the owner', () => {
+  setScheduler(syncScheduler(flush))
+  const log: string[] = []
+  const count = signal(0)
+  createRoot(() => {
+    effect(() => {
+      const c = count()
+      log.push(`run ${c}`)
+      onCleanup(() => log.push(`cleanup ${c}`))
+    })
+    expect(log).toEqual(['run 0'])
+    setSignal(count, 1)
+    expect(log).toEqual(['run 0', 'cleanup 0', 'run 1'])
+  })
 })
