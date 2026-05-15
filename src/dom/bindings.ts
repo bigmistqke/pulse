@@ -69,6 +69,11 @@ function applyAttr(el: Element, name: string, value: unknown): void {
  * Default path also uses `setAttribute` with reactivity for function values.
  */
 export function bindProp(el: Element, name: string, value: unknown): void {
+  // ref — callback invoked once with the element; not reactive
+  if (name === 'ref') {
+    if (typeof value === 'function') (value as (el: Element) => void)(el)
+    return
+  }
   // on:event — direct addEventListener; the handler is not reactive
   if (name.startsWith('on:')) {
     const event = name.slice(3)
