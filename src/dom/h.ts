@@ -13,8 +13,17 @@ export const Fragment: unique symbol = Symbol('Fragment')
  * names work and they all go through `setAttribute`.
  */
 export function h(tag: Tag, props: Record<string, unknown> | null, ...children: unknown[]): Node | Node[] {
+  if (tag === Fragment) {
+    return children
+  }
+  if (typeof tag === 'function') {
+    const merged: Record<string, unknown> = props ? { ...props } : {}
+    if (children.length === 1) merged.children = children[0]
+    else if (children.length > 1) merged.children = children
+    return tag(merged)
+  }
   if (typeof tag !== 'string') {
-    throw new Error('h: non-string tags (components, Fragment) are not supported yet')
+    throw new Error(`h: unsupported tag: ${String(tag)}`)
   }
   const el = document.createElement(tag)
   if (props) {
