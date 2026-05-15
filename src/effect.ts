@@ -19,6 +19,8 @@ import { setSignal, signal } from './signal'
  */
 export function effect(fn: () => void): void {
   const kick = signal(0)
+  // `kickCount` increments per kick so each `setSignal(kick, ...)` is a distinct value
+  // (r3's setSignal bails on `el.value === v`, so writing the same value would be a no-op).
   let kickCount = 0
   let suspendedOn: Promise<unknown> | null = null
   const body = () => {
@@ -28,15 +30,18 @@ export function effect(fn: () => void): void {
       suspendedOn = null // completed successfully — no longer suspended
     } catch (e) {
       if (e instanceof NotReadyYet) {
+        const alreadySuspendedOnSame = suspendedOn === e.promise
         suspendedOn = e.promise
-        const p = e.promise
-        const rerun = () => {
-          if (suspendedOn === p) {
-            suspendedOn = null
-            setSignal(kick, ++kickCount)
+        if (!alreadySuspendedOnSame) {
+          const p = e.promise
+          const rerun = () => {
+            if (suspendedOn === p) {
+              suspendedOn = null
+              setSignal(kick, ++kickCount)
+            }
           }
+          p.then(rerun, rerun)
         }
-        p.then(rerun, rerun)
         return // suspended: hold — do not run the rest of fn, do not propagate
       }
       throw e // a genuine error — propagate (error boundaries are a later plan)
