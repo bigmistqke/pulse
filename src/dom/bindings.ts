@@ -1,9 +1,43 @@
+import { effect } from '../effect'
+
 /**
- * Insert `value` as a child (or children) of `parent`. Handles the static
- * shapes only in this task: string, number, null/undefined/boolean (skipped),
- * DOM Node. Arrays and reactive (function) values come in later tasks.
+ * Insert `value` as a child (or children) of `parent`.
+ *
+ * - string / number → text node
+ * - null / undefined / boolean → nothing
+ * - DOM Node → inserted as-is
+ * - array → each item inserted recursively
+ * - function → wrapped in a binding-effect: the function runs reactively;
+ *   its result is inserted between two marker comments and replaced on
+ *   re-run. `use(...)` inside the function suspends only this binding;
+ *   throws route to the nearest `catchError`.
  */
 export function insertChild(parent: Node, value: unknown): void {
+  if (typeof value === 'function') {
+    const start = document.createComment('')
+    const end = document.createComment('')
+    parent.appendChild(start)
+    parent.appendChild(end)
+    effect(() => {
+      // Call the user function FIRST. If it throws (notably NotReadyYet
+      // via `use(...)`), we leave the existing DOM untouched — stale-but-
+      // stable. Only on a successful call do we clear and re-insert.
+      const next = (value as () => unknown)()
+      // Build the new content into a fragment before touching the DOM, so
+      // a partial insertChild error can't leave a half-cleared region.
+      const frag = document.createDocumentFragment()
+      insertChild(frag, next)
+      // Clear previously-inserted nodes between the markers, then insert.
+      let cur = start.nextSibling
+      while (cur !== null && cur !== end) {
+        const after: ChildNode | null = cur.nextSibling
+        cur.remove()
+        cur = after
+      }
+      end.parentNode!.insertBefore(frag, end)
+    })
+    return
+  }
   if (value === null || value === undefined || typeof value === 'boolean') return
   if (typeof value === 'string' || typeof value === 'number') {
     parent.appendChild(document.createTextNode(String(value)))
