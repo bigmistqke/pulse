@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { isPending, latest } from '../src/async'
+import { isPending, latest, use, NotReadyYet } from '../src/async'
 import { effect } from '../src/effect'
 import { flush, microtaskScheduler, setScheduler, syncScheduler } from '../src/scheduler'
 import { setSignal, signal } from '../src/signal'
@@ -62,4 +62,40 @@ test('latest is reactive — updates as the signal resolves', async () => {
   await tick()
   expect(seen).toEqual([undefined, 1]) // resolved -> effect re-ran -> latest is 1
   setScheduler(microtaskScheduler(flush))
+})
+
+test('use returns a plain (non-promise) value unchanged', () => {
+  expect(use(5)).toBe(5)
+  expect(use('hello')).toBe('hello')
+})
+
+test('use throws NotReadyYet for a pending promise', () => {
+  const pending = new Promise<number>(() => {})
+  expect(() => use(pending)).toThrow(NotReadyYet)
+})
+
+test('the thrown NotReadyYet carries the promise', () => {
+  const pending = new Promise<number>(() => {})
+  try {
+    use(pending)
+    throw new Error('use should have thrown')
+  } catch (e) {
+    expect(e).toBeInstanceOf(NotReadyYet)
+    expect((e as NotReadyYet).promise).toBe(pending)
+  }
+})
+
+test('use resolves a promise synchronously once it has settled', async () => {
+  const p = Promise.resolve(7)
+  expect(() => use(p)).toThrow(NotReadyYet) // first call: still pending to use
+  await tick()
+  expect(use(p)).toBe(7) // settled now — use returns synchronously
+})
+
+test('use re-throws the rejection reason of a settled rejected promise', async () => {
+  const reason = new Error('boom')
+  const p = Promise.reject(reason)
+  expect(() => use(p)).toThrow(NotReadyYet) // first call: pending
+  await tick()
+  expect(() => use(p)).toThrow('boom') // settled rejected: re-throws the reason
 })
