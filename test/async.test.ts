@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { isPending, latest, use, NotReadyYet } from '../src/async'
+import { isPending, latest, use, NotReadyYet, read } from '../src/async'
 import { effect } from '../src/effect'
 import { flush, microtaskScheduler, setScheduler, syncScheduler } from '../src/scheduler'
 import { setSignal, signal } from '../src/signal'
@@ -98,4 +98,31 @@ test('use re-throws the rejection reason of a settled rejected promise', async (
   expect(() => use(p)).toThrow(NotReadyYet) // first call: pending
   await tick()
   expect(() => use(p)).toThrow('boom') // settled rejected: re-throws the reason
+})
+
+test('read of a plain value yields it; yield* expression resolves to it', () => {
+  // Drive `read(42)` manually (no driver yet here — we drive by hand for the unit test).
+  const gen = read(42)
+  const step = gen.next()
+  expect(step.done).toBe(false)
+  expect(step.value).toBe(42)
+  const final = gen.next(42)
+  expect(final.done).toBe(true)
+  expect(final.value).toBe(42)
+})
+
+test('read of a signal calls its accessor (tracking happens via the call)', () => {
+  const s = signal(7)
+  const gen = read(s)
+  const step = gen.next()
+  expect(step.value).toBe(7) // s() was called; yields its value
+  const final = gen.next(7)
+  expect(final.value).toBe(7)
+})
+
+test('read of a promise yields the promise itself', () => {
+  const p = Promise.resolve(1)
+  const gen = read(p)
+  const step = gen.next()
+  expect(step.value).toBe(p)
 })

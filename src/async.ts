@@ -1,5 +1,5 @@
 import { isPromise } from './is-promise'
-import type { Signal } from './signal'
+import { NODE, type Signal } from './signal'
 
 /** Reactive predicate: is the signal's current value a (pending) promise? */
 export function isPending(s: Signal<unknown>): boolean {
@@ -82,4 +82,36 @@ export function use<T>(x: T): Awaited<T> {
   if (state.status === 'fulfilled') return state.value as Awaited<T>
   if (state.status === 'rejected') throw state.reason
   throw new NotReadyYet(x)
+}
+
+/**
+ * The resolved-and-unwrapped type of a stage value or `read(x)` argument:
+ * - If T is a Signal<U>, the result is Awaited<U>.
+ * - If T is a Generator returning R, the result is Awaited<R>.
+ * - Otherwise the result is Awaited<T>.
+ */
+export type Resolved<T> = T extends Signal<infer U>
+  ? Awaited<U>
+  : T extends Generator<unknown, infer R, unknown>
+    ? Awaited<R>
+    : Awaited<T>
+
+/** True if `x` looks like a pulse signal accessor (a function carrying NODE). */
+function isSignalAccessor(x: unknown): x is Signal<unknown> {
+  return typeof x === 'function' && NODE in (x as object)
+}
+
+/**
+ * Generator-side resolver. Use as `yield* read(x)` inside a `function*` stage.
+ * - x is a signal: the accessor is called (tracking the signal as a dep), and
+ *   its value (which may be a `T` or a `Promise<T>`) is yielded.
+ * - x is a promise: yielded directly (untracked).
+ * - x is a plain value: yielded directly; the driver resumes immediately with it.
+ *
+ * `yield* read(x)` has type `Resolved<typeof x>` — per-yield inference, courtesy
+ * of generator delegation.
+ */
+export function* read<T>(x: T): Generator<unknown, Resolved<T>, unknown> {
+  const value = isSignalAccessor(x) ? (x as () => unknown)() : x
+  return (yield value) as Resolved<T>
 }
