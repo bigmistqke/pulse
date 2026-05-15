@@ -98,6 +98,33 @@ export function bindProp(el: Element, name: string, value: unknown): void {
     }
     return
   }
+  // class:name — toggle a single class; function value is reactive
+  if (name.startsWith('class:')) {
+    const cls = name.slice(6)
+    if (typeof value === 'function') {
+      effect(() => el.classList.toggle(cls, !!(value as () => unknown)()))
+    } else {
+      el.classList.toggle(cls, !!value)
+    }
+    return
+  }
+  // style:name — set/remove a single style property; function value is reactive
+  if (name.startsWith('style:')) {
+    const prop = name.slice(6)
+    const apply = (v: unknown) => {
+      if (v === null || v === undefined || v === false) {
+        ;(el as HTMLElement).style.removeProperty(prop)
+      } else {
+        ;(el as HTMLElement).style.setProperty(prop, String(v))
+      }
+    }
+    if (typeof value === 'function') {
+      effect(() => apply((value as () => unknown)()))
+    } else {
+      apply(value)
+    }
+    return
+  }
   // default — same as attr:, with bare name
   if (typeof value === 'function') {
     effect(() => applyAttr(el, name, (value as () => unknown)()))
