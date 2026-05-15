@@ -19,4 +19,4 @@ export {
   type Scheduler,
 } from './scheduler'
 export { setSignal, signal, type Signal, type WritableSignal } from './signal'
-export { For, Fragment, h, render, Show, type Truthy } from './dom'
+export { For, Fragment, h, Match, render, Show, Switch, type Truthy } from './dom'
