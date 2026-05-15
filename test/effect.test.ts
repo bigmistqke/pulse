@@ -1,6 +1,6 @@
 import { afterEach, expect, test } from 'vitest'
 import { effect } from '../src/effect'
-import { onCleanup, createRoot } from '../src/owner'
+import { onCleanup, createRoot, catchError } from '../src/owner'
 import {
   flush,
   microtaskScheduler,
@@ -108,4 +108,39 @@ test('onCleanup inside an effect body registers per-run (r3 behaviour), not on t
     setSignal(count, 1)
     expect(log).toEqual(['run 0', 'cleanup 0', 'run 1'])
   })
+})
+
+test('an effect created inside catchError routes its throw to the handler', () => {
+  setScheduler(syncScheduler(flush))
+  const errors: unknown[] = []
+  catchError(() => {
+    effect(() => { throw new Error('effect failed') })
+  }, (e) => errors.push(e))
+  expect(errors).toHaveLength(1)
+  expect((errors[0] as Error).message).toBe('effect failed')
+})
+
+test('an effect created outside any catchError still propagates uncaught (Plan 2a behaviour preserved)', () => {
+  setScheduler(syncScheduler(flush))
+  expect(() => {
+    effect(() => { throw new Error('uncaught') })
+  }).toThrow('uncaught')
+})
+
+test('an effect re-throwing after a signal change routes the new throw too', () => {
+  setScheduler(syncScheduler(flush))
+  const errors: unknown[] = []
+  const trigger = signal(0)
+  catchError(() => {
+    effect(() => {
+      const v = trigger()
+      if (v > 0) throw new Error(`fail ${v}`)
+    })
+  }, (e) => errors.push(e))
+  expect(errors).toHaveLength(0)
+  setSignal(trigger, 1)
+  expect(errors).toHaveLength(1)
+  setSignal(trigger, 2)
+  expect(errors).toHaveLength(2)
+  expect((errors[1] as Error).message).toBe('fail 2')
 })

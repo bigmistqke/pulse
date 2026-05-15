@@ -1,6 +1,6 @@
 import { computed as r3Computed, unwatched, type Computed as R3Computed } from 'r3'
 import { NotReadyYet } from './async'
-import { registerWithOwner } from './owner'
+import { getOwner, routeError, registerWithOwner } from './owner'
 import { setSignal, signal } from './signal'
 
 /**
@@ -19,6 +19,7 @@ import { setSignal, signal } from './signal'
  * write-back re-triggers the effect and the redundant kick becomes a no-op.
  */
 export function effect(fn: () => void): void {
+  const myOwner = getOwner()
   const kick = signal(0)
   // `kickCount` increments per kick so each `setSignal(kick, ...)` is a distinct value
   // (r3's setSignal bails on `el.value === v`, so writing the same value would be a no-op).
@@ -45,7 +46,7 @@ export function effect(fn: () => void): void {
         }
         return // suspended: hold — do not run the rest of fn, do not propagate
       }
-      throw e // a genuine error — propagate (error boundaries are a later plan)
+      routeError(myOwner, e) // throws if no handler catches
     }
   }
   const node = r3Computed(body)

@@ -2,8 +2,8 @@ import { computed as r3Computed, unwatched, type Computed as R3Computed } from '
 import { isGeneratorFunction, track, type Resolved } from './async'
 import { runStage } from './driver'
 import { isPromise } from './is-promise'
-import { registerWithOwner } from './owner'
-import { makeAccessor, setSignal, signal, type Signal } from './signal'
+import { getOwner, routeError, registerWithOwner } from './owner'
+import { makeAccessor, NODE, setSignal, signal, type Signal } from './signal'
 
 /** A pipeline stage of any shape: sync, async, or generator. The return type
  *  is whatever the function returns — sync `R`, async `Promise<R>`, or
@@ -105,6 +105,8 @@ function makeStageNode(
   stage: (value: any) => unknown,
   inputAccessor: Signal<unknown> | null,
 ): { accessor: Signal<unknown>; r3Node: R3Computed<unknown> } {
+  const myOwner = getOwner()
+  let lastGoodValue: unknown = undefined
   // `kick` lets a settled promise re-trigger this stage's r3 computed.
   const kick = signal(0)
   // `kickCount` increments per kick so each `setSignal(kick, ...)` is a distinct value
@@ -120,69 +122,102 @@ function makeStageNode(
   // The resumption strategy for this stage is fixed by its type at construction.
   const resumeKind: ResumeKind = isGeneratorFunction(stage) ? 'fast-forward' : 'reuse-value'
 
+  // When routeError finds no handler it re-throws; r3 evaluates eagerly at
+  // construction so that re-throw would escape the r3Computed(...) call rather
+  // than the later c() read. We catch that re-throw here, park the error, and
+  // surface it from the accessor wrapper below so it propagates at c() time.
+  let deferredError: { error: unknown } | null = null
+
   const r3Node = r3Computed(() => {
-    kick() // depend on the kick signal so a settled promise can re-trigger this stage
+    try {
+      kick() // depend on the kick signal so a settled promise can re-trigger this stage
 
-    // Read input first so we can validate (or discard) a pending stash.
-    let input: unknown = undefined
-    if (inputAccessor !== null) {
-      input = inputAccessor()
-      if (isPromise(input)) {
-        // The previous stage is suspended; mirror its state.
-        // Any stash we held was for the OLD (pre-promise) input — drop it.
-        stashedResolution = null
-        suspendedOn = null
-        return input
-      }
-    }
-
-    // Consume a stashed resolution IFF the input that produced it still matches.
-    // If the input has changed, the stash is stale and we re-run normally.
-    if (stashedResolution !== null) {
-      if (Object.is(input, suspendedInput)) {
-        const r = stashedResolution
-        stashedResolution = null
-        suspendedOn = null
-        if (r.kind === 'rejected') throw r.reason
-        return r.value
-      }
-      // Input changed — discard the stale stash and fall through.
-      stashedResolution = null
-    }
-
-    const outcome = runStage(stage, input)
-    if (outcome.pending) {
-      const p = outcome.promise
-      if (suspendedOn !== p) {
-        suspendedOn = p
-        suspendedInput = input
-        const rerun = () => {
-          if (suspendedOn === p) {
-            if (resumeKind === 'reuse-value') {
-              const state = track(p)
-              if (state.status === 'fulfilled') {
-                stashedResolution = { kind: 'fulfilled', value: state.value }
-              } else if (state.status === 'rejected') {
-                stashedResolution = { kind: 'rejected', reason: state.reason }
-              }
-              // 'pending' is unreachable here — rerun fires only after settle.
-            }
-            // 'fast-forward': do not stash; the next r3 fn invocation will
-            // re-invoke the stage, and the driver's WeakMap-backed `track`
-            // will see the yielded promise as settled and fast-forward.
-            suspendedOn = null
-            setSignal(kick, ++kickCount)
-          }
+      // Read input first so we can validate (or discard) a pending stash.
+      let input: unknown = undefined
+      if (inputAccessor !== null) {
+        input = inputAccessor()
+        if (isPromise(input)) {
+          // The previous stage is suspended; mirror its state.
+          // Any stash we held was for the OLD (pre-promise) input — drop it.
+          stashedResolution = null
+          suspendedOn = null
+          return input
         }
-        p.then(rerun, rerun)
       }
-      return p
-    }
 
-    suspendedOn = null
-    return outcome.value
+      // Consume a stashed resolution IFF the input that produced it still matches.
+      // If the input has changed, the stash is stale and we re-run normally.
+      if (stashedResolution !== null) {
+        if (Object.is(input, suspendedInput)) {
+          const r = stashedResolution
+          stashedResolution = null
+          suspendedOn = null
+          if (r.kind === 'rejected') throw r.reason
+          lastGoodValue = r.value
+          deferredError = null
+          return r.value
+        }
+        // Input changed — discard the stale stash and fall through.
+        stashedResolution = null
+      }
+
+      const outcome = runStage(stage, input)
+      if (outcome.pending) {
+        const p = outcome.promise
+        if (suspendedOn !== p) {
+          suspendedOn = p
+          suspendedInput = input
+          const rerun = () => {
+            if (suspendedOn === p) {
+              if (resumeKind === 'reuse-value') {
+                const state = track(p)
+                if (state.status === 'fulfilled') {
+                  stashedResolution = { kind: 'fulfilled', value: state.value }
+                } else if (state.status === 'rejected') {
+                  stashedResolution = { kind: 'rejected', reason: state.reason }
+                }
+                // 'pending' is unreachable here — rerun fires only after settle.
+              }
+              // 'fast-forward': do not stash; the next r3 fn invocation will
+              // re-invoke the stage, and the driver's WeakMap-backed `track`
+              // will see the yielded promise as settled and fast-forward.
+              suspendedOn = null
+              setSignal(kick, ++kickCount)
+            }
+          }
+          p.then(rerun, rerun)
+        }
+        return p
+      }
+
+      suspendedOn = null
+      lastGoodValue = outcome.value
+      deferredError = null
+      return outcome.value
+    } catch (e) {
+      try {
+        routeError(myOwner, e) // throws if no handler catches
+      } catch (rethrown) {
+        // No handler — park the error so the accessor can surface it at read time.
+        // This decouples the throw from r3's eager construction call.
+        deferredError = { error: rethrown }
+        return lastGoodValue
+      }
+      // Handler caught — return the cached last-good value so r3 sees no value
+      // change → no propagation to downstream subs → throwing stage stays frozen.
+      return lastGoodValue
+    }
   })
 
-  const accessor = makeAccessor(r3Node)
+  // Wrap the raw accessor: if a previous run parked an unhandled error, throw it
+  // now so callers see the throw at read time rather than at construction time.
+  const rawAccessor = makeAccessor(r3Node)
+  const accessor = (() => {
+    if (deferredError !== null) {
+      throw deferredError.error
+    }
+    return rawAccessor()
+  }) as Signal<unknown>
+  accessor[NODE] = r3Node
   return { accessor, r3Node: r3Node as R3Computed<unknown> }
 }

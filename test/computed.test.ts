@@ -4,7 +4,7 @@ import { effect } from '../src/effect'
 import { signal, setSignal } from '../src/signal'
 import { read } from '../src/async'
 import { flush, microtaskScheduler, setScheduler, syncScheduler } from '../src/scheduler'
-import { createRoot } from '../src/owner'
+import { createRoot, catchError } from '../src/owner'
 
 /** Resolve after all microtasks have drained (a macrotask boundary). */
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
@@ -179,4 +179,64 @@ test('stash is discarded if upstream value changes before kick consumes it', asy
   // With the bug: c() === 'first:1' (stale stash consumed despite id=2).
   // With the fix: c() === 'value:2' (stage rerun under the new input).
   expect(c()).toBe('value:2')
+})
+
+test('a computed created inside catchError routes its throw to the handler', () => {
+  const errors: unknown[] = []
+  catchError(() => {
+    const c = computed(() => { throw new Error('compute failed') })
+    // Read it — that's what triggers the throw to surface (computeds compute on read).
+    c()
+  }, (e) => errors.push(e))
+  expect(errors).toHaveLength(1)
+  expect((errors[0] as Error).message).toBe('compute failed')
+})
+
+test('after a caught throw, the computed is frozen at its previous good value', () => {
+  setScheduler(syncScheduler(flush))
+  const trigger = signal(0)
+  catchError(() => {
+    const c = computed(() => {
+      const t = trigger()
+      if (t === 1) throw new Error('boom')
+      return t * 10
+    })
+    // Read the computed inside an effect so the chain is exercised.
+    const observed: unknown[] = []
+    effect(() => { observed.push(c()) })
+    expect(observed).toEqual([0]) // t=0, c=0
+    setSignal(trigger, 1) // body throws; handler catches; lastGoodValue (0) preserved
+    expect(observed).toEqual([0]) // unchanged — c's r3 value still 0
+    setSignal(trigger, 2) // recovers
+    expect(observed).toEqual([0, 20])
+  }, () => {})
+})
+
+test('a computed throw outside any catchError still propagates uncaught', () => {
+  const c = computed(() => { throw new Error('uncaught') })
+  expect(() => c()).toThrow('uncaught')
+})
+
+test('an unhandled-throw computed throws on every read until a successful re-run clears it', () => {
+  setScheduler(syncScheduler(flush))
+  const trigger = signal(0)
+  const c = computed(() => {
+    const t = trigger()
+    if (t === 0) throw new Error('boom')
+    return t * 10
+  })
+
+  // First read: unhandled — throws.
+  expect(() => c()).toThrow('boom')
+  // Second read with no change — must still throw (NOT silently return stale).
+  expect(() => c()).toThrow('boom')
+
+  // Recover: dep changes such that the body no longer throws.
+  setSignal(trigger, 1)
+  // Now the read should return the new value cleanly.
+  expect(c()).toBe(10)
+  // And subsequent reads stay clean.
+  expect(c()).toBe(10)
+
+  setScheduler(microtaskScheduler(flush))
 })
