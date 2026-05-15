@@ -37,3 +37,20 @@ test('h inserts DOM node children as-is', () => {
   const el = h('div', null, span) as HTMLElement
   expect(el.firstChild).toBe(span)
 })
+
+test('h flattens array children', () => {
+  const el = h('div', null, ['a', 'b', 'c']) as HTMLElement
+  expect(el.textContent).toBe('abc')
+})
+
+test('h flattens nested arrays', () => {
+  const el = h('div', null, ['a', ['b', ['c', 'd']]]) as HTMLElement
+  expect(el.textContent).toBe('abcd')
+})
+
+test('h preserves order of mixed children', () => {
+  const span = document.createElement('span')
+  span.textContent = 'X'
+  const el = h('div', null, 'a', span, 'b', [null, 'c']) as HTMLElement
+  expect(el.textContent).toBe('aXbc')
+})

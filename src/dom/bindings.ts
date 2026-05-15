@@ -13,6 +13,10 @@ export function insertChild(parent: Node, value: unknown): void {
     parent.appendChild(value)
     return
   }
+  if (Array.isArray(value)) {
+    for (const item of value) insertChild(parent, item)
+    return
+  }
   throw new Error(`insertChild: unsupported child value: ${typeof value}`)
 }
 
