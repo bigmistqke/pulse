@@ -71,6 +71,12 @@ export function computed(...stages: Array<(value: any) => unknown>): Signal<unkn
     r3Nodes.push(r3Node)
     prevAccessor = accessor
   }
+  // Disposal walks stages in creation order (upstream → downstream). Each
+  // `unwatched(stageN)` removes that node from its deps' sub-lists; if stage
+  // N+1 was the only consumer of stage N, stage N would have auto-cleaned via
+  // r3's `unwatched` cascade anyway. We dispose every stage explicitly to be
+  // robust against external consumers of intermediate stages (though pulse
+  // doesn't currently expose them).
   registerWithOwner({
     dispose: () => {
       for (const node of r3Nodes) unwatched(node)

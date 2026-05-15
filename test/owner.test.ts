@@ -73,3 +73,21 @@ test('onCleanup outside any context is a no-op (permissive)', () => {
   // Should not throw, should not crash.
   expect(() => onCleanup(() => {})).not.toThrow()
 })
+
+test('runWithOwner restores owner even when fn throws', () => {
+  createRoot(() => {
+    const owner = getOwner()
+    expect(() => runWithOwner(null, () => { throw new Error('boom') })).toThrow('boom')
+    expect(getOwner()).toBe(owner) // restored despite throw
+  })
+})
+
+test('dispose is idempotent — calling twice does not throw or re-run cleanups', () => {
+  const log: string[] = []
+  createRoot((dispose) => {
+    onCleanup(() => log.push('cleaned'))
+    dispose()
+    dispose() // second call must not re-run cleanups
+  })
+  expect(log).toEqual(['cleaned'])
+})
