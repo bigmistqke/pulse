@@ -46,6 +46,10 @@ Severity: **(small)** trivial cleanups · **(worth)** worth doing soon · **(lat
 
 ### r3-side findings
 
+- **(worth) r3 auto-disposes computeds when their sub count drops to 0, mid-flow.** Inside `unlinkSubs`, the line `if (nextSub === null && "fn" in dep) unwatched(dep)` triggers r3's automatic disposal cascade when a computed's last sub goes away. For pulse this bites when a consumer reads a pulse computed *conditionally*: if an effect skips the branch that reads `someComputed()`, `unlinkSubs` removes the dep edge, the computed's subs becomes empty, r3 calls `unwatched` on it, and the computed's own deps are detached too — so it stops listening to upstream signals. Subsequent re-subscription via `r3.read` re-attaches `effect → computed` but the computed's own deps (`computed → upstream`) stay null, so upstream changes never reach it. Workaround in user code: always-read the computed in the effect body (even if the value isn't always used). Long-term: pulse may need to install a phantom sub on owned computeds to keep them alive across periods of zero observers; or expose a "pinned" flag through `unwatched`. The Plan 2d integration test uses the always-read workaround.
+  Source: Plan 2d Task 3 integration test debugging.
+
+
 - **(worth) r3: dep-list partially stale after a throw in `recompute`.** When a `computed`/`effect` body throws partway, r3's `try/finally` (added in Plan 2c) correctly restores `context` and `flags`, but the post-`try` dep-pruning code (`unlinkSubs` against `depsTail`) is skipped. The throwing node retains its dep links from before the throw — including any deps it re-read during the failed partial run. Practically: a throwing computed may re-trigger from deps it should have dropped this run. Not a context-corruption bug; a "phantom re-trigger" risk. Worth pinning down before Plan 2d (error boundaries), since boundary recovery semantics may want to interact with the dep graph of caught nodes.
   Source: Plan 2c Task 3 final review (Important). r3 fix lands in r3's repo, not pulse's.
 
