@@ -97,6 +97,10 @@ function makeStageNode(
   let kickCount = 0
   let suspendedOn: Promise<unknown> | null = null
   let stashedResolution: StashedResolution | null = null
+  // The input value at the time of the most recent suspension. Used to invalidate
+  // the stash if the input has changed since (e.g., upstream re-suspended with a
+  // new pending promise concurrently with this stage's kick).
+  let suspendedInput: unknown = undefined
 
   // The resumption strategy for this stage is fixed by its type at construction.
   const resumeKind: ResumeKind = isGeneratorFunction(stage) ? 'fast-forward' : 'reuse-value'
@@ -104,27 +108,31 @@ function makeStageNode(
   const r3Node = r3Computed(() => {
     kick() // depend on the kick signal so a settled promise can re-trigger this stage
 
-    // Consume a stashed resolution from a 'reuse-value' suspension first — the
-    // resolved value of the outer promise IS the stage value; no re-invocation.
-    if (stashedResolution !== null) {
-      const r = stashedResolution
-      stashedResolution = null
-      suspendedOn = null
-      if (r.kind === 'rejected') throw r.reason
-      return r.value
-    }
-
-    // Propagate a suspended input: if the previous stage's value is a promise,
-    // this stage's value is the same promise. Do not run `stage` — re-entering
-    // when the input value flips will re-evaluate this whole body anyway.
+    // Read input first so we can validate (or discard) a pending stash.
     let input: unknown = undefined
     if (inputAccessor !== null) {
       input = inputAccessor()
       if (isPromise(input)) {
         // The previous stage is suspended; mirror its state.
+        // Any stash we held was for the OLD (pre-promise) input — drop it.
+        stashedResolution = null
         suspendedOn = null
         return input
       }
+    }
+
+    // Consume a stashed resolution IFF the input that produced it still matches.
+    // If the input has changed, the stash is stale and we re-run normally.
+    if (stashedResolution !== null) {
+      if (Object.is(input, suspendedInput)) {
+        const r = stashedResolution
+        stashedResolution = null
+        suspendedOn = null
+        if (r.kind === 'rejected') throw r.reason
+        return r.value
+      }
+      // Input changed — discard the stale stash and fall through.
+      stashedResolution = null
     }
 
     const outcome = runStage(stage, input)
@@ -132,6 +140,7 @@ function makeStageNode(
       const p = outcome.promise
       if (suspendedOn !== p) {
         suspendedOn = p
+        suspendedInput = input
         const rerun = () => {
           if (suspendedOn === p) {
             if (resumeKind === 'reuse-value') {

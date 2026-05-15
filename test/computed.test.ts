@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest'
 import { computed } from '../src/computed'
 import { signal, setSignal } from '../src/signal'
-import { read, use } from '../src/async'
+import { read } from '../src/async'
 import { flush, microtaskScheduler, setScheduler, syncScheduler } from '../src/scheduler'
 
 /** Resolve after all microtasks have drained (a macrotask boundary). */
@@ -126,4 +126,38 @@ test('a generator stage that try/catches a rejected yield resumes normally', asy
   expect(c()).toBeInstanceOf(Promise)
   await tick()
   expect(c()).toBe('caught: boom')
+})
+
+test('stash is discarded if upstream value changes before kick consumes it', async () => {
+  const id = signal<number>(1)
+  let firstRelease!: (v: string) => void
+
+  const c = computed(
+    () => id(),
+    async (n: number) => {
+      if (n === 1) {
+        // First call: returns a promise we control (will resolve to 'first:1').
+        return new Promise<string>((resolve) => { firstRelease = resolve })
+      }
+      // Subsequent calls: returns 'value:<n>' (still wrapped in async = pending briefly).
+      return `value:${n}`
+    },
+  )
+
+  // Initial: pending on the first call's outer promise.
+  expect(c()).toBeInstanceOf(Promise)
+
+  // Race: settle the first promise AND change `id` before the flush microtask runs.
+  // - rerun is queued (will stash 'first:1' for input=1)
+  // - setSignal queues a flush
+  // When the flush runs, stage 0 re-runs (id=2) first (by r3 height), then stage 1
+  // sees input=2 — the stash (captured for input=1) must be discarded.
+  firstRelease('first:1')
+  setSignal(id, 2)
+
+  await tick()
+
+  // With the bug: c() === 'first:1' (stale stash consumed despite id=2).
+  // With the fix: c() === 'value:2' (stage rerun under the new input).
+  expect(c()).toBe('value:2')
 })
