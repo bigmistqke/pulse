@@ -29,6 +29,9 @@ test('end-to-end: signal -> throwing computed -> effect -> catchError catches an
       })
       effect(() => {
         const e = errorState()
+        // Always-read `name()` regardless of `e`: see docs/follow-ups.md
+        // "r3 auto-disposes computeds when their sub count drops to 0".
+        // Reading conditionally would let r3 unwatch `name` mid-flow.
         const n = name()
         if (e !== null) {
           renders.push(`ERROR: ${e.message}`)

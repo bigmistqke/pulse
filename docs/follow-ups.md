@@ -19,6 +19,10 @@ Severity: **(small)** trivial cleanups · **(worth)** worth doing soon · **(lat
 
 ### Test coverage gaps
 
+- **(worth) No test that a mid-pipeline computed throw does NOT double-fire the handler from downstream stages.** Each stage's r3 wrapper calls `routeError(myOwner, e)` only on its own throw, and a throwing stage freezes (`lastGoodValue` returned → no propagation), so downstream stages should not see the throw. The behaviour is correct by construction but unpinned. A two-stage pipeline where stage 1 throws and stage 2 is a sink would document the contract.
+  Source: Plan 2d final review (Future).
+
+
 - **(worth) No test for `use(0)`, `use(null)`, `use(undefined)`.** The `v != null` and `typeof` guards in `isPromise` handle these, but a one-liner boundary test would document the contract explicitly.
   Source: Plan 2a final review (M3).
 - **(worth) No test for the reuse-value rejected-stash path.** `src/computed.ts` handles `r.kind === 'rejected'` by re-throwing in the next r3 fn invocation. That code is reachable (an async stage's returned promise can reject) but currently untested. Plan 2c will exercise this via error boundaries; until then it's an unproven leaf.
@@ -41,6 +45,10 @@ Severity: **(small)** trivial cleanups · **(worth)** worth doing soon · **(lat
 
 ### Architectural notes
 
+- **(later) `catchError` orphan sub-owner when no ambient owner.** Calling `catchError` outside any `createRoot` creates a sub-owner with `parent = null` that is not registered as a disposable anywhere — it lives until GC. In practice the reactive nodes inside it are individually unwatched by r3, so the handler effectively becomes unreachable, but there is no explicit dispose handle for the boundary itself. Consider returning `{ result, dispose }` from `catchError` in a future iteration, or document the constraint more loudly in the JSDoc.
+  Source: Plan 2d final review (Minor).
+- **(later) Promote "create a parented sub-owner" into a shared internal before Plan 3.** Today only `catchError` produces parented children. When DOM components arrive in Plan 3 they will want the same machinery (parent link, disposal-cascade registration, optional handler). Extract `createSubOwner(handler?)` from `catchError`'s body as the first move of Plan 3 rather than retrofitting under DOM pressure.
+  Source: Plan 2d final review (Future).
 - **(later) ADR 0003 wording vs Plan 2b's per-stage implementation.** ADR 0003 says "one ordinary r3 computed node" + "stashed pipeline state". Plan 2b uses one r3 node *per stage* — same architectural commitment (r3 unmodified; async-ness in pulse wrappers), different mechanism (r3's memoization gives free per-stage caching). The ADR could be updated to record the chosen implementation, or kept as-is with the plan's scope note serving as the divergence record.
   Source: Plan 2b plan scope notes + final review.
 
