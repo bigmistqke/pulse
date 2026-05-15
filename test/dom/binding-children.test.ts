@@ -71,3 +71,31 @@ test('function child preserves marker order for static siblings', () => {
     expect(el.textContent).toBe('LmR')
   })
 })
+
+test('nested reactive child does not leak the inner effect on outer re-run', () => {
+  createRoot(() => {
+    const outer = signal(0)
+    const inner = signal(0)
+    let innerRuns = 0
+    const el = h('div', null, () => {
+      outer() // outer dep
+      return h('span', null, () => {
+        innerRuns++
+        return String(inner())
+      })
+    }) as HTMLElement
+    document.body.append(el)
+    flush()
+    expect(innerRuns).toBe(1)
+    // Trigger outer re-run multiple times. If the inner effect leaks,
+    // each old nested effect remains subscribed to `inner`.
+    setSignal(outer, 1)
+    setSignal(outer, 2)
+    setSignal(outer, 3)
+    // Now bump inner. With proper disposal, exactly one (the latest) inner
+    // effect re-runs. With leak, all four (or however many accumulated) fire.
+    const before = innerRuns
+    setSignal(inner, 100)
+    expect(innerRuns - before).toBe(1)
+  })
+})

@@ -140,7 +140,7 @@ export function catchError<T>(
   })
 }
 
-function disposeOwner(owner: Owner): void {
+export function disposeOwner(owner: Owner): void {
   if (owner.disposed) return
   owner.disposed = true
   // Bottom-up: dispose owned children first (their r3 nodes detach from deps).

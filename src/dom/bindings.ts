@@ -1,5 +1,5 @@
 import { effect } from '../effect'
-import { onCleanup } from '../owner'
+import { createSubOwner, disposeOwner, getOwner, onCleanup, runWithOwner, type Owner } from '../owner'
 
 /**
  * Insert `value` as a child (or children) of `parent`.
@@ -15,27 +15,39 @@ import { onCleanup } from '../owner'
  */
 export function insertChild(parent: Node, value: unknown): void {
   if (typeof value === 'function') {
+    // Capture the owner at h()-call time. The binding-effect lives until this
+    // owner is disposed. Each run of the effect gets its own sub-owner so any
+    // nested effects/computeds created by the user function are cleaned up
+    // before the next run — no leak across re-runs.
+    const parentOwner = getOwner()
     const start = document.createComment('')
     const end = document.createComment('')
     parent.appendChild(start)
     parent.appendChild(end)
+    let runOwner: Owner | null = null
     effect(() => {
-      // Call the user function FIRST. If it throws (notably NotReadyYet
-      // via `use(...)`), we leave the existing DOM untouched — stale-but-
-      // stable. Only on a successful call do we clear and re-insert.
-      const next = (value as () => unknown)()
-      // Build the new content into a fragment before touching the DOM, so
-      // a partial insertChild error can't leave a half-cleared region.
-      const frag = document.createDocumentFragment()
-      insertChild(frag, next)
-      // Clear previously-inserted nodes between the markers, then insert.
-      let cur = start.nextSibling
-      while (cur !== null && cur !== end) {
-        const after: ChildNode | null = cur.nextSibling
-        cur.remove()
-        cur = after
-      }
-      end.parentNode!.insertBefore(frag, end)
+      // Dispose the previous run's owner first — this tears down any
+      // nested binding-effects from the prior run.
+      if (runOwner !== null) disposeOwner(runOwner)
+      runOwner = createSubOwner(parentOwner)
+      runWithOwner(runOwner, () => {
+        // Call the user function FIRST. If it throws (notably NotReadyYet
+        // via `use(...)`), we leave the existing DOM untouched — stale-but-
+        // stable. Only on a successful call do we clear and re-insert.
+        const next = (value as () => unknown)()
+        // Build the new content into a fragment before touching the DOM, so
+        // a partial insertChild error can't leave a half-cleared region.
+        const frag = document.createDocumentFragment()
+        insertChild(frag, next)
+        // Clear previously-inserted nodes between the markers, then insert.
+        let cur = start.nextSibling
+        while (cur !== null && cur !== end) {
+          const after: ChildNode | null = cur.nextSibling
+          cur.remove()
+          cur = after
+        }
+        end.parentNode!.insertBefore(frag, end)
+      })
     })
     return
   }
