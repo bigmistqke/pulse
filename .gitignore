@@ -1,3 +1,5 @@
 node_modules
 dist
 test/dom/__screenshots__
+examples/*/node_modules
+examples/*/dist
