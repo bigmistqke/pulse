@@ -55,10 +55,18 @@ export function insertChild(parent: Node, value: unknown): void {
   throw new Error(`insertChild: unsupported child value: ${typeof value}`)
 }
 
+function applyAttr(el: Element, name: string, value: unknown): void {
+  if (value === null || value === undefined || value === false) {
+    el.removeAttribute(name)
+  } else {
+    el.setAttribute(name, value === true ? '' : String(value))
+  }
+}
+
 /**
- * Apply one prop entry to `el`. Handles `on:` and `prop:` prefixes;
- * function values with `prop:` are reactive (wrapped in effect).
- * Default path uses `setAttribute` without reactivity.
+ * Apply one prop entry to `el`. Handles `on:`, `prop:`, and `attr:` prefixes;
+ * function values with `prop:` and `attr:` are reactive (wrapped in effect).
+ * Default path also uses `setAttribute` with reactivity for function values.
  */
 export function bindProp(el: Element, name: string, value: unknown): void {
   // on:event — direct addEventListener; the handler is not reactive
@@ -80,7 +88,20 @@ export function bindProp(el: Element, name: string, value: unknown): void {
     }
     return
   }
-  // default — setAttribute, no reactivity yet
-  if (value === null || value === undefined || value === false) return
-  el.setAttribute(name, String(value))
+  // attr:name — explicit setAttribute; function value is reactive
+  if (name.startsWith('attr:')) {
+    const attr = name.slice(5)
+    if (typeof value === 'function') {
+      effect(() => applyAttr(el, attr, (value as () => unknown)()))
+    } else {
+      applyAttr(el, attr, value)
+    }
+    return
+  }
+  // default — same as attr:, with bare name
+  if (typeof value === 'function') {
+    effect(() => applyAttr(el, name, (value as () => unknown)()))
+  } else {
+    applyAttr(el, name, value)
+  }
 }
