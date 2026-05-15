@@ -1,7 +1,13 @@
 export { isPending, latest, read, use, NotReadyYet, type Resolved } from './async'
 export { computed } from './computed'
 export { effect } from './effect'
-export { onCleanup } from './owner'
+export {
+  createRoot,
+  getOwner,
+  onCleanup,
+  runWithOwner,
+  type Owner,
+} from './owner'
 export {
   flush,
   microtaskScheduler,

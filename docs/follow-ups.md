@@ -44,6 +44,11 @@ Severity: **(small)** trivial cleanups · **(worth)** worth doing soon · **(lat
 - **(later) ADR 0003 wording vs Plan 2b's per-stage implementation.** ADR 0003 says "one ordinary r3 computed node" + "stashed pipeline state". Plan 2b uses one r3 node *per stage* — same architectural commitment (r3 unmodified; async-ness in pulse wrappers), different mechanism (r3's memoization gives free per-stage caching). The ADR could be updated to record the chosen implementation, or kept as-is with the plan's scope note serving as the divergence record.
   Source: Plan 2b plan scope notes + final review.
 
+### r3-side findings
+
+- **(worth) r3: dep-list partially stale after a throw in `recompute`.** When a `computed`/`effect` body throws partway, r3's `try/finally` (added in Plan 2c) correctly restores `context` and `flags`, but the post-`try` dep-pruning code (`unlinkSubs` against `depsTail`) is skipped. The throwing node retains its dep links from before the throw — including any deps it re-read during the failed partial run. Practically: a throwing computed may re-trigger from deps it should have dropped this run. Not a context-corruption bug; a "phantom re-trigger" risk. Worth pinning down before Plan 2d (error boundaries), since boundary recovery semantics may want to interact with the dep graph of caught nodes.
+  Source: Plan 2c Task 3 final review (Important). r3 fix lands in r3's repo, not pulse's.
+
 ---
 
 ## Already addressed (kept for traceability)
@@ -55,6 +60,7 @@ Severity: **(small)** trivial cleanups · **(worth)** worth doing soon · **(lat
 - ~~Plan 2a: `generation.set(s, 0)` at signal creation to make the "never written" state explicit.~~ Fixed in commit `4f89bc8` (Plan 2a Task 2 amend).
 - ~~Plan 2a: `kickCount` comment explaining why an incrementing counter is used.~~ Fixed in commit `91bda2b`.
 - ~~Plan 2b: Stash race in `makeStageNode` — consumed stale value when upstream re-suspended.~~ Fixed in commit `c8f24aa` (added `suspendedInput` + `Object.is` validation; regression test).
+- ~~Plan 2c: r3 `context` global not restored on throw in `recompute` — corrupted r3 process-wide after any thrown effect/computed.~~ Fixed in r3 commit `55a70c1` (try/finally around `el.fn()` restoring `context` + `flags`).
 
 ---
 
