@@ -60,3 +60,26 @@ test('render supports a component returning an array', () => {
   dispose()
   expect(target.children.length).toBe(0)
 })
+
+test('render accepts a top-level reactive (function) return', () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+  const count = signal(0)
+  const dispose = render(() => count, target)
+  expect(target.textContent).toBe('0')
+  setSignal(count, 7)
+  flush()
+  expect(target.textContent).toBe('7')
+  dispose()
+  // Marker comments and the text node should all be gone.
+  expect(target.childNodes.length).toBe(0)
+})
+
+test('render accepts a top-level primitive return', () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+  const dispose = render(() => 'plain text', target)
+  expect(target.textContent).toBe('plain text')
+  dispose()
+  expect(target.childNodes.length).toBe(0)
+})

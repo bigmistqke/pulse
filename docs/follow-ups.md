@@ -49,8 +49,6 @@ Severity: **(small)** trivial cleanups · **(worth)** worth doing soon · **(lat
   Source: Plan 3a final review (Minor).
 - **(small) `render(component, target)` leaks the root owner if `component()` throws synchronously.** The root owner created by `createRoot` is unreferenced — the throw escapes before `dispose` is returned to the caller. Trivial; wrap the `component()` invocation in `try/catch` that disposes the owner before re-throwing.
   Source: Plan 3a final review (Minor).
-- **(later) No top-level reactive return from a component.** `Component<P> = (props: P) => Node | Node[]` cannot return a bare function for the renderer to treat reactively — `render` invokes `component()` and appends the result directly. Solid's `() => count` at root works because Solid's `render` does the wrapping. Workaround today: return an element containing the reactive child (`() => h('span', null, count)` works, `() => count` does not). Document before Plan 3b.
-  Source: Plan 3a final review (Future).
 
 ### API ergonomics
 
@@ -87,6 +85,7 @@ Severity: **(small)** trivial cleanups · **(worth)** worth doing soon · **(lat
 - ~~Plan 2a: `kickCount` comment explaining why an incrementing counter is used.~~ Fixed in commit `91bda2b`.
 - ~~Plan 2b: Stash race in `makeStageNode` — consumed stale value when upstream re-suspended.~~ Fixed in commit `c8f24aa` (added `suspendedInput` + `Object.is` validation; regression test).
 - ~~Plan 2c: r3 `context` global not restored on throw in `recompute` — corrupted r3 process-wide after any thrown effect/computed.~~ Fixed in r3 commit `55a70c1` (try/finally around `el.fn()` restoring `context` + `flags`).
+- ~~Plan 3a: No top-level reactive return from a component.~~ Fixed in commit `7329624` — `render` now passes `component()` through `insertChild`, so a function return is treated reactively (markers inserted, re-run on signal change, cleaned up on dispose). `Component` type widened to `() => unknown`.
 
 ---
 
