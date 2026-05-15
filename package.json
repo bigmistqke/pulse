@@ -11,6 +11,8 @@
     "build": "tsdown --dts src/index.ts"
   },
   "devDependencies": {
+    "@vitest/browser": "^3.2.4",
+    "playwright": "^1.60.0",
     "tsdown": "^0.11.1",
     "typescript": "^5.8.3",
     "vitest": "^3.1.3"
