@@ -45,8 +45,8 @@ export function makeAccessor<T>(node: R3Node<T>): Signal<T> {
 }
 
 /** Create a writable reactive signal. */
-export function signal<T>(initial: T): WritableSignal<T> {
-  return makeAccessor(r3Signal(initial)) as WritableSignal<T>
+export function signal<T>(initial: T): WritableSignal<Awaited<T> | T> {
+  return makeAccessor(r3Signal(initial)) as WritableSignal<Awaited<T> | T>
 }
 
 /** Write a new value into a signal and request a scheduler flush. */
