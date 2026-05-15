@@ -118,6 +118,21 @@ signal's current value a pending promise? `latest(s)` — the most recent
 last resolved value; it does **not** revert to `undefined` while a newer promise
 is pending (stale-while-revalidate).
 
+**Owner**:
+A lifecycle scope for reactive nodes (effects and computeds). Created by
+`createRoot((dispose) => …)` — runs the callback with the new owner as ambient;
+returns the callback's return value. Calling `dispose()` cleans up everything
+created within: bottom-up disposal of owned children, each child's `onCleanup`
+callbacks fire, each child's r3 node is detached via `r3.unwatched(node)`
+(cascading upstream cleanup is automatic). `getOwner()` returns the current
+ambient owner (or `null` outside any root). `runWithOwner(owner, fn)` is the
+explicit override for cross-tree work. `createRoot` always creates a *root* —
+nesting does not parent inner to outer (matches Solid; it is the "opt out of
+parent disposal" primitive). Outside any root, reactive nodes are permissive —
+they work as before, just live forever. Use-after-dispose (creating a node in
+or running with a disposed owner) throws. **Signals are not owned** — they are
+plain data with no lifecycle.
+
 **Error Boundary**:
 A graph node that registers as the error sink for its subtree. It catches both
 synchronous throws (a stage throwing, or reading an errored computed
