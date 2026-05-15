@@ -7,13 +7,14 @@ import {
   runWithOwner,
   type Owner,
 } from '../owner'
+import type { Child } from './h'
 import type { Truthy } from './show'
 
 const MATCH: unique symbol = Symbol('Match')
 
 export interface MatchProps<T> {
   when: T | (() => T)
-  children: Node | Node[] | (() => unknown) | ((value: Truthy<T>) => Node | Node[] | (() => unknown))
+  children: Child | ((value: Truthy<T>) => Child)
 }
 
 export interface MatchData<T> extends MatchProps<T> {
@@ -35,7 +36,7 @@ export function Match<T>(props: MatchProps<T>): Node {
 }
 
 export interface SwitchProps {
-  fallback?: Node | Node[] | (() => unknown)
+  fallback?: Child
   children: unknown
 }
 

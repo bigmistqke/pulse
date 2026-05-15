@@ -1,9 +1,10 @@
+import type { Child } from './h'
 import { mapArray } from './map-array'
 
 export interface ForProps<T> {
   each: T[] | Promise<T[]> | (() => T[] | Promise<T[]>)
-  fallback?: Node | Node[] | (() => unknown)
-  children: (item: T, index: () => number) => Node | Node[] | (() => unknown)
+  fallback?: Child
+  children: (item: T, index: () => number) => Child
 }
 
 /**
@@ -20,8 +21,7 @@ export interface ForProps<T> {
  * Node sequence.
  */
 export function For<T>(props: ForProps<T>): () => unknown {
-  type RowResult = Node | Node[] | (() => unknown)
-  const mapped = mapArray<T, RowResult>(props.each, props.children)
+  const mapped = mapArray<T, Child>(props.each, props.children)
   return () => {
     const flat = mapped().flat()
     return flat.length === 0 ? props.fallback : flat

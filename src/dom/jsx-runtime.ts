@@ -1,4 +1,4 @@
-import { Fragment as FragmentSymbol, h, type Tag } from './h'
+import { Fragment as FragmentSymbol, h, type Child, type Tag } from './h'
 
 export const Fragment = FragmentSymbol
 
@@ -46,6 +46,6 @@ export namespace JSX {
   export interface IntrinsicElements {
     [tag: string]: Record<string, unknown>
   }
-  export type Element = Node | Node[] | (() => unknown)
+  export type Element = Child
   export interface ElementChildrenAttribute { children: {} }
 }

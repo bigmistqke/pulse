@@ -7,6 +7,7 @@ import {
   runWithOwner,
   type Owner,
 } from '../owner'
+import type { Child } from './h'
 
 /** Type-level narrowing for `Show`'s function-child: the value passed in
  *  is the input minus its falsy components (including pending Promises,
@@ -15,8 +16,8 @@ export type Truthy<T> = Exclude<T, false | null | undefined | 0 | '' | Promise<u
 
 export interface ShowProps<T> {
   when: T | (() => T)
-  fallback?: Node | Node[] | (() => unknown)
-  children: Node | Node[] | (() => unknown) | ((value: Truthy<T>) => Node | Node[] | (() => unknown))
+  fallback?: Child
+  children: Child | ((value: Truthy<T>) => Child)
 }
 
 /**
@@ -32,7 +33,7 @@ export interface ShowProps<T> {
 export function Show<T>(props: ShowProps<T>): () => unknown {
   const parentOwner = getOwner()
   let lastBranch: 'truthy' | 'falsy' | null = null
-  let cachedNode: Node | Node[] | (() => unknown) | undefined
+  let cachedNode: Child | undefined
   let branchOwner: Owner | null = null
 
   return () => {
@@ -53,7 +54,7 @@ export function Show<T>(props: ShowProps<T>): () => unknown {
     cachedNode = untrack(() => runWithOwner(branchOwner!, () => {
       if (isTruthy) {
         return typeof props.children === 'function'
-          ? (props.children as (v: Truthy<T>) => Node | Node[] | (() => unknown))(raw as Truthy<T>)
+          ? (props.children as (v: Truthy<T>) => Child)(raw as Truthy<T>)
           : props.children
       }
       return props.fallback

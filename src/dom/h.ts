@@ -1,5 +1,23 @@
 import { bindProp, insertChild } from './bindings'
 
+/**
+ * Anything `insertChild` will render: a Node, a primitive, null/undefined/
+ * boolean (rendered as nothing), a function (reactive — wrapped in a
+ * binding-effect), or an array of any of these (recursively flattened).
+ *
+ * This is the "lingua franca" of pulse's child slots. JSX.Element is
+ * an alias for `Child`.
+ */
+export type Child =
+  | Node
+  | string
+  | number
+  | boolean
+  | null
+  | undefined
+  | (() => unknown)
+  | Child[]
+
 export type Component<P = any> = (props: P) => Node | Node[] | (() => unknown)
 export type Tag = string | ((props: any) => Node | Node[] | (() => unknown)) | symbol
 
