@@ -43,6 +43,11 @@ Severity: **(small)** trivial cleanups · **(worth)** worth doing soon · **(lat
 - **(later) Document the within-generator restart-from-top semantics in `src/computed.ts`.** A comment near the `'fast-forward'` branch explaining that within a `function*` body, the runtime re-invokes the generator from the top on each kick (relying on the driver's WeakMap to fast-forward settled yields). Cross-stage caching is the per-stage r3 computed; intra-generator caching is explicitly deferred.
   Source: Plan 2b final review.
 
+### API ergonomics
+
+- **(worth) Widen `use` to accept an accessor too.** Today `use<T>(x: T | Promise<T>): T` requires `use(signal())`. Accept `Accessor<T | Promise<T>>` as a third arm so `use(signal)` works directly. Rationale: symmetry with `read` (the generator-side universal resolver already accepts signals, promises, or plain values) and one less call-site asterisk in real-world bindings. Implementation is one branch: `if (typeof x === 'function') x = x()`. Real footgun: if `T extends Function`, the value would be called accidentally — rare; users with a function value can box it. Backward-compatible: `use(value())` keeps working because the existing union arm still matches. Touch: `src/async.ts` + a test + `CONTEXT.md` `use` entry.
+  Source: Plan 3a brainstorming exchange (deferred from Plan 3a scope; agreed to land as follow-up after Plan 3a final review).
+
 ### Architectural notes
 
 - **(later) `catchError` orphan sub-owner when no ambient owner.** Calling `catchError` outside any `createRoot` creates a sub-owner with `parent = null` that is not registered as a disposable anywhere — it lives until GC. In practice the reactive nodes inside it are individually unwatched by r3, so the handler effectively becomes unreachable, but there is no explicit dispose handle for the boundary itself. Consider returning `{ result, dispose }` from `catchError` in a future iteration, or document the constraint more loudly in the JSDoc.
