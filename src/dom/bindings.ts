@@ -2,6 +2,21 @@ import { effect } from '../effect'
 import { createSubOwner, disposeOwner, getOwner, onCleanup, runWithOwner, type Owner } from '../owner'
 
 /**
+ * Warn (once per occurrence) when a reactive binding or event listener is
+ * created without an ambient owner. The framework remains permissive — the
+ * binding still works — but it will never be cleaned up, so we surface the
+ * leak loudly. Wrap in `render()` or `createRoot()` to silence.
+ */
+function warnIfOrphaned(kind: string): void {
+  if (getOwner() === null) {
+    console.warn(
+      `pulse: ${kind} created outside any owner — it will live forever. ` +
+      `Wrap in render() or createRoot().`,
+    )
+  }
+}
+
+/**
  * Insert `value` as a child (or children) of `parent`.
  *
  * - string / number → text node
@@ -19,6 +34,7 @@ export function insertChild(parent: Node, value: unknown): void {
     // owner is disposed. Each run of the effect gets its own sub-owner so any
     // nested effects/computeds created by the user function are cleaned up
     // before the next run — no leak across re-runs.
+    warnIfOrphaned('reactive child')
     const parentOwner = getOwner()
     const start = document.createComment('')
     const end = document.createComment('')
@@ -90,6 +106,7 @@ export function bindProp(el: Element, name: string, value: unknown): void {
   if (name.startsWith('on:')) {
     const event = name.slice(3)
     if (typeof value !== 'function') return
+    warnIfOrphaned('event listener')
     const handler = value as EventListener
     el.addEventListener(event, handler)
     onCleanup(() => el.removeEventListener(event, handler))
@@ -99,6 +116,7 @@ export function bindProp(el: Element, name: string, value: unknown): void {
   if (name.startsWith('prop:')) {
     const prop = name.slice(5)
     if (typeof value === 'function') {
+      warnIfOrphaned('prop binding')
       effect(() => { (el as any)[prop] = (value as () => unknown)() })
     } else {
       ;(el as any)[prop] = value
@@ -109,6 +127,7 @@ export function bindProp(el: Element, name: string, value: unknown): void {
   if (name.startsWith('attr:')) {
     const attr = name.slice(5)
     if (typeof value === 'function') {
+      warnIfOrphaned('attr binding')
       effect(() => applyAttr(el, attr, (value as () => unknown)()))
     } else {
       applyAttr(el, attr, value)
@@ -119,6 +138,7 @@ export function bindProp(el: Element, name: string, value: unknown): void {
   if (name.startsWith('class:')) {
     const cls = name.slice(6)
     if (typeof value === 'function') {
+      warnIfOrphaned('class binding')
       effect(() => el.classList.toggle(cls, !!(value as () => unknown)()))
     } else {
       el.classList.toggle(cls, !!value)
@@ -136,6 +156,7 @@ export function bindProp(el: Element, name: string, value: unknown): void {
       }
     }
     if (typeof value === 'function') {
+      warnIfOrphaned('style binding')
       effect(() => apply((value as () => unknown)()))
     } else {
       apply(value)
@@ -144,6 +165,7 @@ export function bindProp(el: Element, name: string, value: unknown): void {
   }
   // default — same as attr:, with bare name
   if (typeof value === 'function') {
+    warnIfOrphaned('attr binding')
     effect(() => applyAttr(el, name, (value as () => unknown)()))
   } else {
     applyAttr(el, name, value)

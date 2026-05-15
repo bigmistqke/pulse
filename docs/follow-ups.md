@@ -45,8 +45,6 @@ Severity: **(small)** trivial cleanups · **(worth)** worth doing soon · **(lat
 
 ### DOM-layer findings (Plan 3a)
 
-- **(worth) `h()` called outside any owner silently leaks listeners and reactive bindings.** `on:`/`prop:`/`attr:`/`class:`/`style:` reactive paths register `effect`s, and `on:` registers cleanup via `onCleanup` — all of which silently no-op when `currentOwner === null`. Users who build nodes at module scope and only later mount via `render()` get permanent listeners + ever-running effects. Either (a) document "always call `h`/JSX inside a `render` scope" in the `render` JSDoc, or (b) defer the `bindProp` reactive wiring until first mount. The doc-only path is the cheap fix.
-  Source: Plan 3a final review (Minor).
 - **(small) `render(component, target)` leaks the root owner if `component()` throws synchronously.** The root owner created by `createRoot` is unreferenced — the throw escapes before `dispose` is returned to the caller. Trivial; wrap the `component()` invocation in `try/catch` that disposes the owner before re-throwing.
   Source: Plan 3a final review (Minor).
 
