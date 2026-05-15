@@ -157,3 +157,21 @@ test('different-reference same-shape items: treated as different', () => {
     expect(calls).toBe(2)
   })
 })
+
+test('empty array → non-empty creates entries; non-empty → empty disposes all', () => {
+  let cleanups = 0
+  createRoot(() => {
+    const items = signal<number[]>([])
+    const mapped = mapArray(items, () => {
+      onCleanup(() => { cleanups++ })
+      return 'x'
+    })
+    expect(mapped()).toEqual([])
+    setSignal(items, [1, 2, 3])
+    expect(mapped()).toEqual(['x', 'x', 'x'])
+    expect(cleanups).toBe(0)
+    setSignal(items, [])
+    expect(mapped()).toEqual([])
+    expect(cleanups).toBe(3)
+  })
+})

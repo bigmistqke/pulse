@@ -48,6 +48,13 @@ Severity: **(small)** trivial cleanups · **(worth)** worth doing soon · **(lat
 - **(small) `render(component, target)` leaks the root owner if `component()` throws synchronously.** The root owner created by `createRoot` is unreferenced — the throw escapes before `dispose` is returned to the caller. Trivial; wrap the `component()` invocation in `try/catch` that disposes the owner before re-throwing.
   Source: Plan 3a final review (Minor).
 
+### Control-flow findings (Plan 3b)
+
+- **(later) Switch's branch caching is keyed by Match-object identity.** If a user wraps Switch's children in a function that constructs fresh Match objects on each call (e.g. a parent re-render rebuilds the Match list), every re-run looks like a winner-change and disposes/remounts the branch. Currently fine because JSX inlines Match calls once at parent-component construction. Worth documenting in Switch's JSDoc: "Place Match children inline in Switch's JSX; reconstructing them per-run defeats branch caching."
+  Source: Plan 3b final review (Minor).
+- **(later) `Show`'s function child is called once per truthy transition, not on each truthy value update.** Documented in the JSDoc but worth flagging as a user-facing semantic: `<Show when={user}>{u => <span>{u.name}</span>}</Show>` captures `u` at transition time; if `user.name` changes (same object, mutated), the rendered DOM doesn't update unless the children body has its own reactive read. A `keyed` opt-in (Solid-style) that re-invokes children on each truthy-value change is a future enhancement.
+  Source: Plan 3b final review (Minor).
+
 ### API ergonomics
 
 - **(worth) Widen `use` to accept an accessor too.** Today `use<T>(x: T | Promise<T>): T` requires `use(signal())`. Accept `Accessor<T | Promise<T>>` as a third arm so `use(signal)` works directly. Rationale: symmetry with `read` (the generator-side universal resolver already accepts signals, promises, or plain values) and one less call-site asterisk in real-world bindings. Implementation is one branch: `if (typeof x === 'function') x = x()`. Real footgun: if `T extends Function`, the value would be called accidentally — rare; users with a function value can box it. Backward-compatible: `use(value())` keeps working because the existing union arm still matches. Touch: `src/async.ts` + a test + `CONTEXT.md` `use` entry.

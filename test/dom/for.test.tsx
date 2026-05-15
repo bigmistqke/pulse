@@ -111,3 +111,28 @@ test('pending Promise<T[]> → fallback rendered', () => {
   expect(target.textContent).toBe('loading')
   dispose()
 })
+
+test('index accessor is reactive: rendered DOM updates on reorder', () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+  const a = { id: 'a' }
+  const b = { id: 'b' }
+  const c = { id: 'c' }
+  const items = signal([a, b, c])
+  const dispose = render(
+    () => (
+      <For each={items}>
+        {(item, index) => (
+          <li>
+            {index}:{item.id}
+          </li>
+        )}
+      </For>
+    ),
+    target,
+  )
+  expect(target.textContent).toBe('0:a1:b2:c')
+  setSignal(items, [c, a, b])
+  expect(target.textContent).toBe('0:c1:a2:b')
+  dispose()
+})
