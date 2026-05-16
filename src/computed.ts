@@ -182,6 +182,13 @@ function makeStageNode(
                 }
                 // 'pending' is unreachable here — rerun fires only after settle.
               }
+              // Within-generator restart-from-top semantics:
+              // On each settle-kick, the generator stage is re-invoked from the top.
+              // The driver's WeakMap-backed `track` recognizes each yielded promise that
+              // has already settled and fast-forwards through them synchronously, so prior
+              // yields don't pay the wait cost. Cross-stage caching is automatic via the
+              // per-stage r3 computed node; intra-generator checkpointing (resume from a
+              // specific yield without re-running prior yields) is explicitly deferred.
               // 'fast-forward': do not stash; the next r3 fn invocation will
               // re-invoke the stage, and the driver's WeakMap-backed `track`
               // will see the yielded promise as settled and fast-forward.
