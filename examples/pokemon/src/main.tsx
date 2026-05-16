@@ -8,7 +8,7 @@ import {
   signal,
   use,
 } from "pulse";
-import { fetchList, fetchPokemon, type Pokemon, type PokemonRef } from "./api";
+import { fetchList, fetchPokemon, type PokemonRef } from "./api";
 import "./style.css";
 
 const [page, setPage] = signal(0);
@@ -17,7 +17,10 @@ const [expanded, setExpanded] = signal<string | null>(null);
 // Plan 6 fixed `computed(() => Promise)` to preserve dep tracking and
 // stale-while-revalidate cleanly. Reading via `use(list)` (widened accessor
 // form) throws NotReadyYet on initial pending, returns the array once settled.
-const list = computed(() => fetchList(page()).then((r) => r.results));
+const list = computed(
+  () => fetchList(page()),
+  (r) => r.results,
+);
 
 function TopBar() {
   // Stale-while-revalidate: list keeps its prior array during refetch, so the
@@ -35,28 +38,27 @@ function TopBar() {
 
 function PokemonDetails(props: { name: string }) {
   const pokemon = fetchPokemon(props.name);
-  const p = (): Pokemon => use(pokemon);
   return (
     <Loading initial={<div class="detail-spinner">loading details…</div>}>
       {() => (
         <div class="details">
           {/* sprite: hidden until p resolves; each prop binding is reactive */}
           {() =>
-            p().sprites.front_default && (
+            use(pokemon).sprites.front_default && (
               <img
-                attr:src={() => p().sprites.front_default!}
-                attr:alt={() => p().name}
+                attr:src={() => use(pokemon).sprites.front_default!}
+                attr:alt={() => use(pokemon).name}
               />
             )
           }
           <div class="meta">
             <div class="types">
-              <For each={() => p().types}>
+              <For each={() => use(pokemon).types}>
                 {(t) => <span class="type">{t.type.name}</span>}
               </For>
             </div>
             <table class="stats">
-              <For each={() => p().stats}>
+              <For each={() => use(pokemon).stats}>
                 {(s) => (
                   <tr>
                     <td>{s.stat.name}</td>

@@ -4,11 +4,14 @@ import { NODE, PENDING, type Accessor, type Signal } from './signal'
 /** Reactive predicate: is the signal/computed currently pending?
  *  - If the accessor carries a `[PENDING]` brand, queries that accessor (used by
  *    computeds with stale-while-revalidate — value may be the prior T, not a Promise).
- *  - Otherwise, returns `isPromise(accessor())` (signals holding a Promise). */
+ *  - Otherwise, inspects the value: a Promise that has not yet settled is pending;
+ *    a Promise that has fulfilled/rejected (per `track()`) is no longer pending. */
 export function isPending(s: Accessor<unknown>): boolean {
   const pendingAccessor = (s as { [PENDING]?: Accessor<boolean> })[PENDING]
   if (pendingAccessor !== undefined) return pendingAccessor()
-  return isPromise(s())
+  const value = s()
+  if (!isPromise(value)) return false
+  return track(value).status === 'pending'
 }
 
 /**
@@ -26,6 +29,11 @@ const lastResolved = new WeakMap<object, unknown>()
 export function latest<T>(s: Accessor<T>): Awaited<T> | undefined {
   const value = s()
   if (isPromise(value)) {
+    const state = track(value)
+    if (state.status === 'fulfilled') {
+      lastResolved.set(s, state.value)
+      return state.value as Awaited<T>
+    }
     return lastResolved.get(s) as Awaited<T> | undefined
   }
   lastResolved.set(s, value)

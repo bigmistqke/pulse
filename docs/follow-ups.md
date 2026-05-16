@@ -39,8 +39,6 @@ Severity: **(small)** trivial cleanups · **(worth)** worth doing soon · **(lat
   Source: Plan 4 brainstorming (Loading design).
 - **(later) `catchError` orphan sub-owner when no ambient owner.** Calling `catchError` outside any `createRoot` creates a sub-owner with `parent = null` that is not registered as a disposable anywhere — it lives until GC. In practice the reactive nodes inside it are individually unwatched by r3, so the handler effectively becomes unreachable, but there is no explicit dispose handle for the boundary itself. Consider returning `{ result, dispose }` from `catchError` in a future iteration, or document the constraint more loudly in the JSDoc.
   Source: Plan 2d final review (Minor).
-- **(later) Drop signal write-back (`signal<T | Promise<T>>` auto-resolve).** With Plan 6's `computed(() => Promise)` fully fixed, the write-back hack in `signal()` (where setting a signal to a Promise auto-flips it to T on settle) is no longer needed in user code — `computed(() => p)` covers all cases naturally and with proper dep tracking. Consider removing write-back to simplify `signal` semantics: a signal stores exactly what you put in it, no implicit async behavior.
-  Source: Plan 6 design discussion.
 - **(later) ADR 0003 wording vs Plan 2b's per-stage implementation.** ADR 0003 says "one ordinary r3 computed node" + "stashed pipeline state". Plan 2b uses one r3 node *per stage* — same architectural commitment (r3 unmodified; async-ness in pulse wrappers), different mechanism (r3's memoization gives free per-stage caching). The ADR could be updated to record the chosen implementation, or kept as-is with the plan's scope note serving as the divergence record.
   Source: Plan 2b plan scope notes + final review.
 
@@ -79,6 +77,7 @@ Severity: **(small)** trivial cleanups · **(worth)** worth doing soon · **(lat
 - ~~Document the within-generator restart-from-top semantics in `src/computed.ts`.~~ Fixed in commit `2d56830` (follow-up cleanup pass).
 - ~~Widen `use` to accept an accessor too.~~ Fixed in commit `67aa326` (follow-up cleanup pass).
 - ~~Promote "create a parented sub-owner" into a shared internal before Plan 3.~~ Fixed in commit `548e1df` (Plan 3a Task 2 — `refactor(owner): extract internal createSubOwner from catchError`).
+- ~~Drop signal write-back (`signal<T | Promise<T>>` auto-resolve).~~ Removed in commit `__DROPSIG__` — `signal` now stores values as-is; `signal<T>` no longer widens to `Awaited<T> | T`. `latest`/`isPending` consult `track()` so they still report settled state on Promise-valued signals. Eager `track(value)` registration in `signal()` and the setter preserves the "settled by next tick without explicit `use` call" UX. For dep-driven async derivations, use `computed(() => p)` (Plan 6).
 - ~~`'reuse-value'` stash consumption in `src/computed.ts` loses dep tracking — sync computeds returning Promises freeze on first settle.~~ Fixed in commit `bea4b1c` (Plan 6) — rewrote `makeStageNode` to always run the body for r3 dep tracking and publish settle values out-of-band via an internal signal. Added stale-while-revalidate semantics and resolved-value (Object.is) caching; `isPending(computed)` exposes the refetch window via a `[PENDING]` accessor brand. Pokemon demo migrated back to the natural `computed(() => fetchList(page()).then(...))` pattern in commit `cf7230e`.
 
 ---

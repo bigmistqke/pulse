@@ -19,8 +19,8 @@ import { signal } from './signal'
  *
  * `suspendedOn` tracks the promise the effect is currently suspended on (or
  * `null`). A successful run clears it; the kick callback only fires if
- * `suspendedOn` still matches — so when the promise came from a signal,
- * write-back re-triggers the effect and the redundant kick becomes a no-op.
+ * `suspendedOn` still matches — so when an effect is already scheduled by some
+ * other path on settle, the redundant kick becomes a no-op.
  */
 export function effect(fn: () => void): void {
   const myOwner = getOwner()

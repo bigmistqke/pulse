@@ -17,16 +17,6 @@ test('isPending is true for a signal holding a pending promise', () => {
   expect(isPending(s)).toBe(true)
 })
 
-test('a promise-typed signal accepts its resolved value via setter', () => {
-  // signal(Promise<number>) is [Accessor<number | Promise<number>>, Setter<...>],
-  // so setting the resolved number must typecheck and flip isPending.
-  const [s, setS] = signal(Promise.resolve(1))
-  expect(isPending(s)).toBe(true)
-  setS(1)
-  expect(isPending(s)).toBe(false)
-  expect(s()).toBe(1)
-})
-
 test('latest is undefined before the first resolution', () => {
   const [s] = signal(new Promise<number>(() => {})) // never resolves
   expect(latest(s)).toBeUndefined()
@@ -40,7 +30,7 @@ test('latest returns the resolved value after the promise settles', async () => 
 })
 
 test('latest keeps the last resolved value while a newer promise is pending', async () => {
-  const [s, setS] = signal<number | Promise<number>>(Promise.resolve(1))
+  const [s, setS] = signal<Promise<number>>(Promise.resolve(1))
   await tick()
   expect(latest(s)).toBe(1)
 
@@ -53,14 +43,18 @@ test('latest keeps the last resolved value while a newer promise is pending', as
   expect(latest(s)).toBe(2) // now the new resolved value
 })
 
-test('latest is reactive — updates as the signal resolves', async () => {
+test('latest is reactive — updates when the signal is written to a new value', () => {
+  // latest re-runs the effect when the signal *value* changes (a write). It does
+  // NOT push on the same-Promise-settling, since signal stores values as-is and
+  // r3 dirties only on writes. For "push on settle," reach for `computed(() => p)`.
   setScheduler(syncScheduler(flush))
-  const [s] = signal(Promise.resolve(1))
+  const [s, setS] = signal<Promise<number>>(new Promise<number>(() => {}))
   const seen: Array<number | undefined> = []
   effect(() => { seen.push(latest(s)) })
   expect(seen).toEqual([undefined]) // pending — no prior resolution
-  await tick()
-  expect(seen).toEqual([undefined, 1]) // resolved -> effect re-ran -> latest is 1
+  setS(Promise.resolve(1))           // write: effect re-runs
+  // latest will see 'pending' synchronously (state not yet drained), so still undefined
+  expect(seen).toEqual([undefined, undefined])
   setScheduler(microtaskScheduler(flush))
 })
 
@@ -153,7 +147,7 @@ test('use() accepts an accessor (signal getter)', () => {
 })
 
 test('use() accessor form unwraps pending promises (throws NotReadyYet)', () => {
-  const [s] = signal<number | Promise<number>>(new Promise(() => {}))
+  const [s] = signal<Promise<number>>(new Promise(() => {}))
   expect(() => use(s)).toThrow(NotReadyYet)
 })
 
@@ -169,7 +163,7 @@ test('isPending dispatches via [PENDING] brand when present', () => {
 test('isPending without [PENDING] brand falls back to isPromise(value)', () => {
   const [s, setS] = signal<number | Promise<number>>(7)
   expect(isPending(s)).toBe(false)
-  setS(new Promise(() => {}))
+  setS(new Promise<number>(() => {}))
   expect(isPending(s)).toBe(true)
 })
 

@@ -38,30 +38,12 @@ test('computed accessor is not writable (type-level)', () => {
   c.nonexistent
 })
 
-test('a signal created with a promise writes back the resolved value', async () => {
+test('a signal stores a Promise value as-is (no auto-resolve)', async () => {
+  // Write-back was removed: signal stores exactly what you put in it. For
+  // async derivations use computed; for one-shot reads use `use(s())`.
   const [s] = signal(Promise.resolve(42))
   expect(isPending(s)).toBe(true)
   await tick()
-  expect(s()).toBe(42)
-  expect(isPending(s)).toBe(false)
-})
-
-test('setter with a promise writes back on settle', async () => {
-  const [s, setS] = signal<number | Promise<number>>(0)
-  setS(Promise.resolve(99))
-  expect(isPending(s)).toBe(true)
-  await tick()
-  expect(s()).toBe(99)
-})
-
-test('a superseded promise does not write back', async () => {
-  const [s, setS] = signal<number | Promise<number>>(0)
-  let release!: (v: number) => void
-  const slow = new Promise<number>((resolve) => { release = resolve })
-  setS(slow) // schedules a write-back for `slow`
-  setS(7)    // supersedes it — bumps the generation
-  release(123)       // `slow` settles late
-  await tick()
-  expect(s()).toBe(7) // NOT 123 — the superseded write-back was skipped
-  expect(isPending(s)).toBe(false)
+  expect(s()).toBeInstanceOf(Promise)
+  expect(await s()).toBe(42)
 })

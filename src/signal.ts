@@ -10,6 +10,7 @@ import {
 } from 'r3'
 import { requestFlush } from './scheduler'
 import { isPromise } from './is-promise'
+import { track } from './async'
 
 /** The underlying r3 node behind any pulse signal or computed accessor. */
 type R3Node<T> = R3Signal<T> | R3Computed<T>
@@ -50,62 +51,28 @@ export function makeAccessor<T>(node: R3Node<T>): Signal<T> {
   return accessor
 }
 
-/**
- * Per-signal generation counter. Every write bumps it; a scheduled write-back
- * captures the generation at schedule time and applies only if it still matches —
- * so a superseded (stale) promise cannot clobber a newer value.
- */
-const generation = new WeakMap<object, number>()
+/** Create a writable reactive signal, returning an [accessor, setter] tuple.
+ *  A signal stores exactly what you put in it — Promise values are NOT
+ *  auto-resolved. For async derivations use `computed(() => fetchX())` or
+ *  read a Promise-valued signal at the leaf via `use(signal())`. */
+export function signal<T>(initial: T): [Accessor<T>, Setter<T>] {
+  const r3Node = r3Signal(initial)
+  const accessor = makeAccessor(r3Node)
 
-/**
- * If `value` is a promise, schedule its resolved value to be written back into
- * the signal once it settles — unless the signal has been re-assigned since
- * (generation guard). A rejected promise does not write back; the signal keeps
- * holding the rejected promise and `use` surfaces the rejection when the value
- * is read.
- */
-function scheduleWriteBack(
-  node: R3Signal<unknown>,
-  genKey: object,
-  value: unknown,
-  write: (v: unknown) => void,
-): void {
-  if (!isPromise(value)) return
-  const captured = generation.get(genKey) ?? 0
-  value.then(
-    (resolved) => {
-      if ((generation.get(genKey) ?? 0) === captured) write(resolved)
-    },
-    () => {
-      // Rejected: write-back is happy-path only (error boundaries are Plan 2c).
-    },
-  )
-}
+  // Eagerly install the .then listener on Promise values via `track`, so
+  // `latest`/`isPending`/`use` consumers see the settled state once the
+  // microtask queue drains, without anyone having to call `track` themselves.
+  if (isPromise(initial)) track(initial)
 
-/** Create a writable reactive signal, returning an [accessor, setter] tuple. */
-export function signal<T>(initial: T): [Accessor<Awaited<T> | T>, Setter<Awaited<T> | T>] {
-  const r3Node = r3Signal(initial) as R3Signal<Awaited<T> | T>
-  const accessor = makeAccessor(r3Node) as Signal<Awaited<T> | T>
-  // Use the accessor object as the generation key (stable object identity).
-  const genKey = accessor
-  generation.set(genKey, 0)
-
-  const write = (value: Awaited<T> | T): void => {
-    generation.set(genKey, (generation.get(genKey) ?? 0) + 1)
-    r3SetSignal(r3Node, value)
-    scheduleWriteBack(r3Node as R3Signal<unknown>, genKey, value, write as (v: unknown) => void)
-    requestFlush()
-  }
-
-  const setter: Setter<Awaited<T> | T> = (next) => {
+  const setter: Setter<T> = (next) => {
     const value =
       typeof next === 'function'
-        ? (next as (prev: Awaited<T> | T) => Awaited<T> | T)(untrack(() => accessor()))
+        ? (next as (prev: T) => T)(untrack(() => accessor()))
         : next
-    write(value)
+    if (isPromise(value)) track(value)
+    r3SetSignal(r3Node, value)
+    requestFlush()
   }
-
-  scheduleWriteBack(r3Node as R3Signal<unknown>, genKey, initial, write as (v: unknown) => void)
 
   return [accessor, setter]
 }

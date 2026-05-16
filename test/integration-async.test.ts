@@ -4,7 +4,7 @@ import { effect, isPending, latest, signal, use } from '../src/index'
 /** Resolve after all microtasks have drained (a macrotask boundary). */
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
 
-test('a promise-holding signal flows through an effect via use, and writes back', async () => {
+test('a promise-holding signal flows through an effect via use', async () => {
   const [user] = signal(Promise.resolve({ name: 'ada' }))
   const seen: string[] = []
   effect(() => { seen.push(use(user()).name) })
@@ -15,14 +15,15 @@ test('a promise-holding signal flows through an effect via use, and writes back'
 
   await tick()
 
-  // write-back flipped the signal; the effect re-ran with the resolved value
+  // Settle: the effect's .then(rerun) re-fires, use(p) returns the resolved
+  // value (via track()), isPending is no longer true.
   expect(seen).toEqual(['ada'])
   expect(isPending(user)).toBe(false)
   expect(use(user())).toEqual({ name: 'ada' }) // use of a settled value is synchronous
 })
 
 test('latest gives stale-while-revalidate across a re-fetch', async () => {
-  const [data, setData] = signal<number | Promise<number>>(Promise.resolve(1))
+  const [data, setData] = signal<Promise<number>>(Promise.resolve(1))
   await tick()
   expect(latest(data)).toBe(1)
 
