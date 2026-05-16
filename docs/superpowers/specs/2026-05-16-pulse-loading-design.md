@@ -12,196 +12,196 @@ Master spec §11 calls v2's Loading "an opt-in coarser catch site for
 `NotReadyYet` (coordination), additive to per-node path." Solid 2.x has
 the right ergonomics — initial vs. subsequent pending differentiation,
 held prior content during reload — but ties them to a transitions-first
-runtime entanglement that pulse explicitly rejects. Pulse's value-level
-pending info (master spec §6 colored async) means we don't need
-transitions; the user-facing semantics fall out of catching `NotReadyYet`
-at a per-binding scope.
+runtime entanglement that pulse explicitly rejects.
+
+Pulse's value-level pending info (master spec §6) and the components-
+run-once invariant together let Loading work as a thin coordination
+boundary: it observes per-binding suspension via an owner-attached
+counter, never re-running its thunk or re-instantiating components.
 
 **In scope:**
 
-- `loading(loaded, options?)` — the utility. Returns an accessor branded
-  with a `.pending` accessor property.
-- `<Loading>` — JSX component wrapping the utility (slot-based ergonomic
-  shorthand).
-- `useLoading()` — hook reading the nearest outer Loading scope's pending
-  signal. Mirrors the owner-walk pattern from `catchError` → `routeError`.
-- Owner extension: a `loadingScope: Accessor<boolean> | null` field
+- `<Loading>` — JSX component creating a boundary scope and selecting
+  between initial / fallback / loaded slots based on observed pending
+  count.
+- `useLoading()` — hook reading the nearest outer Loading scope's
+  pending state. Owner-walk pattern, mirrors `routeError`.
+- Owner extension: `loadingScope: { pending: Accessor<boolean>; register: () => () => void } | null`
   (analogous to Plan 2d's `errorHandler` addition).
-- Three-state semantics: initial / subsequent-pending / loaded.
-- Hold-prior-view-with-live-effects via a tentative/loadedOwner pattern.
+- Per-binding registration: binding-effects that catch `NotReadyYet`
+  walk up to find `loadingScope`, register themselves as pending until
+  their next successful run.
 
-**Deferred:**
+**Deferred / out of scope:**
 
+- A standalone `loading()` utility — Loading the component IS the
+  primitive. Users wanting boundary semantics use `<Loading>`.
+- Cross-tree `useLoading()` from outside a Loading subtree — `useLoading()`
+  returns a constant-false accessor when no enclosing Loading; cross-tree
+  observation can be added later via ref-passing if a real use case
+  emerges.
 - Solid-style transitions / runtime entanglement — explicitly not built.
-- `useLoading()` from OUTSIDE a Loading boundary (cross-tree observers
-  reading a deeply-nested boundary's state) — not in v1; if a real use
-  case shows up, exported `loading()` already lets the caller plumb the
-  `pending` accessor wherever they need.
-- Two-phase keying interactions with Loading.
-- `loaded()` running off-screen / "dry-run" before commit — pulse's
-  attempt-then-commit pattern (tentative owner) achieves the same effect
-  without speculative rendering.
+- Two-phase keying interactions.
 
-## 2. Architecture
+## 2. The two invariants this design respects
 
-The factoring mirrors `For`/`mapArray`:
+### Invariant 1: Components run once
+
+A component function is invoked exactly once at JSX construction. Pulse's
+reactivity model puts state in signals/effects/computeds, not in
+component-instance lifecycles. A Loading boundary must not violate this:
+no whole-subtree re-instantiation on async-settle.
+
+### Invariant 2: `use()` lives inside callbacks
+
+`use(x)` throws `NotReadyYet` synchronously when `x` is pending. For
+that throw to be caught locally (by a binding-effect, scheduled to
+re-run on settle), `use()` must be inside a function value — a
+function-child (`{() => use(x)}`) or a reactive prop accessor
+(`prop={() => use(x)}`).
+
+Putting `use()` at the top of a component body or at the top of
+Loading's children-thunk would either crash construction or force the
+enclosing thunk to re-run on settle — violating Invariant 1.
+
+The convention is documented and enforced by `use()`'s semantics, not
+by runtime check. Authors who put `use()` outside a callback see their
+component re-instantiate or crash.
+
+## 3. Architecture
 
 ```
 src/
   dom/
-    loading.ts      — loading() utility, <Loading> JSX wrapper, useLoading()
-  owner.ts          — extends Owner with `loadingScope: Accessor<boolean> | null`
-  index.ts          — re-exports Loading, loading, useLoading
+    loading.ts        — <Loading> component, useLoading() hook
+  owner.ts            — extends Owner with `loadingScope` field
+  effect.ts           — binding-effect registers with loadingScope when catching NotReadyYet
+  index.ts            — re-exports Loading, useLoading
 test/
   dom/
     loading.test.tsx
 ```
 
-The utility and the JSX wrapper live in the same file because both are
-small (~80 LOC combined) and share machinery.
+## 4. `<Loading>` component
 
-## 3. Three-state semantics
-
-| State | Trigger | Default rendered output | `view.pending()` |
-|---|---|---|---|
-| **Initial** | First `loaded()` call throws `NotReadyYet`, no prior success | `options.initial?.() ?? options.fallback?.() ?? undefined` | `true` |
-| **Subsequent pending** | `loaded()` throws after a prior success | `options.fallback?.() ?? lastLoadedResult` (hold prior) | `true` |
-| **Loaded** | `loaded()` returns | latest `loaded()` result | `false` |
-
-**The hold-prior behavior is automatic when `fallback` is omitted.** This
-gives stale-while-revalidate semantics by default during reloads — Solid
-2.x's friendliest mode without requiring opt-in. Users who want explicit
-"swap to spinner" mode pass `fallback`.
-
-## 4. `loading()` utility
-
-### Signature
-
-```ts
-export interface LoadingOptions {
-  fallback?: () => unknown
-  initial?: () => unknown
-}
-
-export function loading(
-  loaded: () => unknown,
-  options?: LoadingOptions,
-): Accessor<unknown> & { pending: Accessor<boolean> }
-```
-
-### Semantics
-
-On each call of the returned accessor:
-
-1. Create a **tentative sub-owner** parented to the **boundary owner** (a
-   durable sub-owner created at `loading()` construction).
-2. Run `loaded()` under the tentative owner.
-3. **Success path:**
-   - Dispose any active slot-owner (from a prior pending state).
-   - Dispose the previous `loadedOwner` (committing the new one replaces it).
-   - Install `tentative` as the new `loadedOwner`. Save its result as
-     `lastLoaded`. Set `hasEverLoaded = true`. Set `pending = false`.
-   - Return the result.
-4. **`NotReadyYet` throw path:**
-   - Dispose the failed tentative (its partial work).
-   - Register `.then` on the carried promise to re-kick the accessor (with
-     the stale-on-supersede guard — only kick if the same promise is still
-     awaited).
-   - Set `pending = true`.
-   - Pick the rendered output:
-     - If `hasEverLoaded` and `fallback` provided → render fallback under
-       a fresh slot-owner (cleaning up the previous slot-owner if any),
-       and **dispose `loadedOwner`** (its DOM is being replaced).
-     - If `hasEverLoaded` and no `fallback` → **hold-prior mode**: keep
-       `loadedOwner` alive, dispose any slot-owner, return `lastLoaded`.
-     - If `!hasEverLoaded` → render `initial ?? fallback` under a fresh
-       slot-owner.
-5. **Other throw path:** dispose tentative, re-throw. The binding-effect
-   that called the accessor will route via `routeError` → nearest
-   `catchError`.
-
-### Owner tree
-
-```
-boundaryOwner  (durable; carries loadingScope = pendingSig)
-    ├── loadedOwner    (effects of the currently-committed loaded result; sibling rotation)
-    ├── slotOwner      (effects of fallback/initial slots; rotates on slot change)
-    └── tentative      (transient: each accessor run starts one; either becomes the new loadedOwner or is disposed)
-```
-
-The boundary owner is the durable anchor. Its lifetime equals the
-`loading()` call's lifetime — it is registered as a child of whatever
-owner was ambient when `loading()` was called (typically the parent
-component's owner). When that ancestor disposes, the boundary cascades.
-
-### Why this owner structure
-
-- **Loaded effects survive across transitions.** The binding-effect that
-  wraps the loading accessor has its own per-run sub-owner (Plan 3a Task
-  5). That owner's lifecycle is independent of `loadedOwner`. So the
-  prior loaded DOM's effects keep running during a hold-prior transition.
-- **Slot effects don't accumulate.** Each pending-to-pending re-render
-  disposes the old slot-owner before creating a new one.
-- **Cascade disposal works** without per-case bookkeeping: when the
-  ambient context that contains the loading() call disposes, boundary
-  cascades, taking everything with it.
-
-### Pending exposure
-
-```ts
-const view = loading(() => use(user))
-view.pending           // Accessor<boolean>
-view.pending()         // current value (reactive)
-```
-
-The accessor function gets a `pending` property attached. Same pattern
-as `signal()` returning a callable that carries internal state.
-
-## 5. `<Loading>` JSX wrapper
+### API
 
 ```ts
 export interface LoadingProps {
-  children: () => unknown   // function child REQUIRED
+  children: () => unknown   // function child REQUIRED — see §5
   fallback?: unknown
   initial?: unknown
 }
 
+export function Loading(props: LoadingProps): Accessor<unknown>
+```
+
+### Semantics
+
+1. Loading creates a sub-owner (the `boundaryOwner`) parented to whatever
+   owner was ambient at `Loading(props)` call time.
+2. It attaches a `loadingScope` to `boundaryOwner`, exposing a `pending`
+   accessor and a `register()` method that returns an unregister
+   callback.
+3. It calls `props.children()` **exactly once**, inside
+   `runWithOwner(boundaryOwner, …)`. This produces the loaded subtree
+   as JSX (already-constructed Node(s)). Components inside run once;
+   their effects/bindings are owned by descendants of `boundaryOwner`.
+4. It returns a reactive accessor that observes
+   `loadingScope.pending` and a `hasEverLoaded` flag, returning:
+   - `pending === false` → the loaded subtree (Nodes returned in step 3)
+   - `pending === true, hasEverLoaded === false` → `initial ?? fallback`
+   - `pending === true, hasEverLoaded === true` → `fallback ?? loaded subtree` (hold-prior)
+
+`hasEverLoaded` flips to `true` the first time `pending` becomes `false`
+(detected via an internal effect).
+
+### Three states
+
+| State | Trigger | Rendered slot | `pending` |
+|---|---|---|---|
+| **Initial** | At construction, ≥1 inner binding suspended; never settled all-clear yet | `initial ?? fallback` | `true` |
+| **Subsequent pending** | Was loaded before, ≥1 inner binding now suspended | `fallback`; if no fallback, hold loaded subtree | `true` |
+| **Loaded** | All inner bindings settled | loaded subtree | `false` |
+
+### Implementation shape
+
+```ts
 export function Loading(props: LoadingProps): Accessor<unknown> {
-  const view = loading(
-    () => props.children(),
-    {
-      fallback: props.fallback === undefined
-        ? undefined
-        : () => props.fallback,
-      initial: props.initial === undefined
-        ? undefined
-        : () => props.initial,
+  const parentOwner = getOwner()
+  const boundaryOwner = createSubOwner(parentOwner)
+  const [pendingCount, setPendingCount] = signal(0)
+  const pending: Accessor<boolean> = () => pendingCount() > 0
+
+  boundaryOwner.loadingScope = {
+    pending,
+    register: () => {
+      setPendingCount(c => c + 1)
+      return () => setPendingCount(c => c - 1)
     },
-  )
-  return view  // pending accessor still attached but JSX users typically ignore it
+  }
+
+  // Construct loaded subtree once, inside the boundary owner.
+  const loadedSubtree: unknown = runWithOwner(boundaryOwner, props.children)
+
+  let hasEverLoaded = false
+  // Flip `hasEverLoaded` the first time pending drops to false.
+  effect(() => {
+    if (!pending()) hasEverLoaded = true
+  })
+
+  return () => {
+    if (!pending()) return loadedSubtree
+    if (!hasEverLoaded) return props.initial ?? props.fallback
+    return props.fallback ?? loadedSubtree
+  }
 }
 ```
 
-**Function-child required.** Static JSX children make no semantic sense
-inside Loading — they're already-constructed Nodes, so there's no
-opportunity to catch a `use()` throw. The thunk is what makes use catchable
-at this site.
+### What stays alive across transitions
+
+`loadedSubtree` is constructed exactly once. Its DOM Nodes are stable.
+Its binding-effects live in descendants of `boundaryOwner`. When
+Loading's accessor returns `loadedSubtree` (loaded state) the nodes are
+attached; when it returns `fallback` or `initial`, the nodes are
+detached by `insertChild`'s reactive-binding swap. **Their bindings
+remain alive** (owned by descendants of `boundaryOwner`, which itself is
+alive). They keep listening to their deps and re-running on settle.
+When pending drops, the subtree is reattached without reconstruction.
+
+This is why "hold prior" is the natural default — there is no other
+state to maintain. The Nodes simply re-attach.
+
+## 5. The function-child requirement
 
 ```tsx
 <Loading initial={<Spinner/>}>
-  {() => <UserView user={use(user)}/>}
+  {() => (
+    <>
+      <Header/>
+      <UserView user={() => use(user)}/>
+      <PostsList posts={() => use(posts)}/>
+    </>
+  )}
 </Loading>
 ```
 
-JSX users who want pending visualization use the utility directly:
+Why a function child:
 
-```tsx
-const view = loading(() => use(user).name, { initial: () => <Spinner/> })
-<Show when={view.pending}>{() => <TopBar.Indicator/>}</Show>
-<div>{view}</div>
-```
+- JSX evaluation order: child expressions are constructed before the
+  parent component is invoked. `<UserView ...>` would be called with
+  the outer (App-level) owner ambient, not Loading's `boundaryOwner`.
+  Bindings inside would walk up an owner chain that doesn't include
+  Loading.
+- The function child defers construction. Loading calls it inside
+  `runWithOwner(boundaryOwner, …)`, so all descendants register with the
+  correct `loadingScope`.
 
-## 6. `useLoading()` hook
+This is the same trick voby uses for its context Providers; pulse
+applies it consistently. The single-`() =>` cost at each `<Loading>`
+call site is the documented trade.
+
+## 6. `useLoading()`
 
 ### Signature
 
@@ -211,12 +211,9 @@ export function useLoading(): Accessor<boolean>
 
 ### Semantics
 
-Walks the current owner's `parent` chain looking for the nearest non-null
-`loadingScope`. Returns that accessor. If none found, returns a constant
-`() => false` accessor.
-
-Useful for components inside the loaded slot of a Loading boundary that
-want to react to the boundary's pending state without prop drilling:
+Walks the current owner's chain looking for the nearest non-null
+`loadingScope`. Returns that scope's `pending` accessor. If no enclosing
+Loading, returns a constant-false accessor.
 
 ```tsx
 function Header() {
@@ -232,17 +229,17 @@ function Header() {
 <Loading initial={<Spinner/>}>
   {() => (
     <>
-      <Header/>                       {/* reads outer Loading's pending */}
-      <UserView user={use(user)}/>
+      <Header/>                              {/* Header reads outer pending */}
+      <UserView user={() => use(user)}/>
     </>
   )}
 </Loading>
 ```
 
-When `user` is reloaded, Loading goes into hold-prior mode (no fallback).
-Header stays mounted with live effects (loadedOwner survives). Header's
-`useLoading()` accessor flips to `true`, the Show toggles on, the
-indicator appears.
+Header runs inside Loading's `boundaryOwner` (via the function-child
+materialization). Its `useLoading()` call walks up, finds the
+`loadingScope`, and returns its `pending` accessor. When `user`
+re-fetches, the count goes positive; Header's `Show` flips on.
 
 ### Implementation
 
@@ -252,175 +249,267 @@ const CONST_FALSE_ACCESSOR: Accessor<boolean> = () => false
 export function useLoading(): Accessor<boolean> {
   let owner = getOwner()
   while (owner !== null) {
-    if (owner.loadingScope !== null) return owner.loadingScope
+    if (owner.loadingScope !== null) return owner.loadingScope.pending
     owner = owner.parent
   }
   return CONST_FALSE_ACCESSOR
 }
 ```
 
-Walk starts at the current owner and includes it. Header runs inside
-`loadedOwner` (a child of `boundaryOwner`); the walk goes
-`loadedOwner` → `boundaryOwner` (loadingScope found) → returns. If
-called from a context with no enclosing Loading, the walk reaches a
-root and returns the constant-false accessor.
-
 ## 7. Owner extension
 
 In `src/owner.ts`, add to the `Owner` interface:
 
 ```ts
+export interface LoadingScope {
+  readonly pending: Accessor<boolean>
+  /** Call when entering pending state. Returns unregister callback. */
+  register: () => () => void
+}
+
 export interface Owner {
   // ... existing fields ...
-  /** Optional pending-state accessor attached by `loading()`. `useLoading()`
-   *  walks up the parent chain to find the nearest non-null entry. */
-  loadingScope: Accessor<boolean> | null
+  loadingScope: LoadingScope | null
 }
 ```
 
-Update `newOwner()` to initialize `loadingScope: null`. No other changes
-to disposal/cleanup logic needed — `loadingScope` is just an accessor
-reference, garbage-collected with the owner.
+Initialize `loadingScope: null` in `newOwner()`. No other lifecycle
+changes — `loadingScope` is just a reference field, garbage-collected
+with the owner.
 
-Update `createSubOwner` to accept an optional `loadingScope` argument, or
-provide an internal helper `attachLoadingScope(owner, accessor)` that
-loading() calls after creating its boundaryOwner. Either works; pick whichever
-keeps callsites minimal.
+## 8. Binding-effect integration
 
-## 8. Coordination across multiple `use()`s
+In `src/effect.ts`, the existing `NotReadyYet` catch path gains owner-
+walk registration with the nearest `loadingScope`:
+
+```ts
+// Inside effect(), near the existing NotReadyYet handler:
+let unregister: (() => void) | null = null
+
+// ... existing body ...
+try {
+  fn()
+  // Successful run — if we were registered as pending, unregister now.
+  if (unregister !== null) {
+    unregister()
+    unregister = null
+  }
+  suspendedOn = null
+} catch (e) {
+  if (e instanceof NotReadyYet) {
+    // ... existing suspension setup ...
+    // NEW: register with nearest loadingScope (idempotent — only on first throw per pending period)
+    if (unregister === null) {
+      const scope = findLoadingScope(myOwner)
+      if (scope !== null) unregister = scope.register()
+    }
+    return
+  }
+  // ... existing real-error path ...
+}
+```
+
+`findLoadingScope(owner)` walks up the parent chain. Inline helper in
+`src/effect.ts` or shared with `useLoading`.
+
+The `unregister` closure variable lives in the effect's scope; if the
+effect is disposed mid-pending, its cleanup must call `unregister()` to
+decrement the count. Add that to the effect's own `onCleanup`
+registration.
+
+## 9. Reactive prop convention
+
+Components that consume reactive values declare props as
+`() => T` (or `FunctionMaybe<T> = T | (() => T)` for flexibility, with
+the documented type-safety trade-off — see §13):
+
+```tsx
+function UserView(props: { user: () => User }) {
+  return <h1>{() => props.user().name}</h1>
+}
+```
+
+The `{() => props.user().name}` is a function-child of `<h1>`. It's a
+binding-effect. `props.user()` calls `() => use(user)`. `use()` throws
+if pending. The binding-effect catches and registers with Loading via
+owner-walk.
+
+At the call site:
+
+```tsx
+<UserView user={() => use(user)}/>
+```
+
+Three `() =>`s in the full example are the entire tax: one for
+Loading's children, one for each reactive prop. No double-wrap around
+component invocations.
+
+## 10. Coordination across multiple `use()` sites
+
+Each binding-effect catches its own `NotReadyYet` and registers
+independently. Loading's pending count aggregates:
 
 ```tsx
 <Loading initial={<Spinner/>} fallback={<Indicator/>}>
-  {() => {
-    const u = use(user)
-    const p = use(posts)
-    return <>{u.name}: {p.length} posts</>
-  }}
+  {() => (
+    <>
+      <UserView user={() => use(user)}/>      {/* registers when user pending */}
+      <PostsList posts={() => use(posts)}/>    {/* registers when posts pending */}
+    </>
+  )}
 </Loading>
 ```
 
-`use()` calls are **sequential** — the second only attempts after the
-first resolves. Under-the-hood **promises** can be in flight in parallel
-if the user kicked them off in parallel (e.g. `const user = signal(fetchUser());
-const posts = signal(fetchPosts())` — both fetches start immediately,
-their promises live in the signals, `use()` just observes settlement).
+Both pending → count = 2. Either settles → decrement. Both settled →
+count = 0 → loaded slot mounts (and `hasEverLoaded` flips true on first
+zero).
 
-Reveal is coordinated: until both `use()`s succeed, the loaded slot
-doesn't mount. Initial/fallback shows the whole time. No piecemeal
-updates.
+Per-binding suspension means **each binding resumes independently**.
+The user binding settling doesn't re-run posts binding or any
+component. Components inside Loading run once.
 
-## 9. Nesting
+## 11. Nesting
 
-Inner Loading catches first; outer never sees the inner's
-`NotReadyYet`. Same as catchError nesting.
+Inner Loading's `boundaryOwner` is a descendant of outer Loading's
+`boundaryOwner` (because the inner is constructed inside the outer's
+function child). `useLoading()` walks up and finds the nearest, so an
+inner-scope binding registers with the inner Loading only.
 
 ```tsx
 <Loading initial={<PageSpinner/>}>
   {() => (
     <>
-      <UserHeader user={use(user)}/>
+      <UserHeader user={() => use(user)}/>
       <Loading fallback={<PostsSkeleton/>}>
-        {() => <PostsList posts={use(posts)}/>}
+        {() => <PostsList posts={() => use(posts)}/>}
       </Loading>
     </>
   )}
 </Loading>
 ```
 
-Initial render: outer pending (user not ready) → PageSpinner.
+Initial render: outer pending (user not ready) → PageSpinner. User
+settles: outer loads. UserHeader and the inner Loading mount. Inner
+evaluates — posts pending → inner shows PostsSkeleton. Posts settle:
+inner loads. Outer never saw posts's pending because the inner
+registered first (and the inner's loaded subtree was already inside
+the outer's loaded subtree).
 
-User settles: outer renders loaded slot. UserHeader mounts. Inner
-Loading evaluates — posts pending → inner renders PostsSkeleton.
-useLoading() inside UserHeader returns `false` (outer not pending);
-inside PostsList (if mounted) would return `true` (inner pending).
+## 12. Errors
 
-Posts settle: inner renders loaded slot. All settled. Both
-useLoading() accessors return `false`.
+Non-`NotReadyYet` throws in any binding inside Loading:
 
-Re-fetch posts: inner enters subsequent pending. Inner has fallback →
-swaps to PostsSkeleton. Inner's loadingScope flips to `true`. Outer's
-loadingScope stays `false`. `useLoading()` inside the inner's loaded
-subtree (now unmounted) doesn't matter; inside the outer's loaded
-subtree (UserHeader) still sees outer = false.
+- Re-thrown from the binding-effect.
+- Routed via `routeError` to the nearest `catchError` ancestor.
+- Loading is not in the error path; it strictly coordinates pending,
+  not errors.
 
-## 10. Errors
+`catchError` and Loading compose: an outer `catchError` catches what an
+inner Loading's bindings throw (apart from `NotReadyYet`, which is
+caught by the binding-effect itself).
 
-Non-`NotReadyYet` throws in `loaded()`:
-- Re-thrown from the loading accessor.
-- The binding-effect that owns the accessor catches via the existing
-  `routeError` chain (Plan 2d), routing to the nearest `catchError`
-  ancestor.
-- `loading()` does NOT pretend to handle real errors. It's strictly a
-  pending/loaded coordinator.
+## 13. Reactive props ergonomics — known limitation
 
-Throws in `fallback()` or `initial()`:
-- Same routing — re-thrown from the loading accessor on the next run.
-- Slot rendering is just user code; nothing special.
+TypeScript catches the `prop={use(x)}` vs `prop={() => use(x)}`
+mistake **only when the prop type is strictly `() => T`**. If the prop
+type is widened to `FunctionMaybe<T>` for static-or-reactive
+flexibility, both forms typecheck even though the eager-call form has
+runtime traps (value captured statically; throw on construction →
+component re-instantiation if not in a callback).
 
-## 11. Tests
+The pragmatic stance for v1:
 
-`test/dom/loading.test.tsx`, ~12 tests:
+- **Recommend strict `() => T`** for reactive props — TS keeps call
+  sites honest.
+- **`FunctionMaybe<T>`** is available for authors who knowingly want
+  flexibility; they accept the looser typing.
 
-- Synchronous loaded thunk → renders result directly; pending stays false.
-- Pending `use()` first time → renders `initial`; pending true.
-- Pending `use()` first time with no `initial` → renders `fallback`; pending true.
-- Pending `use()` first time with neither → renders undefined.
-- Settled → renders loaded result; pending false.
-- Subsequent pending with `fallback` → renders fallback; pending true; prior loaded effects DISPOSED.
-- Subsequent pending without `fallback` → **holds prior loaded DOM with live effects**; pending true.
-- Loaded effects' cleanup fires on transition-to-fallback (when fallback provided).
-- Loaded effects keep running during hold-prior (no fallback) — assertion via signal-driven re-render of held content.
-- Coordinated reveal: two `use()`s both pending → both must settle before loaded mounts.
-- `useLoading()` inside a nested component inside loaded slot reflects outer Loading's pending state.
-- Real error in loaded() propagates through `catchError`.
+A future architectural shift to Solid-style **prop getters** would
+resolve the typing gap by making any `prop={x}` reactive at the
+property-access site without explicit call. Tracked as a follow-up in
+`docs/follow-ups.md`; not in scope for v1.
 
-## 12. Public API surface
+## 14. Tests
+
+`test/dom/loading.test.tsx`, ~10 tests:
+
+- Synchronous loaded thunk (no `use()` anywhere) → renders result;
+  pending stays false; `hasEverLoaded` true immediately.
+- Pending `use()` in a binding → renders `initial`; pending true.
+- Pending `use()` with no `initial` → renders `fallback`.
+- Pending `use()` with neither → renders nothing (undefined).
+- Settled → renders loaded subtree; pending false.
+- Subsequent pending **with** `fallback` → renders fallback; previous
+  loaded subtree's nodes detached but binding-effects still alive
+  (verify by signal-driven update arriving at the detached subtree
+  when re-mounted).
+- Subsequent pending **without** `fallback` → holds prior loaded
+  subtree; pending true.
+- Two `use()`s pending in parallel → pendingCount=2 → both must settle
+  before loaded slot mounts.
+- `useLoading()` inside a sync component inside loaded subtree returns
+  the outer Loading's pending accessor and is reactive.
+- Real error in a binding inside Loading propagates through outer
+  `catchError`.
+- Disposing the surrounding owner cascades to `boundaryOwner` and all
+  its descendants (binding-effects' `unregister`s run via owner cleanup
+  but the parent owner is already gone — no decrement attempt against a
+  freed scope).
+- Nested Loading: inner pending registers only with inner; outer
+  pending stays false.
+
+## 15. Public API surface
 
 Added to `src/index.ts`:
 
 ```ts
-export { Loading, loading, useLoading } from './dom'
+export { Loading, useLoading } from './dom'
 ```
 
 Added to `src/dom/index.ts`:
 
 ```ts
-export { Loading, loading, useLoading } from './loading'
+export { Loading, useLoading } from './loading'
 ```
 
-## 13. Decisions log
+Added to `src/owner.ts` exports: `type LoadingScope` (internal use by
+binding-effect, may stay un-exported from the public barrel).
+
+## 16. Decisions log
 
 | Decision | Resolution | Why |
 |---|---|---|
-| Boundary shape | Per-binding utility + thin JSX wrapper | Mirrors `For`/`mapArray`; avoids tree-wide owner-walk and dry-run rendering; matches user's instinct |
-| Argument shape | Positional `loaded`, options bag for slots | Caller picks which slots they care about; no positional ambiguity |
-| JSX children | Function required | Static children can't be `use()`d; force the explicit thunk |
-| Default with no slots | Render `undefined` (initial) / hold prior loaded (subsequent) | Initial has no prior to hold; subsequent does. Stale-while-revalidate falls out for free |
-| Pending API | Accessor with `.pending` accessor property | Matches signal's callable+brand pattern; one value to pass around |
-| `useLoading()` walk start | Current owner (walk up) | Symmetric to `routeError`; works whether called inside loaded subtree or boundary-rendering setup |
-| Owner extension | Add `loadingScope: Accessor<boolean> \| null` | Same pattern as Plan 2d's `errorHandler` field |
-| Hold-prior mechanism | Tentative + loadedOwner sub-owner pattern, sibling to slot-owner under boundary | Keeps loaded effects alive across transition without specific "freeze" mode; per-slot owner prevents fallback effect accumulation |
-| Three states | Internal `hasEverLoaded` flag, no public state-machine API | Three-state semantics fall out without exposing a state enum |
-| Coordination | `use()`-sequential, promises-parallel-if-in-flight | User controls parallelism by when they kick off promises |
-| Transitions | Not built | Pulse's value-level pending info is already the entanglement substrate |
+| Components run once | Hard invariant | Foundation of pulse's fine-grained reactivity model |
+| `use()` allowed locations | Callbacks only (binding-effects, reactive prop accessors) | Top-level `use()` would force enclosing thunk re-run → violates components-run-once |
+| Loading boundary shape | JSX component with function child | Only way to construct descendants under boundary owner (JSX evaluation order) |
+| Re-execution mechanism | Per-binding-effect (existing Plan 2a) + per-binding owner-walk registration | Coordination without re-running components |
+| Hold-prior default | Subsequent pending without `fallback` returns loaded subtree | Bindings stay alive; reattaching is free; "stale-while-revalidate" falls out |
+| Pending exposure | `useLoading()` hook (owner-walk) | Symmetric to `routeError`; works from any descendant component |
+| State machine | Internal `hasEverLoaded` flag + reactive `pendingCount` | Three-state semantics fall out; no public API for the FSM |
+| Reactive prop convention | `() => T` strict, or `FunctionMaybe<T>` opt-in | Strict gives TS safety; flexible accepts trade-off documented as follow-up |
+| Cross-tree `useLoading()` | Not built; out-of-tree returns constant-false | YAGNI; ref-passing fallback exists if needed |
+| Transitions | Not built | Pulse's value-level pending info + per-binding suspension is the substrate |
 
-## 14. Relationship to master spec §11
+## 17. Relationship to master spec §11
 
-§11 says: "v2 — re-introduce a Loading/`<Suspense>` boundary as an opt-in
+§11: "v2 — re-introduce a Loading/`<Suspense>` boundary as an opt-in
 *coarser* catch site for `NotReadyYet` (coordination), additive to the
 per-node path."
 
 This design matches:
-- **Opt-in**: only triggers when user wraps with `<Loading>` or `loading()`.
-- **Coarser catch site**: catches `NotReadyYet` thrown by any `use()`
-  within the thunk; multiple uses coordinate.
-- **Additive**: per-node stale-but-stable still works for bindings outside
-  any Loading.
+- **Opt-in**: only triggers when user wraps with `<Loading>`.
+- **Coarser catch site**: aggregates pending state across all bindings
+  inside the boundary; coordinates the loaded slot's mount.
+- **Additive**: per-node stale-but-stable (Plan 2a) still works for
+  bindings outside any Loading; inside, per-binding suspension
+  semantics are unchanged but ALSO contribute to the boundary's
+  count.
 
 Extensions beyond §11:
-- **Hold-prior-by-default** is a refinement of the §9 stale-but-stable
-  semantic, applied at the boundary scope. §11 didn't specify a default;
-  this design picks the friendliest one.
-- **Pending exposure via `view.pending` + `useLoading()`** gives
-  visualisation primitives the master spec didn't enumerate. They fall
-  cleanly out of the design rather than being added as separate concepts.
+- **Hold-prior-by-default** when `fallback` is omitted — falls naturally
+  out of the "boundary doesn't reconstruct anything; just toggles
+  attachment" design.
+- **Initial / subsequent differentiation** via `hasEverLoaded` —
+  inspired by Solid 2.x's three-slot model, achieved without transitions.
+- **`useLoading()` for cross-component observation** within the
+  boundary's subtree — owner-walk pattern mirrors `routeError`.
