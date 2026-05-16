@@ -32,6 +32,17 @@ the prior resolved value stays visible during a refetch, and downstream is
 invalidated only when the new resolved value differs (Object.is) from the
 prior one. Observe the refetch window with `isPending(computed)`.
 
+**Transition (pattern, not primitive)**:
+A generator `computed(function* () { ... yield* read(gateAccessor) ... })`
+whose body uses `yield* read(x)` on one or more inputs that may be pending.
+The brand-aware `read` suspends the generator while any read accessor is
+mid-refetch and resumes with the fresh value on settle. The computed's
+prior published value stays visible (SWR) throughout, so consumers see a
+coherent multi-read snapshot — when an upstream input changes, the computed
+commits the new snapshot atomically. No new primitive: transitions are a
+property of generator computeds that read brand-aware via `read`. Plain
+`use(accessor)` at JSX/effect leaves keeps its SWR-at-leaf behavior.
+
 **Pipeline**:
 The ordered list of Stages passed to `computed`. The runtime threads a value
 through it: stage N receives stage N-1's (unwrapped) return value.
