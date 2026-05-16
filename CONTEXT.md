@@ -27,7 +27,10 @@ the `signal()` tuple. Type: `Accessor<T> = () => T`.
 **Computed**:
 A derived signal. Defined as a Pipeline of one or more Stages:
 `computed(stage0, stage1, ...)`. A single sync function or single generator is
-just a one-stage pipeline.
+just a one-stage pipeline. Async stages publish via **stale-while-revalidate**:
+the prior resolved value stays visible during a refetch, and downstream is
+invalidated only when the new resolved value differs (Object.is) from the
+prior one. Observe the refetch window with `isPending(computed)`.
 
 **Pipeline**:
 The ordered list of Stages passed to `computed`. The runtime threads a value

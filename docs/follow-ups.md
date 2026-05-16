@@ -35,23 +35,14 @@ Severity: **(small)** trivial cleanups · **(worth)** worth doing soon · **(lat
 
 ### Architectural notes
 
-- **(important) `'reuse-value'` stash consumption in `src/computed.ts` loses dep tracking — sync computeds returning Promises freeze on first settle.** When a non-generator computed stage's body returns a `Promise<T>`, Plan 2b's `'reuse-value'` mechanism stashes the resolved value via `.then(rerun)` and, on the next recompute, **returns the stash early without calling the user's body**. r3's dep-tracking only registers reads that happen during a recompute; bypassing the body unlinks every signal the body would have read. After the first stash consumption, the computed has no deps left — subsequent `setSignal(originalDep, …)` calls don't mark it dirty, the body never re-runs, the computed freezes on the first fetched value.
-
-  Concrete symptom: `computed(() => fetchList(page()).then(r => r.results))` shows page 0 correctly, but `setPage(1)` doesn't trigger a refetch — the computed stays subscribed to nothing.
-
-  **Workaround:** use `signal<T | Promise<T>>` + `effect(() => setSignal(s, fetchList(dep())))` instead — the effect's deps are explicit and re-runs on dep change; write-back updates the signal's value without going through stash-bypass. The pokemon demo (`examples/pokemon/src/main.tsx`) documents this pattern with a note pointing to this follow-up.
-
-  **Real fixes to evaluate:**
-  - (a) **Always call the body on recompute** even when stash is available — use stash to short-circuit `.then` re-registration and re-suspension, not to skip the body. Cost: extra work in `async function` stages (which was the original optimization target). Mitigation: keep body-skip for `async function`s, body-run for sync arrow bodies (resumeKind already differentiates).
-  - (b) **Untrack/snapshot the body's deps separately** from its execution. When stash is consumed, re-register the snapshotted deps with r3 without re-running the body.
-  - (c) **Require generator computeds** for async derivations (`yield* read(promise)`). The driver's WeakMap caches yielded promises by identity — but if the body creates a fresh Promise each run, the cache still misses. So this isn't a complete fix; it just shifts the burden onto the user to cache the Promise.
-
-  Aligns with the user's intuition that pulse should wrap user-returned Promises in a stable pulse-controlled wrapper that preserves dep tracking. The current 'reuse-value' approximates that, but the body-bypass breaks dep tracking.
-  Source: Plan 4 demos (examples/pokemon Playwright tests). Root cause traced via instrumented runs.
 - **(later) Props-as-getters (Solid-style) for reactive props.** Today reactive props are typed `() => T` and consumed via `props.x()` — explicit and consistent with "function = reactive." Pulse rejected prop getters in favor of voby-style destructurable plain values. The cost surfaces when a prop type is widened to `FunctionMaybe<T>` (= `T | (() => T)`) for static-or-reactive flexibility: TypeScript can no longer distinguish `prop={use(x)}` (eager call, returns value, captured statically — runtime trap if pending) from `prop={() => use(x)}` (lazy, reactive, correct). Both forms typecheck under `FunctionMaybe<T>`. With strict `() => T` props this isn't an issue (call-site mistakes get TS errors), but `FunctionMaybe<T>` is a real ergonomic gravity for component authors who want flexibility. Prop getters would resolve this by making `<Comp prop={x}>` always reactive at the property-access site, without explicit call. Big architectural shift — would change destructuring semantics, prop access mechanics, and CONTEXT.md commitments. Revisit if/when several real components want both static and reactive use cases.
   Source: Plan 4 brainstorming (Loading design).
 - **(later) `catchError` orphan sub-owner when no ambient owner.** Calling `catchError` outside any `createRoot` creates a sub-owner with `parent = null` that is not registered as a disposable anywhere — it lives until GC. In practice the reactive nodes inside it are individually unwatched by r3, so the handler effectively becomes unreachable, but there is no explicit dispose handle for the boundary itself. Consider returning `{ result, dispose }` from `catchError` in a future iteration, or document the constraint more loudly in the JSDoc.
   Source: Plan 2d final review (Minor).
+- **(later) Drop signal write-back (`signal<T | Promise<T>>` auto-resolve).** With Plan 6's `computed(() => Promise)` fully fixed, the write-back hack in `signal()` (where setting a signal to a Promise auto-flips it to T on settle) is no longer needed in user code — `computed(() => p)` covers all cases naturally and with proper dep tracking. Consider removing write-back to simplify `signal` semantics: a signal stores exactly what you put in it, no implicit async behavior.
+  Source: Plan 6 design discussion.
+- **(later) `use(cb)` hook form as sugar over `computed(cb) + throw-on-pending`.** Today `use(promise)` and `use(accessor)` both work, but a `use(() => fetchX(dep()))` form (which would internally do `const m = computed(cb); if (isPending(m)) throw NotReadyYet(m); return m()`) would give leaves a one-liner for "create-and-suspend-on" without explicit `computed` ceremony. Sugar, not a primitive; spec it once `computed`-async patterns settle.
+  Source: Plan 6 design discussion.
 - **(later) ADR 0003 wording vs Plan 2b's per-stage implementation.** ADR 0003 says "one ordinary r3 computed node" + "stashed pipeline state". Plan 2b uses one r3 node *per stage* — same architectural commitment (r3 unmodified; async-ness in pulse wrappers), different mechanism (r3's memoization gives free per-stage caching). The ADR could be updated to record the chosen implementation, or kept as-is with the plan's scope note serving as the divergence record.
   Source: Plan 2b plan scope notes + final review.
 
@@ -90,6 +81,7 @@ Severity: **(small)** trivial cleanups · **(worth)** worth doing soon · **(lat
 - ~~Document the within-generator restart-from-top semantics in `src/computed.ts`.~~ Fixed in commit `2d56830` (follow-up cleanup pass).
 - ~~Widen `use` to accept an accessor too.~~ Fixed in commit `67aa326` (follow-up cleanup pass).
 - ~~Promote "create a parented sub-owner" into a shared internal before Plan 3.~~ Fixed in commit `548e1df` (Plan 3a Task 2 — `refactor(owner): extract internal createSubOwner from catchError`).
+- ~~`'reuse-value'` stash consumption in `src/computed.ts` loses dep tracking — sync computeds returning Promises freeze on first settle.~~ Fixed in commit `bea4b1c` (Plan 6) — rewrote `makeStageNode` to always run the body for r3 dep tracking and publish settle values out-of-band via an internal signal. Added stale-while-revalidate semantics and resolved-value (Object.is) caching; `isPending(computed)` exposes the refetch window via a `[PENDING]` accessor brand. Pokemon demo migrated back to the natural `computed(() => fetchList(page()).then(...))` pattern in commit `cf7230e`.
 
 ---
 
