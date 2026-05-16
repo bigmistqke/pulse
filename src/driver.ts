@@ -55,12 +55,11 @@ function driveGenerator(gen: Generator<unknown, unknown, unknown>): StageOutcome
  * Run a single pipeline stage with the given input. Detects the stage's shape
  * (generator function / async function / sync function) and dispatches.
  *
- * NOTE: detection of `async` is informational only — an async function's
+ * NOTE: async functions are not detected explicitly — an async function's
  * returned promise is handled by `settle` just like any other returned promise,
- * so the sync path catches it correctly. The `isAsyncFunction` check exists for
- * symmetry and future expansion; it is not strictly required for correctness.
+ * so the sync path catches it correctly. Generator detection is the only
+ * dispatch we need; async vs sync is handled uniformly by `settle`.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function runStage(
   stage: (value: any) => unknown,
   input: unknown,

@@ -45,11 +45,6 @@ export function isGeneratorFunction(f: unknown): f is (...args: unknown[]) => Ge
   return typeof f === 'function' && (f as { constructor?: { name?: string } }).constructor?.name === 'GeneratorFunction'
 }
 
-/** True if `f` is declared with `async function` (an async function). */
-export function isAsyncFunction(f: unknown): f is (...args: unknown[]) => Promise<unknown> {
-  return typeof f === 'function' && (f as { constructor?: { name?: string } }).constructor?.name === 'AsyncFunction'
-}
-
 type PromiseState =
   | { status: 'pending' }
   | { status: 'fulfilled'; value: unknown }
