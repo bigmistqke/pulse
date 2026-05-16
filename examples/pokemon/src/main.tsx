@@ -6,16 +6,20 @@ const [page, setPage] = signal(0)
 const [expanded, setExpanded] = signal<string | null>(null)
 
 // `list` is a signal holding the current page's results promise. An effect
-// kicks off the fetch and write-back flips the signal Promise → array once
-// settled. When `page` changes, the effect re-runs and writes a new promise.
+// kicks off the fetch on page change and write-back flips the signal
+// Promise → array once settled.
+//
+// NOTE: we deliberately use signal+effect instead of `computed(() => fetchList(page()).then(...))`
+// because pulse's `'reuse-value'` stash mechanism loses dep tracking on stash-
+// consuming re-runs (see follow-up "stash-consumption loses dep tracking").
+// With a computed, page changes wouldn't notify the computed after the first
+// stash consumption — list would freeze on the first fetched page.
 const [list, setList] = signal<PokemonRef[] | Promise<PokemonRef[]>>(
   fetchList(0).then((r) => r.results),
 )
 effect(() => {
-  // Re-runs when `page` changes; first run is the init value above so we
-  // skip page 0 to avoid double-fetching.
   const p = page()
-  if (p === 0) return
+  if (p === 0) return // initial value handles page 0; skip double-fetch
   setList(fetchList(p).then((r) => r.results))
 })
 
