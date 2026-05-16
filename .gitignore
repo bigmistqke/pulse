@@ -3,3 +3,5 @@ dist
 test/dom/__screenshots__
 examples/*/node_modules
 examples/*/dist
+examples/*/test-results/
+examples/*/playwright-report/

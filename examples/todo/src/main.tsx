@@ -90,7 +90,11 @@ function App() {
             <Switch>
               <Match when={() => remaining() === 0 && todos().length > 0}>All done!</Match>
               <Match when={() => remaining() === 1}>1 item left</Match>
-              <Match when={() => remaining() > 1}>{() => `${remaining()} items left`}</Match>
+              {/* `remaining` is passed as a function child → reactive binding;
+                  " items left" is a static text sibling. Wrapping in a fn child
+                  (`{() => `${remaining()} items left`}`) would NOT be reactive —
+                  Match calls function children once at branch transition. */}
+              <Match when={() => remaining() > 1}>{remaining} items left</Match>
             </Switch>
           </span>
           <div class="filters">

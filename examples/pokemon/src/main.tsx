@@ -1,16 +1,23 @@
-import { computed, For, Loading, render, Show, signal, use, useLoading } from 'pulse'
+import { effect, For, Loading, render, Show, signal, use, useLoading } from 'pulse'
 import { fetchList, fetchPokemon, type Pokemon, type PokemonRef } from './api'
 import './style.css'
 
 const [page, setPage] = signal(0)
 const [expanded, setExpanded] = signal<string | null>(null)
 
-// `list` is a computed whose value transitions Promise → array via pulse's
-// write-back. Re-runs when `page` changes (kicks off a new fetch); the prior
-// result stays visible during reload thanks to per-binding stale-but-stable.
-// Reading `use(list)` (widened accessor form) suspends while pending and
-// returns the array once settled.
-const list = computed(() => fetchList(page()).then((r) => r.results))
+// `list` is a signal holding the current page's results promise. An effect
+// kicks off the fetch and write-back flips the signal Promise → array once
+// settled. When `page` changes, the effect re-runs and writes a new promise.
+const [list, setList] = signal<PokemonRef[] | Promise<PokemonRef[]>>(
+  fetchList(0).then((r) => r.results),
+)
+effect(() => {
+  // Re-runs when `page` changes; first run is the init value above so we
+  // skip page 0 to avoid double-fetching.
+  const p = page()
+  if (p === 0) return
+  setList(fetchList(p).then((r) => r.results))
+})
 
 function TopBar() {
   const pending = useLoading()
