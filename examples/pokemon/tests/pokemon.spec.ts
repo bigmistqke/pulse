@@ -174,6 +174,41 @@ test.describe('Pokédex', () => {
     await expect(page.locator('.indicator')).not.toBeVisible()
   })
 
+  test('page label and items commit atomically (transition snapshot)', async ({ page }) => {
+    await page.route(
+      (url) => url.href.includes('/api/v2/pokemon?offset=0&limit=20'),
+      (route) => route.fulfill({ json: listPage0 }),
+    )
+    let releasePage1!: () => void
+    const page1Gate = new Promise<void>((r) => { releasePage1 = r })
+    await page.route(
+      (url) => url.href.includes('/api/v2/pokemon?offset=20&limit=20'),
+      async (route) => {
+        await page1Gate
+        await route.fulfill({ json: listPage1 })
+      },
+    )
+
+    await page.goto('/')
+    await expect(page.locator('.list li button.name')).toHaveCount(3)
+    const pageLabel = page.locator('.paging span')
+    await expect(pageLabel).toHaveText('page 1')
+
+    await page.locator('button', { hasText: 'next →' }).click()
+
+    // Mid-refetch: label stays at page 1, items stay at page 0 names.
+    // The .loading class is applied for the grey-out cue.
+    await expect(pageLabel).toHaveText('page 1')
+    await expect(page.locator('.list li button.name')).toHaveCount(3)
+    await expect(pageLabel).toHaveClass(/loading/)
+
+    // Release the request; both label and items commit together.
+    releasePage1()
+    await expect(pageLabel).toHaveText('page 2')
+    await expect(page.locator('.list li button.name')).toHaveCount(2)
+    await expect(pageLabel).not.toHaveClass(/loading/)
+  })
+
   test('initial spinner appears during first load', async ({ page }) => {
     // Delay the initial list request
     await page.route(

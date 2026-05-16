@@ -139,9 +139,18 @@ function isSignalAccessor(x: unknown): x is Signal<unknown> {
  */
 export function* read<T>(x: T): Generator<unknown, Resolved<T>, unknown> {
   if (isSignalAccessor(x)) {
+    const acc = x as () => unknown
+    // Force upstream recompute first: reading the accessor stabilizes its
+    // computed, which updates its [PENDING] brand in the same pass. Without
+    // this, brand?.() may return a stale value when both this generator and
+    // the upstream computed were dirtied by the same root-signal write.
+    let value = acc()
     const brand = (x as Signal<unknown>)[PENDING]
-    if (brand?.()) yield brand.promise!() as Promise<unknown>
-    return (yield (x as () => unknown)()) as Resolved<T>
+    if (brand?.()) {
+      yield brand.promise!() as Promise<unknown>
+      value = acc() // re-read after resume to pick up the post-settle value
+    }
+    return (yield value) as Resolved<T>
   }
   return (yield x) as Resolved<T>
 }

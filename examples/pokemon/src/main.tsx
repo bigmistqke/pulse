@@ -3,6 +3,7 @@ import {
   For,
   isPending,
   Loading,
+  read,
   render,
   Show,
   signal,
@@ -14,18 +15,24 @@ import "./style.css";
 const [page, setPage] = signal(0);
 const [expanded, setExpanded] = signal<string | null>(null);
 
-// Plan 6 fixed `computed(() => Promise)` to preserve dep tracking and
-// stale-while-revalidate cleanly. Reading via `use(list)` (widened accessor
-// form) throws NotReadyYet on initial pending, returns the array once settled.
 const list = computed(
   () => fetchList(page()),
   (r) => r.results,
 );
 
+// Coherent display snapshot: page label and items commit atomically when the
+// new page settles. yield* read(list) is brand-aware — suspends the generator
+// while list is mid-refetch, resumes with the new items. SWR keeps the prior
+// snapshot visible to consumers throughout.
+const view = computed(function* () {
+  return {
+    page: yield* read(page),
+    items: yield* read(list),
+  };
+});
+
 function TopBar() {
-  // Stale-while-revalidate: list keeps its prior array during refetch, so the
-  // Loading boundary doesn't re-trip. isPending(list) is the SWR-aware probe.
-  const refreshing = () => isPending(list);
+  const refreshing = () => isPending(view);
   return (
     <header class="top-bar">
       <h1>pokédex</h1>
@@ -99,11 +106,8 @@ function App() {
       {() => (
         <div class="app">
           <TopBar />
-          <ul class="list">
-            {/* `each` is a function → mapArray re-runs reactively. use(list) (widened
-                accessor form) throws NotReadyYet while pending; pulse's signal
-                write-back flips list's value Promise → array, ending the suspension. */}
-            <For each={() => use(list)}>
+          <ul class="list" class:loading={() => isPending(view)}>
+            <For each={() => use(view).items}>
               {(ref) => <PokemonRow ref={ref} />}
             </For>
           </ul>
@@ -114,7 +118,9 @@ function App() {
             >
               ← prev
             </button>
-            <span>page {() => page() + 1}</span>
+            <span class:loading={() => isPending(view)}>
+              page {() => use(view).page + 1}
+            </span>
             <button on:click={() => setPage((p) => p + 1)}>next →</button>
           </nav>
         </div>

@@ -158,3 +158,8 @@ body {
   color: #555;
   font-variant-numeric: tabular-nums;
 }
+
+.loading {
+  opacity: 0.55;
+  transition: opacity 120ms ease-in-out;
+}
