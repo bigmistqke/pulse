@@ -2,7 +2,7 @@ import { expect, test } from 'vitest'
 import { isPending, latest, use, NotReadyYet, read } from '../src/async'
 import { effect } from '../src/effect'
 import { flush, microtaskScheduler, setScheduler, syncScheduler } from '../src/scheduler'
-import { signal } from '../src/signal'
+import { signal, PENDING, type Accessor } from '../src/signal'
 
 /** Resolve after all microtasks have drained (a macrotask boundary). */
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
@@ -155,4 +155,27 @@ test('use() accepts an accessor (signal getter)', () => {
 test('use() accessor form unwraps pending promises (throws NotReadyYet)', () => {
   const [s] = signal<number | Promise<number>>(new Promise(() => {}))
   expect(() => use(s)).toThrow(NotReadyYet)
+})
+
+test('isPending dispatches via [PENDING] brand when present', () => {
+  const [pending, setPending] = signal(false)
+  const branded = (() => 42) as Accessor<number> & { [PENDING]?: Accessor<boolean> }
+  branded[PENDING] = pending
+  expect(isPending(branded)).toBe(false)
+  setPending(true)
+  expect(isPending(branded)).toBe(true)
+})
+
+test('isPending without [PENDING] brand falls back to isPromise(value)', () => {
+  const [s, setS] = signal<number | Promise<number>>(7)
+  expect(isPending(s)).toBe(false)
+  setS(new Promise(() => {}))
+  expect(isPending(s)).toBe(true)
+})
+
+test('isPending([PENDING]) takes precedence over value check', () => {
+  const [pending] = signal(false)
+  const branded = (() => new Promise(() => {})) as Accessor<unknown> & { [PENDING]?: Accessor<boolean> }
+  branded[PENDING] = pending
+  expect(isPending(branded)).toBe(false)
 })

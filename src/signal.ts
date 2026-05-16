@@ -17,10 +17,16 @@ type R3Node<T> = R3Signal<T> | R3Computed<T>
 /** Internal key under which a pulse accessor stashes its r3 node. */
 export const NODE = Symbol('pulse.node')
 
+/** Optional brand: when present on a Signal/Accessor, `isPending` queries
+ *  this accessor instead of inspecting the value-as-promise. Used by
+ *  computeds with stale-while-revalidate semantics. */
+export const PENDING = Symbol('pulse.pending')
+
 /** A pulse signal or computed: an accessor function carrying its r3 node. */
 export interface Signal<T> {
   (): T
   [NODE]: R3Node<T>
+  [PENDING]?: Accessor<boolean>
 }
 
 /** A callable that reads a reactive signal or computed value. */

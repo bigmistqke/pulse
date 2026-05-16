@@ -1,8 +1,13 @@
 import { isPromise } from './is-promise'
-import { NODE, type Accessor, type Signal } from './signal'
+import { NODE, PENDING, type Accessor, type Signal } from './signal'
 
-/** Reactive predicate: is the signal's current value a (pending) promise? */
+/** Reactive predicate: is the signal/computed currently pending?
+ *  - If the accessor carries a `[PENDING]` brand, queries that accessor (used by
+ *    computeds with stale-while-revalidate — value may be the prior T, not a Promise).
+ *  - Otherwise, returns `isPromise(accessor())` (signals holding a Promise). */
 export function isPending(s: Accessor<unknown>): boolean {
+  const pendingAccessor = (s as { [PENDING]?: Accessor<boolean> })[PENDING]
+  if (pendingAccessor !== undefined) return pendingAccessor()
   return isPromise(s())
 }
 
