@@ -1,5 +1,5 @@
 import { computed as r3Computed, read as r3Read, unwatched, type Computed as R3Computed } from 'r3'
-import { isGeneratorFunction, NotReadyYet, track, type PromiseState, type Resolved } from './async'
+import { isGeneratorFunction, track, type PromiseState, type Resolved } from './async'
 import { runStage } from './driver'
 import { isPromise } from './is-promise'
 import { getOwner, routeError, registerWithOwner } from './owner'
@@ -170,11 +170,10 @@ function makeStageNode(
   // publishedValue / pendingSig. Its OWN return value is irrelevant — we
   // never read it for the value.
   const depTracker = r3Computed(() => {
-    // hoisted: needed by NotReadyYet catch below
-    let input: unknown = undefined
     try {
       kick() // dep so generator stash-rerun can force body re-run
 
+      let input: unknown = undefined
       if (inputAccessor !== null) {
         input = inputAccessor()
         if (isPromise(input)) {
@@ -269,19 +268,6 @@ function makeStageNode(
       deferredError = null
       return null
     } catch (e) {
-      if (e instanceof NotReadyYet) {
-        // Body explicitly suspended via use(pendingAccessor). Route through the
-        // same pending-Promise mechanism as a body that returned Promise.
-        suspendOn(e.promise as Promise<unknown>, input, (state) => {
-          if (state.status === 'fulfilled' || state.status === 'rejected') {
-            suspendedOn = null
-            setPendingSig(false)
-            // Re-run body to attempt a coherent snapshot with the now-settled gate.
-            setKick(++kickCount)
-          }
-        })
-        return null
-      }
       try {
         routeError(myOwner, e)
       } catch (rethrown) {

@@ -84,25 +84,16 @@ export function track(promise: Promise<unknown>): PromiseState {
  * - Settled promise -> its resolved value (a settled rejection re-throws its reason).
  * - Pending promise -> throws `NotReadyYet` (caught by the nearest effect).
  *
- * Intended for use inside effects, JSX bindings, AND computed bodies.
- * Inside a computed, `use(pendingAccessor)` suspends the computed via SWR:
- * the prior published value stays visible until the gate settles, then the
- * computed re-runs and publishes a coherent new snapshot. This enables
- * multi-read transitions — see docs/superpowers/specs/2026-05-16-pulse-transitions-design.md.
+ * Intended for use inside effects and JSX bindings. For coherent multi-read
+ * snapshots inside a generator computed, use `yield* read(accessor)` instead
+ * — `read` is brand-aware and suspends via the driver, preserving SWR-at-leaf
+ * for non-generator callers of `use`.
  */
 export function use<T>(x: T | Promise<T> | (() => T | Promise<T>)): Awaited<T> {
   // Accept accessor form for symmetry with `read()`. Footgun: if T extends
   // Function, the value gets called accidentally — rare; box the function
   // value to use it.
   if (typeof x === 'function') {
-    // Consult the [PENDING] brand BEFORE reading — SWR may be hiding an
-    // in-flight Promise behind a stale resolved value at the accessor.
-    const brand = (x as { [PENDING]?: PendingBrand })[PENDING]
-    // Invariant: when brand() is true, brand.promise() is non-null. The brand
-    // is only branded by computed (which always sets .promise), and a pending
-    // stage's suspendedOn is set; the upstream-OR case inductively bubbles to
-    // a stage whose suspendedOn is set.
-    if (brand?.()) throw new NotReadyYet(brand.promise!() as Promise<unknown>)
     x = (x as () => T | Promise<T>)()
   }
   if (!isPromise(x)) return x as Awaited<T>
@@ -135,6 +126,11 @@ function isSignalAccessor(x: unknown): x is Signal<unknown> {
  * Generator-side resolver. Use as `yield* read(x)` inside a `function*` stage.
  * - x is a signal: the accessor is called (tracking the signal as a dep), and
  *   its value (which may be a `T` or a `Promise<T>`) is yielded.
+ * - x is a signal/computed with a `[PENDING]` brand currently true: the
+ *   in-flight Promise from the brand is yielded first (driver suspends), then
+ *   on resume the accessor is re-called for the post-settle value. Enables
+ *   coherent multi-read snapshots for transition patterns — see
+ *   docs/superpowers/specs/2026-05-16-pulse-transitions-design.md.
  * - x is a promise: yielded directly (untracked).
  * - x is a plain value: yielded directly; the driver resumes immediately with it.
  *
@@ -142,6 +138,10 @@ function isSignalAccessor(x: unknown): x is Signal<unknown> {
  * of generator delegation.
  */
 export function* read<T>(x: T): Generator<unknown, Resolved<T>, unknown> {
-  const value = isSignalAccessor(x) ? (x as () => unknown)() : x
-  return (yield value) as Resolved<T>
+  if (isSignalAccessor(x)) {
+    const brand = (x as Signal<unknown>)[PENDING]
+    if (brand?.()) yield brand.promise!() as Promise<unknown>
+    return (yield (x as () => unknown)()) as Resolved<T>
+  }
+  return (yield x) as Resolved<T>
 }

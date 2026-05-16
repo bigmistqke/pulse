@@ -627,7 +627,7 @@ test('[PENDING].promise returns the in-flight Promise during refetch', async () 
   expect(brand.promise!()).toBeNull()
 })
 
-test('computed body suspends on use(pendingComputed) and snapshots coherently', async () => {
+test('generator computed reading yield* read(pendingComputed) snapshots coherently', async () => {
   const [page, setPage] = signal(1)
   let release!: (v: string[]) => void
   const list = computed(() => {
@@ -637,40 +637,21 @@ test('computed body suspends on use(pendingComputed) and snapshots coherently', 
   })
   await tick()
 
-  const view = computed(() => ({ page: page(), items: use(list) }))
+  const view = computed(function* () {
+    return {
+      page: yield* read(page),
+      items: yield* read(list),
+    }
+  })
   expect(view()).toEqual({ page: 1, items: ['a', 'b'] })
 
   setPage(2)
-  // SWR: view's prior snapshot stays visible even though page() returns 2 now.
+  // SWR: view's prior snapshot stays visible even though page() returns 2.
   expect(view()).toEqual({ page: 1, items: ['a', 'b'] })
   expect(isPending(view)).toBe(true)
 
   release(['c', 'd'])
   await tick()
   expect(view()).toEqual({ page: 2, items: ['c', 'd'] })
-  expect(isPending(view)).toBe(false)
-})
-
-test('computed body re-runs when a use(pendingComputed) gate rejects', async () => {
-  const [id, setId] = signal(1)
-  let reject!: (reason: unknown) => void
-  const list = computed(() => {
-    const i = id()
-    if (i === 1) return Promise.resolve('ok')
-    return new Promise<string>((_, r) => { reject = r })
-  })
-  await tick()
-
-  const view = computed(() => use(list))
-  expect(view()).toBe('ok')
-
-  setId(2)
-  expect(isPending(view)).toBe(true)
-
-  reject(new Error('boom'))
-  await tick()
-  // Pending cleared after settle. View's published value is still 'ok' (SWR
-  // held it; rejection didn't replace it because the body would re-throw on
-  // re-run, but the suspension is resolved).
   expect(isPending(view)).toBe(false)
 })

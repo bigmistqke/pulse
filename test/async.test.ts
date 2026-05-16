@@ -175,7 +175,7 @@ test('isPending([PENDING]) takes precedence over value check', () => {
   expect(isPending(branded)).toBe(false)
 })
 
-test('use(accessor) throws NotReadyYet when [PENDING] brand is true', async () => {
+test('use(accessor) keeps SWR-at-leaf: returns stale value during refetch', async () => {
   const [id, setId] = signal(1)
   let release!: (v: number) => void
   const c = computed(() => {
@@ -187,10 +187,36 @@ test('use(accessor) throws NotReadyYet when [PENDING] brand is true', async () =
   expect(use(c)).toBe(10)
 
   setId(2)
-  // c is mid-refetch: c() still returns 10 (SWR), but use must suspend.
-  expect(() => use(c)).toThrow(NotReadyYet)
+  // SWR: c() returns stale 10; use(c) returns stale value too (no suspension at leaf).
+  // For coherent suspension inside a generator computed, reach for yield* read(c).
+  expect(use(c)).toBe(10)
 
   release(20)
   await tick()
   expect(use(c)).toBe(20)
+})
+
+test('yield* read(pendingComputed) suspends the generator until settle', async () => {
+  const [id, setId] = signal(1)
+  let release!: (v: number) => void
+  const c = computed(() => {
+    const i = id()
+    if (i === 1) return Promise.resolve(10)
+    return new Promise<number>((r) => { release = r })
+  })
+  await tick()
+
+  const view = computed(function* () {
+    return yield* read(c)
+  })
+  expect(view()).toBe(10)
+
+  setId(2)
+  expect(view()).toBe(10) // SWR snapshot during refetch
+  expect(isPending(view)).toBe(true)
+
+  release(20)
+  await tick()
+  expect(view()).toBe(20)
+  expect(isPending(view)).toBe(false)
 })
