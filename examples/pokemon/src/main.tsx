@@ -1,12 +1,16 @@
-import { For, Loading, render, Show, signal, use, useLoading } from 'pulse'
+import { computed, For, Loading, render, Show, signal, use, useLoading } from 'pulse'
 import { fetchList, fetchPokemon, type Pokemon, type PokemonRef } from './api'
 import './style.css'
 
 const [page, setPage] = signal(0)
 const [expanded, setExpanded] = signal<string | null>(null)
 
-// Reactive list: depends on page signal
-const list = (): Promise<PokemonRef[]> => fetchList(page()).then((r) => r.results)
+// `list` is a computed whose value transitions Promise → array via pulse's
+// write-back. Re-runs when `page` changes (kicks off a new fetch); the prior
+// result stays visible during reload thanks to per-binding stale-but-stable.
+// Reading `use(list)` (widened accessor form) suspends while pending and
+// returns the array once settled.
+const list = computed(() => fetchList(page()).then((r) => r.results))
 
 function TopBar() {
   const pending = useLoading()
@@ -19,11 +23,13 @@ function TopBar() {
 }
 
 function PokemonDetails(props: { name: string }) {
-  // Kick off fetch once; the promise is stable.
-  const pokemonPromise = fetchPokemon(props.name)
-  // `p` is a thunk that calls use() — wrap each access at the leaf to keep
-  // bindings fine-grained. Each `() => p()…` is its own binding-effect.
-  const p = (): Pokemon => use(pokemonPromise)
+  // Wrap the fetch in a signal so pulse's write-back flips Promise → Pokemon
+  // once settled. Calling use() on a raw Promise would stay suspended forever
+  // (the same Promise identity persists; the .then-rerun fires only once).
+  const [pokemon] = signal<Pokemon | Promise<Pokemon>>(fetchPokemon(props.name))
+  // `p` resolves the signal at the leaf — use's widened-accessor form unwraps
+  // the signal call and the Promise transparently.
+  const p = (): Pokemon => use(pokemon)
   return (
     <Loading initial={<div class="detail-spinner">loading details…</div>}>
       {() => (
@@ -86,10 +92,10 @@ function App() {
         <div class="app">
           <TopBar />
           <ul class="list">
-            {/* `each` is a function → mapArray re-runs reactively when page() changes.
-                use() inside re-throws on the new pending promise; mapArray's
-                binding-effect catches and registers with Loading's scope. */}
-            <For each={() => use(list())}>{(ref) => <PokemonRow ref={ref} />}</For>
+            {/* `each` is a function → mapArray re-runs reactively. use(list) (widened
+                accessor form) throws NotReadyYet while pending; pulse's signal
+                write-back flips list's value Promise → array, ending the suspension. */}
+            <For each={() => use(list)}>{(ref) => <PokemonRow ref={ref} />}</For>
           </ul>
           <nav class="paging">
             <button
