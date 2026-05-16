@@ -2,7 +2,7 @@ import { expect, test } from 'vitest'
 import { computed } from '../src/computed'
 import { effect } from '../src/effect'
 import { signal } from '../src/signal'
-import { read } from '../src/async'
+import { isPending, read } from '../src/async'
 import { flush, microtaskScheduler, setScheduler, syncScheduler } from '../src/scheduler'
 import { createRoot, catchError } from '../src/owner'
 
@@ -292,6 +292,315 @@ test('async stage rejection: rejected promise re-thrown on next r3 invocation (r
   flush()
   expect(caught).toHaveLength(1)
   expect((caught[0] as Error).message).toBe('stage-1-rejected')
+
+  setScheduler(microtaskScheduler(flush))
+})
+
+test('stage-0 returning Promise: dep stays tracked across settles (THE main bug)', async () => {
+  setScheduler(syncScheduler(flush))
+  const fetches: number[] = []
+  const [page, setPage] = signal(0)
+  const resolvers: Array<(v: number[]) => void> = []
+
+  function fakeFetch(p: number): Promise<number[]> {
+    fetches.push(p)
+    return new Promise((r) => resolvers.push(r))
+  }
+
+  createRoot(() => {
+    const list = computed(() => fakeFetch(page()))
+    effect(() => {
+      try { list() } catch { /* may suspend */ }
+    })
+    expect(fetches).toEqual([0])
+    resolvers[0]([1, 2, 3])
+  })
+  await Promise.resolve()
+  flush()
+
+  setPage(1)
+  flush()
+  expect(fetches).toEqual([0, 1])
+
+  setScheduler(microtaskScheduler(flush))
+})
+
+test('refetch with different resolved value: downstream effect re-runs', async () => {
+  setScheduler(syncScheduler(flush))
+  const [page, setPage] = signal(0)
+  const resolvers: Array<(v: number[]) => void> = []
+  const observed: number[][] = []
+
+  createRoot(() => {
+    const list = computed(() => {
+      page()
+      return new Promise<number[]>((r) => resolvers.push(r))
+    })
+    effect(() => {
+      try { observed.push(list()) } catch { /* pending */ }
+    })
+
+    resolvers[0]([1, 2, 3])
+  })
+  await Promise.resolve()
+  flush()
+  expect(observed.at(-1)).toEqual([1, 2, 3])
+
+  setPage(1)
+  flush()
+  resolvers[1]([4, 5, 6])
+  await Promise.resolve()
+  flush()
+  expect(observed.at(-1)).toEqual([4, 5, 6])
+
+  setScheduler(microtaskScheduler(flush))
+})
+
+test('refetch with same resolved value (Object.is): downstream effect does not re-run', async () => {
+  setScheduler(syncScheduler(flush))
+  const sameArray = [1, 2, 3]
+  const [page, setPage] = signal(0)
+  const resolvers: Array<(v: number[]) => void> = []
+  let downstreamRuns = 0
+
+  createRoot(() => {
+    const list = computed(() => {
+      page()
+      return new Promise<number[]>((r) => resolvers.push(r))
+    })
+    effect(() => {
+      try {
+        list()
+        downstreamRuns++
+      } catch { /* pending */ }
+    })
+
+    resolvers[0](sameArray)
+  })
+  await Promise.resolve()
+  flush()
+  const after1stSettle = downstreamRuns
+
+  setPage(1)
+  flush()
+  resolvers[1](sameArray) // SAME reference
+  await Promise.resolve()
+  flush()
+  // Refetch with Object.is-equal value should NOT trigger downstream re-run
+  expect(downstreamRuns).toBe(after1stSettle)
+
+  setScheduler(microtaskScheduler(flush))
+})
+
+test('stale-while-revalidate: prior value visible during refetch', async () => {
+  setScheduler(syncScheduler(flush))
+  const [page, setPage] = signal(0)
+  const resolvers: Array<(v: string) => void> = []
+  let valueReads: string[] = []
+
+  createRoot(() => {
+    const data = computed(() => {
+      page()
+      return new Promise<string>((r) => resolvers.push(r))
+    })
+    effect(() => {
+      try { valueReads.push(data()) } catch { /* pending */ }
+    })
+
+    resolvers[0]('A')
+  })
+  await Promise.resolve()
+  flush()
+  expect(valueReads.at(-1)).toBe('A')
+
+  // Trigger refetch. The value seen by downstream should STAY 'A' until 'B' settles.
+  setPage(1)
+  flush()
+  // No new entry yet — value is still 'A'
+  expect(valueReads.at(-1)).toBe('A')
+
+  resolvers[1]('B')
+  await Promise.resolve()
+  flush()
+  expect(valueReads.at(-1)).toBe('B')
+
+  setScheduler(microtaskScheduler(flush))
+})
+
+test('isPending(computed) true during initial load, false after settle', async () => {
+  setScheduler(syncScheduler(flush))
+  let resolveP!: (v: number) => void
+  const p = new Promise<number>((r) => { resolveP = r })
+
+  await createRoot(async (dispose) => {
+    const c = computed(() => p)
+    expect(isPending(c)).toBe(true)
+    resolveP(42)
+    await Promise.resolve()
+    flush()
+    expect(isPending(c)).toBe(false)
+    dispose()
+  })
+
+  setScheduler(microtaskScheduler(flush))
+})
+
+test('isPending(computed) true during refetch (after first settle)', async () => {
+  setScheduler(syncScheduler(flush))
+  const [page, setPage] = signal(0)
+  const resolvers: Array<(v: number) => void> = []
+
+  await createRoot(async (dispose) => {
+    const c = computed(() => {
+      page()
+      return new Promise<number>((r) => resolvers.push(r))
+    })
+    effect(() => {
+      try { c() } catch { /* pending */ }
+    })
+
+    resolvers[0](1)
+    await Promise.resolve()
+    flush()
+    expect(isPending(c)).toBe(false)
+
+    setPage(1)
+    flush()
+    expect(isPending(c)).toBe(true)
+
+    resolvers[1](2)
+    await Promise.resolve()
+    flush()
+    expect(isPending(c)).toBe(false)
+    dispose()
+  })
+
+  setScheduler(microtaskScheduler(flush))
+})
+
+test('.then-chained Promise identity (unstable per call): no infinite loop, settles correctly', async () => {
+  setScheduler(syncScheduler(flush))
+  const [page, setPage] = signal(0)
+  const underlyingResolvers: Array<(v: { results: number[] }) => void> = []
+  const observed: number[][] = []
+
+  createRoot(() => {
+    const list = computed(() => {
+      page()
+      const fetchPromise = new Promise<{ results: number[] }>((r) =>
+        underlyingResolvers.push(r),
+      )
+      return fetchPromise.then((r) => r.results)
+    })
+    effect(() => {
+      try { observed.push(list()) } catch { /* pending */ }
+    })
+
+    underlyingResolvers[0]({ results: [1, 2] })
+  })
+  await Promise.resolve()
+  await Promise.resolve()
+  flush()
+  expect(observed.at(-1)).toEqual([1, 2])
+
+  setPage(1)
+  flush()
+  underlyingResolvers[1]({ results: [3, 4] })
+  await Promise.resolve()
+  await Promise.resolve()
+  flush()
+  expect(observed.at(-1)).toEqual([3, 4])
+  // Infinite loop would create many more resolver requests
+  expect(underlyingResolvers.length).toBe(2)
+
+  setScheduler(microtaskScheduler(flush))
+})
+
+test('multi-stage: stage 1 returning Promise still works (regression check)', async () => {
+  setScheduler(syncScheduler(flush))
+  const [page, setPage] = signal(0)
+  const resolvers: Array<(v: { results: number[] }) => void> = []
+  const observed: number[][] = []
+
+  createRoot(() => {
+    const list = computed(
+      () => page(),
+      (_p) => new Promise<{ results: number[] }>((r) => resolvers.push(r)),
+      (r) => r.results,
+    )
+    effect(() => {
+      try { observed.push(list()) } catch { /* pending */ }
+    })
+
+    resolvers[0]({ results: [10, 20] })
+  })
+  await Promise.resolve()
+  flush()
+  expect(observed.at(-1)).toEqual([10, 20])
+
+  setPage(1)
+  flush()
+  resolvers[1]({ results: [30, 40] })
+  await Promise.resolve()
+  flush()
+  expect(observed.at(-1)).toEqual([30, 40])
+
+  setScheduler(microtaskScheduler(flush))
+})
+
+test('supersession: stale settle of an old promise is ignored', async () => {
+  setScheduler(syncScheduler(flush))
+  const [page, setPage] = signal(0)
+  const resolvers: Array<(v: string) => void> = []
+  const observed: string[] = []
+
+  createRoot(() => {
+    const c = computed(() => {
+      page()
+      return new Promise<string>((r) => resolvers.push(r))
+    })
+    effect(() => {
+      try { observed.push(c()) } catch { /* pending */ }
+    })
+  })
+
+  setPage(1)
+  flush()
+  // Resolve the OLD promise (index 0) AFTER moving to page 1
+  resolvers[0]('OLD')
+  await Promise.resolve()
+  flush()
+  expect(observed.includes('OLD')).toBe(false)
+
+  resolvers[1]('NEW')
+  await Promise.resolve()
+  flush()
+  expect(observed.at(-1)).toBe('NEW')
+
+  setScheduler(microtaskScheduler(flush))
+})
+
+test('generator stage: unchanged behaviour (regression check)', async () => {
+  setScheduler(syncScheduler(flush))
+  const [trigger, setTrigger] = signal(0)
+  let yieldedFromGen = 0
+
+  await createRoot(async (dispose) => {
+    const c = computed(function* () {
+      trigger()
+      yieldedFromGen++
+      return 42
+    })
+    effect(() => {
+      try { c() } catch { /* nothing */ }
+    })
+    expect(yieldedFromGen).toBeGreaterThanOrEqual(1)
+    const beforeRetrigger = yieldedFromGen
+    setTrigger(1)
+    flush()
+    expect(yieldedFromGen).toBeGreaterThan(beforeRetrigger)
+    dispose()
+  })
 
   setScheduler(microtaskScheduler(flush))
 })

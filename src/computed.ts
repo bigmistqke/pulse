@@ -1,9 +1,9 @@
-import { computed as r3Computed, unwatched, type Computed as R3Computed } from 'r3'
+import { computed as r3Computed, read as r3Read, unwatched, type Computed as R3Computed } from 'r3'
 import { isGeneratorFunction, track, type Resolved } from './async'
 import { runStage } from './driver'
 import { isPromise } from './is-promise'
 import { getOwner, routeError, registerWithOwner } from './owner'
-import { makeAccessor, NODE, signal, type Signal } from './signal'
+import { makeAccessor, NODE, PENDING, signal, type Signal } from './signal'
 
 /** A pipeline stage of any shape: sync, async, or generator. The return type
  *  is whatever the function returns — sync `R`, async `Promise<R>`, or
@@ -90,7 +90,7 @@ export function computed(...stages: Array<(value: any) => unknown>): Signal<unkn
 /** Resumption strategy for a suspended stage — see the `computed` JSDoc. */
 type ResumeKind = 'fast-forward' | 'reuse-value'
 
-/** Stash for 'reuse-value' resumption: the settled fulfillment or rejection of
+/** Stash for 'fast-forward' resumption: the settled fulfillment or rejection of
  *  the suspending promise, to be consumed by the next r3 fn invocation. */
 type StashedResolution =
   | { kind: 'fulfilled'; value: unknown }
@@ -102,6 +102,16 @@ type StashedResolution =
  * the stage reads its predecessor — and if that value is a pending promise, this
  * stage's value becomes the same promise (color propagates without re-entering
  * the stage's logic).
+ *
+ * Architecture:
+ * - The body ALWAYS runs on dep changes (including settle-triggered kicks) so
+ *   r3 dep links are never dropped.
+ * - Non-generator stages: resolved-value keyed cache. On settle, kick fires and
+ *   the body re-runs. The new resolved value is compared with Object.is to the
+ *   last resolved value; downstream is only invalidated if changed.
+ *   Stale-while-revalidate: the last resolved value is returned during refetch.
+ * - Generator stages: fast-forward + stash mechanism. The stash is consumed
+ *   by the body when input matches, allowing the generator to resume correctly.
  */
 // `any` here is the standard implementation-signature widening for the
 // variadic overloads above; narrowing to `unknown` breaks the overload contract.
@@ -110,125 +120,165 @@ function makeStageNode(
   inputAccessor: Signal<unknown> | null,
 ): { accessor: Signal<unknown>; r3Node: R3Computed<unknown> } {
   const myOwner = getOwner()
-  let lastGoodValue: unknown = undefined
-  // `kick` lets a settled promise re-trigger this stage's r3 computed.
-  const [kick, setKick] = signal(0)
-  // `kickCount` increments per kick so each setKick(...) is a distinct value
-  // (r3's setSignal bails on `el.value === v`, so writing the same value would be a no-op).
-  let kickCount = 0
-  let suspendedOn: Promise<unknown> | null = null
-  let stashedResolution: StashedResolution | null = null
-  // The input value at the time of the most recent suspension. Used to invalidate
-  // the stash if the input has changed since (e.g., upstream re-suspended with a
-  // new pending promise concurrently with this stage's kick).
-  let suspendedInput: unknown = undefined
-
-  // The resumption strategy for this stage is fixed by its type at construction.
   const resumeKind: ResumeKind = isGeneratorFunction(stage) ? 'fast-forward' : 'reuse-value'
 
-  // When routeError finds no handler it re-throws; r3 evaluates eagerly at
-  // construction so that re-throw would escape the r3Computed(...) call rather
-  // than the later c() read. We catch that re-throw here, park the error, and
-  // surface it from the accessor wrapper below so it propagates at c() time.
+  // Sentinel for "first load — no resolved value yet."
+  const UNRESOLVED = Symbol('unresolved')
+  let lastResolvedValue: unknown = UNRESOLVED
+  let suspendedOn: Promise<unknown> | null = null
+  let suspendedInput: unknown = undefined
+  let stashedResolution: StashedResolution | null = null
   let deferredError: { error: unknown } | null = null
 
-  const r3Node = r3Computed(() => {
-    try {
-      kick() // depend on the kick signal so a settled promise can re-trigger this stage
+  // Published view value: settle handler updates this DIRECTLY (out-of-band)
+  // so body doesn't re-run on settle. Consumers reading the accessor get this.
+  const [publishedValue, setPublishedValue] = signal<unknown>(UNRESOLVED as unknown)
 
-      // Read input first so we can validate (or discard) a pending stash.
+  // Reactive pending state. Brand on accessor exposes this to `isPending()`.
+  const [pendingSig, setPendingSig] = signal(false)
+
+  // Generator-only kick: drives body re-run so the generator-driver can
+  // fast-forward through the WeakMap-cached settled yields. Non-generator
+  // stages never trigger this (they publish via setPublishedValue directly).
+  const [kick, setKick] = signal(0)
+  let kickCount = 0
+
+  // dep-tracker: runs the body for r3 dep tracking. Side-effects into
+  // publishedValue / pendingSig. Its OWN return value is irrelevant — we
+  // never read it for the value.
+  const depTracker = r3Computed(() => {
+    try {
+      kick() // dep so generator stash-rerun can force body re-run
+
       let input: unknown = undefined
       if (inputAccessor !== null) {
         input = inputAccessor()
         if (isPromise(input)) {
-          // The previous stage is suspended; mirror its state.
-          // Any stash we held was for the OLD (pre-promise) input — drop it.
+          // Upstream stage suspended; mirror its state.
           stashedResolution = null
           suspendedOn = null
-          return input
+          setPendingSig(true)
+          if (lastResolvedValue === UNRESOLVED) {
+            setPublishedValue(input)
+          }
+          // else: stale-while-revalidate
+          return null
         }
       }
 
-      // Consume a stashed resolution IFF the input that produced it still matches.
-      // If the input has changed, the stash is stale and we re-run normally.
-      if (stashedResolution !== null) {
+      // Non-generator stages can stash a resolved value to consume on next
+      // body invocation. (Generators don't stash — they re-invoke from the top
+      // and the driver's WeakMap fast-forwards through settled yields.)
+      if (resumeKind === 'reuse-value' && stashedResolution !== null) {
         if (Object.is(input, suspendedInput)) {
           const r = stashedResolution
           stashedResolution = null
           suspendedOn = null
-          if (r.kind === 'rejected') throw r.reason
-          lastGoodValue = r.value
+          setPendingSig(false)
+          if (r.kind === 'rejected') {
+            deferredError = { error: r.reason }
+            setPublishedValue(r.reason)
+            return null
+          }
+          lastResolvedValue = r.value
           deferredError = null
-          return r.value
+          setPublishedValue(r.value)
+          return null
         }
-        // Input changed — discard the stale stash and fall through.
         stashedResolution = null
       }
 
       const outcome = runStage(stage, input)
+
       if (outcome.pending) {
         const p = outcome.promise
         if (suspendedOn !== p) {
+          // New (or different) Promise → suspend on it.
           suspendedOn = p
           suspendedInput = input
+          setPendingSig(true)
+          // First-load: publish the Promise. Refetch: keep stale value visible.
+          if (lastResolvedValue === UNRESOLVED) {
+            setPublishedValue(p)
+          }
+          // else: stale-while-revalidate (don't update publishedValue)
+
           const rerun = () => {
-            if (suspendedOn === p) {
-              if (resumeKind === 'reuse-value') {
-                const state = track(p)
-                if (state.status === 'fulfilled') {
-                  stashedResolution = { kind: 'fulfilled', value: state.value }
-                } else if (state.status === 'rejected') {
-                  stashedResolution = { kind: 'rejected', reason: state.reason }
-                }
-                // 'pending' is unreachable here — rerun fires only after settle.
-              }
-              // Within-generator restart-from-top semantics:
-              // On each settle-kick, the generator stage is re-invoked from the top.
-              // The driver's WeakMap-backed `track` recognizes each yielded promise that
-              // has already settled and fast-forwards through them synchronously, so prior
-              // yields don't pay the wait cost. Cross-stage caching is automatic via the
-              // per-stage r3 computed node; intra-generator checkpointing (resume from a
-              // specific yield without re-running prior yields) is explicitly deferred.
-              // 'fast-forward': do not stash; the next r3 fn invocation will
-              // re-invoke the stage, and the driver's WeakMap-backed `track`
-              // will see the yielded promise as settled and fast-forward.
+            if (suspendedOn !== p) return // superseded
+            const state = track(p)
+            if (state.status === 'fulfilled') {
               suspendedOn = null
-              setKick(++kickCount)
+              setPendingSig(false)
+              if (resumeKind === 'fast-forward') {
+                // Generators: no stash. Kick → body re-runs → generator
+                // re-invokes from top; driver fast-forwards via WeakMap and
+                // returns the GENERATOR'S TRUE RETURN (which may be a
+                // transformation of the yielded value).
+                setKick(++kickCount)
+                return
+              }
+              // Non-generators: resolved-value-keyed cache. Publish only on change.
+              if (
+                lastResolvedValue === UNRESOLVED ||
+                !Object.is(lastResolvedValue, state.value)
+              ) {
+                lastResolvedValue = state.value
+                deferredError = null
+                setPublishedValue(state.value)
+              }
+              // else: same value, no downstream invalidation
+            } else if (state.status === 'rejected') {
+              suspendedOn = null
+              setPendingSig(false)
+              if (resumeKind === 'fast-forward') {
+                // Generators handle rejection via their own try/catch around
+                // yield. Kick → body re-runs → driver re-throws on the yield,
+                // generator catches (or doesn't), runStage returns/throws.
+                setKick(++kickCount)
+                return
+              }
+              deferredError = { error: state.reason }
+              // Bump publishedValue to dirty consumers so they re-read and throw.
+              setPublishedValue(state.reason)
             }
           }
           p.then(rerun, rerun)
         }
-        return p
+        // No body return value — view is via publishedValue.
+        return null
       }
 
+      // Sync result.
       suspendedOn = null
-      lastGoodValue = outcome.value
+      setPendingSig(false)
+      if (
+        lastResolvedValue === UNRESOLVED ||
+        !Object.is(lastResolvedValue, outcome.value)
+      ) {
+        lastResolvedValue = outcome.value
+        setPublishedValue(outcome.value)
+      }
       deferredError = null
-      return outcome.value
+      return null
     } catch (e) {
       try {
-        routeError(myOwner, e) // throws if no handler catches
+        routeError(myOwner, e)
       } catch (rethrown) {
-        // No handler — park the error so the accessor can surface it at read time.
-        // This decouples the throw from r3's eager construction call.
         deferredError = { error: rethrown }
-        return lastGoodValue
       }
-      // Handler caught — return the cached last-good value so r3 sees no value
-      // change → no propagation to downstream subs → throwing stage stays frozen.
-      return lastGoodValue
+      return null
     }
   })
 
-  // Wrap the raw accessor: if a previous run parked an unhandled error, throw it
-  // now so callers see the throw at read time rather than at construction time.
-  const rawAccessor = makeAccessor(r3Node)
+  // User-facing accessor: reads depTracker (to register as sub so dep
+  // changes propagate AND to trigger lazy first eval) and publishedValue
+  // (the actual view value). Surfaces parked errors.
   const accessor = (() => {
-    if (deferredError !== null) {
-      throw deferredError.error
-    }
-    return rawAccessor()
+    if (deferredError !== null) throw deferredError.error
+    r3Read(depTracker as R3Computed<unknown>)
+    return publishedValue()
   }) as Signal<unknown>
-  accessor[NODE] = r3Node
-  return { accessor, r3Node: r3Node as R3Computed<unknown> }
+  accessor[NODE] = depTracker as R3Computed<unknown>
+  accessor[PENDING] = pendingSig
+  return { accessor, r3Node: depTracker as R3Computed<unknown> }
 }

@@ -35,8 +35,10 @@ test('pipeline re-runs when its signal input changes', async () => {
   expect(pipeline()).toBe('value:1')
 
   setId(2)
-  // After the write, the async stage re-runs and is suspended again with a fresh promise.
-  expect(pipeline()).toBeInstanceOf(Promise)
+  // Plan 6: stale-while-revalidate. After the write, the prior resolved value
+  // ('value:1') stays visible until the new promise settles. `isPending(pipeline)`
+  // would be true during the refetch window for callers that want to observe it.
+  expect(pipeline()).toBe('value:1')
   await tick()
   expect(pipeline()).toBe('value:2')
 })
