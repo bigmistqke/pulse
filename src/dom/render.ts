@@ -25,12 +25,17 @@ export function render(
     // everything else — covers marker comments, text nodes, and any DOM
     // produced by reactive function-child bindings.
     const preExisting = new Set<ChildNode>(Array.from(target.childNodes))
-    insertChild(target, component())
-    onCleanup(() => {
-      for (const n of Array.from(target.childNodes)) {
-        if (!preExisting.has(n)) target.removeChild(n)
-      }
-    })
-    return dispose
+    try {
+      insertChild(target, component())
+      onCleanup(() => {
+        for (const n of Array.from(target.childNodes)) {
+          if (!preExisting.has(n)) target.removeChild(n)
+        }
+      })
+      return dispose
+    } catch (e) {
+      dispose()
+      throw e
+    }
   })
 }

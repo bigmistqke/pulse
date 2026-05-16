@@ -3,6 +3,7 @@ import { h } from '../../src/dom/h'
 import {
   flush,
   microtaskScheduler,
+  onCleanup,
   render,
   setScheduler,
   signal,
@@ -81,4 +82,19 @@ test('render accepts a top-level primitive return', () => {
   expect(target.textContent).toBe('plain text')
   dispose()
   expect(target.childNodes.length).toBe(0)
+})
+
+test('render() disposes root owner if component throws synchronously', () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+  let cleanedUp = false
+  expect(() => render(
+    () => {
+      onCleanup(() => { cleanedUp = true })
+      throw new Error('boom from component')
+    },
+    target,
+  )).toThrow('boom from component')
+  // Owner should have been disposed despite the throw escaping
+  expect(cleanedUp).toBe(true)
 })
