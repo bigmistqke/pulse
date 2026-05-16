@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'vitest'
-import { catchError, createRoot, getOwner, onCleanup, runWithOwner } from '../src/owner'
+import { catchError, createRoot, getOwner, onCleanup, runWithOwner, findLoadingScope, type LoadingScope } from '../src/owner'
 import { flush, microtaskScheduler, setScheduler } from '../src/scheduler'
 
 afterEach(() => setScheduler(microtaskScheduler(flush)))
@@ -160,4 +160,36 @@ test('catchError throws when called inside a disposed owner', () => {
     dispose()
     expect(() => catchError(() => {}, () => {})).toThrow(/disposed/)
   })
+})
+
+test('Owner.loadingScope defaults to null', () => {
+  createRoot(() => {
+    const owner = getOwner()!
+    expect(owner.loadingScope).toBe(null)
+  })
+})
+
+test('findLoadingScope walks parent chain to find first non-null entry', () => {
+  let captured: LoadingScope | null = null
+  const scope: LoadingScope = {
+    pending: () => true,
+    register: () => () => {},
+  }
+  createRoot(() => {
+    const outer = getOwner()!
+    outer.loadingScope = scope
+    catchError(() => {
+      // inner owner is a child of outer via createSubOwner inside catchError
+      captured = findLoadingScope(getOwner())
+    }, () => {})
+  })
+  expect(captured).toBe(scope)
+})
+
+test('findLoadingScope returns null when no scope on chain', () => {
+  let captured: LoadingScope | null = { pending: () => false, register: () => () => {} }
+  createRoot(() => {
+    captured = findLoadingScope(getOwner())
+  })
+  expect(captured).toBe(null)
 })

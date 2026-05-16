@@ -1,4 +1,17 @@
 import { getContext, type Disposable, onCleanup as r3OnCleanup } from 'r3'
+import type { Accessor } from './signal'
+
+/**
+ * Reactive pending-state handle attached to an `Owner` by `<Loading>`.
+ * Inner binding-effects that catch `NotReadyYet` walk up the owner chain
+ * to find the nearest scope and register themselves as pending.
+ */
+export interface LoadingScope {
+  /** `true` while at least one descendant binding is registered as pending. */
+  readonly pending: Accessor<boolean>
+  /** Increment the pending count. Returns an unregister callback. */
+  register: () => () => void
+}
 
 /** A lifecycle scope. Owns reactive nodes created within it and their cleanup callbacks. */
 export interface Owner {
@@ -14,6 +27,8 @@ export interface Owner {
   readonly cleanups: Disposable[]
   /** True once this owner has been disposed. Use-after-dispose throws. */
   disposed: boolean
+  /** Optional loading scope (set by `<Loading>`). Used by binding-effects on `NotReadyYet` to register pending. */
+  loadingScope: LoadingScope | null
 }
 
 let currentOwner: Owner | null = null
@@ -22,7 +37,7 @@ function newOwner(
   parent: Owner | null = null,
   errorHandler: ((error: unknown) => void) | null = null,
 ): Owner {
-  return { parent, errorHandler, children: [], cleanups: [], disposed: false }
+  return { parent, errorHandler, children: [], cleanups: [], disposed: false, loadingScope: null }
 }
 
 /**
@@ -200,4 +215,18 @@ export function onCleanup(fn: Disposable): Disposable {
     currentOwner.cleanups.push(fn)
   }
   return fn
+}
+
+/**
+ * Walk up the parent chain from `start` (inclusive) and return the first
+ * non-null `loadingScope`. Returns `null` if none found. Internal helper
+ * used by `useLoading()` and by binding-effects on `NotReadyYet`.
+ */
+export function findLoadingScope(start: Owner | null): LoadingScope | null {
+  let owner = start
+  while (owner !== null) {
+    if (owner.loadingScope !== null) return owner.loadingScope
+    owner = owner.parent
+  }
+  return null
 }
