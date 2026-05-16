@@ -41,8 +41,6 @@ Severity: **(small)** trivial cleanups · **(worth)** worth doing soon · **(lat
   Source: Plan 2d final review (Minor).
 - **(later) Drop signal write-back (`signal<T | Promise<T>>` auto-resolve).** With Plan 6's `computed(() => Promise)` fully fixed, the write-back hack in `signal()` (where setting a signal to a Promise auto-flips it to T on settle) is no longer needed in user code — `computed(() => p)` covers all cases naturally and with proper dep tracking. Consider removing write-back to simplify `signal` semantics: a signal stores exactly what you put in it, no implicit async behavior.
   Source: Plan 6 design discussion.
-- **(later) `use(cb)` hook form as sugar over `computed(cb) + throw-on-pending`.** Today `use(promise)` and `use(accessor)` both work, but a `use(() => fetchX(dep()))` form (which would internally do `const m = computed(cb); if (isPending(m)) throw NotReadyYet(m); return m()`) would give leaves a one-liner for "create-and-suspend-on" without explicit `computed` ceremony. Sugar, not a primitive; spec it once `computed`-async patterns settle.
-  Source: Plan 6 design discussion.
 - **(later) ADR 0003 wording vs Plan 2b's per-stage implementation.** ADR 0003 says "one ordinary r3 computed node" + "stashed pipeline state". Plan 2b uses one r3 node *per stage* — same architectural commitment (r3 unmodified; async-ness in pulse wrappers), different mechanism (r3's memoization gives free per-stage caching). The ADR could be updated to record the chosen implementation, or kept as-is with the plan's scope note serving as the divergence record.
   Source: Plan 2b plan scope notes + final review.
 
