@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest'
 import { computed } from '../src/computed'
 import { effect } from '../src/effect'
-import { signal } from '../src/signal'
+import { PENDING, signal } from '../src/signal'
 import { isPending, read } from '../src/async'
 import { flush, microtaskScheduler, setScheduler, syncScheduler } from '../src/scheduler'
 import { createRoot, catchError } from '../src/owner'
@@ -603,4 +603,26 @@ test('generator stage: unchanged behaviour (regression check)', async () => {
   })
 
   setScheduler(microtaskScheduler(flush))
+})
+
+test('[PENDING].promise returns the in-flight Promise during refetch', async () => {
+  const [id, setId] = signal(1)
+  let release!: (v: string) => void
+  const list = computed(() => {
+    const i = id()
+    if (i === 1) return Promise.resolve(`v:${i}`)
+    return new Promise<string>((r) => { release = r })
+  })
+  await tick()
+  expect(list()).toBe('v:1')
+
+  setId(2)
+  const brand = list[PENDING]!
+  expect(brand()).toBe(true)
+  expect(brand.promise!()).toBeInstanceOf(Promise)
+
+  release('v:2')
+  await tick()
+  expect(brand()).toBe(false)
+  expect(brand.promise!()).toBeNull()
 })

@@ -3,7 +3,7 @@ import { isGeneratorFunction, track, type Resolved } from './async'
 import { runStage } from './driver'
 import { isPromise } from './is-promise'
 import { getOwner, routeError, registerWithOwner } from './owner'
-import { makeAccessor, NODE, PENDING, signal, type Signal } from './signal'
+import { makeAccessor, NODE, PENDING, signal, type Accessor, type Signal } from './signal'
 
 /** A pipeline stage of any shape: sync, async, or generator. The return type
  *  is whatever the function returns — sync `R`, async `Promise<R>`, or
@@ -284,8 +284,20 @@ function makeStageNode(
   // (downstream stages see the prior resolved value during a refetch, so their
   // own pendingSig stays false even though the pipeline is mid-refetch).
   const upstreamPending = inputAccessor?.[PENDING]
-  accessor[PENDING] = upstreamPending
+  // We wrap even the non-upstream case so the brand has a stable shape
+  // (function + .promise getter). Behavior is identical since () => pendingSig()
+  // delegates to the same signal.
+  const pendingFn = upstreamPending
     ? () => pendingSig() || upstreamPending()
-    : pendingSig
+    : () => pendingSig()
+  const brand = pendingFn as Accessor<boolean> & { promise: () => Promise<unknown> | null }
+  brand.promise = () => {
+    if (suspendedOn !== null) return suspendedOn
+    const up = upstreamPending as
+      | (Accessor<boolean> & { promise?: () => Promise<unknown> | null })
+      | undefined
+    return up?.promise?.() ?? null
+  }
+  accessor[PENDING] = brand
   return { accessor, r3Node: depTracker as R3Computed<unknown> }
 }

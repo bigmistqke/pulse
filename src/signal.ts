@@ -27,7 +27,7 @@ export const PENDING = Symbol('pulse.pending')
 export interface Signal<T> {
   (): T
   [NODE]: R3Node<T>
-  [PENDING]?: Accessor<boolean>
+  [PENDING]?: Accessor<boolean> & { promise?: () => Promise<unknown> | null }
 }
 
 /** A callable that reads a reactive signal or computed value. */
