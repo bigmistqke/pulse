@@ -2,7 +2,7 @@ import { expect, test } from 'vitest'
 import { computed } from '../src/computed'
 import { effect } from '../src/effect'
 import { PENDING, signal } from '../src/signal'
-import { isPending, read } from '../src/async'
+import { isPending, read, use } from '../src/async'
 import { flush, microtaskScheduler, setScheduler, syncScheduler } from '../src/scheduler'
 import { createRoot, catchError } from '../src/owner'
 
@@ -625,4 +625,28 @@ test('[PENDING].promise returns the in-flight Promise during refetch', async () 
   await tick()
   expect(brand()).toBe(false)
   expect(brand.promise!()).toBeNull()
+})
+
+test('computed body suspends on use(pendingComputed) and snapshots coherently', async () => {
+  const [page, setPage] = signal(1)
+  let release!: (v: string[]) => void
+  const list = computed(() => {
+    const p = page()
+    if (p === 1) return Promise.resolve(['a', 'b'])
+    return new Promise<string[]>((r) => { release = r })
+  })
+  await tick()
+
+  const view = computed(() => ({ page: page(), items: use(list) }))
+  expect(view()).toEqual({ page: 1, items: ['a', 'b'] })
+
+  setPage(2)
+  // SWR: view's prior snapshot stays visible even though page() returns 2 now.
+  expect(view()).toEqual({ page: 1, items: ['a', 'b'] })
+  expect(isPending(view)).toBe(true)
+
+  release(['c', 'd'])
+  await tick()
+  expect(view()).toEqual({ page: 2, items: ['c', 'd'] })
+  expect(isPending(view)).toBe(false)
 })

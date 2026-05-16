@@ -84,9 +84,11 @@ export function track(promise: Promise<unknown>): PromiseState {
  * - Settled promise -> its resolved value (a settled rejection re-throws its reason).
  * - Pending promise -> throws `NotReadyYet` (caught by the nearest effect).
  *
- * Intended for use inside effects (including, later, JSX bindings). Using it
- * inside a `computed` is allowed but a code smell — the computed becomes
- * throw-on-read.
+ * Intended for use inside effects, JSX bindings, AND computed bodies.
+ * Inside a computed, `use(pendingAccessor)` suspends the computed via SWR:
+ * the prior published value stays visible until the gate settles, then the
+ * computed re-runs and publishes a coherent new snapshot. This enables
+ * multi-read transitions — see docs/superpowers/specs/2026-05-16-pulse-transitions-design.md.
  */
 export function use<T>(x: T | Promise<T> | (() => T | Promise<T>)): Awaited<T> {
   // Accept accessor form for symmetry with `read()`. Footgun: if T extends
