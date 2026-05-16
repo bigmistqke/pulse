@@ -284,20 +284,11 @@ function makeStageNode(
   // (downstream stages see the prior resolved value during a refetch, so their
   // own pendingSig stays false even though the pipeline is mid-refetch).
   const upstreamPending = inputAccessor?.[PENDING]
-  // We wrap even the non-upstream case so the brand has a stable shape
-  // (function + .promise getter). Behavior is identical since () => pendingSig()
-  // delegates to the same signal.
-  const pendingFn = upstreamPending
+  // Stable brand shape so .promise is always callable.
+  const brand = (upstreamPending
     ? () => pendingSig() || upstreamPending()
-    : () => pendingSig()
-  const brand = pendingFn as Accessor<boolean> & { promise: () => Promise<unknown> | null }
-  brand.promise = () => {
-    if (suspendedOn !== null) return suspendedOn
-    const up = upstreamPending as
-      | (Accessor<boolean> & { promise?: () => Promise<unknown> | null })
-      | undefined
-    return up?.promise?.() ?? null
-  }
+    : pendingSig) as Accessor<boolean> & { promise: () => Promise<unknown> | null }
+  brand.promise = () => suspendedOn ?? upstreamPending?.promise?.() ?? null
   accessor[PENDING] = brand
   return { accessor, r3Node: depTracker as R3Computed<unknown> }
 }
