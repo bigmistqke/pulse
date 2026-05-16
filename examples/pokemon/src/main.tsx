@@ -19,39 +19,41 @@ function TopBar() {
 }
 
 function PokemonDetails(props: { name: string }) {
-  // Kick off fetch once; the promise is stable across the binding-effect's runs.
+  // Kick off fetch once; the promise is stable.
   const pokemonPromise = fetchPokemon(props.name)
+  // `p` is a thunk that calls use() — wrap each access at the leaf to keep
+  // bindings fine-grained. Each `() => p()…` is its own binding-effect.
+  const p = (): Pokemon => use(pokemonPromise)
   return (
     <Loading initial={<div class="detail-spinner">loading details…</div>}>
       {() => (
         <div class="details">
-          {() => {
-            // use() inside a binding callback — its NotReadyYet throw is caught
-            // by the binding-effect and registers with the enclosing Loading.
-            const p: Pokemon = use(pokemonPromise)
-            return (
-              <>
-                {p.sprites.front_default && (
-                  <img attr:src={p.sprites.front_default} attr:alt={p.name} />
-                )}
-                <div class="meta">
-                  <div class="types">
-                    <For each={p.types}>{(t) => <span class="type">{t.type.name}</span>}</For>
-                  </div>
-                  <table class="stats">
-                    <For each={p.stats}>
-                      {(s) => (
-                        <tr>
-                          <td>{s.stat.name}</td>
-                          <td>{s.base_stat}</td>
-                        </tr>
-                      )}
-                    </For>
-                  </table>
-                </div>
-              </>
+          {/* sprite: hidden until p resolves; each prop binding is reactive */}
+          {() =>
+            p().sprites.front_default && (
+              <img
+                attr:src={() => p().sprites.front_default!}
+                attr:alt={() => p().name}
+              />
             )
-          }}
+          }
+          <div class="meta">
+            <div class="types">
+              <For each={() => p().types}>
+                {(t) => <span class="type">{t.type.name}</span>}
+              </For>
+            </div>
+            <table class="stats">
+              <For each={() => p().stats}>
+                {(s) => (
+                  <tr>
+                    <td>{s.stat.name}</td>
+                    <td>{s.base_stat}</td>
+                  </tr>
+                )}
+              </For>
+            </table>
+          </div>
         </div>
       )}
     </Loading>
