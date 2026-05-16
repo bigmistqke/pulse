@@ -19,33 +19,41 @@ function TopBar() {
 }
 
 function PokemonDetails(props: { name: string }) {
+  // Kick off fetch once; the promise is stable across the binding-effect's runs.
+  const pokemonPromise = fetchPokemon(props.name)
   return (
     <Loading initial={<div class="detail-spinner">loading details…</div>}>
-      {() => {
-        const p: Pokemon = use(fetchPokemon(props.name))
-        return (
-          <div class="details">
-            {p.sprites.front_default && (
-              <img attr:src={p.sprites.front_default} attr:alt={p.name} />
-            )}
-            <div class="meta">
-              <div class="types">
-                <For each={p.types}>{(t) => <span class="type">{t.type.name}</span>}</For>
-              </div>
-              <table class="stats">
-                <For each={p.stats}>
-                  {(s) => (
-                    <tr>
-                      <td>{s.stat.name}</td>
-                      <td>{s.base_stat}</td>
-                    </tr>
-                  )}
-                </For>
-              </table>
-            </div>
-          </div>
-        )
-      }}
+      {() => (
+        <div class="details">
+          {() => {
+            // use() inside a binding callback — its NotReadyYet throw is caught
+            // by the binding-effect and registers with the enclosing Loading.
+            const p: Pokemon = use(pokemonPromise)
+            return (
+              <>
+                {p.sprites.front_default && (
+                  <img attr:src={p.sprites.front_default} attr:alt={p.name} />
+                )}
+                <div class="meta">
+                  <div class="types">
+                    <For each={p.types}>{(t) => <span class="type">{t.type.name}</span>}</For>
+                  </div>
+                  <table class="stats">
+                    <For each={p.stats}>
+                      {(s) => (
+                        <tr>
+                          <td>{s.stat.name}</td>
+                          <td>{s.base_stat}</td>
+                        </tr>
+                      )}
+                    </For>
+                  </table>
+                </div>
+              </>
+            )
+          }}
+        </div>
+      )}
     </Loading>
   )
 }
@@ -72,27 +80,27 @@ function PokemonRow(props: { ref: PokemonRef }) {
 function App() {
   return (
     <Loading initial={<div class="spinner">loading…</div>}>
-      {() => {
-        const items = use(list())
-        return (
-          <div class="app">
-            <TopBar />
-            <ul class="list">
-              <For each={items}>{(ref) => <PokemonRow ref={ref} />}</For>
-            </ul>
-            <nav class="paging">
-              <button
-                on:click={() => setPage((p) => Math.max(0, p - 1))}
-                prop:disabled={() => page() === 0}
-              >
-                ← prev
-              </button>
-              <span>page {() => page() + 1}</span>
-              <button on:click={() => setPage((p) => p + 1)}>next →</button>
-            </nav>
-          </div>
-        )
-      }}
+      {() => (
+        <div class="app">
+          <TopBar />
+          <ul class="list">
+            {/* `each` is a function → mapArray re-runs reactively when page() changes.
+                use() inside re-throws on the new pending promise; mapArray's
+                binding-effect catches and registers with Loading's scope. */}
+            <For each={() => use(list())}>{(ref) => <PokemonRow ref={ref} />}</For>
+          </ul>
+          <nav class="paging">
+            <button
+              on:click={() => setPage((p) => Math.max(0, p - 1))}
+              prop:disabled={() => page() === 0}
+            >
+              ← prev
+            </button>
+            <span>page {() => page() + 1}</span>
+            <button on:click={() => setPage((p) => p + 1)}>next →</button>
+          </nav>
+        </div>
+      )}
     </Loading>
   )
 }
