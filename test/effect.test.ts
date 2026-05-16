@@ -1,6 +1,8 @@
 import { afterEach, expect, test } from 'vitest'
 import { effect } from '../src/effect'
 import { onCleanup, createRoot, catchError } from '../src/owner'
+import { getOwner } from '../src/index'
+import { type LoadingScope } from '../src/owner'
 import {
   flush,
   microtaskScheduler,
@@ -143,4 +145,74 @@ test('an effect re-throwing after a signal change routes the new throw too', () 
   setTrigger(2)
   expect(errors).toHaveLength(2)
   expect((errors[1] as Error).message).toBe('fail 2')
+})
+
+test('effect that suspends increments nearest loadingScope', async () => {
+  setScheduler(syncScheduler(flush))
+  let count = 0
+  const scope: LoadingScope = {
+    pending: () => count > 0,
+    register: () => {
+      count++
+      return () => { count-- }
+    },
+  }
+  let resolveP!: (v: number) => void
+  const p = new Promise<number>((r) => { resolveP = r })
+
+  await createRoot(async (dispose) => {
+    getOwner()!.loadingScope = scope
+    effect(() => { use(p) })
+    expect(count).toBe(1) // suspended → registered
+    resolveP(42)
+    await p
+    flush()
+    expect(count).toBe(0) // settled → unregistered
+    dispose()
+  })
+
+  setScheduler(microtaskScheduler(flush))
+})
+
+test('effect disposal while pending unregisters from loadingScope', () => {
+  setScheduler(syncScheduler(flush))
+  let count = 0
+  const scope: LoadingScope = {
+    pending: () => count > 0,
+    register: () => {
+      count++
+      return () => { count-- }
+    },
+  }
+  const p = new Promise<number>(() => {}) // never settles
+
+  const dispose = createRoot((d) => {
+    getOwner()!.loadingScope = scope
+    effect(() => { use(p) })
+    return d
+  })
+  expect(count).toBe(1) // suspended
+  dispose()
+  expect(count).toBe(0) // disposed → unregistered
+
+  setScheduler(microtaskScheduler(flush))
+})
+
+test('effect that never suspends does not touch loadingScope', () => {
+  setScheduler(syncScheduler(flush))
+  let count = 0
+  const scope: LoadingScope = {
+    pending: () => count > 0,
+    register: () => {
+      count++
+      return () => { count-- }
+    },
+  }
+  createRoot(() => {
+    getOwner()!.loadingScope = scope
+    effect(() => { /* sync, no use() */ })
+    expect(count).toBe(0)
+  })
+
+  setScheduler(microtaskScheduler(flush))
 })
