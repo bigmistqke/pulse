@@ -29,6 +29,12 @@ export interface ShowProps<T> {
  * subtree (children function is NOT re-called when the value updates but
  * the branch stays). Truthy↔falsy transitions dispose the old branch's
  * sub-owner and mount the new under a fresh one.
+ *
+ * Note: the function-child form is called ONCE per truthy transition, not on
+ * each truthy value update. `<Show when={user}>{u => <span>{u.name}</span>}</Show>`
+ * captures `u` at transition time; if `user.name` changes (same object, mutated),
+ * the rendered DOM doesn't update unless the children body has its own reactive
+ * read (e.g. `<span>{() => user().name}</span>`).
  */
 export function Show<T>(props: ShowProps<T>): () => unknown {
   const parentOwner = getOwner()

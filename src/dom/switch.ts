@@ -51,6 +51,11 @@ export interface SwitchProps {
  * under a fresh one.
  *
  * Non-Match children are silently ignored (e.g. stray whitespace text).
+ *
+ * Note: branch caching uses Match-object identity. Place `<Match>` children
+ * INLINE in the Switch's JSX, not constructed per-render (e.g. don't wrap in
+ * a function that rebuilds the Match list each call). Fresh Match objects
+ * each render look like winner changes and cause unnecessary remounts.
  */
 export function Switch(props: SwitchProps): () => unknown {
   const parentOwner = getOwner()
