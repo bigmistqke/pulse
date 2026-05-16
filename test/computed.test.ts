@@ -267,3 +267,31 @@ test('an unhandled-throw computed throws on every read until a successful re-run
 
   setScheduler(microtaskScheduler(flush))
 })
+
+test('async stage rejection: rejected promise re-thrown on next r3 invocation (reuse-value path)', async () => {
+  setScheduler(syncScheduler(flush))
+  const caught: unknown[] = []
+
+  let rejectP!: (reason: unknown) => void
+  const p = new Promise<number>((_, rej) => { rejectP = rej })
+
+  createRoot(() => {
+    catchError(() => {
+      const c = computed(
+        () => 1,           // stage 0: sync
+        async () => p,     // stage 1: async, returns rejecting promise
+      )
+      effect(() => { c() })
+    }, (e) => caught.push(e))
+  })
+
+  expect(caught).toEqual([])  // not yet rejected
+  rejectP(new Error('stage-1-rejected'))
+  await p.catch(() => {})  // wait for rejection to settle
+  await tick()             // allow the async wrapper's outer promise to settle too
+  flush()
+  expect(caught).toHaveLength(1)
+  expect((caught[0] as Error).message).toBe('stage-1-rejected')
+
+  setScheduler(microtaskScheduler(flush))
+})
