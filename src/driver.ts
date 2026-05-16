@@ -60,6 +60,8 @@ function driveGenerator(gen: Generator<unknown, unknown, unknown>): StageOutcome
  * so the sync path catches it correctly. Generator detection is the only
  * dispatch we need; async vs sync is handled uniformly by `settle`.
  */
+// `any` here is the standard implementation-signature widening for the
+// variadic overloads above; narrowing to `unknown` breaks the overload contract.
 export function runStage(
   stage: (value: any) => unknown,
   input: unknown,

@@ -56,6 +56,8 @@ export function computed<A, B, C, D, E>(
  *
  * @remarks Typed overloads cover 1–5 stages; beyond that, compose pipelines.
  */
+// `any` here is the standard implementation-signature widening for the
+// variadic overloads above; narrowing to `unknown` breaks the overload contract.
 export function computed(...stages: Array<(value: any) => unknown>): Signal<unknown> {
   if (stages.length === 0) {
     throw new Error('computed requires at least one stage')
@@ -101,6 +103,8 @@ type StashedResolution =
  * stage's value becomes the same promise (color propagates without re-entering
  * the stage's logic).
  */
+// `any` here is the standard implementation-signature widening for the
+// variadic overloads above; narrowing to `unknown` breaks the overload contract.
 function makeStageNode(
   stage: (value: any) => unknown,
   inputAccessor: Signal<unknown> | null,
