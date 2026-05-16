@@ -58,9 +58,13 @@ export function Loading(props: LoadingProps): Accessor<unknown> {
   const loadedSubtree: unknown = runWithOwner(boundaryOwner, props.children)
 
   // Detect "ever loaded": flip true the first time pending drops to false.
+  // Owned by boundaryOwner (symmetric with loadedSubtree) so the lifetime
+  // is bound to the boundary, not the calling parent.
   let hasEverLoaded = false
-  effect(() => {
-    if (!pending()) hasEverLoaded = true
+  runWithOwner(boundaryOwner, () => {
+    effect(() => {
+      if (!pending()) hasEverLoaded = true
+    })
   })
 
   return () => {

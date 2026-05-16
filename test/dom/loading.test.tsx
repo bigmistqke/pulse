@@ -303,3 +303,60 @@ test('disposing surrounding owner cascades to Loading', () => {
   dispose()
   expect(cleaned).toBe(true)
 })
+
+test('useLoading() outside any Loading returns constant-false accessor', () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+
+  let captured!: ReturnType<typeof useLoading>
+  const dispose = render(
+    () => {
+      captured = useLoading()
+      return <span>x</span>
+    },
+    target,
+  )
+  expect(captured()).toBe(false)
+  // The accessor is stable; not reactive after the fact.
+  expect(captured).toBe(captured)
+  dispose()
+})
+
+test('rapid src-swap keeps pending count at 1, not climbing', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+  const p1 = new Promise<string>(() => {})
+  const p2 = new Promise<string>(() => {}) // both pending; never settle
+  const [src, setSrc] = signal<string | Promise<string>>(p1)
+
+  let observedPending: boolean[] = []
+  function Probe() {
+    const pending = useLoading()
+    // Observe pending at each tick by reading inside an effect via Show
+    return <Show when={pending}>{() => { observedPending.push(true); return <i>p</i> }}</Show>
+  }
+
+  const dispose = render(
+    () => (
+      <Loading initial={<p>init</p>}>
+        {() => (
+          <>
+            <Probe/>
+            <span>{() => use(src())}</span>
+          </>
+        )}
+      </Loading>
+    ),
+    target,
+  )
+  // Initial pending → shows init; loaded subtree (with Probe) hasn't mounted yet,
+  // so observedPending captures from when subtree actually attaches.
+  expect(target.textContent).toBe('init')
+  // Swap rapidly — count should remain at 1 (same effect, register guard prevents double-count)
+  setSrc(p2)
+  setSrc(p1)
+  setSrc(p2)
+  // Still pending. text stays at init.
+  expect(target.textContent).toBe('init')
+  dispose()
+})
