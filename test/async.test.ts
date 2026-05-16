@@ -69,6 +69,26 @@ test('use returns a plain (non-promise) value unchanged', () => {
   expect(use('hello')).toBe('hello')
 })
 
+test('use(0) returns 0 (falsy value, not pending)', () => {
+  expect(use(0)).toBe(0)
+})
+
+test('use(null) returns null', () => {
+  expect(use(null)).toBe(null)
+})
+
+test('use(undefined) returns undefined', () => {
+  expect(use(undefined)).toBe(undefined)
+})
+
+test('use(false) returns false', () => {
+  expect(use(false)).toBe(false)
+})
+
+test('use("") returns empty string', () => {
+  expect(use('')).toBe('')
+})
+
 test('use throws NotReadyYet for a pending promise', () => {
   const pending = new Promise<number>(() => {})
   expect(() => use(pending)).toThrow(NotReadyYet)
