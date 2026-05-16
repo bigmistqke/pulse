@@ -1,5 +1,5 @@
 import { computed as r3Computed, read as r3Read, unwatched, type Computed as R3Computed } from 'r3'
-import { isGeneratorFunction, NotReadyYet, track, type Resolved } from './async'
+import { isGeneratorFunction, NotReadyYet, track, type PromiseState, type Resolved } from './async'
 import { runStage } from './driver'
 import { isPromise } from './is-promise'
 import { getOwner, routeError, registerWithOwner } from './owner'
@@ -143,11 +143,34 @@ function makeStageNode(
   const [kick, setKick] = signal(0)
   let kickCount = 0
 
+  // Shared envelope: assign suspendedOn/suspendedInput, flip pendingSig,
+  // publish the Promise on first-load (else SWR), and wire settle handlers.
+  // Per-callsite settle behavior is delegated to `onSettle`.
+  const suspendOn = (
+    p: Promise<unknown>,
+    input: unknown,
+    onSettle: (state: PromiseState) => void,
+  ) => {
+    if (suspendedOn === p) return
+    suspendedOn = p
+    suspendedInput = input
+    setPendingSig(true)
+    if (lastResolvedValue === UNRESOLVED) {
+      setPublishedValue(p)
+    }
+    // else: stale-while-revalidate — prior value stays visible
+    const rerun = () => {
+      if (suspendedOn !== p) return // superseded
+      onSettle(track(p))
+    }
+    p.then(rerun, rerun)
+  }
+
   // dep-tracker: runs the body for r3 dep tracking. Side-effects into
   // publishedValue / pendingSig. Its OWN return value is irrelevant — we
   // never read it for the value.
   const depTracker = r3Computed(() => {
-    // Hoisted so the body catch (NotReadyYet branch) can stash it as suspendedInput.
+    // hoisted: needed by NotReadyYet catch below
     let input: unknown = undefined
     try {
       kick() // dep so generator stash-rerun can force body re-run
@@ -192,59 +215,43 @@ function makeStageNode(
       const outcome = runStage(stage, input)
 
       if (outcome.pending) {
-        const p = outcome.promise
-        if (suspendedOn !== p) {
-          // New (or different) Promise → suspend on it.
-          suspendedOn = p
-          suspendedInput = input
-          setPendingSig(true)
-          // First-load: publish the Promise. Refetch: keep stale value visible.
-          if (lastResolvedValue === UNRESOLVED) {
-            setPublishedValue(p)
-          }
-          // else: stale-while-revalidate (don't update publishedValue)
-
-          const rerun = () => {
-            if (suspendedOn !== p) return // superseded
-            const state = track(p)
-            if (state.status === 'fulfilled') {
-              suspendedOn = null
-              setPendingSig(false)
-              if (resumeKind === 'fast-forward') {
-                // Generators: no stash. Kick → body re-runs → generator
-                // re-invokes from top; driver fast-forwards via WeakMap and
-                // returns the GENERATOR'S TRUE RETURN (which may be a
-                // transformation of the yielded value).
-                setKick(++kickCount)
-                return
-              }
-              // Non-generators: resolved-value-keyed cache. Publish only on change.
-              if (
-                lastResolvedValue === UNRESOLVED ||
-                !Object.is(lastResolvedValue, state.value)
-              ) {
-                lastResolvedValue = state.value
-                deferredError = null
-                setPublishedValue(state.value)
-              }
-              // else: same value, no downstream invalidation
-            } else if (state.status === 'rejected') {
-              suspendedOn = null
-              setPendingSig(false)
-              if (resumeKind === 'fast-forward') {
-                // Generators handle rejection via their own try/catch around
-                // yield. Kick → body re-runs → driver re-throws on the yield,
-                // generator catches (or doesn't), runStage returns/throws.
-                setKick(++kickCount)
-                return
-              }
-              deferredError = { error: state.reason }
-              // Bump publishedValue to dirty consumers so they re-read and throw.
-              setPublishedValue(state.reason)
+        suspendOn(outcome.promise, input, (state) => {
+          if (state.status === 'fulfilled') {
+            suspendedOn = null
+            setPendingSig(false)
+            if (resumeKind === 'fast-forward') {
+              // Generators: no stash. Kick → body re-runs → generator
+              // re-invokes from top; driver fast-forwards via WeakMap and
+              // returns the GENERATOR'S TRUE RETURN (which may be a
+              // transformation of the yielded value).
+              setKick(++kickCount)
+              return
             }
+            // Non-generators: resolved-value-keyed cache. Publish only on change.
+            if (
+              lastResolvedValue === UNRESOLVED ||
+              !Object.is(lastResolvedValue, state.value)
+            ) {
+              lastResolvedValue = state.value
+              deferredError = null
+              setPublishedValue(state.value)
+            }
+            // else: same value, no downstream invalidation
+          } else if (state.status === 'rejected') {
+            suspendedOn = null
+            setPendingSig(false)
+            if (resumeKind === 'fast-forward') {
+              // Generators handle rejection via their own try/catch around
+              // yield. Kick → body re-runs → driver re-throws on the yield,
+              // generator catches (or doesn't), runStage returns/throws.
+              setKick(++kickCount)
+              return
+            }
+            deferredError = { error: state.reason }
+            // Bump publishedValue to dirty consumers so they re-read and throw.
+            setPublishedValue(state.reason)
           }
-          p.then(rerun, rerun)
-        }
+        })
         // No body return value — view is via publishedValue.
         return null
       }
@@ -265,28 +272,14 @@ function makeStageNode(
       if (e instanceof NotReadyYet) {
         // Body explicitly suspended via use(pendingAccessor). Route through the
         // same pending-Promise mechanism as a body that returned Promise.
-        const p = e.promise as Promise<unknown>
-        if (suspendedOn !== p) {
-          suspendedOn = p
-          suspendedInput = input
-          setPendingSig(true)
-          if (lastResolvedValue === UNRESOLVED) {
-            setPublishedValue(p)
+        suspendOn(e.promise as Promise<unknown>, input, (state) => {
+          if (state.status === 'fulfilled' || state.status === 'rejected') {
+            suspendedOn = null
+            setPendingSig(false)
+            // Re-run body to attempt a coherent snapshot with the now-settled gate.
+            setKick(++kickCount)
           }
-          // else: SWR — prior value stays visible
-
-          const rerun = () => {
-            if (suspendedOn !== p) return // superseded
-            const state = track(p)
-            if (state.status === 'fulfilled' || state.status === 'rejected') {
-              suspendedOn = null
-              setPendingSig(false)
-              // Re-run body to attempt a coherent snapshot with the now-settled gate.
-              setKick(++kickCount)
-            }
-          }
-          p.then(rerun, rerun)
-        }
+        })
         return null
       }
       try {

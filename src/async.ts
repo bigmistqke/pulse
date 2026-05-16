@@ -58,7 +58,7 @@ export function isGeneratorFunction(f: unknown): f is (...args: unknown[]) => Ge
   return typeof f === 'function' && (f as { constructor?: { name?: string } }).constructor?.name === 'GeneratorFunction'
 }
 
-type PromiseState =
+export type PromiseState =
   | { status: 'pending' }
   | { status: 'fulfilled'; value: unknown }
   | { status: 'rejected'; reason: unknown }

@@ -650,3 +650,27 @@ test('computed body suspends on use(pendingComputed) and snapshots coherently', 
   expect(view()).toEqual({ page: 2, items: ['c', 'd'] })
   expect(isPending(view)).toBe(false)
 })
+
+test('computed body re-runs when a use(pendingComputed) gate rejects', async () => {
+  const [id, setId] = signal(1)
+  let reject!: (reason: unknown) => void
+  const list = computed(() => {
+    const i = id()
+    if (i === 1) return Promise.resolve('ok')
+    return new Promise<string>((_, r) => { reject = r })
+  })
+  await tick()
+
+  const view = computed(() => use(list))
+  expect(view()).toBe('ok')
+
+  setId(2)
+  expect(isPending(view)).toBe(true)
+
+  reject(new Error('boom'))
+  await tick()
+  // Pending cleared after settle. View's published value is still 'ok' (SWR
+  // held it; rejection didn't replace it because the body would re-throw on
+  // re-run, but the suspension is resolved).
+  expect(isPending(view)).toBe(false)
+})
