@@ -34,12 +34,7 @@ function TopBar() {
 }
 
 function PokemonDetails(props: { name: string }) {
-  // Wrap the fetch in a signal so pulse's write-back flips Promise → Pokemon
-  // once settled. Calling use() on a raw Promise would stay suspended forever
-  // (the same Promise identity persists; the .then-rerun fires only once).
-  const [pokemon] = signal(fetchPokemon(props.name));
-  // `p` resolves the signal at the leaf — use's widened-accessor form unwraps
-  // the signal call and the Promise transparently.
+  const pokemon = computed(() => fetchPokemon(props.name));
   const p = (): Pokemon => use(pokemon);
   return (
     <Loading initial={<div class="detail-spinner">loading details…</div>}>
