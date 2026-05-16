@@ -23,11 +23,16 @@ export const NODE = Symbol('pulse.node')
  *  computeds with stale-while-revalidate semantics. */
 export const PENDING = Symbol('pulse.pending')
 
+/** The reactive pending brand attached to a Signal accessor by `computed` (Plan 6).
+ *  Calling it yields the current pending state; `.promise()` returns the in-flight
+ *  Promise (own or upstream) that consumers can throw NotReadyYet on. */
+export type PendingBrand = Accessor<boolean> & { promise?: () => Promise<unknown> | null }
+
 /** A pulse signal or computed: an accessor function carrying its r3 node. */
 export interface Signal<T> {
   (): T
   [NODE]: R3Node<T>
-  [PENDING]?: Accessor<boolean> & { promise?: () => Promise<unknown> | null }
+  [PENDING]?: PendingBrand
 }
 
 /** A callable that reads a reactive signal or computed value. */

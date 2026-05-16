@@ -1,5 +1,5 @@
 import { isPromise } from './is-promise'
-import { NODE, PENDING, type Accessor, type Signal } from './signal'
+import { NODE, PENDING, type Accessor, type PendingBrand, type Signal } from './signal'
 
 /** Reactive predicate: is the signal/computed currently pending?
  *  - If the accessor carries a `[PENDING]` brand, queries that accessor (used by
@@ -7,7 +7,7 @@ import { NODE, PENDING, type Accessor, type Signal } from './signal'
  *  - Otherwise, inspects the value: a Promise that has not yet settled is pending;
  *    a Promise that has fulfilled/rejected (per `track()`) is no longer pending. */
 export function isPending(s: Accessor<unknown>): boolean {
-  const pendingAccessor = (s as { [PENDING]?: Accessor<boolean> })[PENDING]
+  const pendingAccessor = (s as { [PENDING]?: PendingBrand })[PENDING]
   if (pendingAccessor !== undefined) return pendingAccessor()
   const value = s()
   if (!isPromise(value)) return false
@@ -95,11 +95,12 @@ export function use<T>(x: T | Promise<T> | (() => T | Promise<T>)): Awaited<T> {
   if (typeof x === 'function') {
     // Consult the [PENDING] brand BEFORE reading — SWR may be hiding an
     // in-flight Promise behind a stale resolved value at the accessor.
-    const brand = (x as { [PENDING]?: Accessor<boolean> & { promise?: () => Promise<unknown> | null } })[PENDING]
-    if (brand?.()) {
-      const p = brand.promise?.()
-      if (p) throw new NotReadyYet(p)
-    }
+    const brand = (x as { [PENDING]?: PendingBrand })[PENDING]
+    // Invariant: when brand() is true, brand.promise() is non-null. The brand
+    // is only branded by computed (which always sets .promise), and a pending
+    // stage's suspendedOn is set; the upstream-OR case inductively bubbles to
+    // a stage whose suspendedOn is set.
+    if (brand?.()) throw new NotReadyYet(brand.promise!() as Promise<unknown>)
     x = (x as () => T | Promise<T>)()
   }
   if (!isPromise(x)) return x as Awaited<T>

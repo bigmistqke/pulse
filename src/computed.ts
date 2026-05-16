@@ -3,7 +3,7 @@ import { isGeneratorFunction, track, type Resolved } from './async'
 import { runStage } from './driver'
 import { isPromise } from './is-promise'
 import { getOwner, routeError, registerWithOwner } from './owner'
-import { makeAccessor, NODE, PENDING, signal, type Accessor, type Signal } from './signal'
+import { makeAccessor, NODE, PENDING, signal, type Accessor, type PendingBrand, type Signal } from './signal'
 
 /** A pipeline stage of any shape: sync, async, or generator. The return type
  *  is whatever the function returns — sync `R`, async `Promise<R>`, or
@@ -287,7 +287,7 @@ function makeStageNode(
   // Stable brand shape so .promise is always callable.
   const brand = (upstreamPending
     ? () => pendingSig() || upstreamPending()
-    : pendingSig) as Accessor<boolean> & { promise: () => Promise<unknown> | null }
+    : pendingSig) as PendingBrand & { promise: () => Promise<unknown> | null }
   brand.promise = () => suspendedOn ?? upstreamPending?.promise?.() ?? null
   accessor[PENDING] = brand
   return { accessor, r3Node: depTracker as R3Computed<unknown> }
