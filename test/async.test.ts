@@ -146,3 +146,13 @@ test('read of a promise yields the promise itself', () => {
   const step = gen.next()
   expect(step.value).toBe(p)
 })
+
+test('use() accepts an accessor (signal getter)', () => {
+  const [count] = signal(42)
+  expect(use(count)).toBe(42)
+})
+
+test('use() accessor form unwraps pending promises (throws NotReadyYet)', () => {
+  const [s] = signal<number | Promise<number>>(new Promise(() => {}))
+  expect(() => use(s)).toThrow(NotReadyYet)
+})

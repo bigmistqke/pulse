@@ -103,7 +103,8 @@ pending. Because it returns `T`, it makes terse JSX (`{use(user).name}`)
 typecheck without dishonest signal types. The throw propagates up the
 synchronous read stack until an **effect** catches it (a JSX binding is an
 effect; in v2, a Loading boundary also catches), suspends that node, and re-runs
-on settle.
+on settle. Accepts a value, a promise, or an accessor (`() => T | Promise<T>`);
+accessors are called and the result resolved.
 
 **Throwing belongs in effects.** Effects — including JSX bindings — are the only
 legitimate catch sites, so `use` is *for* effects. Using it anywhere else (a

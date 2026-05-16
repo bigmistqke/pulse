@@ -75,7 +75,13 @@ export function track(promise: Promise<unknown>): PromiseState {
  * inside a `computed` is allowed but a code smell — the computed becomes
  * throw-on-read.
  */
-export function use<T>(x: T): Awaited<T> {
+export function use<T>(x: T | Promise<T> | (() => T | Promise<T>)): Awaited<T> {
+  // Accept accessor form for symmetry with `read()`. Footgun: if T extends
+  // Function, the value gets called accidentally — rare; box the function
+  // value to use it.
+  if (typeof x === 'function') {
+    x = (x as () => T | Promise<T>)()
+  }
   if (!isPromise(x)) return x as Awaited<T>
   const state = track(x)
   if (state.status === 'fulfilled') return state.value as Awaited<T>
