@@ -1,6 +1,6 @@
 # Pulse Transitions Design
 
-**Status:** Draft
+**Status:** Draft (revised after implementation discovered SWR-at-leaf conflict)
 **Date:** 2026-05-16
 **Related:** Plan 6 (SWR computed), Plan 2a (effect suspension)
 
@@ -23,76 +23,66 @@ What the user actually wants is a **transition**: the label, the items, and the 
 - A new state primitive (signal-lag, transition-tuple, etc.) — we don't add `transition(...)` as a top-level API
 - Changing SWR-as-default for direct `list()` reads
 
-## Design
+## Design (revised)
 
-Make `computed(() => body)` handle `NotReadyYet` thrown from its body the same way it handles a body that returns a pending Promise: suspend with SWR, register a resume callback, hold the prior published value.
+Original sketch made `use(accessor)` consult `[PENDING]` and throw `NotReadyYet`. Implementation discovered this breaks SWR-at-the-leaf: a JSX binding like `<For each={() => use(list)}>` would re-throw on every refetch, re-tripping the `<Loading>` boundary, defeating SWR's whole point.
 
-Make `use(accessor)` consult the accessor's `[PENDING]` brand. If the accessor is mid-refetch (value is a stale SWR view), `use` throws `NotReadyYet` carrying the in-flight Promise.
+The two contexts want opposite behavior:
 
-Together, this lets any computed become a coherent snapshot of multiple reads:
+- **JSX/effect leaf:** SWR is the point. `use(list)` should return the stale items, not suspend.
+- **Inside a snapshot computed:** must suspend on pending, otherwise the snapshot is incoherent.
 
-```ts
-const view = computed(() => ({
-  page: page(),
-  items: use(list),   // suspends the computed if list is mid-refetch
-}));
-```
+Pulse already has a yield-based suspension primitive for the second case: `read(x)`. We extend it (rather than overloading `use`).
 
-`view`'s value commits only when none of its `use(...)` reads are pending. Coherent snapshot. No new primitive.
+### `read` becomes brand-aware
 
-## Mechanism
-
-### 1. `[PENDING]` brand carries the resume Promise
-
-Today:
+`read(accessor)` already yields the accessor's return value; the driver suspends if the value is a Promise. We add: if the accessor has a `[PENDING]` brand and it's true, first `yield brand.promise()` so the driver suspends on the in-flight Promise; on resume, re-call the accessor for the fresh value.
 
 ```ts
-accessor[PENDING] = pendingSig   // Accessor<boolean>
-```
-
-After:
-
-```ts
-accessor[PENDING] = pendingSig           // still Accessor<boolean>
-accessor[PENDING].promise = () => suspendedOn  // attached property
-```
-
-`.promise()` returns the current in-flight Promise the stage is suspended on, or `null` if not pending. This is the only handle to the in-flight Promise that survives SWR (which hides the Promise behind the prior value at the publish site).
-
-Brand stays a function (the existing `Accessor<boolean>` shape) — `isPending` callers don't change. Only `use` and the upstream-pipeline pending OR need the `.promise` attachment.
-
-### 2. `use(accessor)` consults the brand
-
-```ts
-function use(x) {
-  if (typeof x === 'function') {
-    const brand = (x as any)[PENDING];
-    if (brand?.() && brand.promise()) {
-      throw new NotReadyYet(brand.promise());
-    }
-    x = x();
+export function* read<T>(x: T): Generator<unknown, Resolved<T>, unknown> {
+  if (isSignalAccessor(x)) {
+    const brand = (x as Signal<unknown>)[PENDING];
+    if (brand?.()) yield brand.promise!();   // suspend on gate
+    const value = (x as () => unknown)();    // post-resume value
+    return (yield value) as Resolved<T>;
   }
-  if (isPromise(x)) return /* existing track-and-throw-or-return */;
-  return x;
+  return (yield x) as Resolved<T>;
 }
 ```
 
-The brand check comes *before* the accessor call so a refetching computed throws even though its accessor would synchronously return a stale value.
+### Transition pattern uses generator computed
 
-### 3. `computed(() => body)` catches `NotReadyYet` from the body
+```ts
+const view = computed(function* () {
+  return {
+    page: yield* read(page),
+    items: yield* read(list),   // brand-aware suspension
+  };
+});
+```
 
-In `makeStageNode`, wrap the `runStage` call in a try/catch. If the body throws `NotReadyYet(p)`:
+`view` publishes a coherent snapshot atomically when its reads settle. `isPending(view)` is true throughout via the pipeline-OR brand (already shipped in Task 1).
 
-- Same path as `outcome.pending` with `p` as the in-flight Promise
-- `suspendedOn = p`, `setPendingSig(true)`
-- Publish nothing new (SWR — prior value stays)
-- Register `p.then(rerun)`; on settle, re-run the body
+### Clean split
 
-Already-baked machinery: the existing `suspendedOn` / `setPendingSig` / `.then(rerun)` paths handle it.
+| reader | mechanism | use case | SWR behavior |
+|---|---|---|---|
+| `use(x)` | throw NotReadyYet | effects, JSX bindings | stale-at-leaf preserved |
+| `yield* read(x)` | yield + driver suspend | inside generator computeds | coherent snapshots |
 
-### 4. Pipeline-OR for upstream pending
+## Mechanism
 
-The current pipeline-aware `[PENDING]` (`pendingSig() || upstreamPending()`) keeps working. Its `.promise` getter returns: own `suspendedOn` first; falling back to `upstreamAccessor[PENDING]?.promise?.()`. Walks the chain to find the actual in-flight Promise.
+### 1. `[PENDING]` brand carries the resume Promise (kept from original)
+
+Done. `accessor[PENDING]` is a function + `.promise` getter that returns the current in-flight Promise (own or upstream) or `null`. Pipeline-OR walks the chain.
+
+### 2. `read(accessor)` brand-aware suspension
+
+Extend `src/async.ts:read` to check the brand before yielding the accessor's value, as shown above. Driver handles the yielded Promise via existing `runStage` / WeakMap fast-forward.
+
+### 3. `use` unchanged
+
+`use(promise)` and `use(accessor)` keep their existing semantics. `use(accessor)` calls the accessor and treats the returned value as-is. No brand-check at this level — preserves SWR-at-leaf for JSX bindings.
 
 ## Behavior table
 
@@ -105,47 +95,43 @@ The current pipeline-aware `[PENDING]` (`pendingSig() || upstreamPending()`) kee
 
 ## Pokemon demo migration
 
-Drop the page-rides-on-data hack:
-
 ```ts
-// before
-const list = computed(
-  () => fetchList(page()),
-  (r) => ({ page: page(), items: r.items }),
-);
-<span>page {() => list().page + 1}</span>
-<For each={() => list().items}>…
-
-// after
 const list = computed(() => fetchList(page()), r => r.items);
-const view = computed(() => ({ page: page(), items: use(list) }));
+
+const view = computed(function* () {
+  return {
+    page: yield* read(page),
+    items: yield* read(list),
+  };
+});
+
 <span class:loading={() => isPending(view)}>page {() => view().page + 1}</span>
 <For each={() => view().items}>…
 ```
 
-`view()` always returns a coherent snapshot. Page number and items move together. `isPending(view)` drives the visual loading cue.
+`view()` always returns a coherent snapshot. Page number and items move together. `isPending(view)` drives the visual loading cue. SWR-at-leaf preserved for any binding that still reads `use(list)` directly.
 
 ## Out of scope
 
-- Multiple gate accessors in a single transition (use(a) + use(b) already covers this — view suspends on the first pending one, re-runs on settle, checks the next)
+- Multiple gate accessors in a single transition (yield* read(a) + yield* read(b) covers this — generator suspends on the first pending one, re-runs on settle, advances)
 - Explicit `startTransition` / scheduling APIs
 - Time-budget-based "stay in transition for at most N ms then commit anyway" (React useDeferredValue)
-- Replacing the "use inside computed is a code smell" warning with a positive recommendation — keep the JSDoc nuanced; this is a deliberate pattern, not the default
+- JSX-generator bindings (`<For each={function*(){...}}>`) — useful ergonomic follow-up, separate scope
+- `await*`-style JSX compile-time sugar — requires a pulse JSX compiler, much larger conversation
 
 ## Risks
 
-- **Breaking change for existing "use inside computed" code:** today this throws and the computed becomes throw-on-read. After this change, those computeds will suspend instead. Existing tests for the code-smell behavior need rewriting. Likely no real users rely on the throw-on-read behavior since it's been documented as a smell.
-- **`use(accessor)` semantics shift:** previously `use(accessor)` called the accessor and treated the returned value. Now it consults a brand first. Accessors without `[PENDING]` (plain signals) are unaffected. Computeds always have `[PENDING]` so they get the new behavior unconditionally.
-- **Diamond pending bubbling:** if computed A reads computed B which reads list, A's brand `.promise()` should resolve up the chain. The upstream-OR pattern already added in `de2c37a` handles `pending()`; need to extend it to `.promise()` symmetrically.
+- **`read` brand-check is a behavior change:** previously `yield* read(computed)` returned the computed's accessor value (stale during SWR). Now it suspends on pending gates. The change is opt-in to generator contexts only — `use(accessor)`, plain `list()` reads, etc. are unaffected. Generators are the documented home of `read`, so this is a tight, expected change.
+- **Diamond pending bubbling:** Task 1 already handles `.promise()` walking upstream via the pipeline-OR pattern.
 
 ## Test coverage targets
 
-- `use(pendingComputed)` throws `NotReadyYet` carrying the in-flight Promise
-- `computed(() => use(pendingComputed))` suspends with SWR, publishes prior, re-runs on settle
-- Coherent snapshot: setSource changes mid-fetch; downstream snapshot stays old; commits atomically on settle
+- `yield* read(pendingComputed)` suspends the generator, resumes with the resolved value on settle
+- Coherent snapshot: setSource changes mid-fetch; downstream generator-computed snapshot stays old; commits atomically on settle
 - `isPending(view)` true throughout transition window
-- Pipeline-OR `.promise()` walks upstream when the directly-read stage isn't itself suspended
-- Pokemon demo Playwright still passes; refreshing indicator behavior unchanged
+- Pipeline-OR `.promise()` walks upstream when the directly-read stage isn't itself suspended (already covered by Task 1)
+- `use(list)` at a JSX leaf still returns the stale value during refetch (SWR-at-leaf invariant)
+- Pokemon demo Playwright still passes; refreshing indicator behavior unchanged; new coherent-snapshot Playwright assertion
 
 ## Open questions
 
