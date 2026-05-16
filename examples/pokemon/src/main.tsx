@@ -34,7 +34,7 @@ function TopBar() {
 }
 
 function PokemonDetails(props: { name: string }) {
-  const pokemon = computed(() => fetchPokemon(props.name));
+  const pokemon = fetchPokemon(props.name);
   const p = (): Pokemon => use(pokemon);
   return (
     <Loading initial={<div class="detail-spinner">loading details…</div>}>
