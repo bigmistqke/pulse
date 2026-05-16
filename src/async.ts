@@ -93,6 +93,13 @@ export function use<T>(x: T | Promise<T> | (() => T | Promise<T>)): Awaited<T> {
   // Function, the value gets called accidentally — rare; box the function
   // value to use it.
   if (typeof x === 'function') {
+    // Consult the [PENDING] brand BEFORE reading — SWR may be hiding an
+    // in-flight Promise behind a stale resolved value at the accessor.
+    const brand = (x as { [PENDING]?: Accessor<boolean> & { promise?: () => Promise<unknown> | null } })[PENDING]
+    if (brand?.()) {
+      const p = brand.promise?.()
+      if (p) throw new NotReadyYet(p)
+    }
     x = (x as () => T | Promise<T>)()
   }
   if (!isPromise(x)) return x as Awaited<T>

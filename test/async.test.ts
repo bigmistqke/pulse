@@ -2,6 +2,7 @@ import { expect, test } from 'vitest'
 import { isPending, latest, use, NotReadyYet, read } from '../src/async'
 import { effect } from '../src/effect'
 import { flush, microtaskScheduler, setScheduler, syncScheduler } from '../src/scheduler'
+import { computed } from '../src/computed'
 import { signal, PENDING, type Accessor } from '../src/signal'
 
 /** Resolve after all microtasks have drained (a macrotask boundary). */
@@ -172,4 +173,24 @@ test('isPending([PENDING]) takes precedence over value check', () => {
   const branded = (() => new Promise(() => {})) as Accessor<unknown> & { [PENDING]?: Accessor<boolean> }
   branded[PENDING] = pending
   expect(isPending(branded)).toBe(false)
+})
+
+test('use(accessor) throws NotReadyYet when [PENDING] brand is true', async () => {
+  const [id, setId] = signal(1)
+  let release!: (v: number) => void
+  const c = computed(() => {
+    const i = id()
+    if (i === 1) return Promise.resolve(10)
+    return new Promise<number>((r) => { release = r })
+  })
+  await tick()
+  expect(use(c)).toBe(10)
+
+  setId(2)
+  // c is mid-refetch: c() still returns 10 (SWR), but use must suspend.
+  expect(() => use(c)).toThrow(NotReadyYet)
+
+  release(20)
+  await tick()
+  expect(use(c)).toBe(20)
 })
