@@ -279,6 +279,13 @@ function makeStageNode(
     return publishedValue()
   }) as Signal<unknown>
   accessor[NODE] = depTracker as R3Computed<unknown>
-  accessor[PENDING] = pendingSig
+  // Pipeline-aware pending: this stage is pending if its own fetch is in flight
+  // OR any upstream stage is. Necessary because SWR hides upstream Promises
+  // (downstream stages see the prior resolved value during a refetch, so their
+  // own pendingSig stays false even though the pipeline is mid-refetch).
+  const upstreamPending = inputAccessor?.[PENDING]
+  accessor[PENDING] = upstreamPending
+    ? () => pendingSig() || upstreamPending()
+    : pendingSig
   return { accessor, r3Node: depTracker as R3Computed<unknown> }
 }
