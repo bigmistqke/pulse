@@ -1,46 +1,46 @@
-import { effect, For, Loading, render, Show, signal, use, useLoading } from 'pulse'
-import { fetchList, fetchPokemon, type Pokemon, type PokemonRef } from './api'
-import './style.css'
+import {
+  computed,
+  For,
+  isPending,
+  Loading,
+  render,
+  Show,
+  signal,
+  use,
+} from "pulse";
+import { fetchList, fetchPokemon, type Pokemon, type PokemonRef } from "./api";
+import "./style.css";
 
-const [page, setPage] = signal(0)
-const [expanded, setExpanded] = signal<string | null>(null)
+const [page, setPage] = signal(0);
+const [expanded, setExpanded] = signal<string | null>(null);
 
-// `list` is a signal holding the current page's results promise. An effect
-// kicks off the fetch on page change and write-back flips the signal
-// Promise → array once settled.
-//
-// NOTE: we deliberately use signal+effect instead of `computed(() => fetchList(page()).then(...))`
-// because pulse's `'reuse-value'` stash mechanism loses dep tracking on stash-
-// consuming re-runs (see follow-up "stash-consumption loses dep tracking").
-// With a computed, page changes wouldn't notify the computed after the first
-// stash consumption — list would freeze on the first fetched page.
-const [list, setList] = signal<PokemonRef[] | Promise<PokemonRef[]>>(
-  fetchList(0).then((r) => r.results),
-)
-effect(() => {
-  const p = page()
-  if (p === 0) return // initial value handles page 0; skip double-fetch
-  setList(fetchList(p).then((r) => r.results))
-})
+// Plan 6 fixed `computed(() => Promise)` to preserve dep tracking and
+// stale-while-revalidate cleanly. Reading via `use(list)` (widened accessor
+// form) throws NotReadyYet on initial pending, returns the array once settled.
+const list = computed(() => fetchList(page()).then((r) => r.results));
 
 function TopBar() {
-  const pending = useLoading()
+  // Stale-while-revalidate: list keeps its prior array during refetch, so the
+  // Loading boundary doesn't re-trip. isPending(list) is the SWR-aware probe.
+  const refreshing = () => isPending(list);
   return (
     <header class="top-bar">
       <h1>pokédex</h1>
-      <Show when={pending}>{() => <span class="indicator">refreshing…</span>}</Show>
+      <Show when={refreshing}>
+        {() => <span class="indicator">refreshing…</span>}
+      </Show>
     </header>
-  )
+  );
 }
 
 function PokemonDetails(props: { name: string }) {
   // Wrap the fetch in a signal so pulse's write-back flips Promise → Pokemon
   // once settled. Calling use() on a raw Promise would stay suspended forever
   // (the same Promise identity persists; the .then-rerun fires only once).
-  const [pokemon] = signal<Pokemon | Promise<Pokemon>>(fetchPokemon(props.name))
+  const [pokemon] = signal(fetchPokemon(props.name));
   // `p` resolves the signal at the leaf — use's widened-accessor form unwraps
   // the signal call and the Promise transparently.
-  const p = (): Pokemon => use(pokemon)
+  const p = (): Pokemon => use(pokemon);
   return (
     <Loading initial={<div class="detail-spinner">loading details…</div>}>
       {() => (
@@ -74,11 +74,11 @@ function PokemonDetails(props: { name: string }) {
         </div>
       )}
     </Loading>
-  )
+  );
 }
 
 function PokemonRow(props: { ref: PokemonRef }) {
-  const isExpanded = () => expanded() === props.ref.name
+  const isExpanded = () => expanded() === props.ref.name;
   return (
     <li class:expanded={isExpanded}>
       <button
@@ -93,7 +93,7 @@ function PokemonRow(props: { ref: PokemonRef }) {
         {() => <PokemonDetails name={props.ref.name} />}
       </Show>
     </li>
-  )
+  );
 }
 
 function App() {
@@ -106,7 +106,9 @@ function App() {
             {/* `each` is a function → mapArray re-runs reactively. use(list) (widened
                 accessor form) throws NotReadyYet while pending; pulse's signal
                 write-back flips list's value Promise → array, ending the suspension. */}
-            <For each={() => use(list)}>{(ref) => <PokemonRow ref={ref} />}</For>
+            <For each={() => use(list)}>
+              {(ref) => <PokemonRow ref={ref} />}
+            </For>
           </ul>
           <nav class="paging">
             <button
@@ -121,7 +123,7 @@ function App() {
         </div>
       )}
     </Loading>
-  )
+  );
 }
 
-render(() => <App />, document.getElementById('app')!)
+render(() => <App />, document.getElementById("app")!);
