@@ -217,6 +217,33 @@ test('a computed throw outside any catchError still propagates uncaught', () => 
   expect(() => c()).toThrow('uncaught')
 })
 
+test('mid-pipeline throw: stage-N throw freezes pipeline; downstream stage does not see throw', () => {
+  setScheduler(syncScheduler(flush))
+  const [trigger, setTrigger] = signal(false)
+  const handlerCalls: unknown[] = []
+
+  createRoot(() => {
+    catchError(() => {
+      const pipeline = computed(
+        () => {
+          if (trigger()) throw new Error('stage-0-error')
+          return 1
+        },
+        (v) => v * 10,  // stage 1, sink
+      )
+      effect(() => { pipeline() })   // trigger evaluation
+    }, (e) => handlerCalls.push(e))
+  })
+
+  expect(handlerCalls).toEqual([])
+  setTrigger(true)
+  // Stage 0 throws → handler called once. Stage 1 should NOT see the error.
+  expect(handlerCalls).toHaveLength(1)
+  expect((handlerCalls[0] as Error).message).toBe('stage-0-error')
+
+  setScheduler(microtaskScheduler(flush))
+})
+
 test('an unhandled-throw computed throws on every read until a successful re-run clears it', () => {
   setScheduler(syncScheduler(flush))
   const [trigger, setTrigger] = signal(0)
