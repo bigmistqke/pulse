@@ -627,3 +627,55 @@ test('promiseOf(computed) returns the in-flight Promise during refetch', async (
   expect(promiseOf(list)()).toBeNull()
 })
 
+import { describe } from 'vitest'
+
+describe('computed — NotReadyYet absorbed as suspension (Plan B)', () => {
+  test('sync stage body throwing NotReadyYet suspends, then resumes on settle', async () => {
+    let resolve!: (v: number) => void
+    const p = new Promise<number>((r) => (resolve = r))
+    const c = computed(() => use(p) + 1)
+    // First read: stage body throws NotReadyYet → absorbed as suspension.
+    // The accessor's published value on first load is the in-flight Promise.
+    const first = c()
+    expect(first).toBe(p)
+    expect(isPending(c)()).toBe(true)
+    resolve(41)
+    await new Promise<void>((r) => queueMicrotask(() => r()))
+    expect(c()).toBe(42)
+    expect(isPending(c)()).toBe(false)
+  })
+
+  test('two-stage pipeline: stage 0 throws NotReadyYet; downstream stage sees the suspension', async () => {
+    let resolve!: (v: number) => void
+    const p = new Promise<number>((r) => (resolve = r))
+    const stage0 = computed(() => use(p))
+    const stage1 = computed(stage0, (v) => v * 2)
+    expect(isPending(stage1)()).toBe(true)
+    resolve(7)
+    await new Promise<void>((r) => queueMicrotask(() => r()))
+    expect(stage1()).toBe(14)
+  })
+
+  test('SWR-refetch: stage body throwing NotReadyYet during refetch keeps prior value visible', async () => {
+    const [src, setSrc] = signal(1)
+    let activeResolve: (v: number) => void = () => {}
+    const c = computed(() => {
+      src()
+      const p = new Promise<number>((r) => (activeResolve = r))
+      return use(p)
+    })
+    c() // kick first eval
+    await new Promise<void>((r) => queueMicrotask(() => r()))
+    activeResolve(10)
+    await new Promise<void>((r) => queueMicrotask(() => r()))
+    expect(c()).toBe(10)
+    setSrc(2)
+    await new Promise<void>((r) => queueMicrotask(() => r()))
+    expect(c()).toBe(10) // SWR-stale
+    expect(isPending(c)()).toBe(true)
+    activeResolve(20)
+    await new Promise<void>((r) => queueMicrotask(() => r()))
+    expect(c()).toBe(20)
+  })
+})
+

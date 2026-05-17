@@ -1,5 +1,5 @@
 import { computed as r3Computed, read as r3Read, unwatched, type Computed as R3Computed } from 'r3'
-import { isGeneratorFunction, track, type PromiseState, type Resolved } from './async'
+import { isGeneratorFunction, NotReadyYet, track, type PromiseState, type Resolved } from './async'
 import { runStage } from './driver'
 import { isPromise } from './is-promise'
 import { getOwner, routeError, registerWithOwner } from './owner'
@@ -270,6 +270,40 @@ function makeStageNode(
       deferredError = null
       return null
     } catch (e) {
+      if (e instanceof NotReadyYet) {
+        // Sync/async-function stage body called `use(pending)` and threw the
+        // suspension signal. Treat identically to a stage that returned a
+        // pending Promise: set up the same suspendOn + settle machinery.
+        // Generator stages route suspension via their driver and never reach
+        // this catch with a NotReadyYet.
+        suspendOn(e.promise, /* input */ undefined, (state) => {
+          if (state.status === 'fulfilled') {
+            suspendedOn = null
+            setPendingSig(false)
+            // Re-run body via kick (resolved-value cache is meaningless here
+            // because the throw means body never returned — re-execute fully).
+            // Stash the resolved value first so that SWR works: if the body
+            // throws again on re-run (e.g. it creates a fresh promise), the
+            // suspendOn path sees lastResolvedValue != UNRESOLVED and holds
+            // the prior value visible while the new promise is in-flight.
+            if (
+              lastResolvedValue === UNRESOLVED ||
+              !Object.is(lastResolvedValue, state.value)
+            ) {
+              lastResolvedValue = state.value
+              deferredError = null
+              setPublishedValue(state.value)
+            }
+            setKick(++kickCount)
+          } else if (state.status === 'rejected') {
+            suspendedOn = null
+            setPendingSig(false)
+            deferredError = { error: state.reason }
+            setKick(++kickCount)
+          }
+        })
+        return null
+      }
       try {
         routeError(myOwner, e)
       } catch (rethrown) {
