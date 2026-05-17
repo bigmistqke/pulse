@@ -193,9 +193,35 @@ Either way, the user-visible behavior is identical: all holes commit in the same
 - Mid-transition new throw (user clicks again) extends `Promise.all` rather than committing the first batch.
 - Pokemon demo Playwright: page label and items move together across page changes; no mid-flight `{ page: 2, items: oldItems }` frame.
 
+## Hole identity in dynamic children
+
+The hole cache cannot be keyed on a binding-site function reference (a `<For>`'s child function is the same function across all items). It must be keyed on `(binding site × owner instance)` — effectively, a closure variable inside each owner's binding-effect setup. When the owner is disposed, the cache goes with it. No explicit cleanup needed.
+
+This produces these behaviors:
+
+| scenario | owner | cache outcome |
+|---|---|---|
+| `<For>` keyed reorder (same key, moved position) | preserved | survives — same item, same data |
+| `<For>` remove then re-add (same key) | disposed → new | lost — logically first render |
+| `<For>` swap key at same index | disposed → new | lost — different item |
+| `<Show when>` toggle on/off/on | disposed → new | lost on remount — first-render semantics |
+
+### Newly-mounted holes inside an active `<Loading>`
+
+**Chosen rule: option (A) — strict "hold prior committed tree."**
+
+A subtree that mounts while its enclosing `<Loading>` is in `collecting` is not committed until the gather settles. The DOM during the transition is exactly the prior committed frame, including any structural toggles or new-mount events that occurred mid-transition. Those structural changes commit atomically with the rest of the boundary on `Promise.all` resolve.
+
+This gives the cleanest internal semantics ("the boundary holds the prior tree; no exceptions") and the best behavior for the common case where the structural change *is* the consequence of the pending data (e.g. tab switch driven by `tab()` triggering a fetch). The known surprise: independent structural toggles inside a `<Loading>` (e.g. an unrelated "show details" panel) feel laggy while anything else inside the boundary is pending. Document loudly; address with explicit sub-boundaries (a nested `<Loading>` around the independent panel) if the user wants different behavior.
+
+Considered and rejected for v1:
+- **(B) Mount-time bypass.** Newly-mounted holes with no cache commit immediately. Breaks "everything in the boundary moves together."
+- **(C) Implicit sub-boundary on mount.** Each newly-mounted subtree forms its own sub-boundary. Cleanest UX for orthogonal toggles, but the rule "which mounts join which boundary" is subtle to specify and implement.
+
+Both remain available as later refinements if real apps demand them.
+
 ## Risks & open questions
 
-- **Hole identity in dynamic children.** `<For>` / `<Show>` may create/destroy holes across renders. The cache is keyed on binding site; holes destroyed-and-recreated lose their cache. Plan should verify this matches user expectation (probably yes: a hole that wasn't on screen has nothing to be "stale" from).
 - **Commit-deferral mechanism (M1 vs M2).** Pick during planning; affects which file owns the queue.
 - **Nested `<Loading>`.** Spec says "innermost catches." Verify this matches the user's intuition during planning; consider documenting explicitly with an example.
 - **Error boundaries vs `<Loading>`.** A real error thrown from a hole expression should bypass `<Loading>` and reach the nearest error boundary. The hole's catch must filter on `NotReadyYet` and rethrow otherwise — already specified in §3, but worth a dedicated test.
