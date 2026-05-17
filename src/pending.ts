@@ -1,4 +1,6 @@
 // src/pending.ts
+import { isPromise } from './is-promise'
+import { track } from './async'
 import type { Accessor } from './signal'
 
 /** Internal entry describing the pending state of an async-aware accessor.
@@ -37,8 +39,12 @@ export function lookupPending(accessor: Accessor<unknown>): PendingEntry | undef
 export function isPending<T>(x: Accessor<T>): Accessor<boolean> {
   return () => {
     const entry = registry.get(x as Accessor<unknown>)
-    if (entry === undefined) return false
-    return entry.pending()
+    if (entry !== undefined) return entry.pending()
+    // Fallback: inspect the value — signals holding a Promise are pending
+    // until that Promise settles.
+    const value = x()
+    if (!isPromise(value)) return false
+    return track(value).status === 'pending'
   }
 }
 
@@ -47,7 +53,9 @@ export function isPending<T>(x: Accessor<T>): Accessor<boolean> {
 export function promiseOf<T>(x: Accessor<T>): Accessor<Promise<T> | null> {
   return () => {
     const entry = registry.get(x as Accessor<unknown>)
-    if (entry === undefined) return null
-    return entry.promise() as Promise<T> | null
+    if (entry !== undefined) return entry.promise() as Promise<T> | null
+    const value = x()
+    if (!isPromise(value)) return null
+    return track(value).status === 'pending' ? (value as Promise<T>) : null
   }
 }

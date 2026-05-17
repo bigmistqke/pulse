@@ -18,3 +18,23 @@ describe('pending tracker — basics', () => {
     expect(acc()).toBe(null)
   })
 })
+
+describe('pending tracker — value-as-promise fallback', () => {
+  test('isPending true for a signal holding a pending promise', () => {
+    const [s] = signal(new Promise(() => {}))
+    expect(isPending(s)()).toBe(true)
+  })
+
+  test('isPending false for a signal holding a resolved promise (after track)', async () => {
+    const p = Promise.resolve('x')
+    const [s] = signal<unknown>(p)
+    await p
+    expect(isPending(s)()).toBe(false)
+  })
+
+  test('promiseOf returns the pending promise for a signal holding one', () => {
+    const p = new Promise<number>(() => {})
+    const [s] = signal(p)
+    expect(promiseOf(s)()).toBe(p)
+  })
+})
