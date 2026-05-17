@@ -18,21 +18,10 @@ type R3Node<T> = R3Signal<T> | R3Computed<T>
 /** Internal key under which a pulse accessor stashes its r3 node. */
 export const NODE = Symbol('pulse.node')
 
-/** Optional brand: when present on a Signal/Accessor, `isPending` queries
- *  this accessor instead of inspecting the value-as-promise. Used by
- *  computeds with stale-while-revalidate semantics. */
-export const PENDING = Symbol('pulse.pending')
-
-/** The reactive pending brand attached to a Signal accessor by `computed` (Plan 6).
- *  Calling it yields the current pending state; `.promise()` returns the in-flight
- *  Promise (own or upstream) that consumers can throw NotReadyYet on. */
-export type PendingBrand = Accessor<boolean> & { promise?: () => Promise<unknown> | null }
-
 /** A pulse signal or computed: an accessor function carrying its r3 node. */
 export interface Signal<T> {
   (): T
   [NODE]: R3Node<T>
-  [PENDING]?: PendingBrand
 }
 
 /** A callable that reads a reactive signal or computed value. */

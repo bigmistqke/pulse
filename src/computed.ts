@@ -3,7 +3,7 @@ import { isGeneratorFunction, track, type PromiseState, type Resolved } from './
 import { runStage } from './driver'
 import { isPromise } from './is-promise'
 import { getOwner, routeError, registerWithOwner } from './owner'
-import { makeAccessor, NODE, PENDING, signal, type Accessor, type PendingBrand, type Signal } from './signal'
+import { makeAccessor, NODE, signal, type Accessor, type Signal } from './signal'
 import { registerPending, lookupPending } from './pending'
 
 /** A pipeline stage of any shape: sync, async, or generator. The return type
@@ -287,17 +287,6 @@ function makeStageNode(
     return publishedValue()
   }) as Signal<unknown>
   accessor[NODE] = depTracker as R3Computed<unknown>
-  // Pipeline-aware pending: this stage is pending if its own fetch is in flight
-  // OR any upstream stage is. Necessary because SWR hides upstream Promises
-  // (downstream stages see the prior resolved value during a refetch, so their
-  // own pendingSig stays false even though the pipeline is mid-refetch).
-  const upstreamPending = inputAccessor?.[PENDING]
-  // Stable brand shape so .promise is always callable.
-  const brand = (upstreamPending
-    ? () => pendingSig() || upstreamPending()
-    : pendingSig) as PendingBrand & { promise: () => Promise<unknown> | null }
-  brand.promise = () => suspendedOn ?? upstreamPending?.promise?.() ?? null
-  accessor[PENDING] = brand
 
   // Register with the external pending tracker (Plan A foundation). The
   // entry stores LOCAL state (pendingSig + a function returning suspendedOn);
