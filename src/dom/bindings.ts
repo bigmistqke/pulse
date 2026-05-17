@@ -10,6 +10,7 @@ import {
   type BindingController,
   type Owner,
 } from '../owner'
+import { runBindingCompute } from '../transition-tracker'
 
 /**
  * Wrap a reactive `apply(value)` binding in the compute/commit split. The
@@ -36,9 +37,9 @@ function reactiveCommit<T>(
     controller = null
   })
   effect(() => {
-    let value: T
+    let result: { value: T; engagedTransition: boolean }
     try {
-      value = read()
+      result = runBindingCompute(() => read())
     } catch (e) {
       if (e instanceof NotReadyYet) {
         ensureController()?.report({ status: 'throwing' })
@@ -46,10 +47,25 @@ function reactiveCommit<T>(
       }
       throw e
     }
+    const { value, engagedTransition } = result
     const commit = () => apply(value)
-    const ctrl = ensureController()
-    if (ctrl !== null) ctrl.report({ status: 'ready', commit })
-    else commit()
+    // If there's a prior controller (binding previously threw), always go
+    // through the controller to consume its pendingSet entry.
+    if (controller !== null) {
+      controller.report({ status: 'ready', commit })
+      return
+    }
+    // No prior throw. If use() was called and the boundary is pending,
+    // defer this commit until the gate opens (atomic with siblings).
+    if (engagedTransition) {
+      const scope = findLoadingScope(parentOwner)
+      if (scope !== null && scope.pending()) {
+        scope.deferOrCommit(commit)
+        return
+      }
+    }
+    // No coordination needed — commit immediately.
+    commit()
   })
 }
 
@@ -110,11 +126,15 @@ export function insertChild(parent: Node, value: unknown): void {
       // binding-effects/computeds the user creates are bound to this run.
       const nextRunOwner = createSubOwner(parentOwner)
       let frag: DocumentFragment | null = null
+      let engagedTransition = false
       try {
         runWithOwner(nextRunOwner, () => {
-          const next = (value as () => unknown)()
-          frag = document.createDocumentFragment()
-          insertChild(frag, next)
+          const result = runBindingCompute(() => {
+            const next = (value as () => unknown)()
+            frag = document.createDocumentFragment()
+            insertChild(frag, next)
+          })
+          engagedTransition = result.engagedTransition
         })
       } catch (e) {
         // Sub-owner from the failed run is orphaned — dispose to clean up
@@ -153,14 +173,23 @@ export function insertChild(parent: Node, value: unknown): void {
         }
         end.parentNode!.insertBefore(frag!, end)
       }
-      // If there's a Loading scope, defer the commit (atomic flush).
-      // Otherwise commit immediately (preserves no-Loading behavior).
-      const ctrl = ensureController()
-      if (ctrl !== null) {
-        ctrl.report({ status: 'ready', commit })
-      } else {
-        commit()
+      // If there's a prior controller (binding previously threw), always go
+      // through the controller to consume its pendingSet entry.
+      if (controller !== null) {
+        controller.report({ status: 'ready', commit })
+        return
       }
+      // No prior throw. If use() was called and the boundary is pending,
+      // defer this commit until the gate opens (atomic with siblings).
+      if (engagedTransition) {
+        const scope = findLoadingScope(parentOwner)
+        if (scope !== null && scope.pending()) {
+          scope.deferOrCommit(commit)
+          return
+        }
+      }
+      // No coordination needed — commit immediately.
+      commit()
     })
     return
   }

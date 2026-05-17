@@ -47,13 +47,27 @@ export function Loading(props: LoadingProps): Accessor<unknown> {
 
   // pendingSet: controllers currently throwing.
   // readySet: controllers that recomputed successfully and have a commit waiting.
-  // Gate opens (commits flush together) when pendingSet.size === 0 && readySet.size > 0.
+  // deferredCommits: commits from use()-engaged bindings that didn't throw but
+  //   need to wait for the gate to open (atomic with controller-based commits).
+  // Gate opens (commits flush together) when pendingSet.size === 0 AND
+  //   (readySet.size > 0 OR deferredCommits.length > 0).
   const pendingSet = new Set<BindingController>()
   const readySet = new Map<BindingController, () => void>()
+  const deferredCommits: Array<() => void> = []
 
   const [pendingSig, setPendingSig] = signal(false)
   const recomputePending = () =>
-    setPendingSig(pendingSet.size > 0 || readySet.size > 0)
+    setPendingSig(pendingSet.size > 0 || readySet.size > 0 || deferredCommits.length > 0)
+
+  /** Flush all ready and deferred commits atomically. Call only when gate is open. */
+  const flushAll = () => {
+    // Snapshot to avoid iterator invalidation if a commit re-registers.
+    const controllerCommits = Array.from(readySet.values())
+    readySet.clear()
+    const deferred = deferredCommits.splice(0)
+    for (const commit of controllerCommits) commit()
+    for (const commit of deferred) commit()
+  }
 
   const scope: LoadingScope = {
     pending: pendingSig,
@@ -71,22 +85,41 @@ export function Loading(props: LoadingProps): Accessor<unknown> {
             pendingSet.delete(controller)
             readySet.delete(controller)
           }
-          // Gate check: nothing throwing AND something ready → flush all.
-          if (pendingSet.size === 0 && readySet.size > 0) {
-            // Snapshot to avoid iterator invalidation if a commit re-registers.
-            const commits = Array.from(readySet.values())
-            readySet.clear()
-            for (const commit of commits) commit()
+          // Gate check: nothing throwing AND something ready/deferred → flush all.
+          if (pendingSet.size === 0 && (readySet.size > 0 || deferredCommits.length > 0)) {
+            flushAll()
           }
           recomputePending()
         },
         unregister(): void {
           pendingSet.delete(controller)
           readySet.delete(controller)
+          // Gate check: if unregistering drained pendingSet and there are
+          // deferred commits (from use()-engaged bindings that didn't throw),
+          // open the gate now so those commits aren't stranded.
+          if (pendingSet.size === 0 && (readySet.size > 0 || deferredCommits.length > 0)) {
+            flushAll()
+          }
           recomputePending()
         },
       }
       return controller
+    },
+    deferOrCommit(commit: () => void): void {
+      if (pendingSet.size > 0) {
+        // Boundary is pending — queue commit for the next gate-open.
+        deferredCommits.push(commit)
+        recomputePending()
+      } else {
+        // Nothing pending — run immediately (and flush any accumulated deferred).
+        // Also flush any deferred commits that may have accumulated (unlikely but safe).
+        if (deferredCommits.length > 0) {
+          const deferred = deferredCommits.splice(0)
+          for (const c of deferred) c()
+        }
+        commit()
+        recomputePending()
+      }
     },
   }
   boundaryOwner.loadingScope = scope

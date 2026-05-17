@@ -295,3 +295,110 @@ test('reactive child unmounted while throwing releases its controller (does not 
   expect(target.querySelector('.b')!.textContent).toBe('B')
   dispose()
 })
+
+// Task 5.5: use(plainSignal) engages transition coordination.
+// A binding that calls use(signal) — even without throwing — defers its DOM
+// commit until the boundary gate opens, so it moves atomically with siblings.
+test('use(plainSignal) inside <Loading> defers commit when sibling is pending', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+  const [n, setN] = signal(0)
+
+  // Two-load pattern: swap p to introduce a second pending state.
+  let resolve1!: (v: string) => void
+  const p1 = new Promise<string>((r) => (resolve1 = r))
+  const [srcP, setSrcP] = signal<string | Promise<string>>(p1)
+
+  const dispose = render(
+    () => (
+      <Loading initial={<p>loading</p>}>
+        {() => (
+          <div>
+            <span class="n">{() => use(n)}</span>
+            <span class="p">{() => use(srcP())}</span>
+          </div>
+        )}
+      </Loading>
+    ),
+    target,
+  )
+
+  // Initial: both throw (srcP holds p1 which is pending; use(n) marks
+  // engagement but n is ready — however n's binding IS deferred because
+  // the scope is pending). Show initial placeholder.
+  expect(target.textContent).toBe('loading')
+
+  // First load: resolve p1 → gate opens → both spans commit.
+  resolve1('first')
+  await new Promise((r) => queueMicrotask(() => r(undefined)))
+  flush()
+  expect(target.querySelector('.n')!.textContent).toBe('0')
+  expect(target.querySelector('.p')!.textContent).toBe('first')
+
+  // Second load: swap to a new pending promise.
+  let resolve2!: (v: string) => void
+  const p2 = new Promise<string>((r) => (resolve2 = r))
+  setSrcP(p2)
+  await new Promise((r) => queueMicrotask(() => r(undefined)))
+
+  // With srcP now pending (.p binding throws), update n.
+  // use(n) does NOT throw — it returns 1 — but because use() was called and
+  // the scope is pending, its commit must be deferred (atomic-commit promise).
+  setN(1)
+  await new Promise((r) => queueMicrotask(() => r(undefined)))
+
+  // Gate still closed (.p throwing) — span.n should retain prior value '0'.
+  expect(target.querySelector('.n')!.textContent).toBe('0') // commit deferred
+  expect(target.querySelector('.p')!.textContent).toBe('first')
+
+  // Resolve p2; gate opens → both commit atomically.
+  resolve2('second')
+  await new Promise((r) => queueMicrotask(() => r(undefined)))
+  expect(target.querySelector('.n')!.textContent).toBe('1')
+  expect(target.querySelector('.p')!.textContent).toBe('second')
+
+  dispose()
+})
+
+// Task 5.5: bindings that do NOT call use() are unaffected and commit immediately.
+test('binding without use() inside <Loading> commits immediately regardless of boundary pending state', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+  const [n, setN] = signal(0)
+
+  let resolveP!: (v: string) => void
+  const p = new Promise<string>((r) => (resolveP = r))
+
+  const dispose = render(
+    () => (
+      <Loading initial={<p>loading</p>}>
+        {() => (
+          <div>
+            {/* No use() — reads signal directly; not opted into coordination */}
+            <span class="raw">{() => n()}</span>
+            <span class="p">{() => use(p)}</span>
+          </div>
+        )}
+      </Loading>
+    ),
+    target,
+  )
+
+  // Initially: span.p is pending → boundary pending → initial shown.
+  expect(target.textContent).toBe('loading')
+
+  // Resolve p → gate opens → first load committed.
+  resolveP('done')
+  await new Promise((r) => queueMicrotask(() => r(undefined)))
+  flush()
+  expect(target.querySelector('.raw')!.textContent).toBe('0')
+  expect(target.querySelector('.p')!.textContent).toBe('done')
+
+  // Now nothing is pending. Update n: since n() doesn't call use(),
+  // this binding is NOT opted into transition coordination — it commits immediately.
+  setN(5)
+  await new Promise((r) => queueMicrotask(() => r(undefined)))
+  expect(target.querySelector('.raw')!.textContent).toBe('5')
+
+  dispose()
+})

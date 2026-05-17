@@ -1,6 +1,7 @@
 import { isPromise } from './is-promise'
 import { isPending, promiseOf } from './pending'
 import { NODE, type Accessor, type Signal } from './signal'
+import { markUsedInBinding } from './transition-tracker'
 
 /**
  * Records the most recent resolved value observed for each signal. Keyed on the
@@ -82,6 +83,9 @@ export function track(promise: Promise<unknown>): PromiseState {
  * a `<Loading>` boundary fall out of the boundary's atomic-commit gather.
  */
 export function use<T>(x: T | Promise<T> | (() => T | Promise<T>)): Awaited<T> {
+  // Mark unconditionally — even if use() doesn't throw, the binding has
+  // opted into transition coordination with the nearest <Loading> boundary.
+  markUsedInBinding()
   if (typeof x === 'function') {
     const accessor = x as () => T | Promise<T>
     if (isPending(accessor)()) {

@@ -36,6 +36,14 @@ export interface LoadingScope {
   /** Obtain a controller for a new binding. Each binding registers ONCE lazily
    *  on its first `NotReadyYet`; the controller persists across re-runs. */
   register(): BindingController
+  /**
+   * If the boundary is currently pending (pendingSet.size > 0), queue `commit`
+   * to run when the gate opens. If nothing is pending, run `commit` immediately.
+   * This is the coordination point for bindings that called `use()` but did NOT
+   * throw — they still need to defer their DOM commit until all sibling pending
+   * bindings have settled.
+   */
+  deferOrCommit(commit: () => void): void
 }
 
 /** A lifecycle scope. Owns reactive nodes created within it and their cleanup callbacks. */

@@ -156,6 +156,7 @@ test('effect that suspends increments nearest loadingScope', async () => {
       report(state) { count = state.status === 'throwing' ? count + 1 : count > 0 ? count - 1 : 0 },
       unregister() { count = 0 },
     }),
+    deferOrCommit(commit) { commit() },
   }
   let resolveP!: (v: number) => void
   const p = new Promise<number>((r) => { resolveP = r })
@@ -183,6 +184,7 @@ test('effect disposal while pending unregisters from loadingScope', () => {
       report(state) { count = state.status === 'throwing' ? count + 1 : count > 0 ? count - 1 : 0 },
       unregister() { count = 0 },
     }),
+    deferOrCommit(commit) { commit() },
   }
   const p = new Promise<number>(() => {}) // never settles
 
@@ -207,6 +209,7 @@ test('effect that never suspends does not touch loadingScope', () => {
       report(state) { count = state.status === 'throwing' ? count + 1 : count > 0 ? count - 1 : 0 },
       unregister() { count = 0 },
     }),
+    deferOrCommit(commit) { commit() },
   }
   createRoot(() => {
     getOwner()!.loadingScope = scope

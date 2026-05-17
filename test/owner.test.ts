@@ -174,6 +174,7 @@ test('findLoadingScope walks parent chain to find first non-null entry', () => {
   const scope: LoadingScope = {
     pending: () => true,
     register: () => ({ report() {}, unregister() {} }),
+    deferOrCommit(commit) { commit() },
   }
   createRoot(() => {
     const outer = getOwner()!
@@ -187,7 +188,7 @@ test('findLoadingScope walks parent chain to find first non-null entry', () => {
 })
 
 test('findLoadingScope returns null when no scope on chain', () => {
-  let captured: LoadingScope | null = { pending: () => false, register: () => ({ report() {}, unregister() {} }) }
+  let captured: LoadingScope | null = { pending: () => false, register: () => ({ report() {}, unregister() {} }), deferOrCommit(commit) { commit() } }
   createRoot(() => {
     captured = findLoadingScope(getOwner())
   })
