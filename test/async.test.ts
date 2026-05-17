@@ -154,7 +154,9 @@ test('use() accessor form unwraps pending promises (throws NotReadyYet)', () => 
 })
 
 
-test('use(accessor) keeps SWR-at-leaf: returns stale value during refetch', async () => {
+// Plan B: use(accessor) now throws NotReadyYet when isPending(accessor)() is true.
+// For the "give me stale" semantics, use `latest(c)` instead.
+test('use(accessor) throws NotReadyYet during SWR refetch (Plan B behavior; use latest() for stale)', async () => {
   const [id, setId] = signal(1)
   let release!: (v: number) => void
   const c = computed(() => {
@@ -166,15 +168,51 @@ test('use(accessor) keeps SWR-at-leaf: returns stale value during refetch', asyn
   expect(use(c)).toBe(10)
 
   setId(2)
-  // SWR: c() returns stale 10; use(c) returns stale value too (no suspension at leaf).
-  // For coherent suspension inside a generator computed, reach for yield* read(c).
-  expect(use(c)).toBe(10)
+  // SWR: c() returns stale 10, but use(c) now throws because isPending(c)() is true.
+  // Callers that want the stale value should use latest(c) instead.
+  expect(isPending(c)()).toBe(true)
+  expect(latest(c)).toBe(10) // latest() still gives the stale value
+  expect(() => use(c)).toThrow(NotReadyYet) // use() now throws on pipeline-pending
 
   release(20)
   await tick()
   expect(use(c)).toBe(20)
 })
 
+
+describe('use(accessor) — Plan B: throws on isPending', () => {
+  test('use(swrComputed) throws NotReadyYet during refetch, even though accessor returns stale', async () => {
+    const [page, setPage] = signal(1)
+    let activeResolve: (v: string) => void = () => {}
+    const c = computed(() => {
+      page()
+      return new Promise<string>((r) => (activeResolve = r))
+    })
+    // Prime first load
+    c()
+    await new Promise<void>((r) => queueMicrotask(r))
+    activeResolve('v1')
+    await new Promise<void>((r) => queueMicrotask(r))
+    expect(c()).toBe('v1')
+
+    // Trigger refetch.
+    setPage(2)
+    await new Promise<void>((r) => queueMicrotask(r))
+    expect(c()).toBe('v1') // SWR-stale
+
+    // BUT use(c) must throw NotReadyYet now, carrying the in-flight promise.
+    expect(isPending(c)()).toBe(true)
+    let threw: unknown = null
+    try {
+      use(c)
+    } catch (e) {
+      threw = e
+    }
+    expect(threw).toBeInstanceOf(NotReadyYet)
+    const { promiseOf } = await import('../src/pending')
+    expect((threw as NotReadyYet).promise).toBe(promiseOf(c)())
+  })
+})
 
 describe('read — post-Plan-A (no brand suspension)', () => {
   test('yield* read on an SWR-refetching computed yields the stale value, NOT brand.promise', async () => {

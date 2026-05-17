@@ -1,4 +1,5 @@
 import { isPromise } from './is-promise'
+import { isPending, promiseOf } from './pending'
 import { NODE, type Accessor, type Signal } from './signal'
 
 /**
@@ -67,21 +68,26 @@ export function track(promise: Promise<unknown>): PromiseState {
 
 /**
  * Resolve a possibly-async value synchronously.
+ * - Accessor argument: if `isPending(x)()` is true (this stage OR any
+ *   upstream stage is in-flight), throws `NotReadyYet(promiseOf(x)()!)` so
+ *   the surrounding effect/binding can suspend. Otherwise returns the
+ *   accessor's current value (possibly a Promise — handled by the next
+ *   branches just like a plain Promise argument).
  * - Plain value -> returned as-is.
- * - Settled promise -> its resolved value (a settled rejection re-throws its reason).
- * - Pending promise -> throws `NotReadyYet` (caught by the nearest effect).
+ * - Settled promise -> its resolved value (a settled rejection re-throws).
+ * - Pending promise -> throws `NotReadyYet`.
  *
- * Intended for use inside effects and JSX bindings. For coherent multi-read
- * snapshots inside a generator computed, use `yield* read(accessor)` instead
- * — `read` is brand-aware and suspends via the driver, preserving SWR-at-leaf
- * for non-generator callers of `use`.
+ * Intended for use inside effects and JSX bindings. After Plan B, `use(x)`
+ * always throws on pipeline-pending — coherent multi-read snapshots inside
+ * a `<Loading>` boundary fall out of the boundary's atomic-commit gather.
  */
 export function use<T>(x: T | Promise<T> | (() => T | Promise<T>)): Awaited<T> {
-  // Accept accessor form for symmetry with `read()`. Footgun: if T extends
-  // Function, the value gets called accidentally — rare; box the function
-  // value to use it.
   if (typeof x === 'function') {
-    x = (x as () => T | Promise<T>)()
+    const accessor = x as () => T | Promise<T>
+    if (isPending(accessor)()) {
+      throw new NotReadyYet(promiseOf(accessor)()!)
+    }
+    x = accessor()
   }
   if (!isPromise(x)) return x as Awaited<T>
   const state = track(x)
