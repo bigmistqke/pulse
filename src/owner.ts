@@ -2,15 +2,40 @@ import { getContext, type Disposable, onCleanup as r3OnCleanup } from 'r3'
 import type { Accessor } from './signal'
 
 /**
+ * Per-binding state reports flow into a Loading boundary via this shape.
+ * - 'throwing': the binding is currently suspended on a pending promise.
+ * - 'ready': the binding recomputed successfully and has a commit waiting
+ *            for the gate to open. The boundary calls `commit` during flush.
+ * - 'idle':  the binding is no longer pending and has no commit to defer
+ *            (used by plain `effect()` whose body already ran its side
+ *            effects on the successful pass).
+ */
+export type BindingState =
+  | { readonly status: 'throwing' }
+  | { readonly status: 'ready'; readonly commit: () => void }
+  | { readonly status: 'idle' }
+
+/**
+ * A per-binding controller obtained from `LoadingScope.register()`.
+ * The binding reports state changes via `report` and detaches via `unregister`.
+ */
+export interface BindingController {
+  report(state: BindingState): void
+  unregister(): void
+}
+
+/**
  * Reactive pending-state handle attached to an `Owner` by `<Loading>`.
- * Inner binding-effects that catch `NotReadyYet` walk up the owner chain
- * to find the nearest scope and register themselves as pending.
+ * Inner binding-effects that catch `NotReadyYet` register and report state
+ * changes; the boundary tracks pending and ready sets, flushing all ready
+ * commits in one pass once nothing else is pending.
  */
 export interface LoadingScope {
-  /** `true` while at least one descendant binding is registered as pending. */
+  /** `true` while at least one binding is pending OR has a deferred commit waiting. */
   readonly pending: Accessor<boolean>
-  /** Increment the pending count. Returns an unregister callback. */
-  register: () => () => void
+  /** Obtain a controller for a new binding. Each binding registers ONCE lazily
+   *  on its first `NotReadyYet`; the controller persists across re-runs. */
+  register(): BindingController
 }
 
 /** A lifecycle scope. Owns reactive nodes created within it and their cleanup callbacks. */

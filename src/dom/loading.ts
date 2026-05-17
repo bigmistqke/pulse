@@ -4,6 +4,8 @@ import {
   findLoadingScope,
   getOwner,
   runWithOwner,
+  type BindingController,
+  type BindingState,
   type LoadingScope,
   type Owner,
 } from '../owner'
@@ -42,14 +44,49 @@ export interface LoadingProps {
 export function Loading(props: LoadingProps): Accessor<unknown> {
   const parentOwner = getOwner()
   const boundaryOwner: Owner = createSubOwner(parentOwner)
-  const [pendingCount, setPendingCount] = signal(0)
-  const pending: Accessor<boolean> = () => pendingCount() > 0
+
+  // pendingSet: controllers currently throwing.
+  // readySet: controllers that recomputed successfully and have a commit waiting.
+  // Gate opens (commits flush together) when pendingSet.size === 0 && readySet.size > 0.
+  const pendingSet = new Set<BindingController>()
+  const readySet = new Map<BindingController, () => void>()
+
+  const [pendingSig, setPendingSig] = signal(false)
+  const recomputePending = () =>
+    setPendingSig(pendingSet.size > 0 || readySet.size > 0)
 
   const scope: LoadingScope = {
-    pending,
-    register: () => {
-      setPendingCount((c) => c + 1)
-      return () => setPendingCount((c) => c - 1)
+    pending: pendingSig,
+    register(): BindingController {
+      const controller: BindingController = {
+        report(state: BindingState): void {
+          if (state.status === 'throwing') {
+            pendingSet.add(controller)
+            readySet.delete(controller)
+          } else if (state.status === 'ready') {
+            pendingSet.delete(controller)
+            readySet.set(controller, state.commit)
+          } else {
+            // idle
+            pendingSet.delete(controller)
+            readySet.delete(controller)
+          }
+          // Gate check: nothing throwing AND something ready → flush all.
+          if (pendingSet.size === 0 && readySet.size > 0) {
+            // Snapshot to avoid iterator invalidation if a commit re-registers.
+            const commits = Array.from(readySet.values())
+            readySet.clear()
+            for (const commit of commits) commit()
+          }
+          recomputePending()
+        },
+        unregister(): void {
+          pendingSet.delete(controller)
+          readySet.delete(controller)
+          recomputePending()
+        },
+      }
+      return controller
     },
   }
   boundaryOwner.loadingScope = scope
@@ -63,12 +100,12 @@ export function Loading(props: LoadingProps): Accessor<unknown> {
   let hasEverLoaded = false
   runWithOwner(boundaryOwner, () => {
     effect(() => {
-      if (!pending()) hasEverLoaded = true
+      if (!pendingSig()) hasEverLoaded = true
     })
   })
 
   return () => {
-    if (!pending()) return loadedSubtree
+    if (!pendingSig()) return loadedSubtree
     if (!hasEverLoaded) return props.initial ?? props.fallback
     return props.fallback ?? loadedSubtree
   }
