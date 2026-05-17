@@ -1,5 +1,15 @@
+import { NotReadyYet } from '../async'
 import { effect } from '../effect'
-import { createSubOwner, disposeOwner, getOwner, onCleanup, runWithOwner, type Owner } from '../owner'
+import {
+  createSubOwner,
+  disposeOwner,
+  findLoadingScope,
+  getOwner,
+  onCleanup,
+  runWithOwner,
+  type BindingController,
+  type Owner,
+} from '../owner'
 
 /**
  * Warn (once per occurrence) when a reactive binding or event listener is
@@ -41,29 +51,70 @@ export function insertChild(parent: Node, value: unknown): void {
     parent.appendChild(start)
     parent.appendChild(end)
     let runOwner: Owner | null = null
+    let controller: BindingController | null = null
+    const ensureController = (): BindingController | null => {
+      if (controller !== null) return controller
+      const scope = findLoadingScope(parentOwner)
+      if (scope === null) return null
+      controller = scope.register()
+      return controller
+    }
     effect(() => {
-      // Dispose the previous run's owner first — this tears down any
-      // nested binding-effects from the prior run.
-      if (runOwner !== null) disposeOwner(runOwner)
-      runOwner = createSubOwner(parentOwner)
-      runWithOwner(runOwner, () => {
-        // Call the user function FIRST. If it throws (notably NotReadyYet
-        // via `use(...)`), we leave the existing DOM untouched — stale-but-
-        // stable. Only on a successful call do we clear and re-insert.
-        const next = (value as () => unknown)()
-        // Build the new content into a fragment before touching the DOM, so
-        // a partial insertChild error can't leave a half-cleared region.
-        const frag = document.createDocumentFragment()
-        insertChild(frag, next)
-        // Clear previously-inserted nodes between the markers, then insert.
+      // Build the fragment FIRST inside a fresh sub-owner so any nested
+      // binding-effects/computeds the user creates are bound to this run.
+      const nextRunOwner = createSubOwner(parentOwner)
+      let frag: DocumentFragment | null = null
+      try {
+        runWithOwner(nextRunOwner, () => {
+          const next = (value as () => unknown)()
+          frag = document.createDocumentFragment()
+          insertChild(frag, next)
+        })
+      } catch (e) {
+        // Sub-owner from the failed run is orphaned — dispose to clean up
+        // any partial nested registrations.
+        disposeOwner(nextRunOwner)
+        if (e instanceof NotReadyYet) {
+          ensureController()?.report({ status: 'throwing' })
+          // Re-throw so the outer effect() handles re-run-on-settle.
+          // The outer effect's controller registration becomes redundant
+          // with ours — we accept the small duplication; both controllers
+          // report 'throwing' to the same scope, and both will report
+          // 'idle'/'ready' on success. The scope's Set semantics dedupe
+          // per-controller, so two reports just mean two controllers in
+          // pendingSet — the gate still opens correctly when BOTH report
+          // non-throwing. NOTE: this is slightly wasteful; future cleanup
+          // could let insertChild own a custom effect-like primitive that
+          // bypasses the outer scope registration.
+          throw e
+        }
+        throw e
+      }
+      // Successful compute. Build the commit. The commit captures oldRunOwner
+      // from the surrounding `let runOwner` variable, so it disposes the
+      // previous run's owner on commit and installs the new one.
+      const oldRunOwner = runOwner
+      const commit = () => {
+        // Dispose the previous run's owner; install the new one.
+        if (oldRunOwner !== null) disposeOwner(oldRunOwner)
+        runOwner = nextRunOwner
+        // Clear DOM between markers and insert the fragment.
         let cur = start.nextSibling
         while (cur !== null && cur !== end) {
           const after: ChildNode | null = cur.nextSibling
           cur.remove()
           cur = after
         }
-        end.parentNode!.insertBefore(frag, end)
-      })
+        end.parentNode!.insertBefore(frag!, end)
+      }
+      // If there's a Loading scope, defer the commit (atomic flush).
+      // Otherwise commit immediately (preserves no-Loading behavior).
+      const ctrl = ensureController()
+      if (ctrl !== null) {
+        ctrl.report({ status: 'ready', commit })
+      } else {
+        commit()
+      }
     })
     return
   }

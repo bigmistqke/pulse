@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, test } from 'vitest'
 import { flush, microtaskScheduler, render, setScheduler, signal, syncScheduler } from '../../src/index'
 import { Loading } from '../../src/dom/loading'
 import { findLoadingScope, getOwner, runWithOwner } from '../../src/owner'
+import { use } from '../../src/async'
 
 beforeEach(() => setScheduler(syncScheduler(flush)))
 afterEach(() => {
@@ -114,5 +115,67 @@ test('unregister removes the binding from both sets', () => {
   expect(scope.pending()).toBe(true) // b still
   b.unregister()
   expect(scope.pending()).toBe(false)
+  dispose()
+})
+
+test('two reactive children inside <Loading> commit atomically when their promises settle at different ticks', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+
+  let resolveA1: (v: string) => void = () => {}
+  let resolveB1: (v: string) => void = () => {}
+  const pA1 = new Promise<string>((r) => (resolveA1 = r))
+  const pB1 = new Promise<string>((r) => (resolveB1 = r))
+
+  const [srcA, setSrcA] = signal<string | Promise<string>>(pA1)
+  const [srcB, setSrcB] = signal<string | Promise<string>>(pB1)
+
+  const dispose = render(
+    () => (
+      <Loading initial={<p>loading</p>}>
+        {() => (
+          <div>
+            <span class="a">{() => use(srcA())}</span>
+            <span class="b">{() => use(srcB())}</span>
+          </div>
+        )}
+      </Loading>
+    ),
+    target,
+  )
+
+  // Initial: both pending → show initial placeholder.
+  expect(target.textContent).toBe('loading')
+
+  // First load: resolve both.
+  resolveA1('A1')
+  resolveB1('B1')
+  await new Promise((r) => queueMicrotask(() => r(undefined)))
+  flush()
+  expect(target.querySelector('.a')!.textContent).toBe('A1')
+  expect(target.querySelector('.b')!.textContent).toBe('B1')
+
+  // Second load (no fallback → hold-prior-tree). Introduce new promises.
+  let resolveA2: (v: string) => void = () => {}
+  let resolveB2: (v: string) => void = () => {}
+  const pA2 = new Promise<string>((r) => (resolveA2 = r))
+  const pB2 = new Promise<string>((r) => (resolveB2 = r))
+  setSrcA(pA2)
+  setSrcB(pB2)
+  await new Promise((r) => queueMicrotask(() => r(undefined)))
+
+  // Resolve A first; B still pending. With atomic-commit, span.a must retain
+  // its old value ('A1') because the gate is still closed (B throwing).
+  resolveA2('A2')
+  await new Promise((r) => queueMicrotask(() => r(undefined)))
+  expect(target.querySelector('.a')!.textContent).toBe('A1') // commit deferred
+  expect(target.querySelector('.b')!.textContent).toBe('B1')
+
+  // Resolve B; gate opens — both commit atomically.
+  resolveB2('B2')
+  await new Promise((r) => queueMicrotask(() => r(undefined)))
+  expect(target.querySelector('.a')!.textContent).toBe('A2')
+  expect(target.querySelector('.b')!.textContent).toBe('B2')
+
   dispose()
 })
