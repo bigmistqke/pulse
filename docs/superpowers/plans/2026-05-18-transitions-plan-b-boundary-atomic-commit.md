@@ -426,6 +426,153 @@ git commit -m "refactor(effect): adopt BindingController API; plain effects repo
 
 ---
 
+## Task 2.5: Absorb `NotReadyYet` thrown by sync `computed` stage bodies as suspension
+
+**Motivation.** Today a `computed` stage body that throws `NotReadyYet` (via `use(pendingPromise)` or — after Task 5 — `use(pendingAccessor)`) is routed as a *real error* by `makeStageNode`'s outer try/catch. Effects and JSX bindings already absorb `NotReadyYet` as a suspension signal. This task closes the asymmetry: a sync (or async-function) computed stage that throws `NotReadyYet` is treated identically to a stage that returned a pending Promise — `suspendedOn` set to `e.promise`, `pendingSig` flipped, settle handler installed, body re-runs on settle. Generator stages already use `yield*` for suspension and are unaffected.
+
+**Files:**
+- Modify: `src/computed.ts`
+- Modify: `test/computed.test.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+Append to `test/computed.test.ts`:
+
+```ts
+describe('computed — NotReadyYet absorbed as suspension (Plan B)', () => {
+  test('sync stage body throwing NotReadyYet suspends, then resumes on settle', async () => {
+    let resolve!: (v: number) => void
+    const p = new Promise<number>((r) => (resolve = r))
+    const c = computed(() => use(p) + 1)
+    // First read: stage body throws NotReadyYet → absorbed as suspension.
+    // The accessor's published value on first load is the in-flight Promise.
+    const first = c()
+    expect(first).toBe(p)
+    expect(isPending(c)()).toBe(true)
+    resolve(41)
+    await new Promise((r) => queueMicrotask(r))
+    expect(c()).toBe(42)
+    expect(isPending(c)()).toBe(false)
+  })
+
+  test('two-stage pipeline: stage 0 throws NotReadyYet; downstream stage sees the suspension', async () => {
+    let resolve!: (v: number) => void
+    const p = new Promise<number>((r) => (resolve = r))
+    const stage0 = computed(() => use(p))
+    const stage1 = computed(stage0, (v) => v * 2)
+    expect(isPending(stage1)()).toBe(true)
+    resolve(7)
+    await new Promise((r) => queueMicrotask(r))
+    expect(stage1()).toBe(14)
+  })
+
+  test('SWR-refetch: stage body throwing NotReadyYet during refetch keeps prior value visible', async () => {
+    const [src, setSrc] = signal(1)
+    let activeResolve: (v: number) => void = () => {}
+    const c = computed(() => {
+      src()
+      const p = new Promise<number>((r) => (activeResolve = r))
+      return use(p)
+    })
+    c() // kick first eval
+    await new Promise((r) => queueMicrotask(r))
+    activeResolve(10)
+    await new Promise((r) => queueMicrotask(r))
+    expect(c()).toBe(10)
+    setSrc(2)
+    await new Promise((r) => queueMicrotask(r))
+    expect(c()).toBe(10) // SWR-stale
+    expect(isPending(c)()).toBe(true)
+    activeResolve(20)
+    await new Promise((r) => queueMicrotask(r))
+    expect(c()).toBe(20)
+  })
+})
+```
+
+Required imports at top of `test/computed.test.ts` if not already present: `use` from `'../src/async'`, `signal` from `'../src/signal'`, `isPending` from `'../src/pending'`.
+
+- [ ] **Step 2: Run test to verify failure**
+
+Run: `pnpm exec vitest run test/computed.test.ts -t "NotReadyYet absorbed"`
+Expected: FAIL — current code routes `NotReadyYet` as an error (likely unhandled or surfacing as a routed throw).
+
+- [ ] **Step 3: Update `src/computed.ts` to absorb `NotReadyYet`**
+
+Inside `makeStageNode`, locate the outer `try { ... } catch (e) { ... routeError(myOwner, e) ... }` block that wraps the `runStage` call (around the existing `depTracker` body). Currently the catch unconditionally routes:
+
+```ts
+    } catch (e) {
+      try {
+        routeError(myOwner, e)
+      } catch (rethrown) {
+        deferredError = { error: rethrown }
+      }
+      return null
+    }
+```
+
+Insert a `NotReadyYet` branch BEFORE the routeError call:
+
+```ts
+    } catch (e) {
+      if (e instanceof NotReadyYet) {
+        // Sync/async-function stage body called `use(pending)` and threw the
+        // suspension signal. Treat identically to a stage that returned a
+        // pending Promise: set up the same suspendOn + settle machinery.
+        // Generator stages route suspension via their driver and never reach
+        // this catch with a NotReadyYet.
+        suspendOn(e.promise, /* input */ undefined, (state) => {
+          if (state.status === 'fulfilled') {
+            suspendedOn = null
+            setPendingSig(false)
+            // Re-run body via kick (resolved-value cache is meaningless here
+            // because the throw means body never returned — re-execute fully).
+            setKick(++kickCount)
+          } else {
+            suspendedOn = null
+            setPendingSig(false)
+            deferredError = { error: state.reason }
+            setKick(++kickCount)
+          }
+        })
+        return null
+      }
+      try {
+        routeError(myOwner, e)
+      } catch (rethrown) {
+        deferredError = { error: rethrown }
+      }
+      return null
+    }
+```
+
+Add `NotReadyYet` to the imports at the top of `src/computed.ts`:
+
+```ts
+import { isGeneratorFunction, NotReadyYet, track, type PromiseState, type Resolved } from './async'
+```
+
+**Subtlety — input parameter.** `suspendOn(promise, input, onSettle)`'s `input` argument is used by the existing `stashedResolution`/`Object.is(input, suspendedInput)` reuse-value path in the depTracker body. For a NotReadyYet throw, the stage didn't return a value to stash, so we pass `input = undefined` and the resume strategy is "re-run body" (via kick), not "consume stash." Verify the existing reuse-value path's `input` check still behaves: when the next body run reads its real input and produces a fresh value, that's fine — no stash to match.
+
+**Subtlety — generator stages.** Generator stages produce suspension via the driver (`runStage` returns `{pending: true, promise}`), not via throw. So this NotReadyYet branch fires only for sync and async-function stages. Add an assertion (dev-only) is overkill; the existing code structure makes this naturally so.
+
+- [ ] **Step 4: Run tests**
+
+Run: `pnpm exec vitest run`
+Expected: PASS — the three new tests pass; existing computed tests still pass; full suite green.
+
+If any pre-existing test FAILS, investigate carefully: a test that asserted "computed stage throwing NotReadyYet propagates as an error" is now wrong (the spec change inverts that). Update or delete such tests with a brief note in the commit message.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add src/computed.ts test/computed.test.ts
+git commit -m "feat(computed)!: absorb NotReadyYet thrown by sync stage body as suspension"
+```
+
+---
+
 ## Task 3: Split `insertChild` reactive child into compute + commit (with scope.report)
 
 The `insertChild` reactive child currently does `compute then commit` inside the same try block. Split so commit becomes a callback handed to the scope.
