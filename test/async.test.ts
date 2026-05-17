@@ -1,4 +1,4 @@
-import { expect, test } from 'vitest'
+import { describe, expect, test } from 'vitest'
 import { isPending, latest, use, NotReadyYet, read } from '../src/async'
 import { effect } from '../src/effect'
 import { flush, microtaskScheduler, setScheduler, syncScheduler } from '../src/scheduler'
@@ -219,4 +219,36 @@ test('yield* read(pendingComputed) suspends the generator until settle', async (
   await tick()
   expect(view()).toBe(20)
   expect(isPending(view)).toBe(false)
+})
+
+describe('read — post-Plan-A (no brand suspension)', () => {
+  test('yield* read on an SWR-refetching computed yields the stale value, NOT brand.promise', async () => {
+    const [page, setPage] = signal(1)
+    let activeResolve: (v: string) => void = () => {}
+    const c = computed(() => {
+      page() // declare dep
+      return new Promise<string>((r) => { activeResolve = r })
+    })
+
+    // First load: prime the SWR cache.
+    c() // subscribe / kick first-eval
+    await new Promise<void>((r) => queueMicrotask(r))
+    activeResolve('v1')
+    await new Promise<void>((r) => queueMicrotask(r))
+    expect(c()).toBe('v1')
+
+    // Trigger refetch — accessor goes SWR-stale, suspendedOn becomes new Promise.
+    setPage(2)
+    await new Promise<void>((r) => queueMicrotask(r))
+    expect(c()).toBe('v1') // SWR-stale
+
+    // Plan A: read yields the stale value directly.
+    const gen = read(c)
+    const first = gen.next()
+    expect(first.value).toBe('v1')
+    // (Under the pre-Plan-A brand-aware read, first.value would have been
+    // the new in-flight Promise from brand.promise(), not 'v1'.)
+
+    activeResolve('v2')
+  })
 })

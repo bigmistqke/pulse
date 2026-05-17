@@ -126,31 +126,20 @@ function isSignalAccessor(x: unknown): x is Signal<unknown> {
  * Generator-side resolver. Use as `yield* read(x)` inside a `function*` stage.
  * - x is a signal: the accessor is called (tracking the signal as a dep), and
  *   its value (which may be a `T` or a `Promise<T>`) is yielded.
- * - x is a signal/computed with a `[PENDING]` brand currently true: the
- *   in-flight Promise from the brand is yielded first (driver suspends), then
- *   on resume the accessor is re-called for the post-settle value. Enables
- *   coherent multi-read snapshots for transition patterns — see
- *   docs/superpowers/specs/2026-05-16-pulse-transitions-design.md.
  * - x is a promise: yielded directly (untracked).
  * - x is a plain value: yielded directly; the driver resumes immediately with it.
  *
  * `yield* read(x)` has type `Resolved<typeof x>` — per-yield inference, courtesy
  * of generator delegation.
+ *
+ * Plan A note: `read` does NOT consult any `[PENDING]` brand. Suspension is
+ * driven solely by the driver's `settle()` over the yielded value. Coherent
+ * snapshots and transitions are handled by the JSX boundary layer (Plan B),
+ * not by `read`.
  */
 export function* read<T>(x: T): Generator<unknown, Resolved<T>, unknown> {
   if (isSignalAccessor(x)) {
-    const acc = x as () => unknown
-    // Force upstream recompute first: reading the accessor stabilizes its
-    // computed, which updates its [PENDING] brand in the same pass. Without
-    // this, brand?.() may return a stale value when both this generator and
-    // the upstream computed were dirtied by the same root-signal write.
-    let value = acc()
-    const brand = (x as Signal<unknown>)[PENDING]
-    if (brand?.()) {
-      yield brand.promise!() as Promise<unknown>
-      value = acc() // re-read after resume to pick up the post-settle value
-    }
-    return (yield value) as Resolved<T>
+    return (yield (x as () => unknown)()) as Resolved<T>
   }
   return (yield x) as Resolved<T>
 }
