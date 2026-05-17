@@ -39,7 +39,15 @@ export function lookupPending(accessor: Accessor<unknown>): PendingEntry | undef
 export function isPending<T>(x: Accessor<T>): Accessor<boolean> {
   return () => {
     const entry = registry.get(x as Accessor<unknown>)
-    if (entry !== undefined) return entry.pending()
+    if (entry !== undefined) {
+      // Walk the chain: pending if this stage OR any upstream is.
+      let cur: PendingEntry | undefined = entry
+      while (cur !== undefined) {
+        if (cur.pending()) return true
+        cur = cur.upstream
+      }
+      return false
+    }
     // Fallback: inspect the value — signals holding a Promise are pending
     // until that Promise settles.
     const value = x()
@@ -53,7 +61,18 @@ export function isPending<T>(x: Accessor<T>): Accessor<boolean> {
 export function promiseOf<T>(x: Accessor<T>): Accessor<Promise<T> | null> {
   return () => {
     const entry = registry.get(x as Accessor<unknown>)
-    if (entry !== undefined) return entry.promise() as Promise<T> | null
+    if (entry !== undefined) {
+      // Return the deepest in-flight Promise found by walking upstream.
+      // "Deepest" = closest to the user's read site that is actually pending.
+      // We walk top-down (this stage first) so local takes precedence.
+      let cur: PendingEntry | undefined = entry
+      while (cur !== undefined) {
+        const p = cur.promise()
+        if (p !== null) return p as Promise<T> | null
+        cur = cur.upstream
+      }
+      return null
+    }
     const value = x()
     if (!isPromise(value)) return null
     return track(value).status === 'pending' ? (value as Promise<T>) : null
