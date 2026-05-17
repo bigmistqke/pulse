@@ -135,7 +135,8 @@ function makeStageNode(
   // so body doesn't re-run on settle. Consumers reading the accessor get this.
   const [publishedValue, setPublishedValue] = signal<unknown>(UNRESOLVED as unknown)
 
-  // Reactive pending state. Brand on accessor exposes this to `isPending()`.
+  // Reactive pending state. Exposed to `isPending()` via the external
+  // registry entry constructed below.
   const [pendingSig, setPendingSig] = signal(false)
 
   // Generator-only kick: drives body re-run so the generator-driver can

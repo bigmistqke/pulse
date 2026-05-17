@@ -62,9 +62,8 @@ export function promiseOf<T>(x: Accessor<T>): Accessor<Promise<T> | null> {
   return () => {
     const entry = registry.get(x as Accessor<unknown>)
     if (entry !== undefined) {
-      // Return the deepest in-flight Promise found by walking upstream.
-      // "Deepest" = closest to the user's read site that is actually pending.
-      // We walk top-down (this stage first) so local takes precedence.
+      // Returns the in-flight Promise — most-local takes precedence over
+      // upstream (we walk this stage first, then up the chain).
       let cur: PendingEntry | undefined = entry
       while (cur !== undefined) {
         const p = cur.promise()

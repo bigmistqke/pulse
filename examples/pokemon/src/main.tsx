@@ -32,7 +32,7 @@ const view = computed(function* () {
 });
 
 function TopBar() {
-  const refreshing = () => isPending(view);
+  const refreshing = () => isPending(view)();
   return (
     <header class="top-bar">
       <h1>pokédex</h1>
@@ -106,7 +106,7 @@ function App() {
       {() => (
         <div class="app">
           <TopBar />
-          <ul class="list" class:loading={() => isPending(view)}>
+          <ul class="list" class:loading={() => isPending(view)()}>
             <For each={() => use(view).items}>
               {(ref) => <PokemonRow ref={ref} />}
             </For>
@@ -118,7 +118,7 @@ function App() {
             >
               ← prev
             </button>
-            <span class:loading={() => isPending(view)}>
+            <span class:loading={() => isPending(view)()}>
               page {() => use(view).page + 1}
             </span>
             <button on:click={() => setPage((p) => p + 1)}>next →</button>
