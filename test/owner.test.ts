@@ -173,7 +173,7 @@ test('findLoadingScope walks parent chain to find first non-null entry', () => {
   let captured: LoadingScope | null = null
   const scope: LoadingScope = {
     pending: () => true,
-    register: () => () => {},
+    register: () => ({ report() {}, unregister() {} }),
   }
   createRoot(() => {
     const outer = getOwner()!
@@ -187,7 +187,7 @@ test('findLoadingScope walks parent chain to find first non-null entry', () => {
 })
 
 test('findLoadingScope returns null when no scope on chain', () => {
-  let captured: LoadingScope | null = { pending: () => false, register: () => () => {} }
+  let captured: LoadingScope | null = { pending: () => false, register: () => ({ report() {}, unregister() {} }) }
   createRoot(() => {
     captured = findLoadingScope(getOwner())
   })

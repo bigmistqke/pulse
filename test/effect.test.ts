@@ -152,10 +152,10 @@ test('effect that suspends increments nearest loadingScope', async () => {
   let count = 0
   const scope: LoadingScope = {
     pending: () => count > 0,
-    register: () => {
-      count++
-      return () => { count-- }
-    },
+    register: () => ({
+      report(state) { count = state.status === 'throwing' ? count + 1 : count > 0 ? count - 1 : 0 },
+      unregister() { count = 0 },
+    }),
   }
   let resolveP!: (v: number) => void
   const p = new Promise<number>((r) => { resolveP = r })
@@ -163,11 +163,11 @@ test('effect that suspends increments nearest loadingScope', async () => {
   await createRoot(async (dispose) => {
     getOwner()!.loadingScope = scope
     effect(() => { use(p) })
-    expect(count).toBe(1) // suspended → registered
+    expect(count).toBe(1) // suspended → throwing reported
     resolveP(42)
     await p
     flush()
-    expect(count).toBe(0) // settled → unregistered
+    expect(count).toBe(0) // settled → idle reported
     dispose()
   })
 
@@ -179,10 +179,10 @@ test('effect disposal while pending unregisters from loadingScope', () => {
   let count = 0
   const scope: LoadingScope = {
     pending: () => count > 0,
-    register: () => {
-      count++
-      return () => { count-- }
-    },
+    register: () => ({
+      report(state) { count = state.status === 'throwing' ? count + 1 : count > 0 ? count - 1 : 0 },
+      unregister() { count = 0 },
+    }),
   }
   const p = new Promise<number>(() => {}) // never settles
 
@@ -203,10 +203,10 @@ test('effect that never suspends does not touch loadingScope', () => {
   let count = 0
   const scope: LoadingScope = {
     pending: () => count > 0,
-    register: () => {
-      count++
-      return () => { count-- }
-    },
+    register: () => ({
+      report(state) { count = state.status === 'throwing' ? count + 1 : count > 0 ? count - 1 : 0 },
+      unregister() { count = 0 },
+    }),
   }
   createRoot(() => {
     getOwner()!.loadingScope = scope
