@@ -4,6 +4,7 @@ import { runStage } from './driver'
 import { isPromise } from './is-promise'
 import { getOwner, routeError, registerWithOwner } from './owner'
 import { makeAccessor, NODE, PENDING, signal, type Accessor, type PendingBrand, type Signal } from './signal'
+import { registerPending, lookupPending } from './pending'
 
 /** A pipeline stage of any shape: sync, async, or generator. The return type
  *  is whatever the function returns — sync `R`, async `Promise<R>`, or
@@ -297,5 +298,18 @@ function makeStageNode(
     : pendingSig) as PendingBrand & { promise: () => Promise<unknown> | null }
   brand.promise = () => suspendedOn ?? upstreamPending?.promise?.() ?? null
   accessor[PENDING] = brand
+
+  // Register with the external pending tracker (Plan A foundation). The
+  // entry stores LOCAL state (pendingSig + a function returning suspendedOn);
+  // pipeline-OR walking is the tracker's job, driven by the `upstream` link.
+  const upstreamEntry = inputAccessor
+    ? lookupPending(inputAccessor as Accessor<unknown>)
+    : undefined
+  registerPending(accessor, {
+    pending: pendingSig,
+    promise: () => suspendedOn,
+    upstream: upstreamEntry,
+  })
+
   return { accessor, r3Node: depTracker as R3Computed<unknown> }
 }
