@@ -1,13 +1,12 @@
 import {
   computed,
   For,
-  isPending,
   Loading,
-  read,
   render,
   Show,
   signal,
   use,
+  useLoading,
 } from "pulse";
 import { fetchList, fetchPokemon, type PokemonRef } from "./api";
 import "./style.css";
@@ -20,25 +19,10 @@ const list = computed(
   (r) => r.results,
 );
 
-// Coherent display snapshot: page label and items commit atomically when the
-// new page settles. yield* read(list) is brand-aware — suspends the generator
-// while list is mid-refetch, resumes with the new items. SWR keeps the prior
-// snapshot visible to consumers throughout.
-const view = computed(function* () {
-  return {
-    page: yield* read(page),
-    items: yield* read(list),
-  };
-});
-
 function TopBar() {
-  const refreshing = () => isPending(view)();
   return (
     <header class="top-bar">
       <h1>pokédex</h1>
-      <Show when={refreshing}>
-        {() => <span class="indicator">refreshing…</span>}
-      </Show>
     </header>
   );
 }
@@ -106,23 +90,34 @@ function App() {
       {() => (
         <div class="app">
           <TopBar />
-          <ul class="list" class:loading={() => isPending(view)()}>
-            <For each={() => use(view).items}>
-              {(ref) => <PokemonRow ref={ref} />}
-            </For>
-          </ul>
-          <nav class="paging">
-            <button
-              on:click={() => setPage((p) => Math.max(0, p - 1))}
-              prop:disabled={() => page() === 0}
-            >
-              ← prev
-            </button>
-            <span class:loading={() => isPending(view)()}>
-              page {() => use(view).page + 1}
-            </span>
-            <button on:click={() => setPage((p) => p + 1)}>next →</button>
-          </nav>
+          {/* Inner boundary: page label and list commit atomically.
+              While a new page is in-flight, the prior tree stays visible.
+              use(list) and use(page) throw NotReadyYet while pending,
+              keeping the boundary in collecting state until both settle. */}
+          <Loading>
+            {() => (
+              <>
+                <Show when={() => useLoading()()}>
+                  {() => <span class="indicator">refreshing…</span>}
+                </Show>
+                <ul class="list">
+                  <For each={() => use(list)}>
+                    {(ref) => <PokemonRow ref={ref} />}
+                  </For>
+                </ul>
+                <nav class="paging">
+                  <button
+                    on:click={() => setPage((p) => Math.max(0, p - 1))}
+                    prop:disabled={() => page() === 0}
+                  >
+                    ← prev
+                  </button>
+                  <span>page {() => use(page) + 1}</span>
+                  <button on:click={() => setPage((p) => p + 1)}>next →</button>
+                </nav>
+              </>
+            )}
+          </Loading>
         </div>
       )}
     </Loading>
