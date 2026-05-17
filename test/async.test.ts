@@ -1,21 +1,22 @@
 import { describe, expect, test } from 'vitest'
-import { isPending, latest, use, NotReadyYet, read } from '../src/async'
+import { latest, use, NotReadyYet, read } from '../src/async'
+import { isPending } from '../src/pending'
 import { effect } from '../src/effect'
 import { flush, microtaskScheduler, setScheduler, syncScheduler } from '../src/scheduler'
 import { computed } from '../src/computed'
-import { signal, PENDING, type Accessor } from '../src/signal'
+import { signal } from '../src/signal'
 
 /** Resolve after all microtasks have drained (a macrotask boundary). */
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
 
 test('isPending is false for a signal holding a plain value', () => {
   const [s] = signal(0)
-  expect(isPending(s)).toBe(false)
+  expect(isPending(s)()).toBe(false)
 })
 
 test('isPending is true for a signal holding a pending promise', () => {
   const [s] = signal(new Promise<number>(() => {}))
-  expect(isPending(s)).toBe(true)
+  expect(isPending(s)()).toBe(true)
 })
 
 test('latest is undefined before the first resolution', () => {
@@ -152,28 +153,6 @@ test('use() accessor form unwraps pending promises (throws NotReadyYet)', () => 
   expect(() => use(s)).toThrow(NotReadyYet)
 })
 
-test('isPending dispatches via [PENDING] brand when present', () => {
-  const [pending, setPending] = signal(false)
-  const branded = (() => 42) as Accessor<number> & { [PENDING]?: Accessor<boolean> }
-  branded[PENDING] = pending
-  expect(isPending(branded)).toBe(false)
-  setPending(true)
-  expect(isPending(branded)).toBe(true)
-})
-
-test('isPending without [PENDING] brand falls back to isPromise(value)', () => {
-  const [s, setS] = signal<number | Promise<number>>(7)
-  expect(isPending(s)).toBe(false)
-  setS(new Promise<number>(() => {}))
-  expect(isPending(s)).toBe(true)
-})
-
-test('isPending([PENDING]) takes precedence over value check', () => {
-  const [pending] = signal(false)
-  const branded = (() => new Promise(() => {})) as Accessor<unknown> & { [PENDING]?: Accessor<boolean> }
-  branded[PENDING] = pending
-  expect(isPending(branded)).toBe(false)
-})
 
 test('use(accessor) keeps SWR-at-leaf: returns stale value during refetch', async () => {
   const [id, setId] = signal(1)
@@ -196,30 +175,6 @@ test('use(accessor) keeps SWR-at-leaf: returns stale value during refetch', asyn
   expect(use(c)).toBe(20)
 })
 
-test('yield* read(pendingComputed) suspends the generator until settle', async () => {
-  const [id, setId] = signal(1)
-  let release!: (v: number) => void
-  const c = computed(() => {
-    const i = id()
-    if (i === 1) return Promise.resolve(10)
-    return new Promise<number>((r) => { release = r })
-  })
-  await tick()
-
-  const view = computed(function* () {
-    return yield* read(c)
-  })
-  expect(view()).toBe(10)
-
-  setId(2)
-  expect(view()).toBe(10) // SWR snapshot during refetch
-  expect(isPending(view)).toBe(true)
-
-  release(20)
-  await tick()
-  expect(view()).toBe(20)
-  expect(isPending(view)).toBe(false)
-})
 
 describe('read — post-Plan-A (no brand suspension)', () => {
   test('yield* read on an SWR-refetching computed yields the stale value, NOT brand.promise', async () => {

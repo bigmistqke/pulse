@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest'
 import { signal } from '../src/signal'
 import { computed } from '../src/computed'
-import { isPending } from '../src/async'
+import { isPending } from '../src/pending'
 
 /** Resolve after all microtasks have drained (a macrotask boundary). */
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
@@ -42,7 +42,7 @@ test('a signal stores a Promise value as-is (no auto-resolve)', async () => {
   // Write-back was removed: signal stores exactly what you put in it. For
   // async derivations use computed; for one-shot reads use `use(s())`.
   const [s] = signal(Promise.resolve(42))
-  expect(isPending(s)).toBe(true)
+  expect(isPending(s)()).toBe(true)
   await tick()
   expect(s()).toBeInstanceOf(Promise)
   expect(await s()).toBe(42)

@@ -1,8 +1,9 @@
 import { expect, test } from 'vitest'
 import { computed } from '../src/computed'
 import { effect } from '../src/effect'
-import { PENDING, signal } from '../src/signal'
-import { isPending, read, use } from '../src/async'
+import { signal } from '../src/signal'
+import { read, use } from '../src/async'
+import { isPending, promiseOf } from '../src/pending'
 import { flush, microtaskScheduler, setScheduler, syncScheduler } from '../src/scheduler'
 import { createRoot, catchError } from '../src/owner'
 
@@ -434,11 +435,11 @@ test('isPending(computed) true during initial load, false after settle', async (
 
   await createRoot(async (dispose) => {
     const c = computed(() => p)
-    expect(isPending(c)).toBe(true)
+    expect(isPending(c)()).toBe(true)
     resolveP(42)
     await Promise.resolve()
     flush()
-    expect(isPending(c)).toBe(false)
+    expect(isPending(c)()).toBe(false)
     dispose()
   })
 
@@ -462,16 +463,16 @@ test('isPending(computed) true during refetch (after first settle)', async () =>
     resolvers[0](1)
     await Promise.resolve()
     flush()
-    expect(isPending(c)).toBe(false)
+    expect(isPending(c)()).toBe(false)
 
     setPage(1)
     flush()
-    expect(isPending(c)).toBe(true)
+    expect(isPending(c)()).toBe(true)
 
     resolvers[1](2)
     await Promise.resolve()
     flush()
-    expect(isPending(c)).toBe(false)
+    expect(isPending(c)()).toBe(false)
     dispose()
   })
 
@@ -605,7 +606,7 @@ test('generator stage: unchanged behaviour (regression check)', async () => {
   setScheduler(microtaskScheduler(flush))
 })
 
-test('[PENDING].promise returns the in-flight Promise during refetch', async () => {
+test('promiseOf(computed) returns the in-flight Promise during refetch', async () => {
   const [id, setId] = signal(1)
   let release!: (v: string) => void
   const list = computed(() => {
@@ -617,41 +618,12 @@ test('[PENDING].promise returns the in-flight Promise during refetch', async () 
   expect(list()).toBe('v:1')
 
   setId(2)
-  const brand = list[PENDING]!
-  expect(brand()).toBe(true)
-  expect(brand.promise!()).toBeInstanceOf(Promise)
+  expect(isPending(list)()).toBe(true)
+  expect(promiseOf(list)()).toBeInstanceOf(Promise)
 
   release('v:2')
   await tick()
-  expect(brand()).toBe(false)
-  expect(brand.promise!()).toBeNull()
+  expect(isPending(list)()).toBe(false)
+  expect(promiseOf(list)()).toBeNull()
 })
 
-test('generator computed reading yield* read(pendingComputed) snapshots coherently', async () => {
-  const [page, setPage] = signal(1)
-  let release!: (v: string[]) => void
-  const list = computed(() => {
-    const p = page()
-    if (p === 1) return Promise.resolve(['a', 'b'])
-    return new Promise<string[]>((r) => { release = r })
-  })
-  await tick()
-
-  const view = computed(function* () {
-    return {
-      page: yield* read(page),
-      items: yield* read(list),
-    }
-  })
-  expect(view()).toEqual({ page: 1, items: ['a', 'b'] })
-
-  setPage(2)
-  // SWR: view's prior snapshot stays visible even though page() returns 2.
-  expect(view()).toEqual({ page: 1, items: ['a', 'b'] })
-  expect(isPending(view)).toBe(true)
-
-  release(['c', 'd'])
-  await tick()
-  expect(view()).toEqual({ page: 2, items: ['c', 'd'] })
-  expect(isPending(view)).toBe(false)
-})
