@@ -12,6 +12,48 @@ import {
 } from '../owner'
 
 /**
+ * Wrap a reactive `apply(value)` binding in the compute/commit split. The
+ * effect body evaluates `read()` (which may throw NotReadyYet), then either
+ * commits via `apply(value)` immediately (no Loading scope) or defers via
+ * `scope.report({status: 'ready', commit})`. On throw, reports 'throwing'
+ * and re-throws so the effect's outer machinery re-runs on settle.
+ */
+function reactiveCommit<T>(
+  parentOwner: Owner | null,
+  read: () => T,
+  apply: (value: T) => void,
+): void {
+  let controller: BindingController | null = null
+  const ensureController = (): BindingController | null => {
+    if (controller !== null) return controller
+    const scope = findLoadingScope(parentOwner)
+    if (scope === null) return null
+    controller = scope.register()
+    return controller
+  }
+  onCleanup(() => {
+    controller?.unregister()
+    controller = null
+  })
+  effect(() => {
+    let value: T
+    try {
+      value = read()
+    } catch (e) {
+      if (e instanceof NotReadyYet) {
+        ensureController()?.report({ status: 'throwing' })
+        throw e
+      }
+      throw e
+    }
+    const commit = () => apply(value)
+    const ctrl = ensureController()
+    if (ctrl !== null) ctrl.report({ status: 'ready', commit })
+    else commit()
+  })
+}
+
+/**
  * Warn (once per occurrence) when a reactive binding or event listener is
  * created without an ambient owner. The framework remains permissive — the
  * binding still works — but it will never be cleaned up, so we surface the
@@ -59,6 +101,10 @@ export function insertChild(parent: Node, value: unknown): void {
       controller = scope.register()
       return controller
     }
+    onCleanup(() => {
+      controller?.unregister()
+      controller = null
+    })
     effect(() => {
       // Build the fragment FIRST inside a fresh sub-owner so any nested
       // binding-effects/computeds the user creates are bound to this run.
@@ -168,7 +214,8 @@ export function bindProp(el: Element, name: string, value: unknown): void {
     const prop = name.slice(5)
     if (typeof value === 'function') {
       warnIfOrphaned('prop binding')
-      effect(() => { (el as any)[prop] = (value as () => unknown)() })
+      const parentOwner = getOwner()
+      reactiveCommit(parentOwner, value as () => unknown, (v) => { (el as any)[prop] = v })
     } else {
       ;(el as any)[prop] = value
     }
@@ -179,7 +226,8 @@ export function bindProp(el: Element, name: string, value: unknown): void {
     const attr = name.slice(5)
     if (typeof value === 'function') {
       warnIfOrphaned('attr binding')
-      effect(() => applyAttr(el, attr, (value as () => unknown)()))
+      const parentOwner = getOwner()
+      reactiveCommit(parentOwner, value as () => unknown, (v) => applyAttr(el, attr, v))
     } else {
       applyAttr(el, attr, value)
     }
@@ -190,7 +238,8 @@ export function bindProp(el: Element, name: string, value: unknown): void {
     const cls = name.slice(6)
     if (typeof value === 'function') {
       warnIfOrphaned('class binding')
-      effect(() => el.classList.toggle(cls, !!(value as () => unknown)()))
+      const parentOwner = getOwner()
+      reactiveCommit(parentOwner, value as () => unknown, (v) => el.classList.toggle(cls, !!v))
     } else {
       el.classList.toggle(cls, !!value)
     }
@@ -199,7 +248,7 @@ export function bindProp(el: Element, name: string, value: unknown): void {
   // style:name — set/remove a single style property; function value is reactive
   if (name.startsWith('style:')) {
     const prop = name.slice(6)
-    const apply = (v: unknown) => {
+    const applyStyle = (v: unknown) => {
       if (v === null || v === undefined || v === false) {
         ;(el as HTMLElement).style.removeProperty(prop)
       } else {
@@ -208,16 +257,18 @@ export function bindProp(el: Element, name: string, value: unknown): void {
     }
     if (typeof value === 'function') {
       warnIfOrphaned('style binding')
-      effect(() => apply((value as () => unknown)()))
+      const parentOwner = getOwner()
+      reactiveCommit(parentOwner, value as () => unknown, applyStyle)
     } else {
-      apply(value)
+      applyStyle(value)
     }
     return
   }
   // default — same as attr:, with bare name
   if (typeof value === 'function') {
     warnIfOrphaned('attr binding')
-    effect(() => applyAttr(el, name, (value as () => unknown)()))
+    const parentOwner = getOwner()
+    reactiveCommit(parentOwner, value as () => unknown, (v) => applyAttr(el, name, v))
   } else {
     applyAttr(el, name, value)
   }

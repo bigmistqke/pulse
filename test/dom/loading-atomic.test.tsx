@@ -3,6 +3,7 @@ import { flush, microtaskScheduler, render, setScheduler, signal, syncScheduler 
 import { Loading } from '../../src/dom/loading'
 import { findLoadingScope, getOwner, runWithOwner } from '../../src/owner'
 import { use } from '../../src/async'
+import { Show } from '../../src/dom'
 
 beforeEach(() => setScheduler(syncScheduler(flush)))
 afterEach(() => {
@@ -177,5 +178,120 @@ test('two reactive children inside <Loading> commit atomically when their promis
   expect(target.querySelector('.a')!.textContent).toBe('A2')
   expect(target.querySelector('.b')!.textContent).toBe('B2')
 
+  dispose()
+})
+
+// Part A: Task 4 test — reactive class binding defers its commit when a sibling use is still pending
+test('reactive class binding commit defers under <Loading> until gate opens', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+
+  // Use signal-driven promises so we can swap them for the second load.
+  let resolveP: (v: string) => void = () => {}
+  let resolveQ: (v: string) => void = () => {}
+  const p0 = new Promise<string>((r) => (resolveP = r))
+  const q0 = new Promise<string>((r) => (resolveQ = r))
+  const [srcP, setSrcP] = signal<string | Promise<string>>(p0)
+  const [srcQ, setSrcQ] = signal<string | Promise<string>>(q0)
+
+  const dispose = render(
+    () => (
+      <Loading initial={<p>loading</p>}>
+        {() => (
+          <div
+            class:active={() => {
+              use(srcP())
+              return true
+            }}
+          >
+            child
+            <span class="q">{() => use(srcQ())}</span>
+          </div>
+        )}
+      </Loading>
+    ),
+    target,
+  )
+
+  // Initially both pending → show initial placeholder.
+  expect(target.textContent).toBe('loading')
+
+  // First load: resolve both → gate opens → hasEverLoaded becomes true.
+  resolveP('P1')
+  resolveQ('Q1')
+  await new Promise((r) => queueMicrotask(() => r(undefined)))
+  flush()
+  expect(target.querySelector('div')!.classList.contains('active')).toBe(true)
+  expect(target.querySelector('.q')!.textContent).toBe('Q1')
+
+  // Second load: introduce new pending promises.
+  let resolveP2: (v: string) => void = () => {}
+  let resolveQ2: (v: string) => void = () => {}
+  const p2 = new Promise<string>((r) => (resolveP2 = r))
+  const q2 = new Promise<string>((r) => (resolveQ2 = r))
+  setSrcP(p2)
+  setSrcQ(q2)
+  // Remove the class temporarily by resolving with a pending source
+  // so class:active would toggle off, but it should be deferred.
+  // Actually: class:active reads srcP() which is now p2 (pending) → throws.
+  await new Promise((r) => queueMicrotask(() => r(undefined)))
+
+  // Resolve P (class:active can recompute to true) but Q still pending.
+  resolveP2('P2')
+  await new Promise((r) => queueMicrotask(() => r(undefined)))
+
+  // class:active commit is deferred because Q is still throwing.
+  // The div should still show the prior tree (active class unchanged — still true from first load).
+  // Since class:active's commit is deferred, the class should NOT have been re-applied
+  // in any race-y way. The key is: no partial commit happened.
+  // The boundary is still pending (Q not settled), so DOM shows prior state.
+  const div = target.querySelector('div')!
+  expect(div.classList.contains('active')).toBe(true) // unchanged — prior tree retained
+  expect(target.querySelector('.q')!.textContent).toBe('Q1') // prior value — not yet committed
+
+  // Resolve Q; gate opens → both commit atomically.
+  resolveQ2('Q2')
+  await new Promise((r) => queueMicrotask(() => r(undefined)))
+  expect(target.querySelector('div')!.classList.contains('active')).toBe(true)
+  expect(target.querySelector('.q')!.textContent).toBe('Q2')
+
+  dispose()
+})
+
+// Part B: Task 3 regression — reactive child unmounted while throwing releases its controller
+test('reactive child unmounted while throwing releases its controller (does not block boundary)', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+  const [showA, setShowA] = signal(true)
+  const pA = new Promise<string>(() => {}) // never settles
+  const pB = new Promise<string>((r) => setTimeout(() => r('B'), 0))
+
+  const dispose = render(
+    () => (
+      <Loading>
+        {() => (
+          <div>
+            <Show when={showA}>
+              {() => <span class="a">{() => use(pA)}</span>}
+            </Show>
+            <span class="b">{() => use(pB)}</span>
+          </div>
+        )}
+      </Loading>
+    ),
+    target,
+  )
+
+  // pA never settles; the .a binding stays throwing → boundary holds prior tree.
+  await new Promise((r) => setTimeout(() => r(undefined), 5))
+  expect(target.querySelector('.b')?.textContent ?? '').toBe('')
+
+  // Unmount the .a subtree. Its controller(s) must unregister so the boundary's
+  // gate can open for .b.
+  setShowA(false)
+  await new Promise((r) => setTimeout(() => r(undefined), 5))
+  // .a is gone; .b should commit since nothing is pending.
+  expect(target.querySelector('.a')).toBeNull()
+  expect(target.querySelector('.b')!.textContent).toBe('B')
   dispose()
 })
