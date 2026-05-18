@@ -26,6 +26,7 @@ Both libraries share more than is obvious on the surface:
 - **Owner-scoped error boundary.** Pulse's `catchError(fn, handler)` and Solid 2.x's `createErrorBoundary` / `<Errored>` create a sub-owner with an error handler; non-`NotReady` throws walk up via the owner chain.
 - **Push-pull hybrid reactive graph.** Topological dirty-propagation; no diamond glitches.
 - **`<For>` / `<Show>` with per-branch sub-owners.** Both create sub-owners for the branch, dispose on toggle.
+- **Transitive pending propagation via a dep-graph walk.** Solid 2.x's `isPending(fn)` walks reactive reads inside the thunk to determine pending status. Pulse's `isPending(x)()` walks the pending registry's `upstream` chain. Different mechanism, same idea: "downstream is pending iff itself OR any upstream is." This shape — *a graph of producer→consumer state-tracking with transitive walks* — is the same structural primitive Solid 2.x's lane-entanglement uses; in pulse it's currently applied only to value-propagation pending, but the bones generalize (see §2.13).
 
 ### 2. Where pulse diverges — mechanical
 
@@ -38,7 +39,9 @@ Both libraries share intellectual lineage (push-pull-push hybrid, milomg's `reac
 
 Pulse builds async / SWR / boundary semantics in *wrappers* above r3 (each async computed stage = an r3 computed + signals for pending / published-value + a settle handler — see `src/computed.ts:makeStageNode`). Solid 2.x's `createMemo` integrates async directly into the memo's internal state machine, with lane-based transition coordination at the runtime level.
 
-Consequence: pulse can theoretically swap r3 for a different minimal core (the wrappers are the contract), but it pays wrapper overhead and can't reach things only an integrated runtime would expose. Concretely: pulse has transitions (per-`<Loading>` atomic-commit gathers — see §2.3), but Solid 2.x's lane-based runtime supports **multiple transitions in flight simultaneously** across the whole app, with the runtime deciding which transitions block / entangle which others. Pulse's transitions are scoped to a single boundary; two `<Loading>`s = two independent transition windows that never coordinate. Optimistic-dirty flagging (the mechanism behind `createOptimistic*`) is similarly a runtime-level feature that needs lanes to compose correctly with transitions. Solid 2.x has more headroom for runtime-level orchestration at the cost of being its own world.
+Consequence: pulse can theoretically swap r3 for a different minimal core (the wrappers are the contract), but it pays wrapper overhead. The more interesting consequence is what each library *can build on top* of its core. Solid 2.x's lanes give it: multiple transitions in flight simultaneously, cross-boundary entanglement, optimistic-dirty flagging, and lane-aware Loading-path decisions — all native to the runtime. Pulse's per-`<Loading>` atomic-commit gather is currently the only transition coordination mechanism, scoped to a single boundary.
+
+But the gap is smaller than it looks. Pulse's pending registry already does the *shape* of entanglement — a graph of producer/consumer pending nodes with a transitive `upstream` walk (see §2.13 for what would be needed to extend this to transactions). The gap that's irreducibly "needs a real lane runtime" is lane-aware Loading-path semantics; the rest (transactions, entanglement, optimistic) can plug into existing pulse infrastructure with explicit primitives.
 
 #### 2.2 Per-binding `use()` opt-in vs implicit loading path
 
@@ -143,6 +146,32 @@ Solid 2.x throws in dev when you call `setSignal` inside a tracked context (effe
 
 Pulse has no such guard. Writes from any context are allowed.
 
+#### 2.13 Transactions / shadow writes — Solid native via lanes; pulse plausible via existing registry
+
+This is the section where the gap looks bigger than it is. Solid 2.x's lanes give it a powerful set of capabilities for concurrent flows:
+
+1. **Snapshot isolation** — writes inside transition A tag the dirty marks with A's lane; reads outside A see committed state; reads inside A see committed + A's lane overlay.
+2. **Atomic per-transition commit** — all of A's writes promote to committed in one pass.
+3. **Auto-entanglement** — if A reads a value B is currently writing, A blocks until B commits or aborts.
+4. **Optimistic-with-revert** — `createOptimistic` writes land on a sticky lane that auto-reverts when the transition completes (the server's response on the non-transition lane becomes the committed truth).
+5. **Lane-aware Loading** — `<Loading>` knows which transitions are on its loading path and decides fallback-vs-hold accordingly.
+6. **Cancellation as abort side-effect** — abort a transition, its lane-scoped writes vanish.
+
+Pulse has *none* of these as primitives. But the infrastructure cost differs sharply by capability:
+
+| Capability | Pulse infra needed |
+|---|---|
+| (1) Snapshot isolation | New: per-signal overlay storage (`Map<Transaction, T>` on signals, or transaction-owned overlay). |
+| (2) Atomic commit | Free: one tx promote-all is a tiny batch of normal writes. |
+| (3) Auto-entanglement | **Free in principle.** A `Transaction` is a `PendingEntry`; cross-tx reads link entries via the existing `upstream` chain; `isPending(A)` already walks transitively. |
+| (4) Optimistic-with-revert | Small layer over (1) + (2): `optimistic(signal, value, untilPromise)`. |
+| (5) Lane-aware Loading | **Needs real lanes.** `<Loading>` would need to know "this read came from transaction X's overlay" and decide fallback policy based on the transaction's relationship to the boundary. This is the irreducible runtime-level feature. |
+| (6) Cancellation | Free: tx tracks its overlaid signals; abort = discard the overlay. |
+
+What's actually new is (1) + the read-path being transaction-aware (an ambient "current transaction" slot the read path consults). The transition-tracker mechanism from Plan B Task 5.5 is the same shape — a per-run ambient flag the read path consults — so the pattern is already established. Rough estimate: 200–300 LOC for a transaction primitive with snapshot isolation, atomic commit, entanglement, optimistic, and cancellation. Lane-aware Loading is the one item that would push pulse into being its own integrated runtime.
+
+So when the README says "pulse doesn't have lanes" — that's literally true at the runtime level, but the *capabilities lanes provide* mostly fit pulse's existing primitives. The exception is lane-aware Loading-path semantics, which pulse genuinely couldn't replicate without significant runtime work.
+
 ### 3. Where pulse diverges — behavior
 
 #### 3.1 Transition coordination granularity
@@ -212,8 +241,11 @@ Issues that surfaced during pulse's development; tracked in [`docs/follow-ups.md
 | Pending observation | `isPending(fn)` (tracked-call walk) | `isPending(x)()` (registry walk via upstream chain) |
 | Cross-boundary coordination | `<Reveal order="…">` | None |
 | Cache invalidation | `refresh(target)` | None (write to deps) |
-| Mutations | `action(function* …)` + transitions | None |
-| Optimistic UI | `createOptimistic` / `createOptimisticStore` | None |
+| Mutations | `action(function* …)` + transitions | None (manual signal writes) |
+| Optimistic UI | `createOptimistic` / `createOptimisticStore` (sticky lane, auto-revert) | None as primitive; doable manually; plausible as small layer over a transaction primitive (see §2.13) |
+| Snapshot isolation across concurrent flows | Native via lanes | None today; plausible via per-signal overlay + tx-aware reads (see §2.13) |
+| Auto-entanglement of concurrent transactions | Native via lanes | None today; would ride pulse's existing pending-registry upstream chain (see §2.13) |
+| Lane-aware Loading-path | Native (boundary fallback aware of transition lanes) | Not plausible without significant runtime work |
 | Stores | `createStore` / `createProjection` / draft setters / `reconcile` / `deep` / `snapshot` | None — plain signals only |
 | Effects | Split: `createEffect(compute, apply)` | Single-arg `effect(fn)` + staged `effect([...stages], commit)` (Plan C) |
 | Batching | Microtask default, `flush()` to drain | Microtask default, `flush()` to drain (same shape) |
@@ -236,11 +268,14 @@ Both arrive at "coherent transitions across reads," but via opposite philosophie
 
 Solid 2.x's larger surface (`action`, `createOptimistic*`, `refresh`, `createStore`, `<Reveal>`) is *convenient* for certain patterns but not *essential* for app development. You can build real apps in pulse with just signals + computeds + effects + `<Loading>`: mutations are signal writes (optionally inside a generator stage that awaits the server); refetch is "change a dep"; optimistic UI is "set a signal eagerly, correct on settle in a follow-up `.then`"; nested state is composed signals. The 2.x layer trades verbosity for safety (race-safe optimism, automatic reconciliation, draft-first setters), which matters for some teams more than others.
 
+And the gap is less architectural than it appears (see §2.13). Pulse's pending registry already implements the *shape* of Solid 2.x's lane-entanglement (a graph of producer/consumer pending state with transitive walks); applying that shape to transactions instead of just computed pending is mostly a matter of adding per-signal overlays + transaction-aware reads. The one capability that genuinely requires an integrated lane runtime is lane-aware Loading-path semantics — pulse can't get that without becoming its own runtime.
+
 #### Potential future directions for pulse
 
-- **`<Reveal order="…">`** — would fit pulse cleanly. Mechanically it's a parent boundary that observes its child `<Loading>` instances' pending states (via a small extension of `LoadingScope` to expose parent-visible pending) and gates their `loadedSubtree` reveal according to `sequential` / `together` / `natural` policy. The atomic-commit gather already establishes per-boundary pending state; sequencing siblings is a layer above it.
-- **Cache invalidation primitive** — `refresh(c)` for `computed` would just be "force this stage's depTracker to re-run even if its deps look unchanged." Useful for retry/refetch buttons that don't have a clean dep to invalidate.
-- **Optimistic helper** — could be as small as a `signal` that auto-reverts on a Promise's settle: `const [items, setItemsOptimistic] = optimistic(serverItems, p)`. Composed from existing primitives.
+- **Cross-boundary coordination via scope-tree primitive** — unify (a) "two `<Loading>`s commit atomically" (shared scope) and (b) "two `<Loading>`s reveal in order" (Reveal-style) under one primitive: scopes form a tree, parent has a `policy` (`natural` / `gather` / `sequential` / `together`). Policy decides how the parent treats its children's pending state. Same machinery, different policy values.
+- **Transaction primitive for snapshot isolation + atomic commit + entanglement** — explicit `Transaction` value the user creates; writes can be scoped to it; reads inside see overlay, reads outside see committed; commit promotes, abort discards. Rides the existing pending-registry chain for auto-entanglement (cross-tx reads link via `upstream`). Doesn't need a lane runtime. Lane-aware Loading interaction is out of scope (deferred indefinitely; would require runtime work).
+- **Optimistic helper over the transaction primitive** — `optimistic(signal, value, untilPromise)` = "set in a tx, auto-commit on Promise resolve, auto-abort on reject." Small wrapper.
+- **Cache invalidation** — `refresh(c)` would force a computed's stage to re-run even when deps look unchanged. Tiny addition; useful for retry buttons without a clean dep to invalidate.
 - **Stores** — orthogonal; could land as a separate package (`@pulse/store`) without touching the core.
 
 None of these are blocking real app development today.
