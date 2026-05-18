@@ -8,158 +8,227 @@ For project conventions, language definitions, and architectural decisions, see 
 
 ## Pulse vs Solid 2.x — A Comparative Analysis
 
+This analysis is based on Solid 2.0-beta as of the time of writing (see the Solid 2.0 RFCs in `solidjs/solid/documentation/solid-2.0/`). Solid 2.x is a substantial reshape from 1.x: `createResource` is gone, `useTransition` / `startTransition` are gone, `<Suspense>` is renamed `<Loading>`, `<ErrorBoundary>` is renamed `<Errored>`, effects are split into compute/apply phases, batching is microtask-by-default, and new primitives (`action`, `createOptimistic*`, `refresh`, `<Reveal>`) cover mutation and coordination.
+
 ### 1. Shared foundation (behavior + mechanics)
 
-Both libraries sit on the same fundamental architecture:
+Both libraries share more than is obvious on the surface:
 
-- **Fine-grained reactivity, no VDOM.** Both compile JSX into direct DOM operations where reactive expressions become per-binding "holes" with marker comments. Updates touch only the affected DOM nodes.
-- **Components run once.** A component function executes a single time during construction; reactivity lives in the holes it returns, not in re-executing the function body. Local state created in the body is created once.
-- **Owner tree for lifecycle.** Both maintain a parent-child tree of owners that scope reactive nodes (effects, computeds) and their cleanups. Disposal cascades top-down.
-- **Push-pull hybrid reactive graph.** Both use dirty-marking + on-demand recomputation rather than purely push (eager) or pull (lazy). Solid uses its own internal scheduler; pulse inherits this from `r3`.
-- **No diamond glitches.** Topological dirty-propagation guarantees a derived signal isn't observed in a stale-half-old-half-new state during a single update.
-- **JSX bindings as effects.** Each `{() => …}` hole is a reactive effect that tracks its reads and re-runs on dep change, mutating the DOM in place.
-- **Suspension via thrown sentinels.** Both throw a special value (Solid throws Promises; pulse throws `NotReadyYet` carrying a Promise) to suspend rendering. A boundary catches and waits.
-- **Sub-owners for branch scopes.** `Show` / `For` in both create per-branch sub-owners; toggling truthy/falsy disposes the prior branch's sub-owner.
+- **Fine-grained reactivity, no VDOM.** Both compile JSX into direct DOM operations where reactive expressions become per-binding "holes" with marker comments.
+- **Components run once.** Reactivity lives in the holes, not in re-executing the function body. Local state created in the body is created once.
+- **Owner tree for lifecycle.** Both maintain a parent-child tree of owners that scope reactive nodes and their cleanups. Disposal cascades.
+- **Microtask-batched writes.** Both batch state updates on a microtask by default; both expose `flush()` to drain synchronously. Solid 2.x explicitly removed 1.x's synchronous `batch()`; pulse uses the same scheduler shape (microtask default, sync drain for tests via `setScheduler(syncScheduler(flush))`).
+- **Async is a computation property, not a separate primitive.** Both libraries removed the "resource is a special thing" stance: in Solid 2.x, `createMemo(async () => …)` returns an accessor that suspends on read; in pulse, `computed(async () => …)` is the same shape. No `createResource`.
+- **Pending suspension via thrown sentinels.** Both throw a special error class (`NotReadyError` in Solid 2.x, `NotReadyYet` in pulse) carrying the in-flight Promise. A boundary catches it.
+- **`<Loading>` as the suspension boundary.** Both name the boundary `<Loading>` (Solid 2.x renamed from 1.x's `<Suspense>`; pulse used `<Loading>` from the start). `<Loading fallback={…}>` shows the fallback while async pending; both default to "hold prior committed tree on revalidation."
+- **`isPending(fn)` for revalidation indicators.** Both ship an `isPending` that returns true when a reactive expression is mid-refetch but has a stale value to show. Both are false on the Loading path itself (no stale to mask).
+- **`latest()` for stale-while-revalidate reads.** Both expose `latest()` that returns the prior resolved value during refetch without suspending.
+- **Owner-scoped error boundary.** Pulse's `catchError(fn, handler)` and Solid 2.x's `createErrorBoundary` / `<Errored>` create a sub-owner with an error handler; non-`NotReady` throws walk up via the owner chain.
+- **Push-pull hybrid reactive graph.** Topological dirty-propagation; no diamond glitches.
+- **`<For>` / `<Show>` with per-branch sub-owners.** Both create sub-owners for the branch, dispose on toggle.
 
 ### 2. Where pulse diverges — mechanical
 
-#### 2.1 The reactive core is `r3`, not Solid's runtime
+#### 2.1 Reactive core is `r3`, not Solid's runtime
 
-Pulse imports `r3` (a minimal reactive library that exposes `signal` / `computed` / `stabilize` / `onCleanup` / etc.) and builds its semantics on top. Pulse never modifies r3 — async behavior, SWR, the pending registry, and the boundary gather all live in pulse wrappers above r3 nodes. Solid's runtime owns its own scheduler and effect machinery directly.
+Pulse imports `r3` (a minimal reactive library) and builds async/SWR/boundary semantics in wrappers above it. Solid 2.x has its own runtime (`@solidjs/signals` package, `solid-signals/src/core`) that owns scheduling, dependency tracking, and the async-suspension protocol natively.
 
-Consequence: pulse can swap r3 for a different reactive core in principle, but tying-in async semantics adds wrapper overhead (each async computed stage = an r3 computed + signals for pending / published-value + a settle handler).
+Consequence: pulse's async-aware computeds add wrapper overhead (each stage = an r3 computed + signals for pending / published-value + a settle handler). Solid 2.x's `createMemo` integrates async directly into the memo's internal state machine — no wrapper.
 
-#### 2.2 Async computeds are first-class, multi-stage pipelines
+#### 2.2 Per-binding `use()` opt-in vs implicit loading path
 
-Pulse's `computed(s0, s1, s2)` accepts a variadic pipeline of stages, each consuming the prior stage's resolved value. Each stage can be sync, return a Promise, or `function*` (generator with `yield* read(x)` for sequential async). SWR is built into every stage: during a refetch, the prior resolved value is published until the new one settles.
+In pulse, `use(x)` is the explicit opt-in:
 
-Solid 2.x equivalent: `createResource(source, fetcher)` produces an accessor with `.loading` / `.error` / `.latest` properties; pipelines compose via `createMemo` over multiple resources. SWR is opt-in via `.latest`. There's no built-in pipeline-OR pending walk; you compose it manually.
+1. Marks the surrounding binding as "transition-engaged" (per-run flag in `transition-tracker.ts`).
+2. If `x` is pending → throws `NotReadyYet(promiseOf(x)!)`.
+3. Otherwise → returns the value, but still establishes engagement, so the binding's commit later defers if the surrounding `<Loading>` is pending due to a sibling.
 
-Pulse's pipeline pre-bakes pending propagation: `isPending(downstreamStage)()` walks up the chain. Solid users build that walk themselves.
+In Solid 2.x, there is no `use(x)` marker. ANY read of a memo that returns a Promise — `user()` — throws `NotReadyError` if not ready, no extra call wrapper. The "loading path" is implicit: any read inside a `<Loading>` subtree that reaches an unresolved async value puts that subtree on the loading path.
 
-#### 2.3 `use()` is the transition opt-in marker — not just a suspension primitive
+**Trade-off:** Solid 2.x is more concise (`user().name` just works); pulse is more explicit (`use(user).name` makes the suspension boundary contract visible at the call site, and is grep-able). Pulse's explicit `use` also serves a second purpose Solid doesn't have: marking non-throwing reads for transition coordination (see §2.4).
 
-In pulse, `use(x)` does three things atomically:
+#### 2.3 Atomic-commit gather (pulse) vs runtime-managed transitions (Solid 2.x)
 
-1. Marks the surrounding binding as "transition-engaged" (sets a per-run flag in `transition-tracker.ts`).
-2. If `x` is a pending accessor → throws `NotReadyYet(promiseOf(x)!)`.
-3. Otherwise → returns the value, **but still establishes the engagement**, so the binding's commit later defers if the surrounding `<Loading>` is pending due to a sibling.
+Pulse's `<Loading>` has an explicit state machine:
 
-This split is intentional: the engagement signal lets `use(plainSignal)` participate in atomic coordination even when the read itself succeeds. The accompanying binding then routes through `scope.deferOrCommit(commit)` instead of committing inline.
+- `pendingSet: Set<BindingController>` — controllers currently throwing.
+- `readySet: Map<BindingController, () => void>` — controllers that succeeded with a commit waiting.
+- `deferredCommits: Array<() => void>` — anonymous commits from `use()`-engaged bindings that didn't throw but need to wait for the gate.
 
-Solid's analogue is `useTransition` — `const [isPending, startTransition] = useTransition(); startTransition(() => setSignal(newValue))`. Solid implicitly captures all signal updates inside the `startTransition` callback and replays them deferred. The opt-in is at the WRITE site (`startTransition`), not the READ site (`use`).
+When `pendingSet` empties, all queued commits flush in one pass. A microtask "tail check" handles races where a non-throwing binding queued before any sibling thrower had reported in the same flush.
 
-**Behaviorally:** pulse's opt-in is per-read ("I want THIS read coherent with siblings"). Solid's is per-write ("THIS state change should defer"). Pulse's model is more local and per-binding; Solid's is more transactional and global.
+Solid 2.x handles atomicity at the runtime level: transitions are "built-in, multiple in flight" (RFC 05). The runtime manages which updates land in which transition and coordinates revealing them. The user-facing pieces are `isPending(fn)` (observe) and `<Loading>` (boundary). There's no per-binding `report({ status: 'ready', commit })` API in user view — Solid 2.x's runtime owns the coordination internally.
 
-#### 2.4 `<Loading>` is an atomic-commit boundary, not just visibility
+**Trade-off:** pulse exposes the coordination machinery as a small public API (binding controllers, deferOrCommit) — usable for library authors, debuggable, but the user has to think about it. Solid 2.x hides it entirely — transitions "just work" if you use the primitives correctly, but reasoning about edge cases requires understanding the runtime.
 
-Pulse's `<Loading>` has a gather/flush state machine:
+#### 2.4 SWR as default vs SWR via `latest()`
 
-- Bindings that throw report `{ status: 'throwing' }` to the nearest scope's `pendingSet`.
-- Bindings that succeed (and called `use(...)`) report `{ status: 'ready', commit }` to `readySet` — and the actual DOM commit is deferred.
-- When `pendingSet` empties, all queued commits (controller-based `readySet` + anonymous `deferredCommits`) fire in a single flush.
+Pulse: every async computed stage holds its prior resolved value during refetch (SWR is the default; `lastResolvedValue` in `makeStageNode`'s closure). Reading `c()` outside a tracking context returns the stale value during refetch.
 
-Solid's `Suspense` shows a fallback while children are loading; it doesn't gate the commit timing of sibling bindings the same way. A `useTransition` does the timing gating, separately from the visibility decision.
+Solid 2.x: `user()` throws `NotReadyError` during refetch unless you wrap in `latest(() => user())`. The default is "suspend on refetch"; SWR is the opt-in.
 
-So pulse fuses transition + suspense semantics into one boundary. Solid keeps them as two cooperating primitives.
+**Note:** Solid 2.x's `<Loading>` (without the `on` prop) holds the prior committed tree during revalidation by default — so the visual UX is similar (no fallback flicker), but the *read* semantic at the call site differs.
 
-#### 2.5 SWR-as-default vs SWR-as-opt-in
+#### 2.5 Pipeline stages + generator `read` (pulse-unique)
 
-Pulse: every async computed stage holds its prior resolved value during refetch (SWR is the default; `lastResolvedValue` lives in `makeStageNode`'s closure).
+Pulse: `computed(s0, s1, s2)` is a variadic pipeline. Each stage consumes the prior's resolved value. Stages can be sync, async, or generator (`function*` with `yield* read(x)` for per-yield TypeScript inference of sequential async).
 
-Solid: `createResource` exposes `.latest` (settled value, stable across refetch) separately from the call form (`resource()` may throw on refetch). The user explicitly chooses.
+Solid 2.x: a memo is one function. Async composition uses `async/await` inside that function, or chained `createMemo` over multiple memos. No generator-based per-yield inference; no variadic pipeline.
 
-**Behaviorally:** pulse reads "just work" with SWR semantics; Solid surfaces the staleness choice at every read site.
+#### 2.6 External pending tracker (pulse) vs runtime-internal (Solid 2.x)
 
-#### 2.6 No virtual hole cache — DOM is the cache
+Pulse exposes `isPending(x)` and `promiseOf(x)` as free functions backed by a `WeakMap<Accessor, PendingEntry>` registry. `isPending` walks the entry's `upstream` chain (pipeline-OR). The registry is a public concept in `src/pending.ts`.
 
-Plan B's spec called for a per-hole value cache. Pulse didn't build one. Instead, `insertChild`'s reactive child relies on the DOM being naturally stable on throw — if the compute throws `NotReadyYet`, the existing DOM between the binding's marker comments stays untouched. No explicit cache structure.
+Solid 2.x's `isPending(fn)` is a tracked-call mechanism: it runs `fn`, observes whether any read reached an unresolved async source, and returns the answer. The walk is implicit — the runtime knows which signals are on the loading path. No public registry concept.
 
-Solid's `Suspense` doesn't cache content either, but it relies on its `Resource` system + `<Show>` / `<Switch>` falsy returns to suppress mid-flight renders. The mechanism is different (resource state + conditional render) but the user-visible result is similar.
+#### 2.7 Staged effects with explicit commit terminator (pulse-only)
 
-#### 2.7 Staged effects with explicit commit terminator
+Pulse Plan C: `effect([s0, …, sn], commit)` — pipeline of stages feeding into a `commit(value)` callback. The commit is the side-effect terminator and participates in `<Loading>`'s atomic flush via `scope.deferOrCommit`.
 
-Pulse Plan C added `effect([...stages], commit)` — pipeline of stages (sync / async / generator) feeding into a side-effect terminator that the `<Loading>` boundary can defer.
+Solid 2.x doesn't have a direct analogue. Its `createEffect(compute, apply)` is split into two phases (compute reads, apply does side effects), but that's about ordering reads-before-effects within the runtime, not about deferring effect callbacks to a boundary's atomic flush.
 
-Solid has no equivalent. `createEffect(() => sideEffect(resource()))` is the closest, but the side effect fires inside the effect body — no deferred-commit concept. To get gated side effects in Solid, you'd manually check transition state with `useTransition`'s `isPending` and skip work.
+#### 2.8 No `refresh()`, no `action()`, no optimistic primitives (pulse-missing)
+
+Solid 2.x ships a substantial mutation/cache-management layer that pulse doesn't have:
+
+- `refresh(target)` — explicit invalidation that re-runs a derived computation (replaces 1.x's `resource.refetch`).
+- `action(function* (args) { … })` — wraps a generator (or async generator) as a structured async mutation; integrates with transitions and refresh.
+- `createOptimistic(value)` / `createOptimisticStore(fn, seed)` — optimistic primitives that accept writes during a transition and revert to source when the transition completes.
+- `isRefreshing()` — check inside a memo whether you're in a `refresh()`-triggered re-run.
+- `resolve(fn)` — Promise that resolves once a reactive expression settles (imperative bridge for tests and effects).
+
+Pulse has none of these. A pulse user invalidates by writing to a signal the computed depends on; there is no `refresh()` for cache-style invalidation without rewriting the dep graph. Optimistic UI is hand-rolled.
+
+#### 2.9 No `<Reveal>` / no `<Loading on={x}>` (pulse-missing)
+
+Solid 2.x:
+
+- `<Reveal order="sequential|together|natural">` — coordinates the reveal timing of sibling `<Loading>` boundaries (e.g. "show profile header first, then sidebar, then comments").
+- `<Loading on={x}>` — when `x` changes AND async is pending, re-show the fallback instead of holding the stale tree (useful for route-level resets where you DON'T want to hold the previous route's content).
+
+Pulse has neither. Multi-boundary coordination beyond one `<Loading>`'s gather is up to the user.
+
+#### 2.10 No split effects (pulse) — single-phase, except staged form
+
+Solid 2.x effects are explicitly split:
+
+```ts
+createEffect(
+  () => count(),           // compute phase: tracked reads only
+  (value, prev) => {       // apply phase: side effects, untracked
+    console.log(value);
+    return () => { /* cleanup */ };
+  },
+);
+```
+
+Compute phases of all effects in a batch run BEFORE any apply phases. This is required for the runtime to make correct boundary decisions and resumability.
+
+Pulse's `effect(fn)` is single-phase: `fn` does both reads and side effects in one body. There's no separation; effects fire side effects immediately on the successful pass. The staged form `effect([...stages], commit)` (Plan C) achieves something similar at the user level (stages do reads, commit does side effects) but it's an opt-in API shape, not a structural property of all effects.
+
+#### 2.11 No store layer (pulse-missing)
+
+Solid 2.x's store primitives (`createStore`, `createProjection`, `createOptimisticStore`, `reconcile`, `merge`, `omit`, `snapshot`, `deep`, `storePath`) are a substantial feature surface. Draft-first setters, granular reactivity per property, projections, deep observation.
+
+Pulse has plain signals. For nested state, the user composes signals manually or uses external libraries.
+
+#### 2.12 No no-writes-under-scope guard
+
+Solid 2.x throws in dev when you call `setSignal` inside a tracked context (effect body, memo body, component body), unless the signal is created with `{ ownedWrite: true }`. This catches accidental feedback loops.
+
+Pulse has no such guard. Writes from any context are allowed.
 
 ### 3. Where pulse diverges — behavior
 
-#### 3.1 Transition opt-in granularity
+#### 3.1 Transition coordination granularity
 
-Pulse: `use(x)` per read. You can have two bindings in the same `<Loading>` where one uses `use(x)` and one doesn't — only the first participates in the gather; the second commits inline regardless. Mixed coordination is the default behavior, controlled per call site.
+Pulse: per-read via `use(x)`. You can have two bindings in the same `<Loading>` where one calls `use(x)` and one doesn't — only the first participates in the gather; the second commits inline regardless. Mixed coordination is the default, controlled per call site.
 
-Solid: transactional. Inside a `startTransition` callback, all `setSignal` calls are queued and replayed deferred; outside, immediate. Per-binding granularity not directly addressable.
+Solid 2.x: implicit at the loading path. Any read of an async source inside a `<Loading>` subtree puts that read on the loading path. Sibling reads of OTHER (non-async) signals don't participate in the transition coordination directly — they just re-render normally; the boundary's transition behavior is about WHAT the boundary shows (prior tree vs fallback), not about coordinating commit timing across unrelated sibling bindings.
 
-#### 3.2 Atomicity is gated by `<Loading>` placement, not by transition scope
+#### 3.2 `<Loading>` semantics differ
 
-Pulse: place `<Loading>` around the bindings you want coherent. The boundary IS the transition. No `startTransition(() => ...)` wrapper; the *visual grouping* is the *semantic grouping*.
+Pulse's `<Loading>`:
 
-Solid: visibility (Suspense) and timing (useTransition) are independent. You can have a Suspense without transitions, or transitions without Suspense.
+- `initial` shows on first load (no committed tree yet).
+- `fallback` shows on subsequent transitions IF set; otherwise the prior tree is held.
+- Gather mechanism: deferred commits + pending controllers + tail-check microtask.
 
-#### 3.3 No equivalent of `useDeferredValue`
+Solid 2.x's `<Loading>`:
 
-Solid has time-budgeted commits — "show new value after N ms even if not settled." Pulse has none; transitions are strictly settle-driven. If a fetch never resolves, the boundary holds the prior tree forever.
+- `fallback` shows on first load (RFC 05: "branch readiness"). On subsequent revalidation, it does NOT swap back to fallback — that's the implicit "transitions" behavior.
+- `on={x}` prop forces a fallback re-show when `x` changes WHILE pending (route-level reset).
 
-#### 3.4 `<Loading>` boundary's `initial` vs `fallback` distinction
+Pulse's distinction between `initial` and `fallback` makes the "first vs subsequent" intent explicit at the prop level. Solid 2.x bakes the same semantic into the runtime (revalidations don't trigger fallback) plus an `on` opt-out.
 
-Pulse: `initial` shows only on the first load (no committed tree yet). `fallback` shows on subsequent transitions IF set; otherwise the prior tree is held. Solid's Suspense `fallback` doesn't distinguish first-load from subsequent.
+#### 3.3 Effect-and-apply ordering
 
-#### 3.5 Components run once — strictly
+Solid 2.x: all compute phases in a batch run before any apply phases. This means by the time any side effect fires, all reactive reads have updated and no further reads will happen in this batch. Predictable for resumability + boundary decisions.
 
-Both libraries advertise "run once," but pulse enforces it more strictly. There's no `onMount` / `onCleanup` / `createSignal`-by-call-order machinery; the entire component lifecycle is the single function call.
+Pulse: effects are single-phase; side effects fire in topological order as r3 processes the dirty heap. No explicit phase separation.
 
-Practical difference: a pattern like `const Comp = (props) => { const v = use(props.value); const [count] = signal(0); ... }` is safe in pulse only across the first successful run; subsequent re-runs (triggered by binding effects re-throwing) would re-create `count`. Solid handles a similar case more robustly because `createSignal` calls are tied to the owner identity, not re-invoked on retry.
+#### 3.4 Mutation UX
 
-#### 3.6 Generator-based `read` for sequential async in computeds
+Solid 2.x: `action(fn*)` + `createOptimisticStore` form a structured mutation pattern. Optimistic write → yield async work → refresh.
 
-Pulse:
+Pulse: no equivalent. You write a `signal`, run async work, and either update the signal manually or let the computed re-fetch on its own.
 
-```ts
-computed(function* () {
-  const a = yield* read(asyncA)
-  const b = yield* read(asyncB(a))
-  return { a, b }
-})
-```
+#### 3.5 Read suspension at the call site
 
-Generators give per-yield type inference and explicit sequential composition. After Plan A, `read` is a plain yield helper — generators handle their own suspension via the driver, distinct from `use()`'s transition-engagement.
+Solid 2.x: `user()` throws `NotReadyError` (any time, any place, if not ready) — implicit suspension on every async read.
 
-Solid: no generator stages. `async / await` inside a `createResource` fetcher, or chained `createMemo` over multiple resources. More familiar Promise syntax; less expressive about per-yield typing.
+Pulse: `use(user)` throws; `user()` directly returns the value (or the in-flight Promise if no SWR cache; or the stale value if SWR cache exists). The throw is opt-in.
 
-#### 3.7 Owner-based `catchError`, no React-style `ErrorBoundary` component
+#### 3.6 Components-run-once strictness
 
-Pulse: `catchError(() => { ... }, (e) => { ... })` creates an owner sub-tree with an error handler attached. Errors thrown by descendants walk up via the owner chain. Solid has the same `catchError` primitive plus an `ErrorBoundary` component for JSX use.
+Both libraries advertise "run once." Solid 2.x has additional dev-mode guards (strict top-level reactive read warnings, no-writes-under-scope) that make accidental re-execution easier to detect.
+
+Pulse has no such guards. The "use at the top of component body before creating signals" footgun is real and undocumented at the framework level (documented in `CONTEXT.md`'s caveats but not enforced).
 
 ### 4. Pulse-specific quirks (current state)
 
-These are real-world issues that surfaced during pulse's development; some are fixed, some are tracked as follow-ups in [`docs/follow-ups.md`](./docs/follow-ups.md):
+Issues that surfaced during pulse's development; tracked in [`docs/follow-ups.md`](./docs/follow-ups.md):
 
-- **`use(accessor)` must call accessor before the pending check** (post-fix). Solid's reactivity tracks reads automatically inside resource access; pulse's `use` had to be ordered carefully to avoid r3's auto-dispose-on-zero-subs killing the dep edge.
-- **`reactiveCommit` (bindProp's helper) must `runWithOwner(parentOwner)` around the read.** Without it, owner-aware reads like `useLoading()` see the wrong context. Solid's analogous internals do this automatically (or its `useTransition` doesn't depend on ambient owner at read time).
-- **Top-level component children in a `<Loading>`'s Fragment lose the scope.** A pulse-specific issue: top-level function children get wrapped by the outer hole's `insertChild` under the wrong owner. Workaround: nest in a static element. Solid doesn't have this issue because component children in Suspense work through fiber identity, not owner walks at read time.
-- **Structural mounts (`<Show>`, `<For>`) commit immediately even inside pending `<Loading>`.** Only content-hole commits defer. Solid's Suspense holds the entire subtree's commit including structural changes.
+- **`use(accessor)` must call accessor before the pending check** (post-fix). r3 auto-disposes computeds when sub-count drops to 0; pulse's `use` had to be ordered carefully to avoid losing the dep edge on the throw path. Solid 2.x's runtime handles this natively.
+- **`reactiveCommit` (bindProp's helper) must `runWithOwner(parentOwner)` around the read.** Without it, owner-aware reads like `useLoading()` see the wrong ambient owner. Solid 2.x's internals do this automatically.
+- **Top-level component children in a `<Loading>`'s Fragment lose the scope.** Pulse-specific: top-level function children get wrapped by the outer hole's `insertChild` under the wrong owner; `useLoading()` walks past the boundary. Workaround: wrap in any static element. Solid 2.x's component model doesn't have this issue.
+- **Structural mounts (`<Show>`, `<For>`) commit immediately even inside a pending `<Loading>`.** Only content-hole commits defer. Solid 2.x's runtime gates the whole subtree's commit through the transition machinery.
 
 ### 5. Summary table
 
 | Concern | Solid 2.x | Pulse |
 |---|---|---|
-| Reactive core | Own runtime | `r3` (external, minimal) |
-| Async data primitive | `createResource` (resource object w/ properties) | `computed` pipeline w/ stages (suspension built in) |
-| Transition opt-in | `startTransition` / `useTransition` (per-write, transactional) | `use()` per read (per-binding, marker-based) |
-| Suspense boundary | `<Suspense>` (visibility) + `useTransition` (timing) | `<Loading>` (visibility + atomic-commit gather) |
-| SWR | Opt-in via `.latest` | Default for every async computed |
-| Time-budget commits | `useDeferredValue` | None |
-| Initial-load vs refetch fallback | One `fallback` prop | `initial` (first load) vs `fallback` (subsequent) |
-| Effects with deferred commit | None | `effect([...stages], commit)` |
-| Component re-execution on retry | Identity-stable (signals tied to owner) | Body re-runs (state lost if recreated mid-body) |
-| Generator-based async stages | No | `computed(function* () { yield* read(x) })` |
-| Pipeline-OR pending | Manual composition | Built-in (`isPending` walks upstream) |
+| Reactive core | Own runtime (`@solidjs/signals`) | `r3` (external, minimal) |
+| Async data primitive | `createMemo(async () => …)` | `computed(async () => …)` (multi-stage pipeline) |
+| Async opt-in at read site | Implicit — any async read suspends | Explicit — `use(x)` marker (suspends + marks transition engagement) |
+| SWR | Opt-in via `latest(fn)` | Default for every async computed |
+| Suspension boundary | `<Loading fallback={…}>` + `on={…}` reset | `<Loading initial={…} fallback={…}>` (first vs subsequent) |
+| Transitions | Built-in, runtime-managed, implicit | Per-binding via `use()` engagement + boundary's atomic-commit gather |
+| Pending observation | `isPending(fn)` (tracked-call walk) | `isPending(x)()` (registry walk via upstream chain) |
+| Cross-boundary coordination | `<Reveal order="…">` | None |
+| Cache invalidation | `refresh(target)` | None (write to deps) |
+| Mutations | `action(function* …)` + transitions | None |
+| Optimistic UI | `createOptimistic` / `createOptimisticStore` | None |
+| Stores | `createStore` / `createProjection` / draft setters / `reconcile` / `deep` / `snapshot` | None — plain signals only |
+| Effects | Split: `createEffect(compute, apply)` | Single-arg `effect(fn)` + staged `effect([...stages], commit)` (Plan C) |
+| Batching | Microtask default, `flush()` to drain | Microtask default, `flush()` to drain (same shape) |
+| Writes under scope | Throws in dev unless `ownedWrite: true` | Allowed |
+| Top-level reactive read in body | Warns in dev | No guard |
+| Component re-execution | Identity-stable (warnings catch accidental re-runs) | Body re-runs on `use()`-retry; state lost if recreated mid-body |
+| Generator stages | No (memos are one function) | Yes (`computed(function* () { yield* read(x) })`) |
+| Error boundary | `<Errored>` + `createErrorBoundary` | `catchError(fn, handler)` (no JSX component) |
+| List unification | `<For keyed={…}>` (replaces 1.x `<Index>`) | `<For>` only (no `Index`) |
+| Count-based render | `<Repeat count={…}>` | None |
+| Dynamic component | `dynamic()` factory + `<Dynamic>` | None |
 
 ### 6. Conceptual posture
 
-Pulse leans toward **explicit, per-binding opt-in coordinated by JSX-placement boundaries**. Solid leans toward **transactional opt-in coordinated by callback wrappers**. Both arrive at "coherent transitions across reads," but pulse's model is more local (each `use` choice is independent) and more visual (the boundary placement = the semantics). Solid's model is more global (a transition holds across all reads inside its scope) and more imperative (you wrap state changes in a callback).
+Pulse's design bet is **explicit per-binding opt-in with an exposed coordination mechanism**: `use(x)` at the read site, `<Loading>` with a public binding-controller API, an external `isPending` / `promiseOf` registry. Coordination is a thing you can name, debug, and extend.
 
-Neither is strictly better. Pulse's per-binding granularity is more flexible but more error-prone (forgetting `use` silently breaks coherence; pulse offers no static check that a binding inside `<Loading>` actually called `use`). Solid's transactional model is more uniform but heavier — every state change has to choose to participate.
+Solid 2.x's design bet is **implicit runtime-managed coordination**: any async read suspends; transitions are built into the runtime; multiple transitions can be in flight; the user observes via `isPending(fn)` and `<Loading>`. Coordination is a thing the runtime handles for you.
 
-Pulse is also younger and less battle-tested. Its development has surfaced genuine bugs around owner ambient context, dep tracking through suspension, and ordering races — all addressed in v1 but indicative that the per-binding model has more sharp edges than the transactional one.
+Both arrive at "coherent transitions across reads," but via opposite philosophies. Solid 2.x's model is more turnkey (you compose primitives; transitions happen) and matches the trajectory of mainstream frameworks (React Server Components, Svelte 5 runes). Pulse's model is more explicit (you mark each opt-in) and exposes more machinery for library authors — at the cost of footguns when a developer forgets `use()` and silently breaks coherence.
+
+Solid 2.x ships a substantial mutation / cache / store layer (`action`, `createOptimistic*`, `refresh`, `createStore`, `<Reveal>`) that pulse does not have. Pulse is currently positioned as a "reactivity + boundary" research vehicle; it would need significant additional surface to be a real Solid 2.x alternative for app development.
+
+Pulse is also younger and less battle-tested. Several genuine bugs surfaced during its development (owner ambient context losses, dep tracking through suspension, ordering races) — all addressed in v1, but indicative that the per-binding model has more sharp edges than Solid 2.x's runtime-managed approach.
