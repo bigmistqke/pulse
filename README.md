@@ -29,11 +29,16 @@ Both libraries share more than is obvious on the surface:
 
 ### 2. Where pulse diverges — mechanical
 
-#### 2.1 Reactive core is `r3`, not Solid's runtime
+#### 2.1 Reactive core is `r3`, not Solid 2.x's `@solidjs/signals`
 
-Pulse imports `r3` (a minimal reactive library) and builds async/SWR/boundary semantics in wrappers above it. Solid 2.x has its own runtime (`@solidjs/signals` package, `solid-signals/src/core`) that owns scheduling, dependency tracking, and the async-suspension protocol natively.
+Both libraries share intellectual lineage (push-pull-push hybrid, milomg's `reactively` / `r2` research informing Solid's signals model), but the runtimes are independent code:
 
-Consequence: pulse's async-aware computeds add wrapper overhead (each stage = an r3 computed + signals for pending / published-value + a settle handler). Solid 2.x's `createMemo` integrates async directly into the memo's internal state machine — no wrapper.
+- `r3` is a standalone single-file (~450 LOC) reactive library — signals, computeds, owner, scheduler, topological-height ordering. Minimal surface; no async / no transitions / no boundary primitives.
+- `@solidjs/signals` is a full runtime (15+ files in `solid-signals/src/core/`): graph, heap, lanes (for transitions), async-suspension protocol, optimistic flags, owner/scheduler integration, store layer, etc. — all native to the runtime.
+
+Pulse builds async / SWR / boundary semantics in *wrappers* above r3 (each async computed stage = an r3 computed + signals for pending / published-value + a settle handler — see `src/computed.ts:makeStageNode`). Solid 2.x's `createMemo` integrates async directly into the memo's internal state machine, with lane-based transition coordination at the runtime level.
+
+Consequence: pulse can theoretically swap r3 for a different minimal core (the wrappers are the contract), but it pays wrapper overhead and can't reach things only an integrated runtime would expose (lane-based multi-transition coordination, optimistic-dirty flagging, etc.). Solid 2.x has more headroom for runtime-level features at the cost of being its own world.
 
 #### 2.2 Per-binding `use()` opt-in vs implicit loading path
 
