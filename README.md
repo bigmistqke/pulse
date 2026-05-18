@@ -229,6 +229,17 @@ Solid 2.x's design bet is **implicit runtime-managed coordination**: any async r
 
 Both arrive at "coherent transitions across reads," but via opposite philosophies. Solid 2.x's model is more turnkey (you compose primitives; transitions happen) and matches the trajectory of mainstream frameworks (React Server Components, Svelte 5 runes). Pulse's model is more explicit (you mark each opt-in) and exposes more machinery for library authors — at the cost of footguns when a developer forgets `use()` and silently breaks coherence.
 
-Solid 2.x ships a substantial mutation / cache / store layer (`action`, `createOptimistic*`, `refresh`, `createStore`, `<Reveal>`) that pulse does not have. Pulse is currently positioned as a "reactivity + boundary" research vehicle; it would need significant additional surface to be a real Solid 2.x alternative for app development.
+Solid 2.x's larger surface (`action`, `createOptimistic*`, `refresh`, `createStore`, `<Reveal>`) is *convenient* for certain patterns but not *essential* for app development. You can build real apps in pulse with just signals + computeds + effects + `<Loading>`: mutations are signal writes (optionally inside a generator stage that awaits the server); refetch is "change a dep"; optimistic UI is "set a signal eagerly, correct on settle in a follow-up `.then`"; nested state is composed signals. The 2.x layer trades verbosity for safety (race-safe optimism, automatic reconciliation, draft-first setters), which matters for some teams more than others.
 
-Pulse is also younger and less battle-tested. Several genuine bugs surfaced during its development (owner ambient context losses, dep tracking through suspension, ordering races) — all addressed in v1, but indicative that the per-binding model has more sharp edges than Solid 2.x's runtime-managed approach.
+#### Potential future directions for pulse
+
+- **`<Reveal order="…">`** — would fit pulse cleanly. Mechanically it's a parent boundary that observes its child `<Loading>` instances' pending states (via a small extension of `LoadingScope` to expose parent-visible pending) and gates their `loadedSubtree` reveal according to `sequential` / `together` / `natural` policy. The atomic-commit gather already establishes per-boundary pending state; sequencing siblings is a layer above it.
+- **Cache invalidation primitive** — `refresh(c)` for `computed` would just be "force this stage's depTracker to re-run even if its deps look unchanged." Useful for retry/refetch buttons that don't have a clean dep to invalidate.
+- **Optimistic helper** — could be as small as a `signal` that auto-reverts on a Promise's settle: `const [items, setItemsOptimistic] = optimistic(serverItems, p)`. Composed from existing primitives.
+- **Stores** — orthogonal; could land as a separate package (`@pulse/store`) without touching the core.
+
+None of these are blocking real app development today.
+
+#### Maturity
+
+Pulse is younger and less battle-tested. Several genuine bugs surfaced during its development (owner ambient context losses, dep tracking through suspension, ordering races) — all addressed in v1, but indicative that the per-binding model has more sharp edges than Solid 2.x's runtime-managed approach. The framework is honest about this: known issues are tracked in [`docs/follow-ups.md`](./docs/follow-ups.md) with workarounds documented.
