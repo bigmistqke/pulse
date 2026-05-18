@@ -88,10 +88,16 @@ export function use<T>(x: T | Promise<T> | (() => T | Promise<T>)): Awaited<T> {
   markUsedInBinding()
   if (typeof x === 'function') {
     const accessor = x as () => T | Promise<T>
+    // Call accessor() BEFORE the pending check so r3 dep edges are always
+    // established, even on the throw path. Otherwise the caller's effect
+    // would lose its sub on the accessor's underlying computed, r3 would
+    // auto-dispose the pipeline (see docs/follow-ups.md: "r3 auto-disposes
+    // computeds when their sub count drops to 0, mid-flow"), and new values
+    // would never propagate after a refetch.
+    x = accessor()
     if (isPending(accessor)()) {
       throw new NotReadyYet(promiseOf(accessor)()!)
     }
-    x = accessor()
   }
   if (!isPromise(x)) return x as Awaited<T>
   const state = track(x)

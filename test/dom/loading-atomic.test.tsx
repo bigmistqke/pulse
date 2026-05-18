@@ -595,3 +595,168 @@ test('deferred non-throwing use() binding: unmount before gate opens does not NP
   void setShowRaw
   dispose2()
 })
+
+test('coherent transitions: use(plainSignal) + sibling computed-going-pending in same flush — commit must defer', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+
+  const { computed } = await import('../../src/index')
+  // Mimic the pokemon demo: `page` is a plain signal, `list` is a computed
+  // derived from page (re-fetches on change). When page changes, both
+  // bindings re-run in the same flush. The For-equivalent throws because
+  // list went pending; the page label should defer atomically.
+  const [page, setPage] = signal(0)
+  let resolvers: Array<(v: string[]) => void> = []
+  const list = computed(() => {
+    page()
+    return new Promise<string[]>((r) => {
+      resolvers.push(r)
+    })
+  })
+
+  const dispose = render(
+    () => (
+      <Loading initial={<p>loading</p>}>
+        {() => (
+          <div>
+            <span class="page">page {() => use(page) + 1}</span>
+            <span class="items">{() => use(list).join(',')}</span>
+          </div>
+        )}
+      </Loading>
+    ),
+    target,
+  )
+
+  // Initial: both pending → show initial placeholder.
+  expect(target.textContent).toBe('loading')
+
+  // First load.
+  resolvers[0]!(['a', 'b'])
+  await new Promise((r) => queueMicrotask(() => r(undefined)))
+  flush()
+  expect(target.querySelector('.page')!.textContent).toBe('page 1')
+  expect(target.querySelector('.items')!.textContent).toBe('a,b')
+
+  // The bug: setPage in a SINGLE flush.
+  setPage(1)
+  await new Promise((r) => queueMicrotask(() => r(undefined)))
+  flush()
+
+  // Atomic-commit promise: page label should NOT update yet — list is
+  // pending, both bindings should hold their prior values until gate opens.
+  expect(target.querySelector('.page')!.textContent).toBe('page 1') // ← FAILS: shows 'page 2'
+  expect(target.querySelector('.items')!.textContent).toBe('a,b')
+
+  // Settle list.
+  resolvers[1]!(['c', 'd'])
+  await new Promise((r) => queueMicrotask(() => r(undefined)))
+  flush()
+  expect(target.querySelector('.page')!.textContent).toBe('page 2')
+  expect(target.querySelector('.items')!.textContent).toBe('c,d')
+
+  dispose()
+})
+
+test('use(computed) inside binding: single-stage Promise computed propagates new value after refetch', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+
+  const { computed } = await import('../../src/index')
+  const [page, setPage] = signal(0)
+  const resolvers: Array<(v: string[]) => void> = []
+  const list = computed(() => {
+    const p = page()
+    return new Promise<string[]>((r) => {
+      resolvers.push(r)
+      void p
+    })
+  })
+
+  render(
+    () => (
+      <Loading initial={<p>loading</p>}>
+        {() => (
+          <div class="list">
+            {() => {
+              const v = use(list)
+              return Array.isArray(v) ? v.join(',') : `NOT-ARRAY: ${typeof v} ${String(v)}`
+            }}
+          </div>
+        )}
+      </Loading>
+    ),
+    target,
+  )
+
+  // First load.
+  resolvers[0]!(['a', 'b'])
+  await new Promise((r) => queueMicrotask(() => r(undefined)))
+  flush()
+  console.log('after first settle:', target.innerHTML)
+  expect(target.querySelector('.list')!.textContent).toBe('a,b')
+
+  // Refetch.
+  setPage(1)
+  await new Promise((r) => queueMicrotask(() => r(undefined)))
+  flush()
+  console.log('after setPage:', target.innerHTML, 'resolvers count:', resolvers.length)
+  expect(resolvers.length).toBe(2)
+  resolvers[1]!(['c', 'd'])
+  await new Promise((r) => queueMicrotask(() => r(undefined)))
+  flush()
+  console.log('after second settle:', target.innerHTML)
+  expect(target.querySelector('.list')!.textContent).toBe('c,d')
+})
+
+test('use(computed) inside binding: two-stage pipeline (async + sync map) propagates after refetch — regression for r3 auto-dispose-on-zero-subs', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+
+  const { computed } = await import('../../src/index')
+  const [page, setPage] = signal(0)
+  const resolvers: Array<(v: { results: string[] }) => void> = []
+  const list = computed(
+    () => {
+      const p = page()
+      return new Promise<{ results: string[] }>((r) => {
+        resolvers.push(r)
+        void p
+      })
+    },
+    (r) => r.results,
+  )
+
+  render(
+    () => (
+      <Loading initial={<p>loading</p>}>
+        {() => (
+          <div class="list">
+            {() => {
+              const v = use(list)
+              return Array.isArray(v) ? v.join(',') : `NOT-ARRAY: ${typeof v} ${String(v)}`
+            }}
+          </div>
+        )}
+      </Loading>
+    ),
+    target,
+  )
+
+  // First load.
+  resolvers[0]!({ results: ['a', 'b'] })
+  await new Promise((r) => queueMicrotask(() => r(undefined)))
+  flush()
+  console.log('after first settle:', target.innerHTML)
+
+  // Refetch.
+  setPage(1)
+  await new Promise((r) => queueMicrotask(() => r(undefined)))
+  flush()
+  console.log('after setPage:', target.innerHTML, 'resolvers count:', resolvers.length)
+  resolvers[1]!({ results: ['c', 'd'] })
+  await new Promise((r) => queueMicrotask(() => r(undefined)))
+  flush()
+  console.log('after second settle:', target.innerHTML)
+  expect(target.querySelector('.list')!.textContent).toBe('c,d')
+})
