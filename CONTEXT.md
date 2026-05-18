@@ -57,6 +57,22 @@ through it: stage N receives stage N-1's (unwrapped) return value. Each stage
 registers with the external pending tracker; `isPending(downstream)()` walks
 the chain (pipeline-OR).
 
+Conceptually, **pipelines are delimited continuations split at user-chosen
+boundaries**. The "rest of the computation past stage N" IS literally stages
+N+1, N+2, ..., each as its own re-entrant unit. When stage N produces a new
+value, the runtime re-invokes "the rest" with the new input — multi-shot at
+the stage boundary, without restarting prior stages. This is structurally
+what an algebraic-effect handler does when it calls `resume(value)` multiple
+times: invoke the continuation with different values. Pulse achieves it on
+top of single-shot JavaScript generators by decomposition: each stage is a
+separate r3 computed with its own cached result, so re-entry needs no
+generator-state preservation. (Generator stages additionally use restart-
+from-top + WeakMap fast-forward to simulate multi-shot WITHIN a stage's
+yields; that's the finer-grained checkpoint mechanism.) See
+[Bauer & Pretnar's "Programming with Algebraic Effects and Handlers"](https://arxiv.org/abs/1203.1539)
+for the formal theory; [Dan Abramov's "Algebraic Effects for the Rest of Us"](https://overreacted.io/algebraic-effects-for-the-rest-of-us/)
+is the accessible JS-flavored intro.
+
 **Stage**:
 One function in a Pipeline. Independently sync `(value) => ...`,
 `async (value) => ...`, or `function* (value) { ... }`. Every Stage may read
