@@ -161,6 +161,13 @@ export function insertChild(parent: Node, value: unknown): void {
       // previous run's owner on commit and installs the new one.
       const oldRunOwner = runOwner
       const commit = () => {
+        // Defensive: a deferred commit (via scope.deferOrCommit) may fire after
+        // the binding's subtree has been unmounted (markers removed from DOM).
+        // Skip silently — the binding is gone, the commit is moot.
+        if (end.parentNode === null) {
+          disposeOwner(nextRunOwner)
+          return
+        }
         // Dispose the previous run's owner; install the new one.
         if (oldRunOwner !== null) disposeOwner(oldRunOwner)
         runOwner = nextRunOwner
@@ -171,7 +178,7 @@ export function insertChild(parent: Node, value: unknown): void {
           cur.remove()
           cur = after
         }
-        end.parentNode!.insertBefore(frag!, end)
+        end.parentNode.insertBefore(frag!, end)
       }
       // If there's a prior controller (binding previously threw), always go
       // through the controller to consume its pendingSet entry.
