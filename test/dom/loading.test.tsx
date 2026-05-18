@@ -211,6 +211,8 @@ test('useLoading() inside subtree reflects pending state', async () => {
   resolveP('done')
   await p
   flush()
+  // eslint-disable-next-line no-console
+  console.log('[DOM after]', target.innerHTML)
   expect(target.textContent).toContain('idle')
   expect(target.textContent).toContain('done')
   dispose()

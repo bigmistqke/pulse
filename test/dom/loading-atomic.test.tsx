@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'vitest'
-import { flush, microtaskScheduler, render, setScheduler, signal, syncScheduler } from '../../src/index'
+import { flush, microtaskScheduler, render, setScheduler, signal, syncScheduler, useLoading } from '../../src/index'
 import { Loading } from '../../src/dom/loading'
 import { findLoadingScope, getOwner, runWithOwner } from '../../src/owner'
 import { use } from '../../src/async'
@@ -759,4 +759,78 @@ test('use(computed) inside binding: two-stage pipeline (async + sync map) propag
   flush()
   console.log('after second settle:', target.innerHTML)
   expect(target.querySelector('.list')!.textContent).toBe('c,d')
+})
+
+// KNOWN BUG: top-level COMPONENT children in a Loading's Fragment can't reach
+// the Loading scope via useLoading(). Their bindings get wrapped by the OUTER
+// hole's insertChild under the outer's runOwner (not boundaryOwner), so
+// findLoadingScope walks past Loading. Workaround: nest the component in any
+// static element (`<div><Show ...>` works fine). Real fix requires either
+// pre-resolving loadedSubtree to DOM under boundaryOwner (snapshot-stale
+// issue) or a marker-based "wrap-under-this-owner" hint on values returned
+// to insertChild. Tracked in docs/follow-ups.md.
+test.skip('KNOWN BUG: top-level component inside Loading misses scope via useLoading()', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+
+  // Setup: a Loading with a function-component child (mimics how the
+  // pokemon demo uses Show inside Loading). The component reads
+  // useLoading()() — should return true while a sibling is throwing.
+  const observed: boolean[] = []
+
+  function Indicator() {
+    return () => {
+      const pending = useLoading()()
+      observed.push(pending)
+      return pending ? <span class="indicator">refreshing</span> : null
+    }
+  }
+
+  let resolveP: (v: string) => void = () => {}
+  const [srcP, setSrcP] = signal<Promise<string>>(new Promise<string>((r) => (resolveP = r)))
+
+  const dispose = render(
+    () => (
+      <Loading initial={<p>loading</p>}>
+        {() => (
+          <>
+            {/* Component at TOP level of the Fragment — its binding gets
+                wrapped by the OUTER Loading hole's insertChild, which uses
+                the outer hole's runOwner (NOT boundaryOwner) as ambient.
+                If useLoading() walks owners from that point, it must still
+                find the Loading scope. This is the demo pattern. */}
+            <Indicator />
+            <span class="sib">{() => use(srcP())}</span>
+          </>
+        )}
+      </Loading>
+    ),
+    target,
+  )
+
+  // First load.
+  resolveP('first')
+  await new Promise((r) => queueMicrotask(() => r(undefined)))
+  flush()
+  expect(target.querySelector('.sib')!.textContent).toBe('first')
+
+  // After first load, observed contains the false reading (scope idle).
+  expect(observed).toContain(false)
+
+  // Refetch.
+  let resolveP2: (v: string) => void = () => {}
+  setSrcP(new Promise<string>((r) => (resolveP2 = r)))
+  await new Promise((r) => queueMicrotask(() => r(undefined)))
+  flush()
+
+  // During the refetch window, Indicator's binding should re-evaluate with
+  // pending=true. Check the latest observed value.
+  console.log('observed sequence:', observed.join(','))
+  const latest = observed[observed.length - 1]
+  expect(latest).toBe(true) // Indicator sees scope.pending = true
+
+  resolveP2('second')
+  await new Promise((r) => queueMicrotask(() => r(undefined)))
+  flush()
+  dispose()
 })

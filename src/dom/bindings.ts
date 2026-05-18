@@ -55,16 +55,20 @@ function reactiveCommit<T>(
       controller.report({ status: 'ready', commit })
       return
     }
-    // No prior throw. If use() was called and the boundary is pending,
-    // defer this commit until the gate opens (atomic with siblings).
+    // No prior throw. If use() was called inside a Loading scope, ALWAYS
+    // route through deferOrCommit — even if scope.pending() is false right
+    // now. The scope decides whether to fire immediately or defer at end
+    // of microtask. This is required because of the ordering race: a
+    // sibling binding that will throw in the same flush may not have
+    // reported yet, so scope.pending() is a false-negative at this moment.
     if (engagedTransition) {
       const scope = findLoadingScope(parentOwner)
-      if (scope !== null && scope.pending()) {
+      if (scope !== null) {
         scope.deferOrCommit(commit)
         return
       }
     }
-    // No coordination needed — commit immediately.
+    // No scope ancestor — commit immediately.
     commit()
   })
 }
@@ -186,11 +190,14 @@ export function insertChild(parent: Node, value: unknown): void {
         controller.report({ status: 'ready', commit })
         return
       }
-      // No prior throw. If use() was called and the boundary is pending,
-      // defer this commit until the gate opens (atomic with siblings).
+      // No prior throw. If use() was called inside a Loading scope, ALWAYS
+      // route through deferOrCommit — even if scope.pending() is false right
+      // now. The scope's tail-check at end of microtask decides whether to
+      // fire immediately or defer; this avoids the false-negative race when
+      // a sibling that will throw in the same flush hasn't reported yet.
       if (engagedTransition) {
         const scope = findLoadingScope(parentOwner)
-        if (scope !== null && scope.pending()) {
+        if (scope !== null) {
           scope.deferOrCommit(commit)
           return
         }

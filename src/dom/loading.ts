@@ -54,6 +54,7 @@ export function Loading(props: LoadingProps): Accessor<unknown> {
   const pendingSet = new Set<BindingController>()
   const readySet = new Map<BindingController, () => void>()
   const deferredCommits: Array<() => void> = []
+  let tailCheckScheduled = false
 
   const [pendingSig, setPendingSig] = signal(false)
   const recomputePending = () =>
@@ -106,19 +107,27 @@ export function Loading(props: LoadingProps): Accessor<unknown> {
       return controller
     },
     deferOrCommit(commit: () => void): void {
-      if (pendingSet.size > 0) {
-        // Boundary is pending — queue commit for the next gate-open.
-        deferredCommits.push(commit)
-        recomputePending()
-      } else {
-        // Nothing pending — run immediately (and flush any accumulated deferred).
-        // Also flush any deferred commits that may have accumulated (unlikely but safe).
-        if (deferredCommits.length > 0) {
-          const deferred = deferredCommits.splice(0)
-          for (const c of deferred) c()
-        }
-        commit()
-        recomputePending()
+      // Always queue, then decide at end-of-microtask whether to flush.
+      // This handles the ordering race where a non-throwing binding (e.g.
+      // use(plainSignal)) runs BEFORE a sibling binding that will throw in
+      // the same flush. If we committed immediately based on the current
+      // pendingSet, we'd miss the sibling's throw and break atomicity.
+      // The microtask tail-check fires after r3 stabilize completes, so by
+      // then any sibling that was going to throw has reported.
+      deferredCommits.push(commit)
+      recomputePending()
+      if (!tailCheckScheduled) {
+        tailCheckScheduled = true
+        queueMicrotask(() => {
+          tailCheckScheduled = false
+          // If nothing's throwing by now, flush deferred commits. Otherwise
+          // the existing gate-open path (in report()) handles it once the
+          // throwers settle.
+          if (pendingSet.size === 0 && deferredCommits.length > 0) {
+            flushAll()
+            recomputePending()
+          }
+        })
       }
     },
   }

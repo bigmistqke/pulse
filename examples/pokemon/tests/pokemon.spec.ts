@@ -196,17 +196,61 @@ test.describe('Pokédex', () => {
 
     await page.locator('button', { hasText: 'next →' }).click()
 
-    // Mid-refetch: label stays at page 1, items stay at page 0 names.
-    // The .loading class is applied for the grey-out cue.
+    // Mid-refetch: <Loading> boundary holds the prior tree. Page label and
+    // list items both retain their old values until the new page settles.
+    // The .indicator span ("refreshing…") appears for the in-flight cue.
+    await expect(page.locator('.indicator')).toBeVisible()
     await expect(pageLabel).toHaveText('page 1')
     await expect(page.locator('.list li button.name')).toHaveCount(3)
-    await expect(pageLabel).toHaveClass(/loading/)
+    await expect(page.locator('.list li button.name').nth(0)).toHaveText('bulbasaur')
 
-    // Release the request; both label and items commit together.
+    // Release the request; both label and items commit in the same flush.
     releasePage1()
     await expect(pageLabel).toHaveText('page 2')
     await expect(page.locator('.list li button.name')).toHaveCount(2)
-    await expect(pageLabel).not.toHaveClass(/loading/)
+    await expect(page.locator('.list li button.name').nth(0)).toHaveText('wartortle')
+    await expect(page.locator('.indicator')).not.toBeVisible()
+  })
+
+  test('repeated next clicks: after each settle, list and label match the new page', async ({ page }) => {
+    const listPage2 = {
+      count: 1302,
+      results: [
+        { name: 'pidgey', url: 'https://pokeapi.co/api/v2/pokemon/16/' },
+      ],
+    }
+    await page.route(
+      (url) => url.href.includes('/api/v2/pokemon?offset=0&limit=20'),
+      (route) => route.fulfill({ json: listPage0 }),
+    )
+    await page.route(
+      (url) => url.href.includes('/api/v2/pokemon?offset=20&limit=20'),
+      (route) => route.fulfill({ json: listPage1 }),
+    )
+    await page.route(
+      (url) => url.href.includes('/api/v2/pokemon?offset=40&limit=20'),
+      (route) => route.fulfill({ json: listPage2 }),
+    )
+
+    await page.goto('/')
+    const pageLabel = page.locator('.paging span')
+    const items = page.locator('.list li button.name')
+    await expect(items).toHaveCount(3)
+    await expect(pageLabel).toHaveText('page 1')
+
+    // First next: full transition commits, label + items in sync.
+    await page.locator('button', { hasText: 'next →' }).click()
+    await expect(pageLabel).toHaveText('page 2')
+    await expect(items).toHaveCount(2)
+    await expect(items.nth(0)).toHaveText('wartortle')
+
+    // Second next: same — verifies pipeline keeps propagating across
+    // refetches (regression test for r3 auto-dispose-on-zero-subs bug
+    // where multi-stage pipelines stopped updating after one transition).
+    await page.locator('button', { hasText: 'next →' }).click()
+    await expect(pageLabel).toHaveText('page 3')
+    await expect(items).toHaveCount(1)
+    await expect(items.nth(0)).toHaveText('pidgey')
   })
 
   test('initial spinner appears during first load', async ({ page }) => {
