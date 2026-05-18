@@ -38,7 +38,7 @@ Both libraries share intellectual lineage (push-pull-push hybrid, milomg's `reac
 
 Pulse builds async / SWR / boundary semantics in *wrappers* above r3 (each async computed stage = an r3 computed + signals for pending / published-value + a settle handler — see `src/computed.ts:makeStageNode`). Solid 2.x's `createMemo` integrates async directly into the memo's internal state machine, with lane-based transition coordination at the runtime level.
 
-Consequence: pulse can theoretically swap r3 for a different minimal core (the wrappers are the contract), but it pays wrapper overhead and can't reach things only an integrated runtime would expose (lane-based multi-transition coordination, optimistic-dirty flagging, etc.). Solid 2.x has more headroom for runtime-level features at the cost of being its own world.
+Consequence: pulse can theoretically swap r3 for a different minimal core (the wrappers are the contract), but it pays wrapper overhead and can't reach things only an integrated runtime would expose. Concretely: pulse has transitions (per-`<Loading>` atomic-commit gathers — see §2.3), but Solid 2.x's lane-based runtime supports **multiple transitions in flight simultaneously** across the whole app, with the runtime deciding which transitions block / entangle which others. Pulse's transitions are scoped to a single boundary; two `<Loading>`s = two independent transition windows that never coordinate. Optimistic-dirty flagging (the mechanism behind `createOptimistic*`) is similarly a runtime-level feature that needs lanes to compose correctly with transitions. Solid 2.x has more headroom for runtime-level orchestration at the cost of being its own world.
 
 #### 2.2 Per-binding `use()` opt-in vs implicit loading path
 
