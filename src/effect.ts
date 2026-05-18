@@ -1,5 +1,6 @@
 import { computed as r3Computed, unwatched, type Computed as R3Computed } from 'r3'
 import { NotReadyYet } from './async'
+import type { Resolved } from './async'
 import {
   findLoadingScope,
   getOwner,
@@ -8,6 +9,57 @@ import {
   type BindingController,
 } from './owner'
 import { signal } from './signal'
+
+/** A pipeline stage: takes the prior stage's resolved value, returns sync/Promise/generator. */
+type Stage<In, Out> = (value: In) => Out
+
+// Existing single-arg overload — unchanged signature
+export function effect(fn: () => void): void
+
+// Staged-effect overloads, 1–5 stages
+export function effect<A>(
+  stages: [() => A],
+  commit: (value: Resolved<A>) => void,
+): void
+export function effect<A, B>(
+  stages: [() => A, Stage<Resolved<A>, B>],
+  commit: (value: Resolved<B>) => void,
+): void
+export function effect<A, B, C>(
+  stages: [() => A, Stage<Resolved<A>, B>, Stage<Resolved<B>, C>],
+  commit: (value: Resolved<C>) => void,
+): void
+export function effect<A, B, C, D>(
+  stages: [() => A, Stage<Resolved<A>, B>, Stage<Resolved<B>, C>, Stage<Resolved<C>, D>],
+  commit: (value: Resolved<D>) => void,
+): void
+export function effect<A, B, C, D, E>(
+  stages: [
+    () => A,
+    Stage<Resolved<A>, B>,
+    Stage<Resolved<B>, C>,
+    Stage<Resolved<C>, D>,
+    Stage<Resolved<D>, E>,
+  ],
+  commit: (value: Resolved<E>) => void,
+): void
+
+export function effect(
+  ...args:
+    | [fn: () => void]
+    | [stages: Array<(value: any) => unknown>, commit: (value: unknown) => void]
+): void {
+  if (typeof args[0] === 'function') {
+    return singleArgEffect(args[0] as () => void)
+  }
+  const stages = args[0] as Array<(value: unknown) => unknown>
+  const commit = args[1] as (value: unknown) => void
+  return stagedEffect(stages, commit)
+}
+
+function stagedEffect(stages: Array<(value: unknown) => unknown>, commit: (value: unknown) => void): void {
+  throw new Error('TODO Task 2')
+}
 
 /**
  * Run a side-effecting function reactively. It runs once immediately, and
@@ -23,7 +75,7 @@ import { signal } from './signal'
  *
  * Any non-`NotReadyYet` throw routes to the nearest `catchError`.
  */
-export function effect(fn: () => void): void {
+function singleArgEffect(fn: () => void): void {
   const myOwner = getOwner()
   const [kick, setKick] = signal(0)
   let kickCount = 0
