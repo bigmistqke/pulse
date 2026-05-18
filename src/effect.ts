@@ -1,8 +1,7 @@
 import { computed as r3Computed, unwatched, type Computed as R3Computed } from 'r3'
-import { NotReadyYet, track, use } from './async'
+import { NotReadyYet, use } from './async'
 import type { Resolved } from './async'
 import { computed } from './computed'
-import { isPromise } from './is-promise'
 import {
   findLoadingScope,
   getOwner,
@@ -11,6 +10,7 @@ import {
   type BindingController,
 } from './owner'
 import { signal } from './signal'
+import { runBindingCompute } from './transition-tracker'
 
 /** A pipeline stage: takes the prior stage's resolved value, returns sync/Promise/generator. */
 type Stage<In, Out> = (value: In) => Out
@@ -63,35 +63,83 @@ function stagedEffect(
   stages: Array<(value: unknown) => unknown>,
   commit: (value: unknown) => void,
 ): void {
-  // Build the pipeline as a computed; this gives us suspension + SWR + pending
-  // registry + error routing for free (Plan A/B/Plan B Task 2.5).
-  // `computed(...stages)` requires at least one stage.
   if (stages.length === 0) {
     throw new Error('effect: staged form requires at least one stage')
   }
-  // `computed`'s overloads constrain stage shape; we widen at runtime.
   const pipeline = (computed as unknown as (
     ...s: Array<(value: unknown) => unknown>
   ) => () => unknown)(...stages)
 
-  // Wrap commit in a single-arg effect that reads the pipeline. We read
-  // `pipeline()` directly (not via `use()`) to avoid depending on `pendingSig`
-  // — the pending flag updates before `publishedValue`, which would cause a
-  // spurious double-run of the body under syncScheduler when a promise settles.
-  // Instead we read only `publishedValue` (via `pipeline()`) and handle the
-  // Promise case manually.
-  singleArgEffect(() => {
-    const raw = pipeline()
-    if (isPromise(raw)) {
-      const state = track(raw)
-      if (state.status === 'fulfilled') {
-        commit(state.value)
+  const myOwner = getOwner()
+  const [kick, setKick] = signal(0)
+  let kickCount = 0
+  let suspendedOn: Promise<unknown> | null = null
+  let controller: BindingController | null = null
+  const UNSET = Symbol('unset')
+  let lastCommitted: unknown = UNSET
+
+  const ensureController = (): BindingController | null => {
+    if (controller !== null) return controller
+    const scope = findLoadingScope(myOwner)
+    if (scope === null) return null
+    controller = scope.register()
+    return controller
+  }
+
+  const body = () => {
+    kick()
+    let value: unknown
+    let engagedTransition = false
+    try {
+      const computeResult = runBindingCompute(() => use(pipeline))
+      value = computeResult.value
+      engagedTransition = computeResult.engagedTransition
+    } catch (e) {
+      if (e instanceof NotReadyYet) {
+        const alreadySuspendedOnSame = suspendedOn === e.promise
+        suspendedOn = e.promise
+        if (!alreadySuspendedOnSame) {
+          const p = e.promise
+          const rerun = () => {
+            if (suspendedOn === p) {
+              suspendedOn = null
+              setKick(++kickCount)
+            }
+          }
+          p.then(rerun, rerun)
+        }
+        ensureController()?.report({ status: 'throwing' })
         return
       }
-      if (state.status === 'rejected') throw state.reason
-      throw new NotReadyYet(raw)
+      routeError(myOwner, e)
+      return
     }
-    commit(raw as unknown)
+    suspendedOn = null
+    // Dedupe: if the resolved value is the same as what we last committed,
+    // skip — this guards against double-fire from use()'s pendingSig + value
+    // signals both triggering re-runs under syncScheduler when a promise settles.
+    if (Object.is(value, lastCommitted)) return
+    lastCommitted = value
+    // Build the commit closure. It runs the user's commit with the resolved value.
+    const userCommitFn = (): void => commit(value)
+    // Route via existing-controller, deferOrCommit (if engaged + pending), or immediate.
+    const scope = findLoadingScope(myOwner)
+    if (controller !== null) {
+      controller.report({ status: 'ready', commit: userCommitFn })
+    } else if (engagedTransition && scope !== null && scope.pending()) {
+      scope.deferOrCommit(userCommitFn)
+    } else {
+      userCommitFn()
+    }
+  }
+
+  const node = r3Computed(body)
+  registerWithOwner({
+    dispose: () => {
+      unwatched(node as R3Computed<unknown>)
+      controller?.unregister()
+      controller = null
+    },
   })
 }
 
