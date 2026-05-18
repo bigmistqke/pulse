@@ -95,15 +95,10 @@ function App() {
       <Loading initial={<div class="spinner">loading…</div>}>
         {() => (
           <div class="loaded">
-            {/* Wrapped in a static <div> on purpose: top-level component
-                children in the Fragment lose their useLoading() scope (see
-                docs/follow-ups.md — KNOWN BUG). Nesting in a static element
-                works because h() wraps the function child under the right
-                ambient owner. */}
-            <Show when={() => useLoading()()}>
-              {() => <span class="indicator">refreshing…</span>}
-            </Show>
-            <ul class="list">
+            {/* No "refreshing" chip. Instead, the list and page label fade
+                via class:loading while the boundary is pending (transition
+                window). Visual cue without layout shift. */}
+            <ul class="list" class:loading={() => useLoading()()}>
               <For each={() => use(list)}>
                 {(ref) => <PokemonRow ref={ref} />}
               </For>
@@ -115,7 +110,9 @@ function App() {
               >
                 ← prev
               </button>
-              <span>page {() => use(page) + 1}</span>
+              <span class:loading={() => useLoading()()}>
+                page {() => use(page) + 1}
+              </span>
               <button on:click={() => setPage((p) => p + 1)}>next →</button>
             </nav>
           </div>

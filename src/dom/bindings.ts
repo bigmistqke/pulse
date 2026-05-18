@@ -39,7 +39,15 @@ function reactiveCommit<T>(
   effect(() => {
     let result: { value: T; engagedTransition: boolean }
     try {
-      result = runBindingCompute(() => read())
+      // runWithOwner(parentOwner, ...) so that owner-aware reads inside
+      // `read` (e.g. `useLoading()`) walk from parentOwner up — finding
+      // the boundary scope that was ambient when this binding was created.
+      // Without this, the effect body runs with whatever owner happens to
+      // be set globally during r3 stabilize, which loses the connection
+      // to the enclosing <Loading>.
+      result = runWithOwner(parentOwner, () =>
+        runBindingCompute(() => read()),
+      )
     } catch (e) {
       if (e instanceof NotReadyYet) {
         ensureController()?.report({ status: 'throwing' })

@@ -163,3 +163,9 @@ body {
   opacity: 0.55;
   transition: opacity 120ms ease-in-out;
 }
+
+.list.loading {
+  pointer-events: none;
+  opacity: 0.4;
+  filter: grayscale(0.8);
+}

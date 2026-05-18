@@ -165,13 +165,14 @@ test.describe('Pokédex', () => {
     // Click next — don't await completion yet
     await page.locator('button', { hasText: 'next →' }).click()
 
-    // Refreshing indicator should appear
-    await expect(page.locator('.indicator')).toBeVisible()
-    await expect(page.locator('.indicator')).toHaveText('refreshing…')
+    // List and page label both fade via .loading during the transition.
+    await expect(page.locator('.list')).toHaveClass(/loading/)
+    await expect(page.locator('.paging span')).toHaveClass(/loading/)
 
-    // Wait for load to complete
+    // Wait for load to complete; .loading lifts atomically.
     await expect(page.locator('.list li button.name')).toHaveCount(2)
-    await expect(page.locator('.indicator')).not.toBeVisible()
+    await expect(page.locator('.list')).not.toHaveClass(/loading/)
+    await expect(page.locator('.paging span')).not.toHaveClass(/loading/)
   })
 
   test('page label and items commit atomically (transition snapshot)', async ({ page }) => {
@@ -198,8 +199,9 @@ test.describe('Pokédex', () => {
 
     // Mid-refetch: <Loading> boundary holds the prior tree. Page label and
     // list items both retain their old values until the new page settles.
-    // The .indicator span ("refreshing…") appears for the in-flight cue.
-    await expect(page.locator('.indicator')).toBeVisible()
+    // The .loading class is applied to both for the in-flight visual cue.
+    await expect(page.locator('.list')).toHaveClass(/loading/)
+    await expect(pageLabel).toHaveClass(/loading/)
     await expect(pageLabel).toHaveText('page 1')
     await expect(page.locator('.list li button.name')).toHaveCount(3)
     await expect(page.locator('.list li button.name').nth(0)).toHaveText('bulbasaur')
@@ -209,7 +211,8 @@ test.describe('Pokédex', () => {
     await expect(pageLabel).toHaveText('page 2')
     await expect(page.locator('.list li button.name')).toHaveCount(2)
     await expect(page.locator('.list li button.name').nth(0)).toHaveText('wartortle')
-    await expect(page.locator('.indicator')).not.toBeVisible()
+    await expect(page.locator('.list')).not.toHaveClass(/loading/)
+    await expect(pageLabel).not.toHaveClass(/loading/)
   })
 
   test('repeated next clicks: after each settle, list and label match the new page', async ({ page }) => {
