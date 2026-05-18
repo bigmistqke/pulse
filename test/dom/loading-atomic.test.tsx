@@ -402,3 +402,110 @@ test('binding without use() inside <Loading> commits immediately regardless of b
 
   dispose()
 })
+
+test('newly-mounted binding inside <Loading> joins the gather (option A: hold prior tree)', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+  const [visible, setVisible] = signal(false)
+  let resolveA1: (v: string) => void = () => {}
+  let resolveB1: (v: string) => void = () => {}
+  const pA1 = new Promise<string>((r) => (resolveA1 = r))
+  const pB1 = new Promise<string>((r) => (resolveB1 = r))
+  const [srcA, _setSrcA] = signal<string | Promise<string>>(pA1)
+  const [srcB, setSrcB] = signal<string | Promise<string>>(pB1)
+
+  const dispose = render(
+    () => (
+      <Loading initial={<p>loading</p>}>
+        {() => (
+          <div>
+            <span class="a">{() => use(srcA())}</span>
+            <Show when={visible}>
+              {() => <span class="b">{() => use(srcB())}</span>}
+            </Show>
+          </div>
+        )}
+      </Loading>
+    ),
+    target,
+  )
+
+  // Initial: A pending, B not mounted → show initial.
+  expect(target.textContent).toBe('loading')
+
+  // First load: resolve A. Boundary transitions to loaded subtree (B not in tree).
+  resolveA1('A1')
+  await new Promise((r) => queueMicrotask(() => r(undefined)))
+  flush()
+  expect(target.querySelector('.a')!.textContent).toBe('A1')
+  expect(target.querySelector('.b')).toBeNull()
+
+  // Now toggle B on with a pending source. New binding mounts, throws, joins gather.
+  setVisible(true)
+  await new Promise((r) => queueMicrotask(() => r(undefined)))
+  flush()
+  // Boundary is now pending again because B's binding throws.
+  // hasEverLoaded is true so the return-accessor returns fallback ?? loadedSubtree.
+  // No fallback set on this Loading — so loadedSubtree is held; A stays at 'A1';
+  // the .b span is added structurally but its content hole is empty (held).
+  expect(target.querySelector('.a')!.textContent).toBe('A1')
+
+  // Resolve B; gate opens — B's content commits.
+  resolveB1('B1')
+  await new Promise((r) => queueMicrotask(() => r(undefined)))
+  flush()
+  expect(target.querySelector('.a')!.textContent).toBe('A1')
+  expect(target.querySelector('.b')!.textContent).toBe('B1')
+
+  // Avoid unused warning
+  void setSrcB
+  dispose()
+})
+
+test('mid-flight mount without fallback: prior tree retained until gate opens', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+  const [visible, setVisible] = signal(false)
+  let resolveA1: (v: string) => void = () => {}
+  let resolveB1: (v: string) => void = () => {}
+  const pA1 = new Promise<string>((r) => (resolveA1 = r))
+  const pB1 = new Promise<string>((r) => (resolveB1 = r))
+  const [srcA, _setSrcA] = signal<string | Promise<string>>(pA1)
+  const [srcB, _setSrcB] = signal<string | Promise<string>>(pB1)
+  const dispose = render(
+    () => (
+      <Loading initial={<p>loading</p>}>
+        {() => (
+          <div>
+            <span class="a">{() => use(srcA())}</span>
+            <Show when={visible}>
+              {() => <span class="b">{() => use(srcB())}</span>}
+            </Show>
+          </div>
+        )}
+      </Loading>
+    ),
+    target,
+  )
+  // First load A.
+  resolveA1('A1')
+  await new Promise((r) => queueMicrotask(() => r(undefined)))
+  flush()
+  expect(target.querySelector('.a')!.textContent).toBe('A1')
+  // Mount B with pending source mid-flight.
+  setVisible(true)
+  await new Promise((r) => queueMicrotask(() => r(undefined)))
+  flush()
+  // .b span structure is mounted; its content hole is empty (B's hole throws,
+  // markers only). The atomic-commit guarantee covers content commits inside
+  // bindings — structural mounts (Show) are not currently gated. Verify the
+  // content hole is empty.
+  const bSpan = target.querySelector('.b')
+  expect(bSpan).not.toBeNull()
+  expect(bSpan!.textContent).toBe('')
+  resolveB1('B1')
+  await new Promise((r) => queueMicrotask(() => r(undefined)))
+  flush()
+  expect(target.querySelector('.b')!.textContent).toBe('B1')
+  dispose()
+})
