@@ -73,6 +73,7 @@ function stagedEffect(
   const myOwner = getOwner()
   const [kick, setKick] = signal(0)
   let kickCount = 0
+  let disposed = false
   let suspendedOn: Promise<unknown> | null = null
   let controller: BindingController | null = null
   const UNSET = Symbol('unset')
@@ -121,7 +122,10 @@ function stagedEffect(
     if (Object.is(value, lastCommitted)) return
     lastCommitted = value
     // Build the commit closure. It runs the user's commit with the resolved value.
-    const userCommitFn = (): void => commit(value)
+    const userCommitFn = (): void => {
+      if (disposed) return
+      commit(value)
+    }
     // Route via existing-controller, deferOrCommit (if engaged + pending), or immediate.
     const scope = findLoadingScope(myOwner)
     if (controller !== null) {
@@ -136,6 +140,7 @@ function stagedEffect(
   const node = r3Computed(body)
   registerWithOwner({
     dispose: () => {
+      disposed = true
       unwatched(node as R3Computed<unknown>)
       controller?.unregister()
       controller = null
