@@ -337,8 +337,9 @@ When A reads a value B is mid-writing:
 - (b) A sees committed value (ignores B's overlay).
 - (c) A sees B's overlay (treats B's write as visible).
 - (d) Explicit opt-in: A must call `tx.entangleWith(B)`.
+- (e) Retry A on B's commit (STM-style — A re-runs from start against B's new committed view).
 
-Scenario 5 explicitly tests this.
+Scenario 5 explicitly tests this. See Prior art § effect-ts STM for tradeoffs of (e).
 
 ### Q5: Lifecycle of overlays after commit/abort
 
@@ -346,6 +347,63 @@ After `tx.commit()` or `tx.abort()`, are the overlays GC'd immediately? Are subs
 
 - Notification: if any sibling tx was reading a value that was in A's overlay, those reads need to invalidate when A commits/aborts.
 - GC: overlays held by signal? By transaction? Cleanup on tx disposal.
+
+---
+
+## Prior art
+
+### effect-ts (Effect, `@effect/io`, `@effect/stm`)
+
+Effect-ts has done substantial work in this space. Worth knowing what it solves and how its model maps to (or diverges from) what we're sketching.
+
+**STM (Software Transactional Memory) — `Effect.gen` over `TRef`:**
+
+- A `TRef<A>` is a transactional cell. Reads/writes inside an `STM.commit(...)` block are tracked.
+- On commit, the runtime checks: did any TRef I READ get modified by another committed transaction between my start and my commit? If yes → **retry from the top of the block** with the fresh committed view; if no → commit my writes atomically.
+- This is Q4 option **(e) — retry-on-conflict**, distinct from (a) block-and-wait. Cleaner in that there's no entanglement graph and no deadlock surface; the trade-off is that everything inside the STM block must be replayable.
+- Server requests can't naturally retry (they have side effects); STM blocks typically contain only TRef reads/writes, with server work outside the STM block (orchestrated by the surrounding `Effect`).
+
+Maps directly onto: scenario 1 (retry resolves the optimistic race correctly), scenario 5 (conflict → retry instead of block), scenario 7 (the optimistic block reads server result + commits atomically with replacement).
+
+Doesn't directly handle: scenario 2 (in-flight server work needing snapshot correspondence — STM doesn't have a notion of "snapshot for an async call's payload"), scenario 3 (multi-step with side effects — these go in the surrounding `Effect`, not in STM).
+
+**Fibers + structured interruption:**
+
+- A `Fiber` is a lightweight concurrent unit. `Fiber.interrupt(fiber)` signals interruption; the next `yield` checkpoint observes it; finalizers (scoped via `Effect.acquireRelease`) run; post-interrupt operations are no-ops by construction.
+- Maps onto scenario 6 (user-cancellable flow) very cleanly: cancellation is interruption; the structured-concurrency model guarantees post-cancel operations don't fire.
+
+**Scope (acquire-release):**
+
+- Bracketed resource management with finalizers. Maps onto pulse's owner + onCleanup, with stronger guarantees: every acquired resource has a matching release that fires even on interruption / exception.
+- Effect-ts's `Scope` is more disciplined; pulse's owner is more permissive (cleanups can be added at any point).
+
+**Effect.gen with `yield*`:**
+
+- `Effect.gen(function* () { const a = yield* fetchA; const b = yield* fetchB(a); return [a, b] })` is structurally the same shape as pulse's `computed(function* () { const a = yield* read(asyncA); const b = yield* read(asyncB(a)); return [a, b] })`. Both treat the body as a *description* of sequential async, driven by a runtime that handles suspension/resumption.
+- The difference: effect-ts's `yield*` always yields an `Effect<R,E,A>` (typed description of work); pulse's `yield* read(x)` yields a signal accessor (reactive read with suspension). Same syntactic shape, different semantics under the hood.
+
+**`SubscriptionRef`:**
+
+- A `Ref<A>` with a `Stream` of changes. Signal-like — value + subscribers. Comparable to pulse's signal except integration with reactivity goes through `Stream`-typed effects, not direct UI bindings.
+
+### Where the models genuinely diverge
+
+- **Programming model commitment.** Effect-ts is "your whole async layer is `Effect<R, E, A>`" — you write `Effect`s instead of async functions, with typed errors and typed dependencies. Pulse keeps async functions native and adds reactive primitives on top; `use()` is the only marker. Pulse is a much lower buy-in for an existing codebase; effect-ts is a different programming style.
+- **Retry vs block on conflict.** STM retries; Solid 2.x lanes block-and-entangle. Pulse hasn't picked; this is Q4. STM's retry assumes replayability — natural for in-memory `TRef` work, awkward for server calls. Pulse's transaction primitive could go either way: retry-on-conflict (STM-style) for purely local transactions, block-or-explicit-entanglement for transactions containing server work.
+- **Fiber scheduler vs reactive graph.** Effect-ts has a fiber runtime separate from the host's microtask scheduler — fibers are interpreted, scheduled, parked, resumed. Pulse uses the reactive graph as its "interpreter" — there's no fiber concept, just signals and effects driven by the host scheduler.
+- **Error typing.** Effect's `E` parameter forces handling errors at the type level. Pulse propagates errors via `catchError` (owner-walking handlers) — looser but more familiar.
+
+### What we should consider borrowing
+
+- **Retry-on-conflict as one answer to Q4** — should be enumerated alongside block/explicit/never. Useful for purely-local transactions (preview mode, batched signal updates, scenario 8).
+- **Structured interruption semantics** — effect-ts's "interruption propagates through yield checkpoints; finalizers always run; post-interrupt ops are no-ops" is a clean answer to scenario 6. Pulse's transaction primitive could adopt the same structural guarantee: tx.disposed checks on every tx-scoped write, finalizers on tx itself.
+- **Scope discipline** — pulse's owner + onCleanup is more permissive than effect-ts's Scope. For transactions, the more disciplined model (every tx owns a scope; commit/abort runs finalizers) is probably right.
+- **Stream interop** — if pulse ever wants to integrate with effect-ts apps, exposing signals as `SubscriptionRef`-compatible streams is a low-touch bridge.
+
+### What we should NOT borrow
+
+- **The programming-model-everything stance.** Pulse's value is being a small reactive layer on top of normal async functions. Becoming "effect-ts but for UI" is a different project.
+- **STM's retry model as the default.** For UI transactions that contain server calls, retry semantics surprise users. Block/explicit-entanglement is friendlier as a default; retry can be an opt-in mode for purely-local transactions.
 
 ---
 
