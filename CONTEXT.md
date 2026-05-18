@@ -58,20 +58,35 @@ registers with the external pending tracker; `isPending(downstream)()` walks
 the chain (pipeline-OR).
 
 Conceptually, **pipelines are delimited continuations split at user-chosen
-boundaries**. The "rest of the computation past stage N" IS literally stages
-N+1, N+2, ..., each as its own re-entrant unit. When stage N produces a new
-value, the runtime re-invokes "the rest" with the new input — multi-shot at
-the stage boundary, without restarting prior stages. This is structurally
-what an algebraic-effect handler does when it calls `resume(value)` multiple
-times: invoke the continuation with different values. Pulse achieves it on
-top of single-shot JavaScript generators by decomposition: each stage is a
-separate r3 computed with its own cached result, so re-entry needs no
-generator-state preservation. (Generator stages additionally use restart-
-from-top + WeakMap fast-forward to simulate multi-shot WITHIN a stage's
-yields; that's the finer-grained checkpoint mechanism.) See
-[Bauer & Pretnar's "Programming with Algebraic Effects and Handlers"](https://arxiv.org/abs/1203.1539)
+boundaries**, with two distinct granularities of re-entry:
+
+- **Stage boundaries are genuinely multi-shot.** Each stage is a separate r3
+  computed with its own cached result; when stage N produces a new value, the
+  runtime re-invokes stages N+1, N+2, ... with the new input — without
+  restarting prior stages. This is structurally what an algebraic-effect
+  handler does when it calls `resume(value)` multiple times: invoke the
+  continuation with different values. Pulse achieves multi-shot at the
+  stage boundary on top of single-shot JavaScript generators by decomposition,
+  so re-entry needs no generator-state preservation.
+- **Within a single stage, pulse re-executes from the top.** A binding-effect
+  or single-stage computed that suspends on `use(x)` does NOT truly resume on
+  settle — it re-runs the body from the start. The kick-on-settle mechanism
+  just marks the effect dirty; the body restarts. Same model as React Suspense
+  ("re-execute on settle," not true continuation resumption). Generator stages
+  do approximate multi-shot WITHIN a stage's yields via restart-from-top +
+  WeakMap fast-forward (cached yielded values replay synchronously on re-run),
+  but the body still re-executes from the top.
+
+So pulse is true delimited continuations at the **stage-decomposition**
+granularity; re-execution-with-cache at the **within-stage** granularity. This
+distinction matters: the stage boundary is where pulse gets genuine "rest of
+the computation runs with a different value" semantics; everything within a
+single stage runs from the top each time.
+
+See [Bauer & Pretnar's "Programming with Algebraic Effects and Handlers"](https://arxiv.org/abs/1203.1539)
 for the formal theory; [Dan Abramov's "Algebraic Effects for the Rest of Us"](https://overreacted.io/algebraic-effects-for-the-rest-of-us/)
-is the accessible JS-flavored intro.
+is the accessible JS-flavored intro (and includes the contrast with React
+Suspense's re-execution model that pulse also inherits).
 
 **Stage**:
 One function in a Pipeline. Independently sync `(value) => ...`,
@@ -266,6 +281,72 @@ Each binding-effect creates one lazily on first `NotReadyYet`.
 Reading any signal or computed walks it up to date synchronously — reads
 are never stale, regardless of whether a flush has run or where the read
 happens. The Scheduler batches effects only; it never gates read correctness.
+
+## Conceptual model
+
+Pulse's primitives are all the same shape: a **performer** raises a typed
+operation, a **handler** somewhere up the dynamic context catches it and
+decides what to do (commit, defer, resume, abort, ignore). This is the
+algebraic-effects pattern, implemented in a JS-flavored way (re-execution
+plus mutable "current X" ambient slots, not true delimited continuations
+except at stage boundaries — see Pipeline).
+
+The full set of effects pulse currently handles (and a couple sketched for
+future work):
+
+| Effect | Performer | Handler |
+|---|---|---|
+| Suspension | `use(x)` throws `NotReadyYet(promise)` | binding-effect's try/catch + kick-on-promise-settle (re-execution) |
+| Boundary coordination | `use(x)` engagement flag (set in `transition-tracker`) | `<Loading>` scope's gather + atomic-flush state machine |
+| Error | non-`NotReadyYet` throw inside a reactive node | `catchError(fn, handler)` walks the owner tree, nearest handler catches |
+| Owner lookup | `getOwner()` reads ambient owner slot | `runWithOwner(owner, fn)` sets the slot for the dynamic extent of `fn` |
+| Loading scope lookup | `useLoading()` walks owner tree for nearest `loadingScope` | `<Loading>`'s setup attaches a scope to its boundary owner |
+| (future) Transaction overlay | `tx.set(s, v)` writes to per-tx overlay | `transaction(fn)` manages overlay, commits or aborts |
+| (future) Cross-boundary policy | child `<Loading>` scopes' pending state | parent `<Reveal>` policy (sequential / together / natural) |
+
+Three structural patterns recur:
+
+1. **Throw + catch + kick-on-settle** for one-shot effects that pause a
+   computation until something resolves (Suspension, future Optimistic-revert).
+2. **Owner-tree walk for nearest handler** for hierarchical context lookups
+   (catchError, useLoading, future `useTransaction`).
+3. **Module-level mutable "current X" slot** with save-restore wrappers for
+   per-call-frame ambient context (current owner via `runWithOwner`; current
+   binding's engagement flag via `runBindingCompute`; conceivably current
+   transaction via `runInTransaction`).
+
+These three patterns ARE the implementation toolbox for algebraic-effect
+handlers in a language without first-class delimited continuations. Pulse's
+design coherence comes from reusing them across every coordination primitive
+rather than introducing new mechanisms.
+
+### Theoretical lineage
+
+Pulse sits at the intersection of two research threads:
+
+- **Algebraic effects + handlers** (Plotkin & Pretnar; Bauer; Leijen's Koka;
+  Sam Lindley; OCaml 5 effect handlers). The "perform an effect, handler
+  catches and decides resume vs abort" pattern. Pulse's `use()` / `<Loading>`
+  / `catchError` are instances. References at the end of the Pipeline section
+  above; React Suspense and effect-ts are JS-world implementations of the
+  same shape.
+- **Incremental / self-adjusting computation** (Umut Acar's research on
+  self-adjusting computation; [Jane Street's `incremental`](https://github.com/janestreet/incremental)
+  OCaml library; [Yaron Minsky's "Seven Implementations of Incremental"](https://www.youtube.com/watch?v=G6a5G5i4gQU)
+  talk; Milo Mighdoll's [`reactively`](https://github.com/milomg/reactively)
+  and `r2`). The "describe a computation graph once; the runtime efficiently
+  re-evaluates only the affected portions when leaves change" model. r3 (and
+  by extension pulse) inherits the **topological height ordering** approach
+  from this lineage — different from the push-pull-push tri-coloring that
+  most signals libraries use. r3's README is explicit about the influence.
+
+The two threads connect at the structural level: an incremental computation
+graph's "bind" (the operator that lets a node's output depend on a dynamically
+constructed sub-graph) is essentially the multi-shot continuation we discussed
+above. Each `bind` is a stage boundary; the sub-graph past the bind is the
+"rest of the computation"; when the bind's input changes, the sub-graph is
+re-invoked with the new value. Pulse's pipeline `computed(s0, s1, s2)` is
+the same shape as an incremental graph of binds.
 
 ## Relationships
 
