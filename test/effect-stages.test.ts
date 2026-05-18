@@ -7,7 +7,7 @@ import {
   signal,
   syncScheduler,
 } from '../src/index'
-import { createRoot } from '../src/owner'
+import { catchError, createRoot } from '../src/owner'
 
 beforeEach(() => setScheduler(syncScheduler(flush)))
 afterEach(() => setScheduler(microtaskScheduler(flush)))
@@ -55,5 +55,51 @@ describe('effect — staged form', () => {
       setN(3)
       expect(seen).toEqual([10, 20, 30])
     })
+  })
+})
+
+test('throw from a stage routes to nearest catchError', () => {
+  createRoot(() => {
+    let caught: unknown = null
+    catchError(
+      () => {
+        effect(
+          [() => { throw new Error('stage-fail') }],
+          () => { /* never reached */ },
+        )
+      },
+      (e) => { caught = e },
+    )
+    expect((caught as Error).message).toBe('stage-fail')
+  })
+})
+
+test('throw from commit routes to nearest catchError', () => {
+  createRoot(() => {
+    let caught: unknown = null
+    catchError(
+      () => {
+        effect(
+          [() => 'ok'],
+          () => { throw new Error('commit-fail') },
+        )
+      },
+      (e) => { caught = e },
+    )
+    expect((caught as Error).message).toBe('commit-fail')
+  })
+})
+
+test('disposal stops the staged effect from firing further commits', () => {
+  createRoot((dispose) => {
+    const seen: number[] = []
+    const [n, setN] = signal(1)
+    effect([() => n() * 10], (v) => seen.push(v))
+    expect(seen).toEqual([10])
+    setN(2)
+    expect(seen).toEqual([10, 20])
+    dispose()
+    setN(3)
+    expect(seen).toEqual([10, 20]) // no further commits
   })
 })
