@@ -109,6 +109,74 @@ Before adopting this decomposition as the design basis, three things need to be 
 
 The next sub-decision in this document should probably be: validate or falsify this decomposition before committing to any of the Q1–Q9 specific positions. If the decomposition is right, several of the Qs collapse into "pick a library API for this composition pattern." If it's wrong, the Qs need to be answered each on their own terms.
 
+### A sharper recasting: signal = node + value-bag
+
+The seven-concerns decomposition above is roughly right but it bundles two distinct concerns under "scoped versioned state." A cleaner factoring (proposed during session 13 conversation): **a signal isn't a single primitive — it's a (node identity, value-bag) pair.** Currently every reactive framework conflates these into "a signal *is* its current value." Decoupling them is the underlying simplicity.
+
+The reframing:
+
+- **Node** = the stable identity in the reactive dep graph. Other nodes / subscribers depend on this identity. Owners hold it. Equality and reference-tracking are based on it.
+- **Value-bag** = the multi-valued state the node currently has. Entries are tagged with (scope, version, status). The "current committed value" is one entry; the "in-flight pending value" is another; the "optimistic-scope overlay" is a third; the "snapshot-as-of-time-T" is a fourth.
+
+Under this framing, the seven concerns recast as:
+
+- **A (versioned reads)** = read a specific entry from the value-bag
+- **B (pending propagation)** = entries carry pending-status; the dep graph propagates status across nodes
+- **C (atomic commit boundary)** = the value-bag collapses from N entries to 1
+- **D (scoped writes)** = writes contribute an entry to the value-bag, tagged with scope
+- **E (in-flight identity)** = entries carry identity (or the scope that produced them does)
+- **F (cleanup)** = entries can be removed from the bag
+- **G (priority)** = about the *work producing entries*, not about entries themselves — the only one that's not a value-bag operation
+
+So **A–F are all operations on the value-bag of a node**. G is the one genuine outlier (it's about work scheduling). The deeper decomposition shrinks from "7 concerns + 4 primitives" to **three primitives**: (node identity) + (value-bag) + (work scheduling).
+
+**The empirical pattern:** every framework studied implements the node/value-bag separation internally, but none exposes it as the user-facing primitive:
+
+- **Solid 2.x** — explicit per-node slots `_value` / `_pendingValue` / `_overrideValue` / `_snapshotValue` (the fresh dive called this "the architectural anchor"). Internally exposed; user-facing surface is `createOptimistic` / `createSignal` / `createMemo` as separate hooks.
+- **Svelte 5** — `batch_values: Map<Value, [any, boolean]>` per batch. Internally; user-facing is `<svelte:boundary>` / `$derived` / `fork()`.
+- **React modern** — WIP fiber vs current fiber. Same component identity, different value-states. Internally; user-facing is `useOptimistic` / `useTransition` / `useState`.
+- **Replicache** — B-tree DAG with `main` / `sync` heads. The closest to exposing it (named heads are semi-public; most user code doesn't see them).
+- **Postgres MVCC** — row identity stable; multiple tuple-versions per row, indexed by transaction. Internally exposed via `xmin`/`xmax`; not user-API.
+
+The pattern is universal. None of them lets the user say "give me node N's value-bag entry tagged with scope S" as a primitive. Instead they each invent bespoke compositions (`useOptimistic`, `_overrideValue`, `Batch.current.get(node)`) that are *internally* just value-bag-entry-with-scope-S.
+
+**The pulse move under this framing:** expose `(node, value-bag)` as the user-facing primitive, rather than pre-bundled hooks like `useOptimistic`. Higher-level abstractions become userland:
+
+- `<Loading>` = "subscribe to nodes' value-bags; while any has non-committed entries, render the fallback"
+- `optimistic(action, node, value)` = "write into node N's value-bag, tagged with action's scope"
+- `transition(scope, body)` = "open a scope; writes inside body go into target nodes' value-bags tagged with this scope; commit at end"
+- `action(function*)` = "open a scope at start; commit at each yield-point (each yield is a sub-scope); discard if generator throws"
+- `fork()` = "open a scope but don't commit; let user code call `.commit()` or `.discard()` explicitly"
+- `latest(node)` = "read node's value-bag's committed entry, ignoring any non-committed entries"
+- `isPending(node)` = "does node's value-bag have any non-committed entries?"
+- `refresh(node)` = "invalidate node's committed entry; trigger re-computation"
+
+All of these become library code over (node, value-bag, scope) primitives. The framework provides the underlying machinery; userland composes the patterns.
+
+### Open questions about the node/value-bag framing
+
+- **How is a value-bag entry accessed?** Does each entry have an explicit key (scope identity, version number, status tag), and is the read API "give me entry for key K" or "give me the latest committed" or "give me the one for the current reading scope"?
+- **Does the user write into the bag directly**, or is the bag entirely framework-managed (users write values; framework decides which bag-entry that maps to based on active scope)?
+- **What does Dim 3 (priority) look like in this framing?** It's the work-scheduling primitive, the third leg. Possibly just "writes carry a priority hint that the scheduler honors when picking the next entry to commit."
+- **Does `<Loading>` collapse to "subscribe to bag-entry-status changes"?** Simpler than the current gather-on-boundary; need to verify boundary semantics survive.
+
+### Historical data point — Solid 1.x's iterated transition machinery
+
+Verified against the Solid git history (`/Users/bigmistqke/Documents/GitHub/solid`): Solid 1.x had an extensively-iterated transition mechanism that was rewritten multiple times across the 1.x lifecycle. The specific mechanism wasn't strictly node-cloning (the user's recollection in the session 13 conversation) — it was a **per-node `tValue` slot plus framework-tracked `Transition.sources` Set plus `Transition.running` flag.**
+
+Pre-2021-10-08, every `Signal<T>` carried a `tValue?: T` field — the transition-specific value of the node. Reads checked `Transition && Transition.running && Transition.sources.has(s)` and returned `s.tValue` if so, else `s.value`. The `Transition.sources` Set tracked which nodes were participating in the current transition; writes during a transition updated both `node.tValue` and (after transition) `node.value`.
+
+The commit titled **"new transitions and reactive experiments"** (`3623573b`, Oct 8 2021, Ryan Carniato) rewrote this — removing the `tValue` slot from `Signal<T>`, removing the `Transition.sources.has(s)` checks throughout the codebase. The diff is ~440 lines changed in `signal.ts` alone. The git log shows **20+ transition-related commits across Solid 1.x's lifetime** (`fix transition`, `better transition fix`, `fix transition resuming`, `Streamline transition effect queuing`, `simplify batching, reduce createComputed, fix #1122 enable transitions`, etc.).
+
+The trajectory of Solid's design has been **monotonic expansion of the explicit value-bag**:
+- Solid 1.x early: 1 value slot per node, no transition coordination.
+- Solid 1.x mid: 2 slots per node (`value` + `tValue`) + framework-tracked transition state.
+- Solid 1.x late / 2.x: 4 slots per node (`_value` + `_pendingValue` + `_overrideValue` + `_snapshotValue`) + per-write lanes + transition object + `_gatedSubs`.
+
+**This is empirical evidence for the node/value-bag framing.** Solid arrived at "more value-bag entries per stable node" by iterating against real production pressure. The alternative (creating parallel node-clones, or punting transitions entirely) was either tried-and-abandoned or never adopted. The direction Solid's design has moved is *toward making the value-bag larger and more structured*, not toward eliminating it.
+
+If pulse adopts the node/value-bag framing as the user-facing primitive, it would be *exposing what Solid arrived at internally* as the API surface — making explicit what Solid has been keeping implicit. This is a meaningfully different design move; one informed by ~5 years of Solid's transition-machinery iteration.
+
 ---
 
 ## Design questions to address
