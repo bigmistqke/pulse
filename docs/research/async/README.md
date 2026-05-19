@@ -2,6 +2,8 @@
 
 A working research log on how programming has approached **async coordination**: cancellation, isolation, conflict resolution, optimistic UI, transactions, structured concurrency, effect handling. The goal is to inform pulse's API choices for transactions, actions, and the reactive/effect-layer boundary — but the research itself is broader than pulse, because the only way to make informed trade-offs is to understand the full design space.
 
+> **Process conventions for this research live in [`CONTEXT.md`](./CONTEXT.md).** Read it before contributing — it covers sourcing discipline, status-indicator rules, when axes can be added, what each deep-dive should contain, and the anti-patterns we've already learned to avoid.
+
 ## Framing
 
 JavaScript doesn't provide the primitives most async-coordination traditions assume — **first-class continuations, native effect handlers, channels-as-language-primitives, actors-as-language-primitives, STM, linear types, capability typing**. Whatever model pulse ends up with is an **encoding** of one of those models into the tools JS does give us (Promises, generators, ambient mutable slots, owner trees, try/catch). Every encoding loses something the original had.
