@@ -31,31 +31,72 @@ A growing classification of systems along axes that meaningfully distinguish asy
 
 ### Initial table
 
-Cells filled from prior conversational notes; treat these as DRAFT until a deep-dive verifies them. Many systems will have nuances the table flattens; deep-dives are where we capture those.
+Each row is one async-coordination strategy that competes in pulse-adjacent design space. Cells are not equal in confidence — see status column:
 
-| System | Async state | Conflict policy | Cancellation | Async rep | Isolation | Atomicity | Discipline | Reactive integration |
-|---|---|---|---|---|---|---|---|---|
-| **pulse (current)** | fused (in reactive graph) | last-write-wins (no transactions) | cooperative via `NotReadyYet` throw + kick-on-settle | procedure (Promise) + opt-in marker (`use(x)`) | none | per-`<Loading>` boundary gather; per-microtask flush | convention-only | fused |
-| **Solid 2.x** | fused | block-on-entanglement (via lanes) | (transitions cancel via runtime lane management) | procedure | snapshot via lanes | per-transition; per-microtask flush | runtime-enforced | fused |
-| **effect-ts** | separate (Effect is its own world) | retry-on-conflict (STM) | structural-by-scope (Scope + interruption) | typed value (`Effect<R,E,A>`) | serializable (STM) | per-`Effect.gen` block | type-system-enforced | orthogonal (separate from reactive UI) |
-| **Bonsai (Jane Street)** | separate effect layer | n/a (actions dispatched serially) | lifecycle-event (effect dispatch token) | typed value (`Effect.t`) | n/a | per-action | runtime-enforced | separate effect layer over incremental |
-| **Erlang / OTP** | in actors | never-occur (no shared state) | preemptive (process kill) + structural (link / monitor) | message in mailbox | n/a (no shared state) | per-message | runtime-enforced | orthogonal |
-| **Haskell GHC STM** | separate (`TVar` is its own world) | retry-on-conflict | n/a (transactions block on `retry`, no cancellation) | typed value (`STM a`) | serializable | per-`atomically` block | type-system-enforced (no IO in STM) | orthogonal |
-| **Clojure refs + STM** | separate (`ref` is its own world) | retry-on-conflict (with `ensure` for explicit entangle, `commute` for commutative writes) | n/a | macro/expression (`dosync`) | serializable | per-`dosync` block | convention-only (with macro enforcement) | orthogonal |
-| **Postgres MVCC (default SI)** | in tables (versioned rows) | snapshot-iso with write-skew tolerated; explicit `FOR UPDATE` for opt-in entangle | n/a | SQL statement | snapshot | per-transaction (BEGIN/COMMIT) | runtime-enforced | n/a (database) |
-| **Postgres SSI** | in tables | retry-on-conflict (dependency-cycle detection) | n/a | SQL statement | serializable | per-transaction | runtime-enforced | n/a |
-| **Concurrent ML (CML)** | n/a (no shared state assumed) | n/a | atomic-via-`choose`+`withNack` (negative-ack cleans up losing branches) | first-class event value | n/a | per-`sync` of an event | runtime-enforced | orthogonal |
-| **Cap'n Proto / E language** | in distributed promises | n/a (single-writer per object) | lifecycle-event (cancel the cap) | first-class promise value (composable via pipelining) | n/a | per-RPC call | runtime-enforced | orthogonal |
-| **Kotlin coroutines** | in coroutines | n/a (no shared async state) | structural-by-scope (`CoroutineScope` + `Job`) + cooperative checkpoints | suspend procedure | n/a | n/a | runtime + convention | typically separate (sometimes fused via `Flow`) |
-| **Swift Structured Concurrency** | in actors | n/a (actor isolation prevents data races) | structural-by-scope (`TaskGroup`) + cooperative | async procedure / `async let` value | actor-isolated | n/a | type-system-enforced (`Sendable`) | usually separate |
-| **GGPO (rollback netcode)** | in game-state snapshots | snapshot-replay-on-mismatch | per-frame (drop the predicted future) | command/input | snapshot | per-frame | runtime-enforced | n/a (game engine) |
-| **ROS action servers** | in action goals | n/a | lifecycle-event (preempt) | typed lifecycle value (Goal/Feedback/Result) | n/a | per-action goal | runtime-enforced (state machine) | n/a (robotics) |
-| **Yjs / Automerge (CRDTs)** | replicated CRDT | never-occur (CRDT merge always succeeds) | n/a | operation value | eventual | per-operation | runtime-enforced (CRDT semantics) | typically separate |
-| **Redux + RTK Query** | separate (cache slice) | last-write-wins (cache invalidation) | lifecycle-event (`abortController` per query) | procedure (thunk / mutation) | none | per-action dispatch | convention-only | separate effect layer |
-| **React (modern — Suspense / transitions / lanes / `use()` / `useOptimistic`)** | fused (suspended boundaries + work-in-progress trees in the fiber reconciler) | lane-based prioritization (high-priority updates pre-empt lower-priority WIP); not block/retry — instead "render the WIP tree concurrently, commit when ready" | structural — an in-progress WIP tree can be discarded if a higher-priority update arrives; `AbortController` integration for `use(promise)` cancellation paths | thrown Promise (Suspense) + `use(promise \| context)` (React 19 hook) + `startTransition(() => …)` dispatch + `useOptimistic` for sticky-overlay-with-revert | snapshot-ish (the current committed tree stays mounted while the WIP tree renders in background) | per-commit (the WIP tree commits atomically once Suspense resolves + everything settles) | runtime-enforced (the fiber reconciler enforces lane/priority/Suspense semantics) | fused (Suspense + transitions are reconciler-level; not a separate effect layer) |
-| **RxJS** | in observable streams | depends on operator (`switchMap` = replace, `exhaustMap` = ignore, `concatMap` = queue, `mergeMap` = parallel) | lifecycle-event (`Subscription.unsubscribe`) | stream value | n/a | per-emission | convention-only | separate (streams compose; UI subscribes) |
+- 🟢 **verified** — a deep-dive doc exists and cells reflect what it found.
+- 🟡 **draft** — populated from prior conversational notes / synthesis from memory. Needs a deep-dive to verify.
+- ⚪ **pending** — row exists as inventory marker; minimal characterization only. Cells will fill in as deep-dives happen.
 
-(Table will widen as deep-dives reveal new axes; rows will grow as new systems are studied.)
+Systems that DON'T belong in this table (mechanisms, theoretical concepts, different problem domains) but still warrant deep-dives appear in the "Cross-domain deep-dives" section below. Don't conflate "not in the table" with "not researched."
+
+| Status | System | Async state | Conflict policy | Cancellation | Async rep | Isolation | Atomicity | Discipline | Reactive integration |
+|---|---|---|---|---|---|---|---|---|---|
+| 🟡 | **pulse (current)** | fused (in reactive graph) | last-write-wins (no transactions) | cooperative via `NotReadyYet` throw + kick-on-settle | procedure (Promise) + opt-in marker (`use(x)`) | none | per-`<Loading>` boundary gather; per-microtask flush | convention-only | fused |
+| 🟡 | **Solid 2.x** | fused | block-on-entanglement (via lanes) | transitions cancel via runtime lane management | procedure | snapshot via lanes | per-transition; per-microtask flush | runtime-enforced | fused |
+| 🟡 | **React modern** (Suspense / transitions / lanes / `use()` / `useOptimistic`) | fused (suspended boundaries + WIP fiber trees in reconciler) | lane-based prioritization (high-priority pre-empts WIP); concurrent WIP, commit when ready | structural — WIP discarded if higher-priority arrives | thrown Promise + `use(promise\|context)` + `startTransition` + `useOptimistic` | snapshot-ish (current tree mounted while WIP renders) | per-commit (WIP commits atomically once Suspense resolves) | runtime-enforced (fiber reconciler) | fused |
+| 🟡 | **effect-ts** | separate (Effect is its own world) | retry-on-conflict (STM); fiber interruption for non-STM | structural-by-scope (Scope + interruption) | typed value (`Effect<R,E,A>`) | serializable (STM) | per-`Effect.gen` block | type-system-enforced | orthogonal (separate from reactive UI) |
+| 🟡 | **Bonsai (Jane Street)** | separate effect layer over incremental | n/a (actions dispatched serially) | lifecycle-event (effect dispatch token) | typed value (`Effect.t`) | n/a | per-action | runtime-enforced | separate effect layer over reactive graph |
+| 🟡 | **Erlang / OTP** | in actors | never-occur (no shared state) | preemptive (process kill) + structural (link / monitor) | message in mailbox | n/a | per-message | runtime-enforced | orthogonal |
+| 🟡 | **Haskell GHC STM** | separate (`TVar` is its own world) | retry-on-conflict | block-on-retry (no cancellation in STM proper) | typed value (`STM a`) | serializable | per-`atomically` block | type-system-enforced (no IO in STM) | orthogonal |
+| 🟡 | **Clojure refs + STM** | separate (`ref` is its own world) | retry-on-conflict (with `ensure`, `commute`) | n/a | macro (`dosync`) | serializable | per-`dosync` block | convention + macro enforcement | orthogonal |
+| 🟡 | **Postgres MVCC (default SI)** | in tables (versioned rows) | snapshot-iso, write-skew tolerated; explicit `FOR UPDATE` for opt-in entangle | n/a | SQL statement | snapshot | per-transaction (BEGIN/COMMIT) | runtime-enforced | n/a |
+| 🟡 | **Postgres SSI** | in tables | retry-on-conflict (dependency-cycle detection) | n/a | SQL statement | serializable | per-transaction | runtime-enforced | n/a |
+| 🟡 | **Concurrent ML (CML)** | n/a (no shared state assumed) | n/a | atomic via `choose`+`withNack` | first-class event value | n/a | per-`sync` of an event | runtime-enforced | orthogonal |
+| 🟡 | **Cap'n Proto / E language** | in distributed promises | n/a (single-writer per object) | lifecycle-event (cancel the cap) | first-class promise value (composable via pipelining) | n/a | per-RPC call | runtime-enforced | orthogonal |
+| 🟡 | **Kotlin coroutines** | in coroutines | n/a | structural-by-scope (`CoroutineScope` + `Job`) + cooperative checkpoints | suspend procedure | n/a | n/a | runtime + convention | typically separate; fused via `StateFlow` / `collectAsState` in Compose |
+| 🟡 | **Swift Structured Concurrency** | in actors | n/a (actor isolation prevents races) | structural-by-scope (`TaskGroup`) + cooperative | async procedure / `async let` value | actor-isolated | n/a | type-system-enforced (`Sendable`) | usually separate |
+| 🟡 | **GGPO (rollback netcode)** | in game-state snapshots | snapshot-replay-on-mismatch | per-frame (drop predicted future) | command/input value | snapshot | per-frame | runtime-enforced | n/a |
+| 🟡 | **ROS action servers** | in action goals | n/a | lifecycle-event (preempt) | typed lifecycle value (Goal/Feedback/Result) | n/a | per-action goal | runtime-enforced (state machine) | n/a |
+| 🟡 | **Yjs / Automerge (CRDTs)** | replicated CRDT | never-occur (CRDT merge always succeeds) | n/a | operation value | eventual | per-operation | runtime-enforced (CRDT semantics) | typically separate |
+| 🟡 | **Redux + RTK Query** | separate (cache slice) | last-write-wins (cache invalidation) | lifecycle-event (`abortController`) | procedure (thunk / mutation) | none | per-action dispatch | convention-only | separate effect layer |
+| 🟡 | **RxJS** | in observable streams | per-operator (`switchMap` = replace, `exhaustMap` = ignore, `concatMap` = queue, `mergeMap` = parallel) | lifecycle-event (`Subscription.unsubscribe`) | stream value | n/a | per-emission | convention-only | separate |
+| ⚪ | **MobX** (`transaction` / `runInAction`) | fused | last-write-wins; batched | n/a | procedure | none | per-`runInAction` batch | convention-only | fused |
+| ⚪ | **Recoil** (atoms + snapshots) | fused | last-write-wins | n/a | atom value | snapshot-capture (explicit) | — | runtime-enforced | fused |
+| ⚪ | **Jotai** (atomic suspense, `loadable`) | fused | last-write-wins | n/a | atom value; suspending atoms | none | per-atom | convention-only | fused |
+| ⚪ | **Zustand** | separate | last-write-wins | n/a | procedure | none | per-`set` call | convention-only | fused (via subscribe) |
+| ⚪ | **Valtio** (proxy + `snapshot`) | fused | last-write-wins | n/a | proxy mutation | snapshot-capture (explicit) | — | convention-only | fused |
+| ⚪ | **SWR / TanStack Query** | separate (cache) | last-write-wins; rich pending taxonomy (`isLoading`/`isFetching`/`isRefetching`) | lifecycle-event | procedure (queryFn) | none | per-query | convention-only | separate effect layer |
+| ⚪ | **Apollo Client** | separate (normalized cache) | last-write-wins; ID-based reconciliation | lifecycle-event | procedure | none | per-mutation | convention-only | separate effect layer |
+| ⚪ | **Trio** (Python) | in tasks | n/a | structural-by-scope (`nursery`) + cooperative checkpoints | suspend procedure | n/a | n/a | runtime-enforced | n/a |
+| ⚪ | **Go context.Context** | in goroutines + channels | n/a | convention-driven (pass ctx everywhere) + cooperative checkpoint | procedure + ctx value | n/a | n/a | convention-only | orthogonal |
+| ⚪ | **Rust / Tokio** | in futures | n/a | cancel-on-drop (RAII) + `CancellationToken` | future value | n/a | n/a | type-system-enforced (Send/Sync) | orthogonal |
+| ⚪ | **F# async workflows** | in workflows | n/a | structural via cancellation tokens | computation expression value | n/a | n/a | convention + runtime | orthogonal |
+| ⚪ | **Akka** (JVM actors) | in actors | never-occur (actor-isolated state) | preemptive (PoisonPill / Stop) + structural (supervision) | message value | actor-isolated | per-message | runtime-enforced | orthogonal |
+| ⚪ | **Pony** (capability-typed actors) | in actors | never-occur | structural (actor lifecycle) | message value | actor-isolated | per-message | type-system-enforced (capabilities) | orthogonal |
+| ⚪ | **Bevy Commands** (ECS) | in command queue | last-write-wins | none (no in-flight async at this layer) | typed command value | snapshot-ish (queue applied at sync point) | per-sync-point | runtime-enforced | n/a |
+| ⚪ | **Unity DOTS ECB** | in command buffer | last-write-wins | none | typed command | snapshot-ish | per-sync-point | runtime-enforced | n/a |
+| ⚪ | **Algebraic effect languages** (Eff / Koka / OCaml 5) | in handler context | depends on handler | structural (handler scope) | first-class effect value + handler | varies | varies | type-system-enforced (effect rows) | varies (orthogonal in base; fusable) |
+| ⚪ | **SwiftUI + Combine + `@Observable`** | fused (`@Published` props) | last-write-wins | `.task(id:)` cancels on id change | suspend procedure / publisher | none | per-publish | runtime-enforced | fused |
+| ⚪ | **Jetpack Compose + StateFlow + LaunchedEffect** | fused (StateFlow) | last-write-wins | `LaunchedEffect(key)` cancels on key change | suspend procedure / Flow | none | per-emit | runtime-enforced | fused |
+| ⚪ | **Vue 3** (refs + `<Suspense>` + async `setup`) | fused | last-write-wins | structural (Suspense unmount) | procedure / async setup | none | per-flush (microtask) | runtime-enforced | fused |
+| ⚪ | **Svelte 5 runes** | fused (compiler-driven) | last-write-wins | n/a (no built-in transactions yet) | procedure | none | per-tick | compiler + runtime | fused |
+| ⚪ | **Phoenix LiveView** | separate (server-side state) | last-write-wins; server-authoritative | structural (connection lifetime) | server message | n/a | per-server-roundtrip | runtime-enforced | n/a (server-driven) |
+| ⚪ | **HTMX / Hotwire** | separate (server-side state) | last-write-wins | none (HTTP request lifetime) | HTTP response | n/a | per-request | convention-only | n/a (server-driven) |
+| ⚪ | **Temporal / Cadence** (durable workflows) | in durable workflow execution | per-workflow logic (compensation) | preemptive (workflow cancel) + saga compensation | workflow value | durable persisted | per-workflow | runtime-enforced | orthogonal |
+| ⚪ | **Replicache / Rocicorp Zero** | separate (client cache + mutation queue) | replay-mutation-queue on server-state change | lifecycle (mutation pending → settled) | typed mutation = (optimistic-fn, server-fn) pair | snapshot-ish (per-replay) | per-mutation | runtime-enforced | separate |
+| ⚪ | **Linear sync architecture** | separate (in-memory DB + deltas) | server-authoritative reconciliation | lifecycle | typed delta | snapshot-ish | per-delta-batch | runtime-enforced | separate |
+| ⚪ | **Figma multiplayer (OT)** | server-authoritative (OT) | OT transformation | lifecycle | typed op | n/a | per-op | runtime-enforced | separate |
+| ⚪ | **io_uring / IOCP / kqueue** | in completion ring | n/a | lifecycle (submit cancel op) | submission entry (SQE/CQE) | n/a | per-completion | runtime-enforced | n/a (OS-level) |
+| ⚪ | **Esterel / Lustre / SCADE** | in synchronous reaction | n/a (deterministic per instant) | n/a | signal / event | n/a (deterministic per instant) | per-logical-instant | runtime + compiler | fused (entire language is synchronous reactive) |
+| ⚪ | **Spreadsheets** (Excel / VisiCalc) | in cells | last-write-wins | n/a | formula | none | per-recalc | runtime-enforced | fused |
+| ⚪ | **Sagas** (orchestrated long-running tx) | in saga state | compensation on partial failure | structural (saga abort) | step + compensating action pair | n/a (compensation not isolation) | per-saga | convention/framework | orthogonal |
+| ⚪ | **Event sourcing + CQRS + outbox** | append-only event log | last-write-wins on commands; projections rebuild | n/a | typed event | n/a (eventually consistent projections) | per-event-batch | runtime-enforced | separate (read-model is reactive over events) |
+| ⚪ | **Free monads / tagless final** (Haskell / Scala) | in interpreter | depends on interpreter | depends on interpreter | typed effect ADT or type-class call | varies | varies | type-system-enforced | orthogonal |
+| ⚪ | **Iteratees / Conduits / Pipes** (Haskell) | in stream | n/a | structural (stream completion) | typed stream value with backpressure | n/a | per-element | type-system-enforced | orthogonal |
+| ⚪ | **Game lockstep simulation** (RTS) | in deterministic sim state | n/a (everyone runs same sim) | n/a | input value (sent over wire) | n/a (deterministic) | per-tick | runtime-enforced | n/a |
+| ⚪ | **VCS** (Git / Pijul / Darcs) | branches as snapshots | merge / patch theory | n/a (rebase / revert) | commit / patch value | snapshot per branch | per-commit | convention + tooling | n/a |
+
+(Table will widen as deep-dives reveal new axes; rows will continue to grow as new systems are studied. Status indicators show which cells are reliable.)
 
 ### Open questions about the taxonomy itself
 
@@ -83,6 +124,15 @@ These are uncertainties about the *axes*, not the entries. Each one is a thread 
 
 **Mid-session correction.** Initial table had a row for "React `useEffect` + `useState`" — the pre-modern workaround pattern. User pushed back: that's not React's async answer; the actual primitive is the fiber reconciler's lane-based transitions + Suspense + `use()` + `useOptimistic`. Replaced the row accordingly. **Lesson for the rest of the research: when a system has multiple async approaches across versions, pick the one that the system actually claims as its primary primitive — not whatever was the historical workaround that people still use.** Surfaced a new open question about "work-in-progress tree as a primitive" (React's WIP fiber tree maps onto MVCC's in-progress-tx state and GGPO's speculative-state-to-validate; may warrant its own axis).
 
+**Inventory expansion.** Audited the table against everything mentioned in `concurrent-flows.md`'s broader prior art section: 19 rows present, 35 systems missing. Expanded the taxonomy table from 19 to ~50 rows, with status indicators (🟡 draft / ⚪ pending / 🟢 verified). New rows mostly marked ⚪ pending with terse one-line characterization; cells will fill as deep-dives happen. Status indicators double as a progress meter.
+
+**Deep-dive index restructured into three sections.** Earlier the index was one flat list. User observation: things that don't belong as taxonomy rows (because they're mechanisms, theoretical concepts, or different problem domains) still deserve deep-dives — their lessons transfer even though they don't compete in pulse's design space. Split index into:
+- **Primary** (~30 systems in the taxonomy; deep-dives promote rows to 🟢)
+- **Cross-domain** (~20 systems / mechanisms outside the taxonomy with transferable lessons — OS COW fork, build systems, distributed DBs, hardware speculative execution, real-time audio, etc.)
+- **Concept** (~8 theoretical frameworks — algebraic effects theory, delimited continuations, CSP/π-calculus, Petri nets, linear types, session types, self-adjusting computation, free monads / tagless final)
+
+**State of taxonomy as of end of session.** ~50 rows, ~8 axes, 0 cells verified. Inventory is honest about its provenance now (everything is 🟡 or ⚪). Open questions about axes themselves remain unresolved; some will only resolve as deep-dives reveal whether systems straddle categories or cluster cleanly.
+
 #### Threads to pick from for the next session
 
 These are candidate first-deep-dives, roughly ordered by "how much they would refine the taxonomy itself":
@@ -98,32 +148,83 @@ These are candidate first-deep-dives, roughly ordered by "how much they would re
 
 ## Deep-dives
 
-Each deep-dive lives in `deep-dives/<topic>.md`. Order is not predetermined; pick based on what the taxonomy reveals as ambiguous or unexplored. Use the deep-dive template (see `deep-dives/_template.md` once written) to keep them comparable.
+Each deep-dive lives in `deep-dives/<topic>.md`. Order is not predetermined; pick based on what the taxonomy reveals as ambiguous, what's most foundational, or what threads of the current session demanded follow-up. Use the deep-dive template (see `deep-dives/_template.md` once written) to keep them comparable.
 
-Working list (will be checked off as completed):
+The list is split by purpose: **primary** deep-dives are on systems that appear as rows in the taxonomy table (verifying or revising the draft cells); **cross-domain** deep-dives are on systems / mechanisms outside the taxonomy that have transferable insights; **concept** deep-dives are on theoretical frameworks that affect how we interpret everything else.
 
-- [ ] Algebraic effects + handlers (Eff / Koka / OCaml 5)
-- [ ] effect-ts (STM, fibers, Scope, Effect.gen)
-- [ ] Bonsai + Jane Street Incremental
-- [ ] Erlang / OTP (gen_server / gen_statem / supervision)
-- [ ] Concurrent ML — first-class events
-- [ ] Cap'n Proto + E language — promise pipelining
-- [ ] Postgres MVCC + Serializable Snapshot Isolation
-- [ ] Haskell GHC STM
-- [ ] Clojure refs + STM (`ensure` / `commute` distinction)
-- [ ] Kotlin coroutines / Swift Structured Concurrency / Trio (structured concurrency family)
-- [ ] GGPO + fighting-game rollback netcode
-- [ ] Yjs + Automerge (CRDT lineage) + Replicache
-- [ ] Solid 2.x lanes + entanglement (we have notes; deepen)
-- [ ] React modern async — fiber reconciler lanes + Suspense + transitions + `use()` + `useOptimistic`. Note: deliberately NOT framed as "useEffect + useState" (that's the pre-modern workaround); the actual primitive is the lane-based concurrent reconciler.
-- [ ] RxJS concurrency operators
-- [ ] Bevy ECS Commands + sync points
-- [ ] Sagas + event sourcing + outbox pattern
-- [ ] ROS action servers
-- [ ] io_uring + completion-based async (Linux / Windows IOCP)
-- [ ] Synchronous reactive languages — Esterel / Lustre / SCADE
-- [ ] Distributed consensus (Paxos / Raft / EPaxos) — likely brief; mostly relevant for failure-model vocabulary
-- [ ] SwiftUI + Combine / Jetpack Compose + Flow — UI framework comparisons
+### Primary deep-dives (systems in the taxonomy)
+
+These promote a row from 🟡 / ⚪ to 🟢 (verified) by checking the table cells against primary sources.
+
+- [ ] **Algebraic effects + handlers** (Eff / Koka / OCaml 5) — the theoretical baseline; every other system is partially understandable as an encoding of this
+- [ ] **effect-ts** (STM, fibers, Scope, Effect.gen)
+- [ ] **Bonsai + Jane Street Incremental** — "separate effect layer over reactive graph"
+- [ ] **Erlang / OTP** (gen_server / gen_statem / supervision)
+- [ ] **Concurrent ML** — first-class events with `choose` / `withNack`
+- [ ] **Cap'n Proto + E language** — promise pipelining
+- [ ] **Postgres MVCC + Serializable Snapshot Isolation** — longest-running production transaction implementation
+- [ ] **Haskell GHC STM**
+- [ ] **Clojure refs + STM** (`ensure` / `commute` distinction)
+- [ ] **Kotlin coroutines / Swift Structured Concurrency / Trio** (structured concurrency family — comparable enough to fold into one dive)
+- [ ] **Go context + Rust/Tokio cancellation** (cancellation discipline)
+- [ ] **GGPO + fighting-game rollback netcode**
+- [ ] **Yjs + Automerge (CRDT lineage) + Replicache** (production sync engine)
+- [ ] **Solid 2.x lanes + entanglement** (we have notes; deepen)
+- [ ] **React modern async** — fiber reconciler lanes + Suspense + transitions + `use()` + `useOptimistic` + work-in-progress trees. Deliberately NOT framed as "useEffect + useState"; the actual primitive is the lane-based concurrent reconciler.
+- [ ] **RxJS concurrency operators** — `switchMap` / `exhaustMap` / `concatMap` / `mergeMap` as named policies
+- [ ] **Bevy ECS Commands + sync points**
+- [ ] **Sagas + event sourcing + outbox pattern**
+- [ ] **ROS action servers** — structured async lifecycle (Goal/Feedback/Result/Preempt)
+- [ ] **io_uring + completion-based async** (Linux / Windows IOCP / BSD kqueue)
+- [ ] **Synchronous reactive languages** — Esterel / Lustre / SCADE
+- [ ] **SwiftUI + Combine + `@Observable`** and **Jetpack Compose + StateFlow + LaunchedEffect** (UI-framework comparisons; can be one dive comparing both)
+- [ ] **Vue 3 Composition API + `<Suspense>`** + **Svelte 5 runes** (another comparison dive)
+- [ ] **UI state libraries** (MobX / Recoil / Jotai / Zustand / Valtio) — likely one dive comparing all, since they're at the same conceptual level
+- [ ] **SWR / TanStack Query + Apollo Client** — server-state caching layer
+- [ ] **Akka + Pony** — actor model variants beyond Erlang
+- [ ] **Temporal / Cadence / Restate** — durable workflows
+- [ ] **Phoenix LiveView + HTMX/Hotwire** — server-driven async (different philosophy)
+- [ ] **Free monads / tagless final** (Haskell / Scala) — alternative effect representation
+- [ ] **Iteratees / Conduits / Pipes** — streaming with backpressure
+- [ ] **Game lockstep simulation** (RTS) — deterministic simulation as alternative to rollback
+- [ ] **VCS as snapshot isolation** (Git / Pijul / Darcs) — "patch theory" as merge model
+
+### Cross-domain deep-dives (NOT in the taxonomy, but transferable lessons)
+
+These don't compete in pulse's design space — they're mechanisms, primitives, or solutions to different problems — but their solutions have direct transferable lessons.
+
+- [ ] **OS process isolation + copy-on-write fork** — snapshot isolation at the kernel level; cheapest possible "overlay where you wrote, share where you didn't"
+- [ ] **OS RCU (Read-Copy-Update)** — lock-free reads + serialized writers; the Linux kernel's high-read low-write strategy
+- [ ] **Build systems** (Bazel / Nix / Shake / Tup) — incremental computation at scale; content-addressed dependency tracking; distributed remote execution
+- [ ] **Distributed databases — production cross-replica SI** (Spanner / CockroachDB / FoundationDB / Calvin) — TrueTime, hybrid logical clocks, deterministic ordering
+- [ ] **Spark RDD lineage** — DAG of pure transformations with replay-on-failure; "the lineage is the source of truth"
+- [ ] **Spreadsheets** (Excel / VisiCalc / Lotus 1-2-3) — the OG reactive system; 40+ years of production engineering on dep-graph recalc, volatile vs static, iterative modes, multi-threaded calc engines
+- [ ] **Distributed consensus** (Paxos / Raft / EPaxos / Byzantine) — probably brief; mostly for vocabulary (quorum, term/epoch numbers, log replication as source of truth). Pulse is single-process so consensus itself isn't directly relevant
+- [ ] **2-phase locking (2PL) vs Optimistic Concurrency Control vs MVCC** — the database concurrency-control taxonomy; could be folded into Postgres dive
+- [ ] **Vector clocks / Lamport timestamps / hybrid logical clocks** — causality tracking; matters if pulse ever does collaborative editing
+- [ ] **Telephony state machines** (SS7 / SIP / RFC 3261) — multi-step async with timeouts and retries; the design discipline that led to Erlang
+- [ ] **Hardware transactional memory** (Intel TSX) — what STM looks like with silicon support; instructive about cost/benefit at the limit
+- [ ] **Out-of-order CPU execution + speculative execution + reorder buffer** — speculation-and-rollback at the silicon level; conceptually identical to fighting-game rollback netcode at vastly different scale
+- [ ] **File system journaling + copy-on-write FS** (ext4 journal / ZFS / btrfs) — durable atomicity for filesystem operations
+- [ ] **Network protocols with delivery guarantees** (TCP retransmission / MQTT QoS / Kafka exactly-once) — async coordination with explicit failure models
+- [ ] **Real-time audio scheduling** (sample-accurate DAWs / Web Audio API) — async with hard deadlines and determinism
+- [ ] **NSOperationQueue / Grand Central Dispatch** (Cocoa / Darwin) — block-based concurrency with QoS classes + dependencies + cancellation
+- [ ] **Java CompletableFuture** — composable async results in the JVM; comparable to TS Promise but with richer composition
+- [ ] **Linda tuple spaces** + **Erlang mnesia** — coordination via shared tuple space / distributed transactional database; alternative concurrency primitives worth knowing for vocabulary
+- [ ] **ElectricSQL / PowerSync** — production local-first SQL sync engines; comparable to Replicache but database-shaped
+
+### Concept deep-dives (theoretical frameworks)
+
+These aren't systems but frameworks for thinking about systems. Each one changes how we interpret everything else.
+
+- [ ] **Algebraic effects + handlers — the theory** (Plotkin & Pretnar, Bauer, Pretnar, Lindley) — what "perform / handle / resume" actually IS formally; what "multi-shot continuation" means and why it matters; the type-and-effect systems that go with it
+- [ ] **Delimited continuations** (Felleisen, Sitaram, et al) — the substrate algebraic effects sit on; how generators and async/await relate; what JS is missing
+- [ ] **CSP / π-calculus / CCS** — formal models of communicating concurrent processes; what Go channels and Erlang messages descend from
+- [ ] **Petri nets** — formal model of concurrent state transitions; reachability analysis
+- [ ] **Linear types / affine types / capability typing** (Rust, Idris, Granule, Scala caps, Pony) — static enforcement of resource lifecycle; what "you can't forget to commit/abort a transaction" looks like in the type system
+- [ ] **Session types** — types for protocols (Honda et al); could inform a typed `action()` lifecycle
+- [ ] **Self-adjusting computation** (Umut Acar) — the theory r3 / incremental sit on; "change propagation through derivative-like computations"
+- [ ] **Free monads + tagless final** — pure-functional encodings of "effects as values, interpreter chosen separately"; could be a primary OR concept dive depending on how we treat it
 
 ---
 
