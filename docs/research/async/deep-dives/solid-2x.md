@@ -140,6 +140,22 @@ The cost is per-node memory footprint: every node potentially carries `_pendingV
 
 ---
 
+## The problem space of transitions — what Solid's machinery is coordinating
+
+Added after the session-12 cross-cutting synthesis ([LOG.md](../LOG.md) "Transitions branch in four dimensions"). The framing: transitions look like "ad-hoc UI invention" only if you don't notice that they're actually solving a coordination problem across four distinct branching dimensions. Solid 2.x's mechanisms map onto each dimension as follows.
+
+**Dim 1 — Internal branching** (a single transition's speculative future is a *tree* of dependent async work, not a linear chain): handled by `Transition._asyncReporters` (`scheduler.ts:159` — a `Map<Computed, Set<Computed>>` tracking which pending source is blocking which downstream reporter). `transitionComplete` (`scheduler.ts:703-742`) walks this map per-source to decide commit readiness — **per-source, not just per-transition**. This is materially more precise than React's "any pending Suspense in scope blocks the WIP commit"; Solid's transition knows *which* source is blocking and can decide independently.
+
+**Dim 2 — Concurrent branching** (multiple transitions in flight simultaneously, each speculating a different future): handled by **per-write `OptimisticLane`** (`lanes.ts:14-21`). Independent writes get independent lanes; independent lanes flush independently when their `_pendingAsync` Set empties (`scheduler.ts:115-124` — `runLaneEffects` iterates `activeLanes` and skips merged or pending-async lanes). **Not batched.** This is the dimension where Solid 2.x leads React — React's "multiple low-priority transitions currently batched together" is a coarser approximation; Solid lets each lane progress independently from its first write.
+
+**Dim 3 — Input-arrival branching** (user input arrives during a transition; the framework must decide cancel/restart/merge/ignore): **Solid handles this implicitly rather than via priority pre-emption.** A newer input write supersedes a stale in-flight async via the identity-based stale-result discard (`async.ts:188-193` — `if (el._inFlight !== result) return;`). Optimistic overrides revert on transition complete (`resolveOptimisticNodes`, `scheduler.ts:186-200`). There is **no explicit input-priority lane** equivalent to React's "high-priority lanes pre-empt low-priority lanes"; Solid's model is "everything goes through the same scheduler, but newer writes win by identity-superseding older ones." This is weaker than React's input handling — input doesn't *pre-empt* an in-flight transition; it joins the next flush cycle.
+
+**Dim 4 — State-overlap branching** (two transitions touch shared state; the framework must decide whether they're independent or entangled): **Solid handles this best of any framework studied.** `assignOrMergeLane` (`lanes.ts:110-139`) — when a propagating write reaches a subscriber that already has a different active lane, **merge the two lanes via union-find** unless the node has its own active override. The merged lane inherits both pending-async sets and effect queues (`mergeLanes`, `lanes.ts:67-78`). Parent/child lanes (`_parentLane` field, `lanes.ts:18`) deliberately stay independent so `isPending` resolves without waiting for the parent's async. **This is automatic entanglement detection by structural overlap** — no user declaration required. Distinct from STM-retry (effect-ts), MVCC-snapshot (Postgres), and priority-pre-empt (React); a genuinely novel value on the conflict-handling-policy axis.
+
+**The two-dimension takeaway.** Solid leads on **Dim 4 (state-overlap)** via union-find lane merge — React has nothing equivalent; pulse's pipeline-OR walking is a weaker version. Solid lags on **Dim 3 (input)** compared to React — no explicit priority pre-emption; reliance on identity-based stale-discard means input doesn't interrupt mid-transition render work. Dim 1 (internal) is sharper than React's because of the per-source `_asyncReporters` tracking; Dim 2 (concurrent) is mechanically stronger because lanes are independent rather than batched.
+
+---
+
 ## Taxonomy cells
 
 ### 1. Where async state lives

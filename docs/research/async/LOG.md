@@ -537,3 +537,58 @@ What pulse would lose by adopting React's encoding:
 - **Iced + Slint** — other Rust UI frameworks outside Linebender's IC-influenced lineage. Would let us verify whether the structural-cancellation-via-Drop pattern is Linebender-specific or broader Rust-idiom.
 - **Linear sync, ElectricSQL, Agoric `E()`** — still pending.
 - **CML, Erlang/OTP, Postgres MVCC** — still pending; lower priority since the conflict-handling axis is now well-populated.
+
+---
+
+## Cross-cutting thread — Transitions branch in four dimensions
+
+Surfaced 2026-05-19 during reflection on session 11 (Xilem) and the cross-cutting "transitions are the most advanced approach to async derivations" observation. Captured here as a meta-research framing because it sharpens how to read multiple existing dives (React modern, Solid 2.x, pulse) rather than relating to any single new system.
+
+**The observation.** When one says "transitions branch," it's actually four distinct branching dimensions stacked under one word. Each is its own coordination problem; each existing framework handles each dimension differently. Listing the dimensions concretely makes per-framework comparisons sharper than the existing axis-by-axis taxonomy treatment.
+
+**The four dimensions:**
+
+1. **Internal branching** — within a single transition, the speculative state is built from a *tree* of dependent async work (multiple parallel fetches, each producing its own dependent work). The framework must hold the in-flight tree coherently until all branches converge before committing.
+
+2. **Concurrent branching** — multiple transitions in flight simultaneously, each speculating a different future. The framework must coordinate which speculation is "current" for rendering vs which is being prepared, and ideally let independent speculations make independent progress.
+
+3. **Input-arrival branching** — input arrives during a transition; the framework must decide cancel/restart/merge/ignore. Crucial for maintaining input responsiveness (the user keeps typing while the transition fetches results).
+
+4. **State-overlap branching** — two transitions touch shared state; the framework must decide whether they're independent (run separately) or entangled (must merge). Without entanglement detection, two transitions that touch the same key produce inconsistent commits.
+
+**The mapping** (per framework studied so far):
+
+| Framework | Dim 1 (internal) | Dim 2 (concurrent) | Dim 3 (input) | Dim 4 (state-overlap) |
+|---|---|---|---|---|
+| **React modern** | WIP fiber + Suspense in scope | 31-lane bitmask; multi-low-priority currently batched (acknowledged limitation) | **strongest** — high-priority lanes pre-empt; cooperative 5ms yield | not handled (multi-transition batching conflates) |
+| **Solid 2.x** | `_asyncReporters` per-source tracking (sharper than React) | per-write `OptimisticLane`, independent flush (not batched) | identity-based stale-discard only; no priority pre-emption | **strongest** — union-find lane merge on dependency-graph overlap |
+| **pulse (current)** | per-`<Loading>` boundary gather (gather-on-commit) | no explicit machinery | no explicit machinery (transition snapshot but no priority) | no explicit machinery (pipeline-OR walks but doesn't detect entanglement) |
+| **Replicache** | n/a — sidestepped via server-linearized replay | n/a — same | n/a — same | n/a — same |
+| **Xilem** | n/a — no transitions at all | n/a | n/a | n/a |
+
+**Why this framing matters for the research arc:**
+
+- **It makes "transitions are hard" concrete.** Ordinary async/await is *linear* (single receiver, no concurrent intent, no state overlap). Transitions have to coordinate trees, concurrent speculations, input interrupts, and state-overlap merges — four distinct problems under one machinery. Pure async/await has none of them; pulse/Solid/React all have to solve them.
+
+- **It explains why Replicache and Xilem look so much simpler.** Replicache sidesteps every dimension by server-linearizing — everything becomes a single ordered sequence of authoritative mutations. Xilem sidesteps by not speculating at all — Rust's `Drop` + exhaustive matching make the manual-enum path survivable. Both avoid the branching problem rather than solve it.
+
+- **It refines the "continuous observation + concurrent intent" framing.** The four dimensions are why continuous-observation-plus-concurrent-intent is hard. Continuous observation forces commit-coherently (Dim 1). Concurrent intent forces concurrent-speculation (Dim 2), input-during-async (Dim 3), and state-overlap-between-actions (Dim 4). Domains without continuous observation (servers, batch jobs) don't have Dim 1 in the visible sense. Domains without concurrent intent (Xilem's responsive native UI) don't have Dims 2/3/4.
+
+- **It locates pulse's design pressure precisely.** Pulse currently handles Dim 1 well via `<Loading>` gather. Dims 2, 3, 4 are unsolved at the framework level — application code has to manage them. Each is a design decision pulse will face. The cross-framework comparison gives candidate mechanisms (lane-priority for Dim 3, lane-merge for Dim 4, multi-transition lane allocation for Dim 2).
+
+**Connection to existing axes (session 9):**
+
+- Dim 4 (state-overlap) is what the conflict-handling-policy axis (#2) tracks most directly. The refined value vocabulary from session 9 already distinguishes lane-merge (Solid) from priority-pre-empt-with-restart (React) from server-linearized-replay (Replicache).
+- Dim 3 (input) is partially captured in cancellation discipline (#3) but more is about priority/preemption than cancellation per se. May warrant a refinement.
+- Dim 1 (internal) maps onto speculative-state isolation (#9) and atomicity granularity (#6).
+- Dim 2 (concurrent) is currently flattened in the taxonomy — no axis directly tracks "can multiple transitions run independently?" This is the dimension most likely to warrant a new axis after one or two more dives (especially GGPO if it has multi-prediction support).
+
+**Where to test this framing next:**
+
+- **GGPO / rollback-netcode** would test it strongly. Does GGPO have multi-speculation (Dim 2) machinery? How does it handle input-during-speculation (Dim 3)? Does it have state-overlap detection (Dim 4) when multiple players' inputs branch from different points? The user-requested GGPO dive in session 12 will pay special attention to these.
+
+- **Pulse design exploration.** Pulse's current Dim-1-only handling is a real choice — adopting Dim 2, 3, 4 machinery is a significant scope expansion. Each dimension's "best answer" comes from a different framework; pulse can pick and choose.
+
+- **Adapton dive** (still queued) might be relevant for Dim 1 specifically — demand-driven IC is a different way of handling the internal-branching problem than gather-on-commit.
+
+**Documented in-dive.** Both [`react-modern.md`](./deep-dives/react-modern.md) and [`solid-2x.md`](./deep-dives/solid-2x.md) have "Problem space of transitions" sections added that map their framework's specific mechanisms to the four dimensions. Pulse and Xilem dives don't (yet) carry the framing because the relevant content lives in conversations and design speculation, not yet codified.

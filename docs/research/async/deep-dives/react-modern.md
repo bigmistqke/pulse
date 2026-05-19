@@ -152,6 +152,22 @@ There's no type-level enforcement of effect signatures (compare effect-ts). The 
 
 ---
 
+## The problem space of transitions — what React's machinery is coordinating
+
+Added after the session-12 cross-cutting synthesis ([LOG.md](../LOG.md) "Transitions branch in four dimensions"). The framing: transitions look like "ad-hoc UI invention" only if you don't notice that they're actually solving a coordination problem across four distinct branching dimensions. React's mechanisms map onto each dimension as follows.
+
+**Dim 1 — Internal branching** (a single transition's speculative future is a *tree* of dependent async work, not a linear chain): handled by the WIP fiber tree + Suspense boundaries. Any pending source caught by a Suspense in the WIP tree contributes to "this transition isn't done yet." The WIP tree commits atomically once all in-scope Suspense boundaries resolve. **Nested Suspense boundaries can opt into independent commits** — the doc notes "newly rendered Suspense boundaries will still immediately display fallbacks" (`react.dev/reference/react/Suspense`), which is React's escape hatch for "this branch is independent; let it commit on its own."
+
+**Dim 2 — Concurrent branching** (multiple transitions in flight simultaneously, each speculating a different future): handled by the lane allocation. The 31-lane bitmask (source 7) is specifically designed so that IO-bound transitions get multiple lanes — *"if we were to assign the same lane to all transitions, then one transition could effectively block all other transitions, even ones that are unrelated."* **Acknowledged limitation:** multiple low-priority transitions are currently batched together (source 3: *"If there are multiple ongoing Transitions, React currently batches them together. This is a limitation that may be removed in a future release."*). React's destination is independent multi-transition progress; the current state is partial.
+
+**Dim 3 — Input-arrival branching** (user input arrives during a transition; the framework must decide cancel/restart/merge/ignore): **React handles this best of any framework studied.** High-priority lanes (typing, click, hover) pre-empt low-priority lanes (transitions, deferred values, offscreen). The in-progress WIP tree is discarded and rebuilt under the new constraints (source 3). Cooperative multitasking yields every 5 ms to the browser (source 7). The user keeps typing while a transition fetches results; input remains responsive because input-class updates preempt the transition's render work mid-build.
+
+**Dim 4 — State-overlap branching** (two transitions touch shared state; the framework must decide whether they're independent or entangled): **NOT handled automatically.** This is the dimension where React's current implementation is weakest. The "multiple low-priority transitions batched together" limitation (Dim 2) conflates the question — transitions are batched regardless of whether they actually touch shared state. There's no entanglement-detection mechanism analogous to Solid 2.x's union-find lane merge. The application is expected to model conflicts in user code (via `useOptimistic`'s revert-on-failure, or via manual reconciliation in Actions).
+
+**The two-dimension takeaway.** React leads on **Dim 3 (input)** via lane-priority pre-emption — pulse and Solid have nothing equivalent. React lags on **Dim 4 (state-overlap)** — Solid's lane-merge-on-overlap handles this automatically; React's batching is a coarser approximation acknowledged as a limitation. Dim 1 and Dim 2 are handled well but not uniquely (other frameworks have comparable mechanisms).
+
+---
+
 ## Taxonomy cells
 
 ### Where async state lives
