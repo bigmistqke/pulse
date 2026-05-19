@@ -98,7 +98,7 @@ function App() {
             {/* No "refreshing" chip. Instead, the list and page label fade
                 via class:loading while the boundary is pending (transition
                 window). Visual cue without layout shift. */}
-            <ul class="list" class:loading={() => useLoading()()}>
+            <ul class="list" class:loading={useLoading()}>
               <For each={() => use(list)}>
                 {(ref) => <PokemonRow ref={ref} />}
               </For>
@@ -110,7 +110,7 @@ function App() {
               >
                 ← prev
               </button>
-              <span class:loading={() => useLoading()()}>
+              <span class:loading={useLoading()}>
                 page {() => use(page) + 1}
               </span>
               <button on:click={() => setPage((p) => p + 1)}>next →</button>
