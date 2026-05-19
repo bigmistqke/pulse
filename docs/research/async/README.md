@@ -273,7 +273,7 @@ These aren't systems but frameworks for thinking about systems. Each one changes
 - [ ] **Petri nets** — formal model of concurrent state transitions; reachability analysis
 - [ ] **Linear types / affine types / capability typing** (Rust, Idris, Granule, Scala caps, Pony) — static enforcement of resource lifecycle; what "you can't forget to commit/abort a transaction" looks like in the type system
 - [ ] **Session types** — types for protocols (Honda et al); could inform a typed `action()` lifecycle
-- [ ] **Self-adjusting computation** (Umut Acar) — the theory r3 / incremental sit on; "change propagation through derivative-like computations"
+- [x] **Self-adjusting computation** ([dive](./deep-dives/self-adjusting-computation.md), session 10) — Umut Acar's theoretical framework: modifiables, dynamic dependence graphs, change propagation, trace memoisation. **Confirmed r3 is in the SAC lineage by import-name evidence (`stabilize` is the canonical SAC term).** Surfaced three candidate axis refinements: trace-stability sensitivity, continuation semantics of reads, memoisation depth as a three-way distinction (none / value / trace).
 - [ ] **Free monads + tagless final** — pure-functional encodings of "effects as values, interpreter chosen separately"; could be a primary OR concept dive depending on how we treat it
 
 ---

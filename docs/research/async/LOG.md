@@ -441,3 +441,47 @@ What pulse would lose by adopting React's encoding:
 - **CML.** Still pending; the "n/a" cell on dependent-dispatch with first-class event composition is curious — would CML expand the axis or surface a new dimension?
 - **Concept dive: Elm Architecture proper.** Lower priority.
 - **Concept dive: capability security.** Lower priority.
+
+---
+
+## Session 10 — 2026-05-19 — Self-Adjusting Computation (concept dive)
+
+- Concept dive on **Acar's Self-Adjusting Computation (SAC)** — the theoretical underlay for pulse's substrate `r3` and for Jane Street's Incremental (Bonsai's substrate, session 4). Conducted with the parallel-passes-then-merge methodology established sessions 7–8.
+- Background agent did the academic-source-reading (Acar's publications page, the JFP "Consistent Semantics" page, dblp, Jane Street's "Introducing Incremental"). **Most foundational PDFs came back as unparseable binary** — POPL 2002, the thesis CMU-CS-05-129, PLDI 2006, the CMU tech-report version. Agent flagged this honestly throughout the dive with `(secondary)` annotations and a methodology note at the end.
+- Main session's parallel contribution: **confirmed r3-is-SAC by import names** (`pulse/src/*.ts` imports `signal`, `setSignal`, `computed`, `read`, `stabilize`, `untrack` from the `r3` package — `stabilize` is the canonical SAC term for change-propagation; not React's term, not Solid's term, not Vue's term). Concrete evidence of lineage, not inference. Added to the dive's "What this means for pulse / r3" section.
+
+**Key findings (substantive research insights, not just bookkeeping):**
+
+1. **SAC's "memoisation" is trace memoisation, not value memoisation.** This is the largest single conceptual move in the dive. Memo entries in SAC are not pure values — they are sub-traces with edges into modifiables, and reusing one is graph-grafting plus change-propagation. The taxonomy currently coarsens this into "memoised or not"; SAC forces a three-way distinction (none / value / trace). Solid's `createMemo` is value-memo; classical SAC offers trace-memo; few engineering implementations carry trace-memo all the way through (Adapton is the demand-driven refinement that does).
+
+2. **SAC's `read` is continuation-introducing.** A read takes a continuation `'a -> unit`, not a value. This forces dependency to be explicit in program structure. Ley-Wild / Fluet / Acar (ICFP 2008) shows that CPS is the natural compilation target — every `read` becomes a continuation-capture site. This is the **structural connection to algebraic effects** (session 3) — both share captured-continuation ancestry without one being a special case of the other. The dive flagged "no paper directly frames SAC as algebraic effects" as an open question.
+
+3. **Classical SAC is silent on most of the taxonomy.** Engaging axis by axis: SAC has clear commitments on #7 (discipline) and #8 (reactive integration); minor on #3 (cancellation via scopes) and #6 (atomicity at stabilization); **silent on #1, #2, #4, #5, #9, #10**. Pulse's interesting design choices (async, suspension, transitions, Loading, optimistic, dependent-dispatch) all live in the silent region. **Orienting observation: SAC gives pulse the substrate; pulse's design choices live above the SAC frame.**
+
+4. **Three candidate axis additions surfaced by SAC theory:**
+   - **Trace-stability sensitivity** — which input-change classes does the system handle in sub-linear time? Predictive — tells you which workloads each system is bad at.
+   - **Continuation semantics of reads** — does `read` capture a continuation, or pretend reads are pure value retrievals? Pulse's `read` brand checks are arguably an attempt to recover continuation-ness without using literal CPS.
+   - **Memoisation depth** — three-way refinement (none / value / trace), already discussed above.
+   These join the now-confirmed axes #9 and #10 from session 9 as the next research thread. **Don't promote yet — wait for one or two more dives that exercise the distinctions.**
+
+5. **The SAC implementation lineage** is well-mapped: AFL/SLf (POPL 2002 SML library) → Delta ML (CPS-compiled) → CEAL (C-based) → Implicit SAC (type-directed translation) → Adapton (demand-driven). Jane Street's Incremental keeps the core (dynamic dep tracking, push-based propagation, height ordering) but de-emphasises the full trace-memoisation story.
+
+**Cross-references this dive informed:**
+
+- [`bonsai-incremental.md`](./deep-dives/bonsai-incremental.md) (session 4) — confirmed: Incremental IS production SAC. Acar's framing of SAC-vs-FRP is what Jane Street quoted in their blog and what the Bonsai dive cites.
+- [`algebraic-effects.md`](./deep-dives/algebraic-effects.md) (session 3) — both ultimately route through captured continuations; the open question on direct correspondence is shared with that dive.
+- All the fused-reactive system dives (Solid 2.x, React modern, pulse-future) inherit from SAC by descent. Their additions (`createMemo`, lanes, transitions, `<Suspense>`, `<Loading>`) are extensions onto the SAC substrate, not separate frameworks.
+
+**Methodological notes:**
+
+- Parallel-passes-then-merge **worked particularly well for a concept dive**. The background agent's structural-research-then-careful-flagging-of-unparseable-sources produced a more disciplined dive than the main session would have under the same constraints (the temptation to fabricate from "everyone knows" knowledge is highest exactly when canonical sources are unreachable). Promoting this pattern: **for concept dives specifically, the background-agent pass is the more important of the two.**
+- The dive surfaced a clean reminder: **paper PDFs frequently return as binary**. The session-3 convention (use ar5iv for arxiv) doesn't help with CMU / ACM / Cambridge JFP papers; for those, the fallback is HTML abstract pages + author project pages + secondary summaries. The dive's `(secondary)` annotation discipline is the right answer when the canonical PDF won't parse.
+
+### Threads to pick from for session 11
+
+- **Yjs / Automerge (CRDT lineage).** Still the strongest dive-candidate for empirical axis-verification work (CRDT-merge cell on conflict-handling; counterpoint to Replicache's server-linearized model).
+- **Adapton dive.** Now newly motivated by the SAC dive — Adapton's demand-driven SAC variant is arguably closer to a UI-shaped reactive runtime than vanilla SAC. Would test whether pulse's design pressure points (suspension, Loading, transitions) correspond to features Adapton already has.
+- **Synthesis session on the three candidate new axes** (trace-stability sensitivity, continuation semantics of reads, memoisation depth). Pure-taxonomy work; would audit existing rows against the SAC-predicted distinctions.
+- **Linear sync, ElectricSQL, or Agoric `E()`** — empirical dives that don't overlap with current threads.
+- **Concept dive: delimited continuations** — would tie together algebraic-effects (session 3) and SAC (session 10) at their shared mathematical foundation.
+- **CML, Erlang/OTP, Postgres MVCC** — still pending from earlier sessions.
