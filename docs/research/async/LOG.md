@@ -648,3 +648,41 @@ Surfaced 2026-05-19 during reflection on session 11 (Xilem) and the cross-cuttin
 - **A pulse-design-direction session.** The accumulating findings (especially Svelte's "minimum API ≠ minimum engine") are now substantive enough that a dedicated design-direction session — not a dive — could be valuable. Articulate what pulse's transitions story should actually look like in light of the research arc.
 - **Linear sync, ElectricSQL.** Long-pending.
 - **CML, Erlang/OTP, Postgres MVCC.** Long-pending; lower priority.
+
+---
+
+## Cross-cutting thread — Ricky Hanlon on React's API complexity, and what that suggests for Solid / pulse
+
+Captured during session-11/12 design conversations; moved here from inline notes in `react-modern.md` and `solid-2x.md` per a sourcing-discipline correction (the dives should be factual+specific; the LOG is where pulse-context and more transient design-framing lives). Relevant CONTEXT.md anti-pattern was added at the same time.
+
+### Verifiable: Ricky Hanlon's public statements on the API complexity
+
+Source: **Syntax.fm episode #943, "Modern React with Ricky Hanlon"** — `https://syntax.fm/show/943/modern-react-with-ricky-hanlon-react-core-dev/transcript`. Transcript was fetched successfully.
+
+(A separate ~6-hour stream where Ricky appeared on Ryan Carniato's channel — `youtube.com/watch?v=3vw6EAmruEU`, "Innovating React w/ Ricky Hanlon" — is what originally motivated this thread, but no transcript service worked through `WebFetch` for the full stream. Syntax.fm episode #943 contains Ricky giving consistent framings and serves as the verifiable substitute.)
+
+What Ricky said that's diagnostically relevant:
+
+- **Transitions vocabulary** — *"You can think of a transition as a UI transition. Fundamentally, it's kinda like you can think of it as a maybe a little bit like a transaction or like a background thread."* The transaction / background-thread vocabulary the React core team uses matches the framing this research arc settled on independently.
+
+- **Acknowledged product-code complexity** — *"a lot of product code that's, like, needs to wire up the transitions correctly and use use Optimistic correctly and use all these, like, new hooks in the product code, and you gotta use it all correctly."* The React core team explicitly acknowledging that wiring the modern async APIs in product code is hard.
+
+- **`use(promise)` ergonomics are hard** — *"it's kinda hard today to to, like, fetch with use because you have to use this, like, cached promise thing."*
+
+- **Cache invalidation is the hardest part** — *"cache invalidation is harder. And creating a generic API that anybody could use, is, like, the hardest."*
+
+- **Two specific mechanical details Ricky surfaced that the React-modern dive didn't capture from the docs alone:** (1) `useTransition`'s `isPending` flag is implemented internally as `useOptimistic` — *"the isPending flag in useTransition is implemented as useOptimistic"*; (2) Suspense fallbacks are throttled at ≥300ms to batch updates and reduce DOM layout thrashing. Both are below-the-API-surface implementation details that affect how React behaves in practice.
+
+- **The proposed escape route is library infrastructure, not API ergonomics.** Ricky's vision is that *product devs shouldn't be touching these APIs directly* — they get absorbed into routers, data-fetching libraries, and design-system components, which provide the experience "for free by default." A tacit admission that the ergonomics-by-direct-API bet didn't pay off; the answer is to add another abstraction layer on top.
+
+### Inferred and session-bound: what this might mean for Solid 2.x and pulse
+
+**Marked as inference, not observation.** What Ryan Carniato actually said in response on the (unfetchable) ~6-hour stream cannot be quoted from this environment. The Solid 2.x dive's mechanical findings stand independently and don't depend on Ryan's motivations.
+
+What IS observable from the Solid 2.x dive (and stays cited in that dive) is that Solid 2.x's user-facing primitives sit at a meaningfully higher level than React's: `<Loading>` / `<Errored>` / `<Reveal>` are framework-provided coordination primitives, not application-assembled patterns; `action(function*) { yield … }` is a transaction-shaped generator wrapper, not a `startTransition + useOptimistic + manual revert` composition; `createOptimistic` auto-reverts on action failure without the user wiring it. The mechanics are still elaborate (per-write lanes, union-find merge, `_gatedSubs` replay) but the user-facing API surface is fewer hooks doing higher-level things, where React's surface is more hooks doing lower-level things that need to be composed correctly.
+
+**The plausible-but-unverified interpretation:** Solid 2.x chose to make the higher-level abstraction the API itself, rather than expose React-style low-level primitives that product code composes. If Ryan was influenced by Ricky's framings, that direction reads as a response to React's "we built the engine; let library authors build the ergonomics" stance.
+
+**For pulse**, the comparable design question is whether to lean toward (a) React-style low-level primitives + library authors compose ergonomics, (b) Solid-2.x-style higher-level framework primitives, or (c) a third position the research arc hasn't yet identified. Conversation from session 11 articulated (a) as pulse's direction; conversation from session 12 (after the Svelte dive showed "minimum API + rich engine" is possible) refined that — *the minimum applies to user-facing API, not engine surface, and concurrent transitions are not free even with simple primitives.*
+
+This is design context for pulse, not a property of React or Solid; that's why it lives in LOG rather than in either dive.
