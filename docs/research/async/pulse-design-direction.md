@@ -160,22 +160,30 @@ All of these become library code over (node, value-bag, scope) primitives. The f
 - **What does Dim 3 (priority) look like in this framing?** It's the work-scheduling primitive, the third leg. Possibly just "writes carry a priority hint that the scheduler honors when picking the next entry to commit."
 - **Does `<Loading>` collapse to "subscribe to bag-entry-status changes"?** Simpler than the current gather-on-boundary; need to verify boundary semantics survive.
 
-### Historical data point — Solid 1.x's iterated transition machinery
+### Historical data point — Solid's transition-machinery trajectory (verified)
 
-Verified against the Solid git history (`/Users/bigmistqke/Documents/GitHub/solid`): Solid 1.x had an extensively-iterated transition mechanism that was rewritten multiple times across the 1.x lifecycle. The specific mechanism wasn't strictly node-cloning (the user's recollection in the session 13 conversation) — it was a **per-node `tValue` slot plus framework-tracked `Transition.sources` Set plus `Transition.running` flag.**
+User recollection in the session 13 conversation: Solid had a node-cloning approach to transitions at some point that "caused them a lot of headaches." Also: at some point Carniato stated the key insight for Solid 2.x was *"handle the transition at the computed node level instead of as a scheduler from outside."* **Both claims are now verified against the Solid git history** (`/Users/bigmistqke/Documents/GitHub/solid`).
 
-Pre-2021-10-08, every `Signal<T>` carried a `tValue?: T` field — the transition-specific value of the node. Reads checked `Transition && Transition.running && Transition.sources.has(s)` and returned `s.tValue` if so, else `s.value`. The `Transition.sources` Set tracked which nodes were participating in the current transition; writes during a transition updated both `node.tValue` and (after transition) `node.value`.
+The full trajectory across both Solid 1.x and Solid 2.x:
 
-The commit titled **"new transitions and reactive experiments"** (`3623573b`, Oct 8 2021, Ryan Carniato) rewrote this — removing the `tValue` slot from `Signal<T>`, removing the `Transition.sources.has(s)` checks throughout the codebase. The diff is ~440 lines changed in `signal.ts` alone. The git log shows **20+ transition-related commits across Solid 1.x's lifetime** (`fix transition`, `better transition fix`, `fix transition resuming`, `Streamline transition effect queuing`, `simplify batching, reduce createComputed, fix #1122 enable transitions`, etc.).
+**Solid 1.x — per-node `tValue` slot + scheduler-tracked source set.** Every `Signal<T>` carried a `tValue?: T` field — the transition-specific value of the node. Reads checked `Transition && Transition.running && Transition.sources.has(s)` and returned `s.tValue` if so, else `s.value`. The `Transition.sources` Set centralized in the scheduler tracked which nodes were participating. This was iterated extensively — the git log shows **20+ transition-related commits across Solid 1.x's lifetime** (`fix transition`, `better transition fix`, `Streamline transition effect queuing`, etc.). The commit `3623573b` (Oct 8 2021, "new transitions and reactive experiments") was a substantial rewrite of `signal.ts` (~440 lines changed) — but the basic shape (per-node slot + scheduler-tracked Set) persisted.
 
-The trajectory of Solid's design has been **monotonic expansion of the explicit value-bag**:
-- Solid 1.x early: 1 value slot per node, no transition coordination.
-- Solid 1.x mid: 2 slots per node (`value` + `tValue`) + framework-tracked transition state.
-- Solid 1.x late / 2.x: 4 slots per node (`_value` + `_pendingValue` + `_overrideValue` + `_snapshotValue`) + per-write lanes + transition object + `_gatedSubs`.
+**Solid 2.x early development — full node cloning.** Solid 2.x's reactive substrate is a separate package (`@solidjs/signals`), forked from Modderme's `reactively` library (initial commit Dec 8 2022). In the early 2.x development, transitions used **actual node cloning** via a `cloneGraph(node, optimistic?)` function. The transition's `_sources: Map<node, clone>` held the clone-of-each-affected-node; each clone carried a `_cloned` pointer back to its original; the active transition was the scheduler holding all this state. **This is what Carniato meant by "scheduler from outside"** — the transition was an external context holding a parallel cloned subgraph; nodes themselves only carried a `_transition` pointer indicating they were participating.
 
-**This is empirical evidence for the node/value-bag framing.** Solid arrived at "more value-bag entries per stable node" by iterating against real production pressure. The alternative (creating parallel node-clones, or punting transitions entirely) was either tried-and-abandoned or never adopted. The direction Solid's design has moved is *toward making the value-bag larger and more structured*, not toward eliminating it.
+**Solid 2.x mid-development — non-clone optimistic.** Commit `c741f2e0` ("non-clone optimistic", Oct 17 2025, Ryan Carniato) removed the optimistic-cloning path. The diff explicitly removes the `optimistic` parameter from `cloneGraph`; optimistic state moved to overlay (`_overrideValue` slot on the stable node). Transitions still cloned at this point.
 
-If pulse adopts the node/value-bag framing as the user-facing primitive, it would be *exposing what Solid arrived at internally* as the API surface — making explicit what Solid has been keeping implicit. This is a meaningfully different design move; one informed by ~5 years of Solid's transition-machinery iteration.
+**Solid 2.x current (v2.0.0-beta.13) — no cloning anywhere.** Over the ~273 commits between `c741f2e0` and the current beta, the rest of the cloning was removed too. `grep` for `cloneGraph` or `_cloned` in the current source returns zero hits. The architecture is now per-node multi-slot (`_value` / `_pendingValue` / `_overrideValue` / `_snapshotValue`) coordinated by a lightweight `Transition` object that aggregates pending nodes, optimistic nodes, gated subs, action iterators, queue stashes — but **the transition state lives on the nodes themselves**, not in a parallel cloned tree.
+
+The trajectory:
+
+- Solid 1.x: per-node `tValue` slot + scheduler-tracked `Transition.sources` Set
+- Solid 2.x early: external scheduler holds cloned subgraph; nodes carry `_transition` pointer only
+- Solid 2.x mid: cloning for transitions; overlay for optimistic
+- Solid 2.x current: per-node multi-slot; no cloning anywhere
+
+**This is strong empirical evidence for the node/value-bag framing.** Carniato's stated principle ("handle the transition at the computed node level instead of as a scheduler from outside") IS the move from a parallel cloned subgraph to per-node value-bag. The cloning approach was tried in production-grade 2.x development for ~2+ years and was abandoned commit-by-commit. The direction Solid's design has moved — across both 1.x and 2.x — has been *toward making the value-bag larger and more structured*, **and away from external-scheduler-managed parallel structures**.
+
+If pulse adopts the node/value-bag framing as the user-facing primitive, it would be *exposing what Solid arrived at internally* as the API surface — making explicit what Solid has been keeping implicit. This is a meaningfully different design move, informed by ~5 years of Solid's transition-machinery iteration across two major versions and one substantial substrate rewrite.
 
 ---
 
