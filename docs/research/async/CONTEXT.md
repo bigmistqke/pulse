@@ -48,11 +48,11 @@ The order of deep-dives is not predetermined. Pick based on:
 
 Every session should:
 
-1. Read the session log to recall where the last session left off (open threads, unresolved questions).
+1. Read the session log ([`./LOG.md`](./LOG.md)) to recall where the last session left off (open threads, unresolved questions).
 2. Pick *one* concrete piece of work for the session — a single deep-dive (or a continuation), or a taxonomy refinement, or a sourcing pass.
 3. Do the work with primary sources where possible (see sourcing discipline).
 4. Update the relevant artifact (deep-dive doc, taxonomy table, axes list).
-5. Append a session-log entry: what was done, what was learned, what open questions emerged, what the next session might pick up.
+5. Append a session-log entry to [`./LOG.md`](./LOG.md): what was done, what was learned, what open questions emerged, what the next session might pick up.
 
 Sessions should NOT:
 
@@ -183,7 +183,8 @@ Mistakes we want to avoid (some learned from prior sessions, some flagged preemp
 
 ## See also
 
-- `./README.md` — the main research log with framing, taxonomy table, chronology, deep-dive index.
+- `./README.md` — the main research log with framing, taxonomy table, deep-dive index. Stable structural document.
+- `./LOG.md` — append-only session chronology. Where each session records what was done, learned, and left for next time.
 - `./deep-dives/` — individual system / cross-domain / concept deep-dives.
 - `../scenarios/concurrent-flows.md` — the scenarios and policy questions that motivate the research. Scenarios S1–S8 are acceptance tests any candidate async strategy must address; policy questions Q1–Q5 are decisions the research informs.
 - `../../CONTEXT.md` (root) — pulse's project conventions and language. The Conceptual model section there is what this research feeds back into.
