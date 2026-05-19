@@ -136,7 +136,7 @@ So Solid 2.x has **two cancellation strengths**: identity-based stale-discard fo
 
 ### Suspension: `NotReadyError` throw, caught by Loading boundary
 
-The current Solid 2.x mechanism (different from the proposal in source 8):
+The current Solid 2.x mechanism:
 
 1. When `handleAsync` (`async.ts:135-312`) detects an unresolved Promise/iterable, it throws `NotReadyError`.
 2. The throw propagates upward through the reactive graph; nodes that receive a pending status set `STATUS_PENDING` flag and register the source in their `_pendingSources` set.
@@ -147,7 +147,7 @@ This is structurally the same pattern as React Suspense + `use(promise)`, but th
 
 **Re-execution semantics:** same as React and pulse. The computation re-runs from the top when the dependency resolves; there's no continuation resumption. Session-3's framing applies: encoded handlers via re-execution.
 
-The throw-and-catch-at-boundary mechanism is one specific encoding of suspension — alternatives exist (generator-based derivation that pauses *inside* the computation rather than throwing through its enclosing owner, à la algebraic-effect handlers from session 3). The trade-offs of this encoding choice are a recurring theme across the React-modern, pulse, and Solid dives: all three are in the encoded-via-re-execution camp; none has true continuation resumption.
+The throw-and-catch-at-boundary mechanism is one specific encoding of suspension; the encoding choice is a recurring theme across the React-modern, pulse, and Solid dives — all three are in the encoded-via-re-execution camp; none has true continuation resumption (session 3).
 
 ### Composition: `action()` as generator transaction
 
