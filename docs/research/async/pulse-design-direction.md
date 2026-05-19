@@ -46,6 +46,71 @@ The current mechanical landscape for the three production frameworks pulse has t
 
 ---
 
+## Decomposition — what underlying primitives do these mechanics compose from?
+
+Working hypothesis (not yet a decision): the high-level abstractions in the comparison table aren't independent primitives — they're compositions of a smaller set of underlying concerns. If true, pulse's design move is to expose the underlying concerns and let higher-level abstractions be userland-composable.
+
+### Seven concerns extracted from the table
+
+Looking at every mechanic in the comparison and asking *what problem is it actually solving*, the mechanics cluster into seven underlying concerns:
+
+- **A. Versioned reads** — read X as it currently is, OR as it was committed, OR as it appears under this in-flight scope. (WIP fiber tree, `batch_values`, `_overrideValue`, `latest()`, `useDeferredValue`, snapshot-isolation in MVCC.)
+- **B. Pending propagation** — downstream computations learn that an upstream is in-flight. (`_pendingSource(s)`, `_asyncReporters`, `boundary.#pending_count`, pipeline-OR `isPending`.)
+- **C. Atomic commit boundary** — these changes land together; nothing inside is visible until everything is ready. (`<Suspense>`, `<svelte:boundary>`, `<Loading>`, `Batch` commit, `Transition._actions`.)
+- **D. Scoped writes** — writes belong to a named scope (action, fork, transition); the scope can be committed or discarded as a unit. (`OptimisticLane`, `useOptimistic`, `fork()`, `action(function*)`, Replicache mutators.)
+- **E. In-flight identity** — when multiple runs of the same work exist, framework knows which is current. (`_inFlight !== result`, `OBSOLETE`, generation counters.)
+- **F. Lifecycle / cleanup** — async work that's no longer relevant gets cleaned up. (Drop, `AbortController`, `cleanup()`, owner disposal.)
+- **G. Priority** — some updates pre-empt others mid-flight. (React's 31-lane bitmask, uniquely.)
+
+### How the observed abstractions compose from these concerns
+
+The high-level abstractions in the table are combinations of subsets of {A, B, C, D, E, F, G}:
+
+- `<Loading>` / `<Suspense>` / `<svelte:boundary>` = **B** (pending propagation) + **C** (commit boundary)
+- `useOptimistic` / `createOptimistic` = **A** (versioned read of overlay) + **D** (scoped write tied to action) + **C** (commit on action settle)
+- `useTransition` = **D** (scoped write = the transition) + **C** (commit at end) + **G** (low-priority lane)
+- `action(function*)` = **D** (scoped writes during generator) + **C** (commit at each yield) + **E** (action iterator identity)
+- `fork()` = **D** (speculative scope) + **A** (versioned reads see fork's overlay) + **C** (explicit commit/discard)
+- `<Reveal>` = composes multiple **C**s (a coordination layer ABOVE boundaries, not inside them)
+
+None of these abstractions is a primitive in this decomposition. Each is library code over a small subset of the seven concerns.
+
+### The further reduction — three of the seven are deeply entangled
+
+Of the seven concerns, the claim is that **A (versioned reads) + C (commit boundary) + D (scoped writes) are three faces of one primitive, not three independent primitives.**
+
+The argument: a scope is *what holds the writes*; versioned reads are *how you observe a scope's state*; commit is *what makes a scope's writes globally visible*. You can't have any one of them meaningfully without the other two — they're not separable. This is what databases call a *transaction* (MVCC-style): you open a transaction (scope), reads inside it see your own writes layered over committed state (versioned read), and at commit time the writes become globally visible (commit boundary).
+
+The other concerns are genuinely orthogonal:
+
+- **B (pending propagation)** is its own thing — it's about how knowledge of in-flight state flows through the dep graph. Independent of A/C/D.
+- **E (identity)** is its own thing — distinguishing concurrent runs of the same work. Independent.
+- **F (cleanup)** is its own thing — pulse already has owners.
+- **G (priority)** is its own thing — and uniquely React's; pulse can choose whether to include it at all.
+
+### Proposed pulse primitive set (4 primitives, not 9 abstractions)
+
+If this decomposition holds, pulse's underlying primitive set is:
+
+1. **Scoped versioned state** — a unified primitive that's "scope of writes + version of reads + commit boundary." Pulse currently has no first-class scope at the data layer; writes are global.
+2. **Pending-source carriers** — pulse already has `NotReadyYet` carrying source identity; just needs to be sharpened. Pipeline-OR `isPending` already walks this.
+3. **In-flight identity** — pulse has owner-disposal but not work-identity per se; the `<Loading>` gather is close but the "two concurrent runs of the same async" case isn't handled by named identity.
+4. **Priority** — *optional*, only if pulse commits to Dim 3.
+
+**The bet:** pulse exposes these four primitives; `<Loading>`, optimistic, transition, action, fork, Reveal are all userland-composable on top. Higher-level libraries provide ergonomic wrappers; the framework provides the underlying coordination.
+
+### Open questions about the decomposition itself
+
+Before adopting this decomposition as the design basis, three things need to be true:
+
+- **(i)** Is (1) actually one unified primitive, or are scopes / versions / commits separable in a way I'm missing? The MVCC transaction analogy is convincing, but pulse isn't a database; maybe the reactive context changes things.
+- **(ii)** Is (3) — in-flight identity — distinct enough from owner-disposal to deserve being its own primitive, or is it just "the current state of an owner"? Solid's `_inFlight` identity check and React's lane identity are both finer-grained than pulse's owner-scope.
+- **(iii)** Are there mechanics in the table that *don't* compose from these four? `<Reveal>` is the suspicious one — it's coordination between *sibling* boundaries, which feels like it might need a fifth primitive about "boundary composition" rather than being expressible from the four.
+
+The next sub-decision in this document should probably be: validate or falsify this decomposition before committing to any of the Q1–Q9 specific positions. If the decomposition is right, several of the Qs collapse into "pick a library API for this composition pattern." If it's wrong, the Qs need to be answered each on their own terms.
+
+---
+
 ## Design questions to address
 
 Open questions the research arc has surfaced. Each is a decision point. Marked as **open** until addressed concretely below.
