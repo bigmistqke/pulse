@@ -232,3 +232,54 @@ All three are "operate on something via a message-shaped interface, where the ru
 - If still load-bearing after those two dives, consider extracting it into a CONCEPT dive (similar to `algebraic-effects.md`) with its own deep-dive document.
 
 **Risk to flag:** the "everything is a message-send" framing is famously *too unifying* — it dissolves real distinctions if used carelessly. The discipline check is "what does this framing predict that the alternatives don't?" If it predicts e.g. that proxy-based pipelined accessors would work as a pulse ergonomic upgrade, OR that sync-engines and reactive-graphs share an implementation strategy, those are testable. If it just feels elegant, it's a metaphor, not a structural insight.
+
+---
+
+## Session 6 — 2026-05-19 — React modern (primary dive)
+
+- Conducted primary deep-dive: `deep-dives/react-modern.md`. Covers Suspense, transitions, lanes, `use`, `useOptimistic`, `useDeferredValue`, Actions / Server Functions. Promotes React-modern taxonomy row from 🟡 to 🟢.
+- Primary sources: react.dev official docs (Suspense, use, useTransition, useOptimistic, useDeferredValue, Server Functions); React 18 working group discussion #27 (the 31-lane bitmask scheduler with explicit rationale for IO-bound multi-lane allocation).
+- **Sourcing discipline reminder noted in the dive:** practitioner Fiber tutorials (DEV, Medium) consistently lag the official docs by years; the "throw a promise" idiom is no longer the documented API (replaced by `use(promise)`), but most third-party content still describes it that way. Only the react.dev docs were used as primary substantive sources.
+
+**Key findings:**
+
+- The pieces only make sense together: lanes (scheduler), WIP tree (reactive substrate), Suspense (per-boundary pending sentinel), transitions (lane-marked updates), `useOptimistic` (per-action overlay with convergence-in-same-render), Actions (unifying state+pending+optimistic+form). Pulling on any one alone misrepresents the system.
+- **Re-execution as the suspension mechanism, not continuation-resumption.** From source 1: "React does not preserve any state for renders that got suspended before they were able to mount for the first time. When the component has loaded, React will retry rendering the suspended tree from scratch." Confirms session-3's framing: React is in the "encoded handlers via re-execution" camp with pulse, not in the "true continuation" camp.
+- **Lane allocation strategy is the multi-transition coordination story.** 31 lanes; IO-bound transitions get multiple lanes specifically because "if we were to assign the same lane to all transitions, then one transition could effectively block all other transitions, even ones that are unrelated" (source 7). This is the structural answer that pulse and Solid 2.x both lack.
+- **`useOptimistic`'s convergence-in-same-render is surgically precise.** From source 4: "There's no extra render to 'clear' the optimistic state. The optimistic and real state converge in the same render when the Transition completes." This is the textbook S7 (optimistic reconciliation) implementation; the framework guarantees no intermediate flicker frame.
+- **Actions as unifying abstraction.** State + pending + optimistic + form-submission + progressive-enhancement in a single hook. Pre-Actions React required assembling this from primitives every time; the unification is real ergonomic value. Pulse lacks an equivalent.
+
+**Resolved long-standing open questions:**
+
+1. **WIP-tree-as-primitive (open from session 1):** YES, it's a distinct axis. Recommended name: **"speculative-state isolation."** Values: none / per-action overlay (`useOptimistic`, Recoil) / per-transition tree (React WIP, Solid 2.x lanes, pulse `<Loading>` gather) / versioned everywhere (Postgres, Yjs). Cuts cleanly across the existing isolation-level and atomicity-granularity values. README's open-questions list updated to reflect resolution.
+2. **Dependent-dispatch capability axis (candidate from session 5):** React's `use(promise)` is **await-only** (re-execution after resolve, not eager-dispatch of dependent calls). React is the third datapoint; the axis distinction is real and architectural. Promote to confirmed axis after one more datapoint (likely Replicache/sync-engine dive).
+3. **Message-send triangle (cross-cutting thread):** React's `use(promise)` *appears* to sit at the middle corner ("operate on not-yet-here receiver") but mechanically sits at the third corner ("currently-resolved with re-execution"). The middle corner (Cap'n Proto / Agoric `E()` style pipelining) remains uninhabited by current JS frameworks. Triangle is strengthened, not weakened.
+
+**Sharpenings to other axes:**
+
+- **Conflict-handling policy:** "priority-pre-empt-with-restart" is a distinct value from STM-retry, MVCC-snapshot, or Bonsai-serial-dispatch. Currently the React cell describes the mechanism but doesn't pattern-match cleanly with other systems. Consider this as a confirmed value for the conflict axis.
+- **Cancellation discipline:** React has *two* cancellation strengths — structural via WIP discard for rendering, convention-only via `AbortController` for I/O effects. The current single-cell summary loses this distinction. Suggests the axis may need to track *layers* (rendering layer vs. I/O layer) per system.
+
+**Encoding gain/loss for pulse:**
+
+What pulse could learn from React modern:
+- **Lane-based pre-emption** as the answer to multi-transition coordination. Real machinery — 31 lanes, bitmask, IO vs CPU split. Heavy to implement but the cleanest answer in JS.
+- **`useOptimistic` convergence-in-same-render** as the answer to S7. Pulse's pipeline-OR `isPending` could support this with a small additional API.
+- **Actions as unifying abstraction** for state+pending+optimistic+form. Pulse currently makes users assemble this.
+
+What pulse would lose by adopting React's encoding:
+- **Re-execution** as suspension mechanism — pulse's `use(x).name` doesn't re-execute the whole component, only the dependent computed. Cheaper and more compositional.
+- **Behavioral discipline** rather than typed — effect-ts's compile-time enforcement is qualitatively stronger than React's runtime warnings.
+- **No first-class effect-as-value** — Server Actions are just async functions; nothing to pass around / compose / conditionally dispatch.
+- **The WIP tree is invisible** — for S8 (preview/what-if), this is a real limitation. Pulse's `<Loading>` boundary has the same limitation.
+
+**Scenario coverage:** S1 partial, S2 yes, S3 partial (less ergonomic than Cap'n Proto pipelining), S4 yes-with-batching-caveat, S5 partial, S6 yes-for-rendering / partial-for-I/O, **S7 yes canonically (useOptimistic)**, S8 partial (WIP invisible).
+
+### Threads to pick from for session 7
+
+- **Replicache / Rocicorp Zero / Linear sync.** Now triply-motivated: (1) provides 4th datapoint to confirm "dependent-dispatch capability" axis; (2) tests the message-send triangle (sync engines build dependency graphs on the wire — pipelining-shaped); (3) tests the cross-cutting framing that "pipelining IS reactive graphs that fire once." If these systems' mutation queues structurally resemble both pipelined dependent calls AND local reactive graphs, that's strong triangulation evidence.
+- **Solid 2.x lanes + transitions.** Convergent design with React; could be a shorter dive piggybacking on this session's React work. Useful for sharpening the "fused-reactive multi-transition coordination" comparison.
+- **Concept dive: speculative-state isolation as an axis.** Promote the axis formally, audit all existing rows, fill cells. Pure taxonomy work — no new external system to study, just consolidation across the existing dives.
+- **CML** still pending. Lower priority — would test cancellation-discipline axis but the dive-debt elsewhere is heavier.
+- **Concept dive: capability security / Elm Architecture.** Lower priority.
+- **Agoric `E()` + TC39 eventual-send.** Now interesting as the JS-language story for the middle corner of the triangle. Could be combined with a Replicache dive into a "JS pipelining patterns" survey.
