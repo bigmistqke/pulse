@@ -283,3 +283,61 @@ What pulse would lose by adopting React's encoding:
 - **CML** still pending. Lower priority — would test cancellation-discipline axis but the dive-debt elsewhere is heavier.
 - **Concept dive: capability security / Elm Architecture.** Lower priority.
 - **Agoric `E()` + TC39 eventual-send.** Now interesting as the JS-language story for the middle corner of the triangle. Could be combined with a Replicache dive into a "JS pipelining patterns" survey.
+
+---
+
+## Session 7 — 2026-05-19 — Solid 2.x (`@solidjs/signals` 2.0.0-beta.13, source-code-based primary dive)
+
+- Conducted primary deep-dive: `deep-dives/solid-2x.md`. **First dive read directly from source code** (`/Users/bigmistqke/Documents/GitHub/solid`) rather than docs. Promotes Solid 2.x taxonomy row from 🟡 to 🟢 with much sharper cells than the docs-only summary previously supported.
+- Primary sources: `packages/solid-signals/src/core/{lanes,scheduler,action,async,owner,core}.ts`, `packages/solid-signals/src/boundaries.ts`, `packages/solid-signals/src/signals.ts`. The new sourcing mode (read source rather than docs) gave dramatically more precise cells.
+
+**Correction noted post-dive:** an earlier draft of this LOG entry and the dive cited an `async-signals-proposal.md` file at the Solid repo root as evidence of "Solid's roadmap." On verification (`git status` shows the file untracked), it was actually a pulse design-exploration draft accidentally written to the wrong checkout. References removed. Lesson: **check `git status` / `git log` on any file before citing it as upstream evidence.** Added to CONTEXT.md's sourcing discipline.
+
+**Key findings (architecturally the most intricate row in the taxonomy):**
+
+- **Per-Override Optimistic Lane Architecture** (`lanes.ts:9-13`): "Each optimistic signal creates its own lane. Lanes merge when their dependency graphs overlap." This is **fundamentally different from React's 31-bitmask lanes** — Solid allocates per write and merges via union-find on conflict. Mechanically: `signalLanes: WeakMap<Signal, OptimisticLane>`, `activeLanes: Set`, `findLane` chains through `_mergedInto`, `mergeLanes` is union-find. **Parent-child lanes stay independent** so `isPending` resolves without waiting for parent's async (`lanes.ts:126-134`).
+- **`action(function* () { yield … })` is a generator transaction** (`action.ts:18-94`). Each yield is an atomic commit point; writes between yields batch. Promise yields await with `restoreTransition` so post-await writes join the same transition. This is the closest thing in JS to "describe dependent work as a single value, runtime executes as one transaction" — same shape as Bonsai `let%bind.Effect`, effect-ts `Effect.gen`. **The local equivalent of Cap'n Proto pipelining.**
+- **Three-layer atomicity** (per-yield / per-transition / per-lane independent). Distinct from any other taxonomy row. effect-ts has two layers (STM-commit + Scope); Solid has three because lanes flush independently when not blocked (`scheduler.ts:115-124`).
+- **`_gatedSubs` mechanism** (`scheduler.ts:166-170`): "Subscribers that, while recomputing under an optimistic lane, read a plain signal's committed value through the entanglement gate. At commit they get rescheduled so they re-run with the new committed view." This is **explicit cross-transaction read with replay at commit** — an answer to S5 that pulse doesn't have.
+- **`<Reveal>` with `sequential` / `together` / `natural` modes** (`boundaries.ts:512-+`): reveal-ordering is a **first-class reactive primitive**. Sequential = frontier reveal; together = atomic group; natural = each-on-its-own. Nested Reveals compose: inner registers as a slot in outer; outer holds inner until released. **No other taxonomy row has this primitive.**
+- **Cancellation:** identity-based stale-result discard via `_inFlight` reference equality (`async.ts:188-193`); cleanup-hook iterator return for async iterables (`async.ts:258-267`); no AbortController. Same trade-off as pulse, React, Cap'n Proto.
+
+**Comparison to React modern (session 6):**
+
+| | Solid 2.x | React modern |
+|---|---|---|
+| Lanes | per-write dynamic, union-find merge | 31 fixed bitmask priorities |
+| Conflict | merge-on-overlap (entanglement detection) | priority-pre-empt-with-restart |
+| Optimistic | `createOptimistic` + lane override with auto-revert | `useOptimistic` per-action overlay |
+| Atomicity | per-yield / per-transition / per-lane (3 layers) | per-WIP-tree-commit (1 layer) |
+| Multi-transition | independent lanes flush independently | currently batched (acknowledged limitation) |
+| Reveal-order | first-class `<Reveal>` primitive | implicit via Suspense nesting + useDeferredValue |
+| Type discipline | runtime only (`NotReadyError` throw bypasses types) | runtime only |
+
+**Mechanically Solid 2.x is more advanced** in entanglement detection (automatic via overlap), multi-transition coordination (independent lanes), and reveal-ordering (first-class primitive). **React modern is more advanced** in WIP-tree-as-primitive (genuine speculative parallel tree) and ergonomic unification (Actions abstraction).
+
+**Sharpenings to taxonomy axes:**
+
+1. **Conflict-handling policy:** "union-find lane merge with parent-child exception" is a distinct value materially different from STM-retry / MVCC-snapshot / priority-pre-empt. Add as confirmed value.
+2. **Speculative-state isolation (session-6 axis):** Solid sits **between** "per-action overlay" and "per-transition tree." May need fifth intermediate value: "per-write lane overlay with overlap-merge."
+3. **Dependent-dispatch capability (session-5 candidate axis):** Solid is third datapoint in "await-only with generator batching" alongside Bonsai and effect-ts. **Promote axis from candidate to confirmed** on next consolidation.
+4. **Atomicity granularity:** Solid's three layers suggest "multi-layer atomicity" should be its own value, with cells potentially carrying a list of layers rather than a single granularity.
+5. **Async representation:** Solid's `NotReadyError`-carries-source-identity is a precision wrinkle pulse should match — the source-node identity in the thrown error is what enables per-source pending tracking.
+
+**Open questions raised:**
+
+- Could pulse adopt `action(function*)` *without* lanes? The generator-as-transition-script is partially decoupled from lane machinery; pulse's gather-on-`<Loading>` could be the substrate. **Worth focused design exploration.**
+- What's the runtime cost of per-write lane allocation at scale? WeakMap + Set per optimistic write; lane merging on every propagating write. Worth profiling before pulse adopts anything similar.
+- `<Reveal>`'s nested-composition pattern (inner registers as slot in outer) is a fractal-coordination shape that may generalize beyond reveal-ordering. Worth a separate sketch.
+
+**Scenario coverage:** S1 yes-better-than-React (union-find merge), S2 yes, S3 yes-ergonomically (generator action), **S4 yes-better-than-React (independent lanes don't batch)**, S5 partial-with-gated-subs-mechanism, S6 partial, **S7 yes-canonically with auto-revert (createOptimistic + action)**, S8 partial.
+
+**New methodology note:** reading source directly was substantially more precise than docs-only. Worth doing this for any system pulse takes seriously as a design inspiration. Pre-dive estimate of "5 axes verified from docs" expanded to "9 axes verified from source" once we read the actual implementation. **Convention: source-reading is the gold standard for primary dives where the system is open-source and architecturally adjacent to pulse.**
+
+### Threads to pick from for session 8
+
+- **Replicache / Rocicorp Zero / Linear sync.** Still triply-motivated and now newly-relevant: Solid's `action(function*)` + `<Reveal>` gives a lens for thinking about local pipelining-shaped patterns; how do sync engines do the same thing on the wire? Strong candidate for next dive.
+- **Concept dive: consolidation of the new "speculative-state isolation" axis.** Audit all existing rows against the four candidate values (now potentially five with Solid's middle-ground). Pure taxonomy work; no new system to study. Could be combined with promoting "dependent-dispatch capability" from candidate to confirmed axis.
+- **Agoric `E()` + TC39 eventual-send proposal.** The JS-language story for pipelining-shape. Worth pairing with a Replicache dive into a "JS pipelining patterns" survey.
+- **CML.** Still pending; would test cancellation-discipline axis. Lower priority since cancellation is well-characterized across existing dives.
+- **Concept dive: Elm Architecture proper.** Lower priority.
