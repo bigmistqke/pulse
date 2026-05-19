@@ -341,3 +341,60 @@ What pulse would lose by adopting React's encoding:
 - **Agoric `E()` + TC39 eventual-send proposal.** The JS-language story for pipelining-shape. Worth pairing with a Replicache dive into a "JS pipelining patterns" survey.
 - **CML.** Still pending; would test cancellation-discipline axis. Lower priority since cancellation is well-characterized across existing dives.
 - **Concept dive: Elm Architecture proper.** Lower priority.
+
+---
+
+## Session 8 — 2026-05-19 — Replicache (primary dive, parallel-passes methodology)
+
+- Conducted primary deep-dive: `deep-dives/replicache.md`. Used the parallel-passes-then-merge methodology established session 7 (background agent does source-reading; main session does design-rationale + cross-system framing; merge). Promotes Replicache taxonomy row from ⚪ to 🟢 with significant cell refinements.
+- Primary sources: Rocicorp docs (How Replicache Works; Adding Mutators; Subscriptions; Sync; API refs) + `rocicorp/mono/packages/replicache` source (push.ts, pull.ts, replicache.ts, replicache-impl.ts, pending-mutations.ts). The Reflect "Ready, Player Two" blog post used only for design-rationale quotes, flagged as adjacent-product.
+- **Legacy-repo trap discovered and added to CONTEXT.md anti-patterns:** `github.com/rocicorp/replicache` (`pushed_at: 2022-05-07`) is a stub; real source lives in `rocicorp/mono/packages/replicache`. `gh api` calls against the old URL succeed but return dead code. Future dives should check `pushed_at` + README before deep-diving.
+
+**Key findings (refinements to the prior 🟡 row):**
+
+1. **"Last-write-wins (cache invalidation)" was a mischaracterization.** Corrected to **server-linearized re-execution of named mutators**. There is no LWW at the storage layer — the second execution of the mutator (under `reason: 'rebase'`) gets to do anything: no-op, validation reject, CRDT-like merge, override. The conflict-resolution policy lives in user-authored code, not the engine.
+2. **Pending mutations are NOT a separate queue.** They *are* the commit-suffix between the last server snapshot and the main head in the persistent B-tree DAG (`push.ts:120-127`). Push reads them via `localMutations(mainHeadHash, dagRead)`. This is mechanically very different from "a separate queue alongside cache" — the cache IS the queue.
+3. **Cancellation is lifecycle-scoped only.** One `AbortController` per Replicache instance (`replicache-impl.ts:326`) scoped to `close()`. **There is no per-mutation cancellation API.** This is a *design commitment* (mutations in a log can't be cancelled because the server may have already executed them), not a missing feature.
+4. **Mutation wire form is just `{id, name, args, timestamp, clientID}`** (`push.ts:36-42`). Mutator bodies are NOT shipped — only the (name, args) pair. The client and server hold separate implementations of the same name; this is convention, not engine-enforced.
+5. **`WriteTransaction.reason` is `'initial' | 'rebase' | 'authoriative'`** — a tiny but powerful primitive that lets one function distinguish first-run from replay without separating into two.
+6. **Mutation log fires the subscription graph TWICE** — once on optimistic commit (`replicache-impl.ts:1595`), once on rebase if patch+replay changes the result (`replicache-impl.ts:788`). The mutation isn't a node in the reactive graph; it's a *source of pulses* for it.
+
+**Research-question answers (all four threads):**
+
+- **A. Dependent-dispatch capability axis (4th datapoint):** Replicache is a **fourth distinct value** — "named log of (function-name, JSON-args) pairs, sequenced by sender ID, dependent only through shared state." Mutations don't pipelined-reference each other (no value-level dataflow on the wire); locally a later mutation observes earlier effects via cumulative main-head state, but the server gets a flat list. Closer to event-sourcing / SQL-replication pattern than to Cap'n Proto pipelining. **The axis is now well-populated (4 distinct datapoints) and ready to be promoted from candidate to confirmed.**
+
+- **B. Message-send triangle:** Replicache **sits outside the triangle, not at any corner.** The "receiver-existence-state" axis isn't load-bearing here — durability + replay cardinality are. Proposed reframing: replace the triangle with a small grid (receiver-existence × execution-cardinality). The triangle was useful as a hypothesis; Replicache is the evidence that pushes us toward a richer structure.
+
+- **C. "Pipelining IS reactive graphs that fire once":** the framing **needs refinement, not just confirmation**. Mutation log and subscription graph are *different artifacts in one system*, related as **producer and consumer of pulses**. Not the same shape distinguished by firing cardinality — they're structurally different and complementary. The original framing was too unifying.
+
+- **D. Speculative-state isolation axis:** Replicache provides a **new intermediate value** — "versioned engine, fixed-cardinality observable branches." The DAG would support arbitrary branches but the public API exposes only two (main, sync). Strictly stronger than "per-transition tree" (because branches are persistent and explicit) but weaker than "versioned everywhere" (because only two are observable). README open-questions entry updated to reflect five candidate values now spanning the axis.
+
+**Sharpenings to taxonomy axes:**
+
+1. **Dependent-dispatch capability:** now four distinct values — *await-only* / *await-only with generator batching* / *pipelined* / *named log sequenced by sender ID*. **Promote from candidate to confirmed on the next consolidation pass.**
+2. **Conflict-handling policy:** sharpened — Replicache's "server-linearized re-execution" is distinct from STM-retry, MVCC-snapshot, lane-merge, priority-pre-empt-with-restart. Adds a fifth value to the axis.
+3. **Speculative-state isolation:** "versioned engine, fixed-cardinality observable branches" added as fifth value. The axis now has five well-evidenced values; ready for taxonomy table promotion.
+4. **Async representation:** "named-callable abstraction with split client+server implementations" is distinct from typed-value, procedure, throw-protocol, pipelined-promise.
+
+**What pulse can learn from Replicache:**
+
+- **The "register named function, send (name, args)" abstraction is genuinely simpler than typed RPC and gets replay for free.** Pulse's effect/action model could express durable retried work as "named handler + JSON args" without needing a structured Effect ADT — at the cost of losing type-level composition. Worth considering for the eventual sync-engine story.
+- **Snapshot isolation per transaction with a separate replay branch (named heads pattern)** is the cleanest model for "optimistic vs committed" any dive has surfaced. Pulse should consider whether its `<Loading>` gather could be reframed as an explicit named-head pattern.
+- **Read-set-tracked subscriptions over a key-value store** is a precedent for pulse's reactive integration when the underlying state is a cache. The crucial point: subscriptions track *what keys the body read*, not "what was returned."
+- **The `reason: 'initial' | 'rebase' | 'authoriative'` field** is a tiny powerful primitive — same function, three contexts. Pulse's transitions could carry an analogous tag.
+- **No per-operation cancellation is a *design commitment*, not a missing feature.** Pulse should explicitly decide: are pulse transitions cancellable once dispatched, or only retractable via compensating transitions? This is a strategic question Replicache forces clarity on.
+
+**Methodology notes:**
+
+- Parallel-passes-then-merge worked again, even better than session 7. The agent's source-reading caught the "pending mutations ARE the commit-suffix" insight that the docs alone don't surface; the main session's research-question prep was sharp enough that the merge was lighter than session 7 (mostly cross-references + thread updates).
+- The fresh agent flagged the legacy-repo trap *during* its source-reading (it noticed the 2022 stub and pivoted to the monorepo). That kind of provenance vigilance is exactly what the parallel-passes methodology is designed to catch — added to CONTEXT.md anti-patterns.
+
+### Threads to pick from for session 9
+
+- **Concept dive: axis consolidation pass.** Three axes are now ready for promotion-from-candidate-to-confirmed: dependent-dispatch capability (4 values), speculative-state isolation (5 values), and arguably conflict-handling policy (5 values now). A pure-taxonomy consolidation session would audit all existing rows against these refined axes, fill in missing cells, and promote the axes to the table header. **Strong candidate for next session — this is where the research synthesis pays off.**
+- **Linear sync architecture.** Now interesting as a contrast to Replicache: same problem space, different sync model. Linear publishes architecture posts. Could test whether the Replicache findings generalize.
+- **Rocicorp Zero as a follow-up to this dive.** The `#zero?.advance/.trackMutation/.rejectMutation` hooks in `replicache-impl.ts` are integration surface for Zero. If Zero is "Replicache as storage engine + Zero as query/mutation lifecycle layer," it might illuminate how a sync engine evolves to support richer queries. Lower priority — Replicache is the foundation; Zero builds on it.
+- **Yjs / Automerge (CRDT lineage).** The conflict-handling-policy axis now has a clear taxonomy: STM-retry / MVCC-snapshot / lane-merge / priority-pre-empt / server-linearized-replay / **CRDT-merge** (next). Yjs/Automerge would round this axis out.
+- **Agoric `E()` + TC39 eventual-send.** The JS-language story for pipelining-shape. Lower priority — the Replicache dive showed that sync engines don't need pipelining to be expressive.
+- **CML.** Still pending; lower priority.
+- **Concept dive: Elm Architecture proper.** Still pending; lower priority.
