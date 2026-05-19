@@ -75,8 +75,45 @@ These were candidate first-deep-dives. Session 2 picked **effect-ts** (see entry
 
 ### Threads to pick from for session 3
 
-- **Algebraic effects theory** (Plotkin & Pretnar, Bauer, Lindley; Koka / Eff / OCaml 5 handlers). Now that we have effect-ts as a concrete artifact, the theory dive can be grounded: for each formal construct, "what does this look like in effect-ts" and "what would it look like in pulse." This makes the theory non-abstract.
-- **Bonsai + Jane Street Incremental.** The cleanest "separate effect layer over a reactive graph" — directly addresses open question about whether "reactive integration" and "async state lives" are orthogonal.
-- **A second effect-ts dive on Layer / Stream / Schedule** if the bridge between Effect and reactivity becomes a design question pulse needs to answer.
-- **CML — first-class events with `choose` + `withNack`.** Compares to effect-ts's `Effect.race` + `Scope` + interruption; different answer to S6.
-- **Haskell GHC STM.** effect-ts's STM is a port of ZIO's STM which is a port of Haskell's. The original might surface design decisions effect-ts inherited but doesn't justify in its own docs.
+- **Algebraic effects theory** — DONE in session 3.
+- **Bonsai + Jane Street Incremental.** Still pending.
+- **A second effect-ts dive on Layer / Stream / Schedule** — still pending.
+- **CML.** Still pending.
+- **Haskell GHC STM.** Still pending.
+
+---
+
+## Session 3 — 2026-05-19 — Algebraic effects theory (concept dive)
+
+- Conducted first concept dive: `deep-dives/algebraic-effects.md`. Per session 2's plan, the dive was grounded by asking "what does each formal construct map to in effect-ts and in pulse" — so the theory didn't float free of the concrete artifacts.
+- Primary sources: Bauer & Pretnar 2012 paper (via ar5iv since raw PDF couldn't be parsed without poppler); OCaml 5 effects manual; Koka documentation + third-party blog for syntax examples. Secondary: Abramov's blog (already cited in CONTEXT), interjectedfuture.com cross-language comparison.
+- Sourcing tooling note: the raw arxiv PDF couldn't be parsed by `Read` without `poppler` installed (`brew install poppler` failed due to homebrew permission issues; not pursued further). ar5iv HTML rendering worked first try. **Convention: for arxiv papers, default to the ar5iv URL** (`https://ar5iv.labs.arxiv.org/html/<id>`).
+
+**Key findings:**
+
+- The formal model: effects are typed operations (name + parameter + result type); handlers are bindings that intercept operations within a scope; the handler receives the continuation as a FUNCTION (`k : B → R`), enabling **multi-shot resumption** as the headline distinguishing feature.
+- The grand unification: exceptions, async/await, generators, state, dependency injection, nondeterminism, cooperative threading are all instances of the same primitive with specific handler shapes.
+- Implementation strategies: delimited continuations (native — OCaml 5 fibers), CPS transformation (Koka), free monads (Haskell), generator-based encoding (JS, including effect-ts and pulse).
+- **JS encodings sacrifice multi-shot resumption.** JS generators are one-shot; cloning isn't available natively. Multi-shot is only achievable at coarser granularity (pulse: stage boundaries; effect-ts: `Effect.retry` from-the-top). True nondeterminism / backtracking / multi-shot generators aren't expressible in JS encodings without heavyweight machinery.
+- React Suspense and pulse are BOTH in the "re-execution camp" — they look like algebraic effects from the outside but mechanically re-execute the body on resume rather than truly resuming a captured continuation.
+
+**Sharpenings to the taxonomy axes:**
+
+1. **Async representation** — the values (procedure / value / continuation / channel / mailbox) are best understood as a spectrum of "how first-class the captured effectful work is," from procedure (not first-class) to value (first-class but interpreted) to continuation (first-class with multi-shot capability).
+2. **Discipline location** — confirmed session 2's hypothesis that this needs sub-axes. Three mechanisms exist: **structural-effect-typing** (Koka rows, effect-ts `R`), **vocabulary restriction** (STM combinators not exposing IO), **type-level continuation safety** (linear/affine types — Pony, Idris). All three currently flatten to "type-system-enforced." Recommend splitting next time a system uses one without the others.
+3. **Atomicity granularity** — confirmed this is best understood per-handler, not per-system. Multi-handler systems (effect-ts has STM + Scope; pulse has effect + Loading + transition-tracker) have multiple atomicity boundaries by design.
+4. **NEW axis candidate: continuation cardinality.** Values: 0-shot (exceptions); 1-shot (async/await, generators, effect-ts, pulse within-stage); multi-shot at coarse granularity (pulse across stages); multi-shot fine (Eff, Koka, Haskell `MonadCont`); runtime-enforced 1-shot (OCaml 5 deliberately). Don't add this axis yet — wait for one or two more dives to confirm it meaningfully distinguishes systems.
+
+**Open questions surfaced** (rolled into README):
+
+- Is multi-shot resumption useful for UI? Most demonstration examples (nondeterminism, backtracking) aren't UI patterns. Speculative debugging, preview/what-if mode (S8), time-travel state restoration might be the closest UI candidates. Worth checking deliberately during scenario reviews.
+- Can pulse get the *typing benefits* of algebraic effects without the *runtime cost*? TypeScript's structural typing might allow type-level effect tracking via phantom parameters, with the runtime unchanged. Worth a design exploration session once research has more inputs.
+
+### Threads to pick from for session 4
+
+- **Bonsai + Jane Street Incremental.** Now genuinely the next high-value dive: addresses the orthogonality question ("reactive integration" vs "where async state lives") AND extends the algebraic-effects framing to "separate effect layer over reactive graph."
+- **CML — first-class events with `choose` + `withNack`.** Direct comparison to effect-ts's `Scope`-based cancellation; would test whether the algebraic-effects framing extends to first-class concurrency events.
+- **Haskell GHC STM** — to fill out the STM family beyond effect-ts; the original might surface design decisions that ZIO/effect-ts inherited silently.
+- **React modern (Suspense / lanes / `use()` / `useOptimistic`).** With algebraic effects framework in hand, the dive can be precise about which of React's primitives are encoded handlers and where the encoding lossiness lies. Resolves the "WIP tree as a primitive" question from session 1.
+- **A second effect-ts dive on Layer / Stream / Schedule** — defer until reactive-bridge design becomes pressing.
+- **Postgres MVCC + SSI** — defer; bigger value as a focused dive when transaction-primitive design is concrete.
