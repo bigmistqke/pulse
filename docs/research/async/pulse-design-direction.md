@@ -346,6 +346,46 @@ The high-level abstractions compose cleanly. The API surface is small (one new p
 
 The sketch also matches Solid's empirical trajectory described above: Solid moved from external-scheduler-managed cloned subgraphs to per-node value-bag over 5 years of production iteration. The sketch exposes what Solid arrived at internally — making the value-bag user-visible — without re-litigating which implementation strategy is right.
 
+### Concrete fix this framing offers — the late-mounted `<Loading>` edge case
+
+Beyond the conceptual reframing, the node/value-bag decomposition fixes a real fragility in pulse's current implementation. Worth flagging because it shows the framing isn't just notation — it actively improves design.
+
+**Current pulse behavior** (`pulse/src/dom/loading.ts:33-40`): the `<Loading>` boundary's hold-prior decision depends on **per-boundary state** — the boundary tracks "have I rendered the loaded subtree before?" If yes, refetches keep the previous subtree visible (SWR-style); if no, fallback is shown.
+
+**The edge case:** consider a `<Loading>` boundary mounted *after* the signal it would wrap has already committed. Concrete scenarios:
+
+- A refactor adds a `<Loading>` wrapper around code that was previously fine without one.
+- A conditional `<Loading>` is mounted because some other state flips.
+- A boundary remounts (e.g., the wrapping component re-renders and replaces its boundary).
+
+In all three cases, the newly-mounted boundary has empty per-boundary state. When the next refetch puts an upstream into pending, the boundary treats it as **first-load** — shows the fallback — even though the signal has been resolved for ages and the user reasonably expects hold-prior. **Same code, different mount position or remount timing, different behavior.** That's the fragility.
+
+**Why this happens:** the "has been previously committed" property is being tracked on the *wrong* primitive. It's a property of the *signal's history*, not the *boundary's history*. A boundary is just a renderer; it should be a pure function of the signals it's subscribed to. Tracking the property on the boundary couples rendering decisions to mount timing in a way users can't predict.
+
+**The fix under node/value-bag framing:** move the "has been previously committed" property to the signal's value-bag. Then any boundary — newly-mounted or long-running — gets the same answer by asking the same question of the same signal:
+
+```ts
+// Signal's value-bag has a `hasCommitted` slot, true iff the committed entry
+// has ever been populated (not UNINITIALIZED sentinel).
+//
+// <Loading> becomes library code (~6 lines):
+function Loading({ fallback, initial, children }) {
+  const signals = collectDependencies(children)
+  const anyPending = signals.some(s => s.bag.hasPending())
+  const allCommitted = signals.every(s => s.bag.hasCommitted())
+
+  if (!anyPending) return children()
+  if (allCommitted) return children()   // hold-prior on refetch
+  return initial ?? fallback            // first-load
+}
+```
+
+The decision is now a pure function of the signals' bag states. Mount timing is irrelevant. A boundary mounted long after the signal first committed sees the same bag state as one that was there from the start; refetch behavior is identical regardless.
+
+**Why this matters for the design conversation:** the current pulse design has an implicit assumption (boundaries outlive their signals) that the user has just identified as brittle. The node/value-bag framing fixes this not by adding new machinery but by **moving state to the primitive that semantically owns it**. The framing isn't just notation — it's a concrete improvement, and the same shape will likely fix other implicit-assumption fragilities once they're identified.
+
+This is structurally what Solid 2.x ended up doing — its signals track their own resolution state (`STATUS_UNINITIALIZED` / `STATUS_PENDING` flags on the node) — so any boundary that catches a `NotReadyError` can ask the source node "have you been initialized?" and get a consistent answer regardless of boundary lifecycle. Pulse arriving at the same per-signal-state pattern via the node/value-bag framing converges on the same engineering answer.
+
 ---
 
 ## Design questions to address
