@@ -117,3 +117,42 @@ These were candidate first-deep-dives. Session 2 picked **effect-ts** (see entry
 - **React modern (Suspense / lanes / `use()` / `useOptimistic`).** With algebraic effects framework in hand, the dive can be precise about which of React's primitives are encoded handlers and where the encoding lossiness lies. Resolves the "WIP tree as a primitive" question from session 1.
 - **A second effect-ts dive on Layer / Stream / Schedule** — defer until reactive-bridge design becomes pressing.
 - **Postgres MVCC + SSI** — defer; bigger value as a focused dive when transaction-primitive design is concrete.
+
+---
+
+## Session 4 — 2026-05-19 — Bonsai + Jane Street Incremental (primary dive)
+
+- Conducted the second primary deep-dive: `deep-dives/bonsai-incremental.md`. Covered Bonsai (the UI framework) and Incremental (the underlying SAC library) together because Bonsai compiles to Incremental and the trade-offs only make sense across the boundary.
+- Primary sources: `janestreet/bonsai` README; the "Introducing Incremental" Jane Street blog; `bonsai_web/docs/` how-to guides (RPCs, effects-and-stale-values, edge-triggered-effects, history). Several how-tos fetched via `gh api` after WebFetch returned 404s on the docs subdirectory paths.
+- Promoted Bonsai's taxonomy row from 🟡 to 🟢. The pre-dive cells were partially right but mis-stated cancellation discipline ("lifecycle-event (effect dispatch token)" — actually structural-by-component-lifetime, with an acknowledged stale-value footgun documented by Jane Street themselves).
+
+**Key findings:**
+
+- **Incremental** is purely synchronous self-adjusting computation — a DAG of computations re-evaluated efficiently when inputs change, via `Var.create` / `Inc.map` / `Inc.bind` / `Inc.observe` / `Inc.stabilize`. Crucially: NO async support. The Incremental blog explicitly contrasts with FRP — "SAC and FRP have different semantics — FRP is mostly concerned with time-like computations, and SAC is mostly about optimizing DAG-structured computations."
+- **Bonsai** is the canonical Elm-shape over a reactive substrate. Components are purely functional state machines (`apply_action : model + action → new model`); views are Incremental computations derived from the model; effects (`Effect.t`) are dispatchable values that produce actions on completion.
+- **`Effect.t` is the cleanest "effect-as-value-in-a-UI-framework" example.** Composable monadically (`let%bind.Effect`); first-class (can be stored, passed, dispatched conditionally); typed (parameterized over result type).
+- **Architectural commitment:** async happens OUTSIDE the reactive graph; results land in the graph via action dispatch. The graph never "waits"; it always reflects committed state. This is distinctly different from pulse / Solid 2.x / React modern which all fuse async into the graph.
+
+**The orthogonality question — RESOLVED.** Bonsai is the proof that "reactive integration" and "where async state lives" are distinct axes. Bonsai is simultaneously (reactive-integration: substrate is Incremental) and (where-async-state-lives: in the separate `Effect.t` layer outside Incremental). The two axes do NOT collapse. Keep them separate. The README's open-questions list has been updated to mark this resolved with a pointer to the dive.
+
+**Sharpenings to other axes:**
+
+- **Cancellation discipline:** the dive sharpens the distinction between "structural-by-scope with interruption guarantee" (effect-ts: post-cancellation operations are guaranteed not to fire; finalizers run) and "structural-by-component-lifetime" (Bonsai: in-flight effects can complete after their component is unmounted; dispatched actions may refer to stale state — `Bonsai.peek` is the documented workaround). These are different strengths of the same axis value. May warrant sub-values.
+- **Async representation:** Bonsai confirms "typed value with monadic composition" is production-proven and distinct from "procedure" (React `useEffect`) or "generator-based effects" (effect-ts).
+
+**Encoding gain/loss for pulse:**
+
+- Adopting Bonsai's full architecture would mean rejecting pulse's fused-async-in-graph commitment — a different framework, not a refinement.
+- Partial adoption: **`action()` as a first-class effect-as-value primitive** alongside `effect()` (procedural). Pulse's Plan C effect-stages design already gestures this way; the Bonsai dive validates it as a serious option. Production-proven at Jane Street scale.
+- Bonsai's component-state-scoping with auto-management is hard to replicate in TS — OCaml's module system carries weight that TS generics can't easily mirror.
+
+**Scenario coverage:** S1 partial (manual reducer logic), S2 yes (manual but ergonomic), S3 yes (`let%bind.Effect` composition), S4 yes (default), S5 n/a (no transactions), S6 partial (stale-value footgun), S7 yes (standard manual pattern), S8 partial (cleanly expressible).
+
+### Threads to pick from for session 5
+
+- **React modern (Suspense / lanes / `use()` / `useOptimistic`).** Now the highest-value next dive. With effect-ts (orthogonal) and Bonsai (separate-layer-over-reactive) characterized in detail, React modern would complete the "fused" triangulation (alongside pulse and Solid 2.x). Also resolves the "WIP tree as a primitive" axis question from session 1.
+- **Solid 2.x lanes + transitions.** Could be combined with the React dive (since they're convergent designs) or done separately. Sharpens the lane-coordination axis.
+- **CML — first-class events with `choose` + `withNack`.** Still pending; would test cancellation-discipline axis at a different point in the design space.
+- **Haskell GHC STM** — defer; effect-ts already characterizes the STM family well enough for current research stage.
+- **Concept dive: Elm Architecture proper.** Motivated by Bonsai dive — Bonsai is "Elm + reactive views"; the underlying Elm Architecture deserves its own concept treatment as a recurring design pattern (also Redux, RTK).
+- **Postgres MVCC + SSI.** Still pending; defer until transaction-primitive design becomes concrete.
