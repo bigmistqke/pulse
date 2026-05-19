@@ -195,3 +195,40 @@ These were candidate first-deep-dives. Session 2 picked **effect-ts** (see entry
 - **CML** still pending. Would test the cancellation-discipline axis at a different design point.
 - **Concept dive: capability security (E, ocap principles).** Lower priority — the pipelining mechanism is portable without it, and the dive surfaced no strong reason to make capability discipline central to pulse.
 - **Concept dive: Elm Architecture proper.** Motivated by session 4 (Bonsai), still pending.
+
+---
+
+## Cross-cutting thread — message-send to receivers of various existence-states
+
+Surfaced 2026-05-19 during reflection on session 5 (Cap'n Proto / E pipelining). Captured here as an open research thread rather than under a single dive, because it cross-cuts at least three rows of the taxonomy and may be load-bearing for eventual pulse design work.
+
+**The observation, in two parts:**
+
+1. **Pipelining feels like declaring a reactive graph.** Both are "build a static dependency description, hand it to a runtime, don't `await` between nodes." The key difference is **firing cardinality**: a pipelined chain fires once (build → dispatch → resolve); a reactive graph fires continuously (re-evaluate on every input change). Read as a unification: pipelining IS a reactive graph that fires once and dispatches remotely; a reactive graph IS a pipelined chain that re-fires locally on each input change. This connects to the session-3 algebraic-effects framing — both are "computation as data, runtime interprets it."
+
+2. **Pipelining feels Smalltalk-y.** This is not a vibes-match; it's lineage. Alan Kay's definition of OO is "message-sends between encapsulated objects with late binding"; E/CapTP is literally that, generalized to "send messages to objects that don't exist yet." Miller and Tribble's work (Joule → E) sits in a direct Smalltalk-actor design lineage. Cap'n Proto's "the promise has the methods of its eventual value" (capnproto.org/rpc.html) is exactly Smalltalk's late-binding receiver, except the receiver may not have arrived yet.
+
+**The triangle these observations form:**
+
+| Pattern | Receiver existence-state | Binding | Firing | Dispatch locus |
+|---|---|---|---|---|
+| Smalltalk | exists now | late | one-shot | local |
+| E / Cap'n Proto pipelining | doesn't exist yet (future capability) | late, via schema/IDL | one-shot | remote-eager |
+| Reactive graphs (pulse, Solid, Incremental) | currently resolved value (re-resolved on input change) | early (typed field accessor) | continuous | local |
+
+All three are "operate on something via a message-shaped interface, where the runtime mediates what 'where to actually dispatch' means." Pipelining sits between Smalltalk and reactive graphs on the existence-status axis. Bonsai's `Effect.t` is the message-shaped-value variant at the action layer; effect-ts's `Effect<A, E, R>` is the same idea with a richer type signature.
+
+**Why this might be load-bearing for pulse:**
+
+- The triangle suggests `use(x).name` in pulse is already a message-send-on-resolved-receiver — it's the third corner. The Cap'n Proto / proxy-based pipelined accessor question from the session-5 dive ("could pulse adopt proxy-based pipelined accessors?") is asking whether pulse can also do the *middle* corner — message-send-on-not-yet-resolved-receiver.
+- If pulse ever has a sync-engine story, the dependency-graph-on-the-wire pattern is structurally identical to pulse's local reactive-graph pattern. The two layers (UI reactive graph + sync engine batched mutations) might compose more naturally if they share this framing rather than treating them as separate concerns.
+- The "firing cardinality" axis might be a genuine taxonomy axis hiding in plain sight: one-shot pipeline vs. continuous reactive vs. discrete-event-driven (Bonsai actions, Smalltalk events). It cuts across "where async state lives" and "reactive integration" cleanly.
+
+**What to do with this thread:**
+
+- Hold it as a cross-cutting framing — don't promote any of it to taxonomy axes yet.
+- Re-visit after the **React-modern dive** (session 6 candidate). React's `use(promise)` and `<Suspense>` are interestingly placed in the triangle — they look like the middle corner (message-send-on-not-yet-resolved) but are mechanically re-execution (session 3's framing). That will be a useful test of whether this triangle is real structure or just a metaphor.
+- Re-visit after the **Replicache / sync-engine dive**. The dependency-graph-on-the-wire pattern is the testable claim here — if Replicache's mutation queues do structurally resemble pipelined dependent calls AND structurally resemble local reactive graphs, that's three datapoints for the same shape.
+- If still load-bearing after those two dives, consider extracting it into a CONCEPT dive (similar to `algebraic-effects.md`) with its own deep-dive document.
+
+**Risk to flag:** the "everything is a message-send" framing is famously *too unifying* — it dissolves real distinctions if used carelessly. The discipline check is "what does this framing predict that the alternatives don't?" If it predicts e.g. that proxy-based pipelined accessors would work as a pulse ergonomic upgrade, OR that sync-engines and reactive-graphs share an implementation strategy, those are testable. If it just feels elegant, it's a metaphor, not a structural insight.
