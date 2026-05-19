@@ -187,6 +187,167 @@ If pulse adopts the node/value-bag framing as the user-facing primitive, it woul
 
 ---
 
+## Sketch — what node + value-bag looks like as a pulse API
+
+Working sketch (not committed). The goal is to show what user-facing primitives expose the node/value-bag separation in a way that feels native to pulse's existing API style, and to verify that the high-level abstractions in the comparison table genuinely compose from these primitives. Open questions noted at the end.
+
+### What pulse already has
+
+Pulse's current surface is consistent with the node/value-bag decomposition more than the existing API name suggests:
+
+- `signal(initial)` returns `[Accessor<T>, Setter<T>]`. The Accessor is a callable with a `[NODE]` symbol attached (`pulse/src/signal.ts:22-25`). **The accessor IS the node identity from the user's perspective; the value is what `accessor()` returns.** The two are already syntactically separated; what's missing is the multi-valued bag.
+- `untrack(() => …)`, `latest(() => …)`, `isPending(() => …)` are all *context-running* helpers — they change how reads inside the body resolve. These are the precedent for scope-aware reads.
+- Owners (`pulse/src/owner.ts`) are the existing scope-of-relevance primitive — for disposal lifecycle, not for state coordination. They're useful as a model for what *scoped state* might look like.
+
+### The proposed additions
+
+Three primitives, all small, designed to feel native to existing pulse conventions:
+
+```ts
+// 1. SCOPES — first-class primitive for "named context that holds writes"
+//    Created and held by the user; explicitly committed or discarded.
+const tx = scope()              // open a new scope; returns a handle
+
+tx.run(() => {                   // run a body inside the scope
+  setCount(42)                   //   - writes go into count's value-bag tagged with tx
+  console.log(count())           //   - reads inside scope see tx's bag-entry
+})
+
+tx.commit()                      // tx's bag entries become committed; bag collapses
+tx.discard()                     // tx's bag entries removed without committing
+
+// Async variant — scope auto-commits on resolve, auto-discards on throw:
+await scope(async () => {
+  setCount(predicted)
+  const real = await api.save()
+  setCount(real)
+})
+```
+
+```ts
+// 2. SCOPE-AWARE READS — peek into a node's value-bag without committing to its
+//    current entry. The existing `latest()` / `isPending()` style is the precedent.
+latest(() => count())            // read count's committed entry, ignore any staged
+isPending(() => count())         // does count's bag have any non-committed entries?
+
+// Within a scope:
+tx.run(() => count())            // returns tx's bag-entry if present, else committed
+```
+
+```ts
+// 3. SCOPE-AWARE WRITES — write to a node's value-bag, optionally tagging with scope.
+//    Without scope: the current "commit immediately" behavior.
+setCount(42)                     // unchanged: commits to count's value-bag immediately
+setCount(42, { scope: tx })      // optional: write to count's bag tagged with tx
+                                 //   (equivalent to writing inside `tx.run(...)`)
+```
+
+That's the entirety of the proposed additions. The accessor stays a callable; signals stay tuple-returning; reads-and-writes stay function calls. The scope is the new explicit primitive; everything else is the same as today's pulse, slightly extended.
+
+### Composing the high-level abstractions
+
+The claim is that every high-level abstraction in the comparison table composes from {scope, scope-aware reads, scope-aware writes}. Sketching each:
+
+**`<Loading>` boundary** — the existing pulse primitive, now expressed in scope terms:
+
+```ts
+// Library code (composed from primitives, not framework-built-in):
+function Loading({ fallback, children }) {
+  // Implicit: any computed within `children` that depends on a node with pending
+  // entries in its value-bag triggers the boundary. Same pipeline-OR walk pulse
+  // already does, expressed as "any node in scope has a non-committed bag entry."
+  if (isPending(() => children())) return fallback
+  return children()
+}
+```
+
+**Optimistic update** — manual:
+
+```ts
+const tx = scope()
+tx.run(() => setCount(predicted))
+try {
+  const real = await api.save()
+  tx.run(() => setCount(real))
+  tx.commit()
+} catch {
+  tx.discard()                    // reverts to committed value automatically
+}
+
+// Library sugar (one-liner):
+optimistic(predicted, () => api.save())
+// Internally: opens scope, writes predicted, runs body, commits-or-discards.
+```
+
+**Transition** — a scope without immediate commit:
+
+```ts
+const tx = scope()
+tx.run(() => {
+  setFilter(newFilter)
+  // ... lots of dependent updates ...
+})
+// tx auto-commits when all async settles inside the scope's reactive graph,
+// OR explicitly via tx.commit()
+```
+
+**Action with intermediate atomic steps**:
+
+```ts
+const saveTodo = action(function* (text) {
+  setTodos(t => [...t, { text, pending: true }])     // optimistic local change
+  const saved = yield api.save(text)                   // wait for server
+  setTodos(t => t.map(td => td.text === text ? saved : td))  // commit real
+})
+
+// Internally: action() opens a scope, runs body inside it, commits at each
+// yield (or at end), discards on throw. Implementation is library code over
+// the scope primitive.
+```
+
+**`fork()` (Svelte-style speculation)** — user-held scope without auto-commit:
+
+```ts
+const preview = scope()
+preview.run(() => setRoute('/profile'))               // speculate the route change
+button.onmouseenter = () => preview.run(...)          // warm up
+button.onclick = () => preview.commit()               // commit on intent
+button.onmouseleave = () => preview.discard()         // discard on retraction
+```
+
+**`refresh(node)`** — invalidate a node's committed bag entry:
+
+```ts
+refresh(userSignal)              // forces re-computation of userSignal's value
+                                 // Implementation: removes the current committed
+                                 // entry; re-runs the source computation to
+                                 // produce a fresh entry.
+```
+
+### What's NOT in the sketch (deliberately)
+
+- **No priority / lane** primitive. Dim 3 is left for later — pulse can decide whether to add `scope({ priority: 'low' })` once the rest of the design is concrete.
+- **No `useOptimistic`/`createOptimistic`-equivalent as a framework primitive.** Optimistic state is a userland composition over scope (as shown).
+- **No `<Reveal>`-equivalent yet.** The cross-boundary coordination remains an open question (see "Open questions about the decomposition itself" above).
+- **No replacement for the existing `signal` / `computed` / `effect` API.** Those stay. The sketch is purely additive — `scope()` is new; reads and writes get an optional scope parameter.
+
+### Open questions about this sketch
+
+- **How does the framework know which scope a read is "in"?** The sketch assumes dynamic scope context (like `untrack`'s mechanism). The active scope is read from an ambient slot; `tx.run(body)` sets the slot for the body's duration. This is the lightest approach but means scopes are dynamically-scoped (you can't pass a scope around and have it implicitly apply when read in another place).
+- **Does the scope persist across `await`?** For sync bodies, dynamic scoping is fine. For async bodies (e.g. inside `action(function*)`), the scope must persist across `await` points. Pulse can borrow Solid's `restoreTransition` approach (re-enter the scope after each await) or wrap the body in continuation-style machinery.
+- **What's the relationship between scopes and owners?** Owners are disposal-lifecycle-scoped. Scopes are state-coordination-scoped. They could be unified (a scope IS an owner with extra state) or kept separate (scopes are state-only; owners are disposal-only). Probably the latter — they answer different questions, conflating them is the Solid `_transition`-pointer-on-node trap.
+- **Does the existing `use(x)` primitive change?** Currently `use(x)` is an opt-in to transition-style reads. Under this sketch, `use` might become "ensure this read participates in the current scope's bag-coherence" — same idea but expressed through the scope abstraction.
+- **What about nested scopes?** A scope opened inside another scope's body could either inherit the outer scope (merge entries into the outer's bag) or open a fresh scope (independent bag entries that need their own commit). Solid's action-inside-action shares the transition; React's `startTransition` inside `startTransition` is also single-scope. Defaulting to "inherit" is probably right.
+- **Does this support concurrent scopes (Dim 2)?** Multiple scopes can be open simultaneously — `scope()` doesn't return a singleton. Each scope's writes go into the corresponding bag entries. Reads outside any scope see committed; reads inside scope S see S's entry. This is concurrent transitions by construction; whether it scales (per Svelte's ~800-line batch.js) is a separate engineering question.
+
+### Why this sketch is worth taking seriously
+
+The high-level abstractions compose cleanly. The API surface is small (one new primitive — `scope` — plus optional parameters on existing primitives). The conceptual shift is genuine: users see *scopes* and *value-bag entries* explicitly, rather than `useOptimistic` / `useTransition` / `fork` as opaque hooks. The cost is real (users have to know what a scope is) but matches pulse's articulated philosophy that *complexity should be composed from simple principles, not hidden behind specialized hooks*.
+
+The sketch also matches Solid's empirical trajectory described above: Solid moved from external-scheduler-managed cloned subgraphs to per-node value-bag over 5 years of production iteration. The sketch exposes what Solid arrived at internally — making the value-bag user-visible — without re-litigating which implementation strategy is right.
+
+---
+
 ## Design questions to address
 
 Open questions the research arc has surfaced. Each is a decision point. Marked as **open** until addressed concretely below.
