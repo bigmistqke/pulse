@@ -128,6 +128,28 @@ This is precisely what the Acar/Blume/Donham "Consistent Semantics" paper formal
 
 The mental model to lock in: **memo entries in SAC are not pure values — they are sub-traces with edges into modifiables, and reusing one is an act of grafting a graph fragment then patching it.** This is the largest single source of conceptual distance between SAC and a fine-grained signal graph.
 
+### Worked example: value memoisation vs trace memoisation
+
+The same scenario, run under both regimes, makes the distinction concrete. Imagine a recursive sum over a list. First run computes `sum [1, 2, 3, 4, 5] = 15`. Then a head element is inserted: `sum [99, 1, 2, 3, 4, 5]`.
+
+**Under value memoisation** (Solid `createMemo`, React `useMemo`, Vue computed, MobX computed):
+- The cache holds the *output value* — `15`.
+- Cache key: "are the dependencies the same as last time?"
+- The new input `[99, 1, 2, 3, 4, 5]` ≠ `[1, 2, 3, 4, 5]`, so the cache misses.
+- The entire `sum` is recomputed from scratch. **O(n) work.**
+- The engine has no visibility into the recursion's internal structure; from its perspective, "input changed, recompute the whole thing."
+
+**Under trace memoisation** (classical SAC, Adapton):
+- The cache holds the *execution trace* — the DDG fragment that `sum` produced, including which modifiables it read, in what order, and the structure of the recursion.
+- When the new run consumes the `99` and reaches its recursive call `sum [1, 2, 3, 4, 5]`, the engine recognises this matches a cached trace.
+- It **splices the cached trace** into the current execution, then runs change-propagation on the spliced trace against any modifiables that have changed since the cache entry was created.
+- For an unchanged tail, no parts of the spliced trace need re-running. The entire sub-trace is reused as-is.
+- **O(log n) or O(1) work** depending on the structure of the recursion.
+
+The key move: trace memo caches **the structure that produced the value**, not the value itself. That structure is what lets the engine perform targeted partial re-execution — "this sub-graph's modifiables are unchanged, splice it; that sub-graph's modifiables changed, re-run only that part." Value memo cannot do this — when an input changes, the engine has nothing to splice from, so it recomputes from scratch.
+
+This is what enables SAC's headline complexity claims (O(n) → O(log n) for sorted-list maintenance under arbitrary single-element updates, and the experimental results in PLDI 2006 generally). The claims do not transfer to value-memo regimes; flagged again in "What this means for pulse / r3" below.
+
 ## Distinction from FRP
 
 Acar has been explicit that SAC is not FRP. The Jane Street post does not contain a verbatim Acar quote on this, but the framing there is the one most often attributed to him: SAC and FRP have *different semantics* — FRP is about *time-like* computations (behaviours and events indexed by time), while SAC is about *optimising DAG-structured computations* whose inputs *change between runs*.
@@ -191,7 +213,7 @@ Given that confirmed lineage, the theoretical positioning against SAC:
 
 **SAC-divergent traits (likely):**
 
-- *No memoized-sub-trace reuse*. Reactive runtimes in the Solid/Bonsai family don't typically splice cached sub-graphs the way SAC does after a `memo` hit. `createMemo` in Solid is *value* memoisation, not *trace* memoisation. This matters: SAC's complexity results are not transferable to a runtime that lacks adaptive memoization.
+- *No memoized-sub-trace reuse*. Reactive runtimes in the Solid/Bonsai family don't typically splice cached sub-graphs the way SAC does after a `memo` hit. `createMemo` in Solid is *value* memoisation, not *trace* memoisation (see "Worked example" in the Memoization section above for the side-by-side). The practical consequence: when an input changes, value-memo regimes recompute from scratch — they have no DDG fragment to splice. **SAC's complexity results don't transfer.** Where this matters is exactly the workloads pulse hasn't had to handle yet: incremental syntax highlighting, incremental layout, incremental query results, incremental tree diffing — anything where a large structured input changes at the edges and you want sub-linear update cost. For typical UI rendering, where each computed body is small and recomputation is cheap, value memo is fine — which is why Solid, React, Vue, and pulse all live in the same regime without an obvious shortfall. **If pulse ever needs sub-linear updates on algorithmic workloads, Adapton (Hammer et al., PLDI 2014) is the production-grade engineering reference** — it's the demand-driven SAC variant that carries trace memoisation all the way through.
 - *Continuous reactivity, not batch re-runs*. SAC is built around the idea that you *finish a run*, *change the input*, *re-run via change-propagation*. r3 (as we understand the spec from the existing docs in this repo) treats reactivity as a continuous process — there is no "epoch boundary" the way there is in SAC.
 - *Suspension / async*. SAC is synchronous: every modifiable has a value at all times. Pulse's `read` brand-checks, transitions, computed-body throw-suspension story (see the recent commit `f9364d1 feat(read)!: brand-aware`) puts r3 into a region SAC does not model. The way SAC would naturally extend into async is through algebraic-effect-style suspension handlers, and Ley-Wild/Acar's CPS compilation is the closest the academic literature gets.
 
