@@ -485,3 +485,55 @@ What pulse would lose by adopting React's encoding:
 - **Linear sync, ElectricSQL, or Agoric `E()`** — empirical dives that don't overlap with current threads.
 - **Concept dive: delimited continuations** — would tie together algebraic-effects (session 3) and SAC (session 10) at their shared mathematical foundation.
 - **CML, Erlang/OTP, Postgres MVCC** — still pending from earlier sessions.
+
+---
+
+## Session 11 — 2026-05-19 — Xilem + Druid (Linebender, Rust) async dive
+
+- Primary dive on **Xilem + Druid** — Linebender's Rust UI frameworks (current + predecessor). User-requested focus on **async coordination specifically**, not general UI framework architecture. Parallel-passes-then-merge methodology again; this is the 5th dive on that pattern (sessions 7, 8, 10, 11) and it's now the default for primary dives.
+- Promotes Xilem+Druid to the taxonomy as a new 🟢 row (didn't exist as a row before this session). Added between Bonsai (the IC-substrate kin) and the JS UI clusters.
+
+**Key findings (substantive, not just bookkeeping):**
+
+1. **Tasks-as-views is the headline mechanism.** Xilem's `task` and `worker` views ARE async tasks expressed as view-tree nodes. `ViewState = JoinHandle<()>`; `teardown` calls `.abort()`. **Cancellation is structural by view-tree shape — no user-held abort handle.** A future is owned by the view that mounted it; remove the view from the tree on the next rebuild, and the future is aborted at its next yield point. This is structurally novel in the research arc: most JS frameworks layer async separately on top of the reactive substrate; Xilem fuses async INTO the view tree by making tasks themselves first-class views.
+
+2. **The IC framing's actual payoff is *typed addresses*, not dataflow.** This is the most important conceptual finding of the session. Raph Levien's essay confirms IC inspiration explicitly: *"Xilem unapologetically contains at its core a lightweight change propagation engine."* But Linebender chose NOT to build on Adapton/Incremental as a substrate — the IC literature inspired the *framing*, not the substrate. What the IC literature DID give Xilem is the discipline of making every view node *addressable* (the `id-path: Arc<[ViewId]>`). And once you have address-by-id, async composes for free: a future just needs to hold the address. `MessageProxy<M>` = typed-message + id-path = "the waker IS the address." **This directly resolves the gap session 10's SAC dive flagged** ("classical SAC has no async story because node-as-thunk doesn't carry an address for wake-up"). The Linebender team arrived at this independently from the SAC literature, by engineering pressure — production-grade datapoint validating the theoretical finding.
+
+3. **No framework-level Suspense / Loading / transition / optimistic.** Xilem actively chose not to provide these primitives. Loading state is hand-written enum (`ImageState { NotRequested, Pending, Available(T) }`); rendering branches via `OneOf*` views. **The trade-off observation is cross-language design insight:** Rust's exhaustive pattern matching + type-checked enums make the manual approach *survivable*; in JS the same pattern would be too noisy. **The Loading-boundary primitive is more valuable in JS than in Rust** — a genuine design finding about language affordances changing what abstractions earn their complexity.
+
+4. **Druid → Xilem progression maps a 4-axis sharpening.** Druid had `ExtEventSink` (Send queue + selector, no Future support, no cancellation, manual bool+Either for loading). Xilem typed the messages (`MessageProxy<M>` vs Druid's untyped commands), made tasks into views (vs Druid's free-running threads), gained structural cancellation (vs Druid's "no cancellation; submit_command silently drops if target gone"), and adopted id-path routing (vs Druid's selector + delegate routing).
+
+5. **`xilem_web::memoized_await` shows the generation-counter pattern for the no-abort case.** On wasm where `spawn_local` cannot be aborted, Xilem uses a `generation: u64` counter on data change; old-generation results arriving back are recognised at the receiver and discarded as `MessageResult::Stale`. This is the same shape as pulse's transitions and Solid 2.x's identity-based stale-discard — the *correct fallback when you can't physically cancel*.
+
+6. **The `fork` primitive** is a clean abstraction: `fork(visible_view, alongside_view)` mounts a non-rendering view (`Element = NoElement`) for its lifecycle, without contributing to the rendered output. Structurally analogous to React Portals but for invisible side-effect nodes. Pulse-equivalent role is played by effects-within-an-owner; the design dimension of "explicit vs implicit mounting of long-running tasks" is real.
+
+**My pre-launch hypothesis was falsified by the source-reading.** Predicted "async is layered separately on the view-tree, not fused into it." Actual: Xilem makes async tasks INTO views; the view tree IS the cancellation discipline. **Documenting this as a methodology lesson:** predictions made from one language's idioms misread cross-language design choices. The parallel-passes pattern systematically guards against this — separate the empirical source-reading from the framing.
+
+**Taxonomy cell summary:**
+
+- Async state: app state by user convention; framework provides no container.
+- Conflict policy: last-write-wins with stale-message discard (`MessageResult::Stale` on vanished views; generation counter on web).
+- Cancellation: **structural via tokio `JoinHandle::abort()` on view teardown** — cleanest cancellation discipline in any taxonomy row.
+- Async representation: Rust `Future` + tokio + `MessageProxy<M>` (typed + id-path-addressed); tasks-as-views.
+- Isolation: none / shared mutable (single-threaded event loop serialises).
+- Atomicity: per-message.
+- Discipline: mostly user-side + framework-side message routing.
+- Reactive integration: coarse view-diff (re-execute `view()`, structural diff against previous).
+- Speculative-state isolation: **none.**
+- Dependent-dispatch: await-only.
+
+**Cross-references this dive established:**
+
+- [`bonsai-incremental.md`](./deep-dives/bonsai-incremental.md) (session 4) — both Bonsai and Xilem are IC-influenced, but they made opposite substrate choices: Bonsai uses Incremental (full IC engine); Xilem rejected Adapton/Incremental and uses typed virtual-DOM diff. Same theoretical inspiration; different production engineering.
+- [`self-adjusting-computation.md`](./deep-dives/self-adjusting-computation.md) (session 10) — Xilem's id-path-as-waker mechanism directly resolves the gap session 10 flagged ("classical SAC has no async story"). Validates session 10's theoretical claim with a production datapoint.
+- All JS framework dives — the cross-language design finding ("Loading primitive is more valuable in JS than in Rust") gives pulse's `<Loading>` boundary a *language-theoretic reason* to exist, not just a pragmatic one.
+
+### Threads to pick from for session 12
+
+- **Yjs / Automerge (CRDT lineage).** Still the strongest empirical-axis-verification candidate. Would round out the conflict-handling axis (CRDT-merge cell). Has been queued since session 8 and is overdue.
+- **Adapton dive.** Motivated by session 10 SAC; would test "what does the demand-driven IC variant look like in practice?" against Xilem's choice to NOT use it.
+- **Synthesis session on the three SAC-predicted candidate axes** (trace-stability sensitivity, continuation semantics of reads, memoisation-depth-as-three-way). Session 9 promoted two axes; this would be a smaller equivalent for the SAC-surfaced ones.
+- **Synthesis session on cross-language design findings.** Session 11 surfaced "Loading primitive is more valuable in JS than in Rust" — a genuine cross-language insight. There may be more of these latent in the existing dives that a synthesis session could surface.
+- **Iced + Slint** — other Rust UI frameworks outside Linebender's IC-influenced lineage. Would let us verify whether the structural-cancellation-via-Drop pattern is Linebender-specific or broader Rust-idiom.
+- **Linear sync, ElectricSQL, Agoric `E()`** — still pending.
+- **CML, Erlang/OTP, Postgres MVCC** — still pending; lower priority since the conflict-handling axis is now well-populated.
