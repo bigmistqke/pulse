@@ -105,7 +105,7 @@ Before adopting this decomposition as the design basis, three things need to be 
 
 - **(i)** Is (1) actually one unified primitive, or are scopes / versions / commits separable in a way I'm missing? The MVCC transaction analogy is convincing, but pulse isn't a database; maybe the reactive context changes things.
 - **(ii)** Is (3) — in-flight identity — distinct enough from owner-disposal to deserve being its own primitive, or is it just "the current state of an owner"? Solid's `_inFlight` identity check and React's lane identity are both finer-grained than pulse's owner-scope.
-- **(iii)** Are there mechanics in the table that *don't* compose from these four? `<Reveal>` is the suspicious one — it's coordination between *sibling* boundaries, which feels like it might need a fifth primitive about "boundary composition" rather than being expressible from the four.
+- ~~**(iii)** Are there mechanics in the table that *don't* compose from these four? `<Reveal>` is the suspicious one — it's coordination between *sibling* boundaries, which feels like it might need a fifth primitive about "boundary composition" rather than being expressible from the four.~~ **Resolved (session 13, see "Validation against `<Reveal>`" section below):** Reveal composes from the existing primitives without a fifth. What it requires is a *library-level design discipline*: boundaries are **cooperative by design** — they expose state as signals and accept external control via signals. Not a framework primitive.
 
 The next sub-decision in this document should probably be: validate or falsify this decomposition before committing to any of the Q1–Q9 specific positions. If the decomposition is right, several of the Qs collapse into "pick a library API for this composition pattern." If it's wrong, the Qs need to be answered each on their own terms.
 
@@ -328,7 +328,7 @@ refresh(userSignal)              // forces re-computation of userSignal's value
 
 - **No priority / lane** primitive. Dim 3 is left for later — pulse can decide whether to add `scope({ priority: 'low' })` once the rest of the design is concrete.
 - **No `useOptimistic`/`createOptimistic`-equivalent as a framework primitive.** Optimistic state is a userland composition over scope (as shown).
-- **No `<Reveal>`-equivalent yet.** The cross-boundary coordination remains an open question (see "Open questions about the decomposition itself" above).
+- **No `<Reveal>`-equivalent as a primitive.** Validated below as composing from the existing primitives + a cooperative boundary interface; library code, not a framework primitive.
 - **No replacement for the existing `signal` / `computed` / `effect` API.** Those stay. The sketch is purely additive — `scope()` is new; reads and writes get an optional scope parameter.
 
 ### Open questions about this sketch
@@ -385,6 +385,79 @@ The decision is now a pure function of the signals' bag states. Mount timing is 
 **Why this matters for the design conversation:** the current pulse design has an implicit assumption (boundaries outlive their signals) that the user has just identified as brittle. The node/value-bag framing fixes this not by adding new machinery but by **moving state to the primitive that semantically owns it**. The framing isn't just notation — it's a concrete improvement, and the same shape will likely fix other implicit-assumption fragilities once they're identified.
 
 This is structurally what Solid 2.x ended up doing — its signals track their own resolution state (`STATUS_UNINITIALIZED` / `STATUS_PENDING` flags on the node) — so any boundary that catches a `NotReadyError` can ask the source node "have you been initialized?" and get a consistent answer regardless of boundary lifecycle. Pulse arriving at the same per-signal-state pattern via the node/value-bag framing converges on the same engineering answer.
+
+### Validation against `<Reveal>` — does sibling-boundary coordination need a fifth primitive?
+
+Open question (iii) from above. Resolved during session 13: **no fifth primitive needed. `<Reveal>` composes from the existing primitives.** What it requires is a library-level design discipline — boundaries must be cooperative-by-design, exposing state as signals and accepting external control via signals.
+
+**What `<Reveal>` mechanically does** (from the Solid 2.x dive): coordinate sibling `<Loading>` boundaries with a policy (sequential / together / natural). Each child boundary registers as a "slot"; the `RevealController` toggles each slot's `_disabled` / `_collapsed` signals to delay when resolved boundaries become visible. Crucially: *"Reveal manipulates the visibility of already-resolved boundaries"* — it's a layer over already-resolved boundaries, not a coordination of pending ones.
+
+So `<Reveal>` requires three mechanical capabilities:
+1. Discover its child boundaries (context propagation through the JSX tree)
+2. Subscribe to each child boundary's "is-ready" state
+3. Write to each child boundary's "hold" state, based on policy
+
+**The cooperative-boundary interface.** For `<Reveal>` to compose, `<Loading>` must expose itself with this shape:
+
+```ts
+interface CooperativeBoundary<T> {
+  view: T                          // what the boundary renders
+  ready: Accessor<boolean>         // signal: am I ready to be released?
+  held: Setter<boolean>            // signal-setter: parent telling me to wait
+  // Optionally: a held-mode signal for distinguishing
+  // "stay on loading state" vs "collapse to nothing while held".
+}
+```
+
+That's a (signal-out, signal-in) shape — same pattern as every other composable pulse component. No framework extension required.
+
+**`<Reveal>` as ~15 lines of library code:**
+
+```ts
+function Reveal({ order, children }) {
+  // children: array of CooperativeBoundary instances
+  const policy = order ?? 'sequential'
+  const slots = children.map(boundary => ({
+    boundary,
+    held: signal(true),
+  }))
+
+  // Hold-policy as a reactive effect over children's ready states:
+  effect(() => {
+    if (policy === 'sequential') {
+      // Release slots in registration order; each waits for previous.
+      slots.forEach((s, i) => {
+        const allEarlierReady = slots.slice(0, i).every(p => p.boundary.ready())
+        setSignal(s.held, !allEarlierReady)
+      })
+    } else if (policy === 'together') {
+      // Hold all until all are ready, then release together.
+      const allReady = slots.every(s => s.boundary.ready())
+      slots.forEach(s => setSignal(s.held, !allReady))
+    } else { // natural
+      // Each releases on its own readiness; no inter-slot coordination.
+      slots.forEach(s => setSignal(s.held, false))
+    }
+  })
+
+  // Group's own ready signal (policy-dependent: sequential = first-ready,
+  // together = all-ready, natural = any-ready) for fractal composition.
+  const groupReady = computed(() => /* policy-dependent over slots */)
+  return { view: slots.map(s => s.boundary.view), ready: groupReady }
+}
+```
+
+**Fractal composition falls out for free.** `<Reveal>` returns the same `{view, ready}` shape as `<Loading>`. So a Reveal can be a child of another Reveal — the outer treats it as just another slot. Solid 2.x's nested-Reveal-composition property survives without a fifth primitive. The "boundary" abstraction generalizes to *anything with the cooperative interface* — Loading, Errored, Reveal, custom boundaries — they all compose because they share the (ready-signal, held-signal) shape.
+
+**One subtle finding worth flagging for boundary design.** Solid 2.x uses *two* signals per held slot (`_disabled` + `_collapsed`) because there are two distinct meanings:
+- `_disabled` = "you're held; render your loading state"
+- `_collapsed` = "you're held; render nothing at all"
+
+These are different render modes. If pulse's `<Loading>` exposes just one `held` signal, users lose the ability to distinguish "fade to nothing while waiting in line" from "show your loading state while waiting in line." So the cooperative interface probably needs either two held-mode signals or a single held signal with a mode parameter. The choice depends on whether collapsed-vs-disabled is a common UX need. This is a UX-led design question, not a framework-level one.
+
+**What this validation proves about the framing.** The framing is sufficient: every high-level abstraction in the comparison table (Loading, optimistic, transition, action, fork, Reveal) composes from the proposed primitives plus reasonable library-level design discipline. There's no operation in the comparison table that needs a primitive we don't have. **The "open question (iii)" from the decomposition section is now closed.**
+
+**What this validation tells pulse about library design.** The boundary primitive needs to be designed with cooperation in mind from the start. If `<Loading>` is opaque (no `ready` accessor, no `held` setter), then *no userland code can build `<Reveal>` over it* — and pulse would have to ship Reveal as a framework primitive after all. The cost of NOT designing for cooperation is that every coordination pattern becomes a new framework primitive. The benefit of designing for cooperation is that the framework stays small and coordination patterns multiply in userland. **This is the design discipline pulse needs to commit to** if it wants to keep the primitive set minimal.
 
 ---
 
