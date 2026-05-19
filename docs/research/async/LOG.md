@@ -592,3 +592,59 @@ Surfaced 2026-05-19 during reflection on session 11 (Xilem) and the cross-cuttin
 - **Adapton dive** (still queued) might be relevant for Dim 1 specifically — demand-driven IC is a different way of handling the internal-branching problem than gather-on-commit.
 
 **Documented in-dive.** Both [`react-modern.md`](./deep-dives/react-modern.md) and [`solid-2x.md`](./deep-dives/solid-2x.md) have "Problem space of transitions" sections added that map their framework's specific mechanisms to the four dimensions. Pulse and Xilem dives don't (yet) carry the framing because the relevant content lives in conversations and design speculation, not yet codified.
+
+---
+
+## Session 12 — 2026-05-19 — Svelte 5 `$derived(await ...)` + `<svelte:boundary>` + `fork()` async dive
+
+- Primary dive on **Svelte 5's experimental.async story** — user-requested as the contrast to React/Solid's elaborate transition machinery. Parallel-passes-then-merge methodology again (sixth dive on the pattern; now established default for primary dives).
+- Promotes Svelte 5 runes from ⚪ to 🟢 with substantial findings that refine three open research threads.
+
+**Key findings (real research, not just bookkeeping):**
+
+1. **The hypothesis was falsified.** Pre-launch we expected Svelte to "handle Dim 1 only and punt Dims 2/3/4." Source-reading falsified this: Svelte handles **Dim 1 (commit-together via `<svelte:boundary>` + `batch.#blocking_pending`)**, **Dim 2 (concurrent transitions via linked-list of `Batch` objects with `batch_values` time-travel snapshots)**, mostly punts **Dim 3 (no priority/lanes; only `OBSOLETE` per-derived + `STALE_REACTION` per-effect + explicit `fork()`)**, handles **Dim 4 (whole-batch merge when source-sets intersect; coarser than Solid's union-find lane merge but real machinery).** Svelte does NOT do "minimum transitional behavior" in the implementation sense — it does *concise user-facing API* over a *rich engine* (~800 lines of `batch.js`).
+
+2. **Critical refinement to pulse's "minimum primitives" design philosophy** (responding to the conversation from session 11–12 where the user articulated "the only way for complexity to be possible is that it is composed from simple principles"): Svelte 5 is partial evidence both for and against. **For:** the user-facing API is genuinely minimal (3 primitives: `<svelte:boundary>`, `pending` snippet, `$effect.pending()` + optional `fork()`). **Against:** the engine that backs them is ~800 LOC of intricate batch coordination. **The minimum applies to user-facing API, not the engine.** If pulse wants `<Loading>` and `use()` as composable userland primitives, the framework must either (a) not support concurrent transitions, or (b) include enough engine surface to make multi-batch coordination expressible from userland. Svelte chose (b) but hid the engine. Pulse's philosophical position (expose primitives) needs to grapple with this — exposing the engine is a much bigger ask than exposing 3 simple primitives.
+
+3. **New axis value surfaced — "versioned engine, unbounded observable batches".** Svelte 5's linked-list of `Batch` objects (each with `batch_values` snapshot map + write-version per source) sits between Replicache's "fixed-cardinality observable branches" (only main+sync) and full MVCC. Multiple concurrent batches commit independently if non-overlapping; merge into the earlier one if they touch shared sources. `fork()` is a flagged subtype with deeper isolation. Added as the 7th value on speculative-state-isolation axis (#9).
+
+4. **`async_derived` returns `Promise<Source<V>>` — the async-derived value is a regular signal cell.** No user-visible `.loading` / `.pending` / `.error` surface on the derived itself. Loading state is *only* observable via `<svelte:boundary>` + `$effect.pending()`. **This is a deliberate design choice** — refuse to surface per-value loading state; force users through the boundary primitive for all loading UI. Materially different from Solid's `createResource` (which exposes `.loading` / `.latest`) and pulse's `isPending(() => x())` (which lets the user check at the read site).
+
+5. **`OBSOLETE` / `STALE_REACTION` as a two-channel cancellation model.** Per-derived (re-run supersedes previous in-flight) vs per-effect (effect aborted). Composable pattern worth pulse considering as an explicit two-channel cancellation API.
+
+6. **Compiler transform `await a + b` → `(await $.save(a))() + b`** — this is how Svelte preserves dep-tracking across `await` points. The compiler captures `active_effect`, `active_reaction`, `component_context`, `current_batch` *before* the await and restores them on resume. Reads after the await still register as dependencies. Mechanically simpler than React's WIP-tree machinery for the same outcome (post-await reactivity).
+
+7. **`{#await}` template blocks are anomalous** relative to the runes machinery; in-source comments hint they may be retired in favor of `<svelte:boundary>` + `pending` snippet. Worth tracking but not load-bearing.
+
+8. **`fork()` (since 5.42)** is Svelte's closest analog to React's `useTransition` — explicit user-controlled speculative batch. `is_fork = true` means `source.v` is *not* written; speculative state stays in the batch's `current` map until `.commit()` or `.discard()`. Documented use case: preload on hover, commit on click, discard on leave. **Explicit, not inferred.**
+
+9. **`await_waterfall` warning is unique.** Svelte warns when sequential `$derived(await …)` declarations could have been parallelized. No other framework studied has this. Worth pulse considering as a diagnostic.
+
+**Sharpenings to taxonomy and cross-cutting framings:**
+
+- **Speculative-state isolation:** 7th value added (Svelte's unbounded observable batches). Cleanly between Replicache's fixed-cardinality and full MVCC.
+- **Conflict-handling policy (#2):** Svelte adds *two distinct mechanisms* — per-derived OBSOLETE/STALE_REACTION two-channel cancellation, and per-batch whole-batch merge on source-set intersection. Mechanically distinct from Solid's union-find lane merge (per-write vs per-batch granularity).
+- **Four branching dimensions framing:** Svelte's "handles Dim 1+2+4, punts Dim 3" maps cleanly. The cross-cutting thread in this LOG should be updated to add Svelte's column to the comparison table.
+
+**Methodology lessons:**
+
+- **Second methodology entry where parallel-passes caught a wrong prediction** (session 11 was the first — Xilem's "tasks-as-views"; session 12 is "Svelte handles only Dim 1"). Pattern: when the main session predicts something based on cross-language idioms or "what feels minimal," the agent's source-reading often reveals the actual implementation is more elaborate. **Reinforced commitment to parallel-passes-then-merge as the default for primary dives where mechanical accuracy matters.**
+- **The dive flagged its own confidence honestly** — line-number citations were avoided because the codebase is in active flux (multiple TODOs reference future restructuring). Function names and filenames cited instead. Good provenance discipline; worth following for actively-developed systems.
+- **No flagship Rich Harris essay on the async story exists** — the canonical material is `documentation/docs/03-template-syntax/19-await-expressions.md`. This is itself notable: a major feature shipped without a flagship blog post. May reflect Svelte's "the code is the documentation" tradition.
+
+**Open questions noted in the dive:**
+
+- `getAbortSignal` API not verified (referenced but not read from `runtime.js`).
+- SSR streaming planned but not in current main; would change Dim 1 atomicity.
+- `{#await}` deprecation path is hinted but not confirmed.
+- Memory bound of the batch linked list under pathological concurrent-transition loads not stress-tested.
+
+### Threads to pick from for session 13
+
+- **Cross-cutting thread update — Svelte added to the four-branching-dimensions comparison table.** Worth a synthesis pass to incorporate Svelte's mapping into the existing thread alongside React, Solid, pulse, Replicache, Xilem. Pure taxonomy work.
+- **Vue 3 Composition API + `<Suspense>` + async `setup`.** Now the obvious next UI-framework dive. Vue's `<Suspense>` shipped in 3.0 (years before React's `use(promise)`); how does its mechanism compare?
+- **Yjs / Automerge (CRDT lineage).** Still highest-priority axis-verification candidate; long overdue.
+- **Adapton dive.** Still motivated by session 10 (demand-driven SAC variant; closest production-grade IC system).
+- **A pulse-design-direction session.** The accumulating findings (especially Svelte's "minimum API ≠ minimum engine") are now substantive enough that a dedicated design-direction session — not a dive — could be valuable. Articulate what pulse's transitions story should actually look like in light of the research arc.
+- **Linear sync, ElectricSQL.** Long-pending.
+- **CML, Erlang/OTP, Postgres MVCC.** Long-pending; lower priority.
