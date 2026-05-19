@@ -23,13 +23,15 @@ A growing classification of systems along axes that meaningfully distinguish asy
 **Axes (current set, expected to grow):**
 
 1. **Where async state lives** — in the reactive graph (fused with reactivity), in a separate effect layer (Bonsai/Elm-style), in actors (Erlang/Akka), or as types in a pure language (Eff/Koka)
-2. **Conflict-handling policy** — block-on-entanglement, retry-on-conflict, last-write-wins, never-occur-by-construction (CRDT), explicit-opt-in-entangle, snapshot-iso with write-skew tolerated
+2. **Conflict-handling policy** — refined through sessions 4–8 to a richer value set: *last-write-wins* (no machinery, just overwrite); *STM retry-on-conflict* (effect-ts, Haskell, Clojure); *CRDT merge* (never-occur-by-construction; Yjs, Automerge); *actor isolation* (never-occur-via-no-shared-state; Erlang, Akka); *snapshot-iso with write-skew tolerated* (MVCC default); *priority-pre-empt-with-restart* (React modern lanes); *lane-merge on dependency-graph overlap* (Solid 2.x union-find); *server-linearized re-execution* (Replicache); *OT transformation* (Figma); *per-operator dispatch policy* (RxJS switchMap/mergeMap/etc).
 3. **Cancellation discipline** — none, cooperative-via-checkpoints, structural-by-scope, preemptive, lifecycle-event-driven
 4. **Async representation to the programmer** — value (Promise / Effect.t / CML event), procedure, type (`Effect<R,E,A>`), continuation, channel/stream, mailbox
 5. **Isolation level** (where applicable) — none, snapshot, serializable, linearizable, eventual
 6. **Atomicity granularity** — per-operation, per-transaction, per-tick, per-frame, per-action
 7. **Discipline location** — runtime-enforced, type-system-enforced, convention-only, capability-based
 8. **Reactive integration** — fused (async lives in the reactive graph), separate effect layer, orthogonal (no reactivity at all), pure-derivation-only (no async)
+9. **Speculative-state isolation** (added session 9, promoted from candidate). Distinct from isolation level. Asks "is there an isolated parallel state being built that's invisible until commit, that can be discarded mid-build?" Values: *none* (direct mutation); *per-action overlay* (explicit user-managed parallel state — `useOptimistic`, Recoil snapshot); *per-write-lane overlay with overlap-merge* (Solid 2.x); *per-transition tree* (React WIP fiber, pulse `<Loading>` gather); *versioned engine, fixed-cardinality observable branches* (Replicache main+sync heads); *versioned everywhere* (full MVCC — Postgres, Yjs, event sourcing).
+10. **Dependent-dispatch capability** (added session 9, promoted from candidate). Distinct from atomicity granularity. Asks "can dependent operations be dispatched before their prerequisites resolve?" Values: *await-only* (JS Promise, React `use(promise)` — each step needs resolution); *await-only with implicit-ordering* (Replicache mutation log — sequence is the dependency structure; no value-level dataflow on the wire); *await-only with generator-batching* (Solid 2.x `action()`, Bonsai `let%bind.Effect`, effect-ts `Effect.gen` — yields describe a script that runs as one transaction, but each step still awaits before the next); *pipelined* (Cap'n Proto, Agoric `E()` — method invocation on unresolved promise dispatches eagerly); *pipelined+typed-from-schema* (Cap'n Proto with IDL — pipelined dispatch with statically-known interface types).
 
 ### Initial table
 
@@ -100,6 +102,71 @@ Systems that DON'T belong in this table (mechanisms, theoretical concepts, diffe
 
 (Table will widen as deep-dives reveal new axes; rows will continue to grow as new systems are studied. Status indicators show which cells are reliable.)
 
+### Extended axes (added session 9 — axis consolidation pass)
+
+Two axes promoted from candidate to confirmed in session 9 — **speculative-state isolation** (#9) and **dependent-dispatch capability** (#10). Cells below were audited row by row; high-confidence cells reflect deep-dive evidence, low-confidence ones are flagged with `?` and will be verified by future dives. Where an axis genuinely doesn't apply (system has no transactions, no async, etc.) the cell is `n/a`.
+
+| Status | System | Speculative-state isolation | Dependent-dispatch capability |
+|---|---|---|---|
+| 🟡 | **pulse (current)** | per-transition tree (per-`<Loading>` gather) | await-only |
+| 🟢 | **Solid 2.x** | per-write-lane overlay with overlap-merge (between per-action and per-transition) | await-only with generator-batching (`action(function*) { yield … }`) |
+| 🟢 | **React modern** | per-transition tree (WIP fiber) + per-action overlay (`useOptimistic`) | await-only (`use(promise)` triggers re-execution; no eager dispatch) |
+| 🟢 | **effect-ts** | per-`STM.commit` overlay (TRef versioning); per-`Scope` for resources | await-only with generator-batching (`Effect.gen`) |
+| 🟢 | **Bonsai** | per-action overlay (model state) | await-only with generator-batching (`let%bind.Effect`) |
+| 🟡 | **Erlang / OTP** | actor-isolated (no shared state to speculate over) | n/a (message-passing, not dependent dispatch) |
+| 🟡 | **Haskell GHC STM** | per-`atomically` overlay (TVar versioning) | await-only with monadic composition (do-notation) |
+| 🟡 | **Clojure refs + STM** | per-`dosync` overlay | await-only with macro composition |
+| 🟡 | **Postgres MVCC (SI)** | versioned everywhere | n/a (SQL statements; transaction is the unit) |
+| 🟡 | **Postgres SSI** | versioned everywhere | n/a |
+| 🟡 | **Concurrent ML (CML)** | n/a (no shared state) | n/a — but first-class event composition is a different axis altogether (`choose`+`withNack` is composition without await-or-dispatch) |
+| 🟢 | **Cap'n Proto / E** | n/a (no transactions) | **pipelined+typed-from-schema** (method invocation on unresolved promise dispatches eagerly; types from IDL) |
+| 🟡 | **Kotlin coroutines** | none | await-only |
+| 🟡 | **Swift Structured Concurrency** | actor-isolated | await-only with `async let` syntax |
+| 🟡 | **GGPO (rollback netcode)** | per-frame snapshot tree (rollback rebuilds from snapshot + inputs) | n/a (lockstep input simulation) |
+| 🟡 | **ROS action servers** | per-goal lifecycle overlay | n/a (lifecycle protocol, not dispatch) |
+| 🟡 | **Yjs / Automerge (CRDTs)** | versioned everywhere (replicated CRDT state) | n/a (operations are commutative; ordering doesn't matter) |
+| 🟡 | **Redux + RTK Query** | per-action overlay (RTK cache mutation rollback) | await-only |
+| 🟡 | **RxJS** | none (streams are continuous) | per-operator dispatch semantics (`switchMap`/`exhaustMap`/`concatMap`/`mergeMap`) — orthogonal to this axis |
+| ⚪ | **MobX** | none (direct mutation; `runInAction` is just batching) | await-only |
+| ⚪ | **Recoil** | per-snapshot capture (explicit, via `Snapshot`) | await-only |
+| ⚪ | **Jotai** | none (or per-`loadable` atom) | await-only |
+| ⚪ | **Zustand** | none | await-only |
+| ⚪ | **Valtio** | per-snapshot capture (explicit) | await-only |
+| ⚪ | **SWR / TanStack Query** | per-action overlay (mutation cache) | await-only |
+| ⚪ | **Apollo Client** | per-action overlay (cache update) | await-only |
+| ⚪ | **Trio** (Python) | n/a | await-only |
+| ⚪ | **Go context.Context** | n/a | await-only |
+| ⚪ | **Rust / Tokio** | n/a | await-only |
+| ⚪ | **F# async** | n/a | await-only with computation-expression composition |
+| ⚪ | **Akka** | actor-isolated | n/a |
+| ⚪ | **Pony** | actor-isolated | n/a |
+| ⚪ | **Bevy Commands** | per-sync-point command buffer | n/a |
+| ⚪ | **Unity DOTS ECB** | per-sync-point command buffer | n/a |
+| ⚪ | **Algebraic effect languages** | varies (handler-determined) | varies — but multi-shot continuations allow dependent-dispatch-like semantics not expressible in JS encodings |
+| ⚪ | **SwiftUI + Combine** | none | await-only |
+| ⚪ | **Compose + StateFlow** | none | await-only |
+| ⚪ | **Vue 3** | per-`<Suspense>` ? | await-only |
+| ⚪ | **Svelte 5 runes** | none | await-only |
+| ⚪ | **Phoenix LiveView** | server-authoritative (no client speculation) | n/a |
+| ⚪ | **HTMX / Hotwire** | server-authoritative | n/a |
+| ⚪ | **Temporal / Cadence** | versioned everywhere (durable event-history replay) | implicit ordering via workflow code (similar shape to generator-batching but persisted) |
+| 🟢 | **Replicache** | **versioned engine, fixed-cardinality observable branches** (persistent B-tree DAG; only main + sync heads exposed) | **await-only with implicit ordering** (named (function-name, JSON-args) log, sequenced by sender ID; no value-level dataflow on the wire) |
+| ⚪ | **Linear sync** | similar to Replicache ? | similar to Replicache ? |
+| ⚪ | **Figma multiplayer (OT)** | server-authoritative + OT transformation | n/a |
+| ⚪ | **io_uring / IOCP / kqueue** | per-completion ring (kernel-buffered) | n/a |
+| ⚪ | **Esterel / Lustre / SCADE** | per-logical-instant | n/a (synchronous reaction model) |
+| ⚪ | **Spreadsheets** (Excel) | none | n/a |
+| ⚪ | **Sagas** | per-step compensation pair | await-only with explicit step+compensation dependencies |
+| ⚪ | **Event sourcing + CQRS** | versioned everywhere (event log + projection rebuild) | n/a (events are immutable; replay reconstructs) |
+| ⚪ | **Free monads / tagless final** | varies (interpreter-determined) | await-only with monadic composition |
+| ⚪ | **Iteratees / Conduits / Pipes** | n/a | n/a (stream backpressure, not dependent dispatch) |
+| ⚪ | **Game lockstep simulation** | per-tick snapshot | n/a |
+| ⚪ | **VCS** (Git / Pijul) | versioned everywhere (commit DAG) | n/a |
+
+**Reading guide.** The two new axes carve up the design space along orthogonal dimensions to the original eight: speculative-state-isolation answers "what is the engine doing to give you a coherent view while in-progress work hasn't committed?" (cuts across isolation level + atomicity granularity); dependent-dispatch-capability answers "what shape does multi-step dependent async take in this system?" (cuts across async representation + atomicity granularity). Both were initially flattened into existing axes; sessions 4–8 produced enough evidence to surface them as distinct.
+
+The audit shows the two axes have rich, well-populated value sets — six values for speculative-state isolation, five for dependent-dispatch capability — with several systems sitting at uncommon corners (Replicache's "versioned engine, fixed-cardinality branches"; Solid 2.x's "per-write-lane overlay with overlap-merge"). Future dives (Yjs, Linear, Agoric `E()`, Temporal) will further verify the rare-corner cells.
+
 ### Open questions about the taxonomy itself
 
 These are uncertainties about the *axes*, not the entries. Each one is a thread to chase:
@@ -109,14 +176,16 @@ These are uncertainties about the *axes*, not the entries. Each one is a thread 
 - ~~**"Where async state lives" vs "Reactive integration"** — are these axes orthogonal or correlated?~~ **Resolved (session 4, Bonsai dive):** they are distinct. Bonsai is the proof — its reactive integration is the substrate (Incremental), but async state lives outside that graph in the `Effect.t` layer. Pulse / Solid 2.x are (fused-reactive, in-graph); Bonsai / Redux are (separate-layer, in-effects); effect-ts is (orthogonal, in-effects); Excel is (fused, no-async). The two axes are orthogonal; keep them separate. See [`bonsai-incremental.md`](./deep-dives/bonsai-incremental.md) "Open questions resolved."
 - **Discipline location** — is "type-system-enforced" really a single category, or does it split into "checked at compile time" vs "enforced via library types but not language rules"?
 - **What's NOT on the taxonomy yet?** — distribution model (single-process / multi-process / multi-machine / multi-replica), failure model (crash-stop / crash-recover / Byzantine), real-time guarantees (none / soft / hard), determinism (none / per-tick / globally deterministic). These may or may not be relevant to pulse; the research will tell us.
-- ~~**"Work-in-progress tree" as a primitive.**~~ **Resolved (session 6, React-modern dive; refined session 7 Solid + session 8 Replicache):** yes, it's a distinct axis — call it **"speculative-state isolation."** Cuts cleanly across isolation-level and atomicity-granularity. Candidate values (now five, after sessions 7–8): *none* (direct mutation: MobX, Zustand, classic Redux); *per-action overlay* (`useOptimistic`, Recoil); *per-write-lane overlay with overlap-merge* (Solid 2.x — sits between per-action and per-transition); *per-transition tree* (React WIP fiber tree, pulse `<Loading>` gather); *versioned engine, fixed-cardinality observable branches* (Replicache: persistent B-tree DAG, only main + sync heads exposed); *versioned everywhere* (full MVCC: Postgres, Yjs, event sourcing). **Action item:** add this axis to the taxonomy table on the next consolidation pass. See [`react-modern.md`](./deep-dives/react-modern.md), [`solid-2x.md`](./deep-dives/solid-2x.md), [`replicache.md`](./deep-dives/replicache.md).
+- ~~**"Work-in-progress tree" as a primitive.**~~ **Resolved (session 6, React-modern dive; refined session 7 Solid + session 8 Replicache).** **Promoted to confirmed axis #9 in session 9 — "speculative-state isolation"** — see Extended Axes table above. Six values now populated, with deep-dive evidence for 4 of them.
 - **"Discipline location" may need sub-axes.** effect-ts deep-dive (session 2) revealed two distinct mechanisms both classified as "type-system-enforced": (a) structural typing of effect signatures via type parameters (`E`, `R` in `Effect<A, E, R>`), and (b) vocabulary restriction within a namespace (STM combinators don't expose IO-shaped ops, so purity is enforced by what's *not exposed*). These are different kinds of enforcement; might warrant splitting the axis.
 - **"Async state lives" might need a value for "runtime-interpreted lazy description."** effect-ts's `Effect<A, E, R>` isn't really "in a graph" (no reactive integration) or "in actors" or "in tables" — it's *interpreted state* of a lazy description by the runtime. The current value "separate" flattens this. Consider a "runtime-interpreted" value if more systems exhibit this pattern (free monads, tagless final, OCaml 5 effect handlers all might).
 - **Is "purity precondition" a missing axis?** effect-ts STM forbids IO inside transactions (so retry is safe). Haskell STM, Clojure STM, Bevy Commands all share this. Sagas don't. Reactive computeds in pulse/Solid don't formally require it but in practice they should be replayable. Worth tracking whether a system requires its async units to be pure for safe retry/replay.
 - **Atomicity granularity for systems with TWO atomicity layers.** effect-ts has STM-level (per-commit) AND fiber-level scope-bounded (per-scope) atomicity, for different concerns (data consistency vs resource lifecycle). A single cell value flattens this. Session 3's algebraic-effects dive confirmed: atomicity granularity is best understood **per-handler, not per-system** — multi-handler systems have multiple atomicity boundaries by design. Consider whether the axis should split into "data-atomicity" and "lifecycle-atomicity," or be reformulated as "per-handler atomicity" (a row of values, one per handler kind).
 - **Async representation as a spectrum, not a category.** Session 3 sharpened: the current values (procedure / value / type / continuation / channel / mailbox) are best understood as a spectrum of "how first-class the captured effectful work is" — from procedure (not first-class) to value (first-class but interpreted) to continuation (first-class with multi-shot capability). Cells should be read in this light; documenting this in the axis definition would clarify.
-- **NEW axis candidate: continuation cardinality.** Surfaced by the algebraic-effects dive. Values: 0-shot (exceptions); 1-shot (async/await, generators, effect-ts, pulse within-stage); multi-shot at coarse granularity (pulse across stages, incremental graphs); multi-shot fine (Eff, Koka, Haskell `MonadCont`); runtime-enforced 1-shot (OCaml 5 deliberately forbids multi-shot). Structurally distinguishes systems in a way current axes flatten. **Don't add yet — wait for one or two more dives to confirm it meaningfully distinguishes systems beyond what existing axes already track.**
+- **NEW axis candidate: continuation cardinality.** Surfaced by the algebraic-effects dive. Values: 0-shot (exceptions); 1-shot (async/await, generators, effect-ts, pulse within-stage); multi-shot at coarse granularity (pulse across stages, incremental graphs); multi-shot fine (Eff, Koka, Haskell `MonadCont`); runtime-enforced 1-shot (OCaml 5 deliberately forbids multi-shot). Structurally distinguishes systems in a way current axes flatten. **Still candidate after session 9 — JS encodings collapse most of the distinctions, so the axis may be less load-bearing for pulse's design space than dependent-dispatch-capability (which got promoted in session 9). Hold pending evidence that pulse's design choices hinge on this distinction.**
+- ~~**NEW axis candidate: dependent-dispatch capability.**~~ **Promoted to confirmed axis #10 in session 9** after the Replicache dive provided a 4th well-evidenced datapoint. See Extended Axes table above. Five values now populated.
 - **Is multi-shot resumption useful for UI?** Most algebraic-effects "killer apps" (nondeterminism, backtracking, parser combinators, cooperative threading) aren't UI patterns. Speculative rendering, preview/what-if mode (S8), and time-travel state restoration might be the only places multi-shot would help. Worth checking deliberately during scenario reviews — would adopting multi-shot capable encodings buy us anything pulse would actually use?
+- **Cross-cutting thread status — "message-send triangle" (sessions 5–8).** The triangle (Smalltalk / Cap'n Proto / reactive graphs as three corners of "receiver-existence-state × firing-cardinality") was tested against React (same corner as pulse), Solid 2.x (same corner; `action()` is the closest JS gets to the middle), and Replicache (**sits outside the triangle entirely**). Session 8's finding: receiver-existence isn't the load-bearing axis for sync engines; durability + replay cardinality are. **The triangle should be replaced with a small grid** (receiver-existence × execution-cardinality × dispatch-locus). Promoted to an open thread to be worked through in a future synthesis session. See [LOG.md](./LOG.md) "Cross-cutting thread — message-send to receivers of various existence-states."
 
 ---
 

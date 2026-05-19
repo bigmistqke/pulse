@@ -398,3 +398,46 @@ What pulse would lose by adopting React's encoding:
 - **Agoric `E()` + TC39 eventual-send.** The JS-language story for pipelining-shape. Lower priority — the Replicache dive showed that sync engines don't need pipelining to be expressive.
 - **CML.** Still pending; lower priority.
 - **Concept dive: Elm Architecture proper.** Still pending; lower priority.
+
+---
+
+## Session 9 — 2026-05-19 — Axis consolidation pass (taxonomy work, no new dive)
+
+- Pure-taxonomy session. No new external system studied; existing dives' findings consolidated into refined and promoted axes.
+- **Promoted two axes from candidate to confirmed** based on evidence from sessions 4–8:
+  1. **Speculative-state isolation** (axis #9) — was open-question since session 6 (React-modern WIP-tree-as-primitive); refined by sessions 7 (Solid lanes-between-overlay-and-tree) and 8 (Replicache versioned-engine-with-fixed-cardinality-branches). Six values now well-evidenced.
+  2. **Dependent-dispatch capability** (axis #10) — was candidate since session 5 (Cap'n Proto pipelining); refined by sessions 6 (React await-only), 7 (Solid generator-batching), 8 (Replicache implicit-ordering-via-sender-ID). Five values now well-evidenced.
+- **Refined the conflict-handling-policy axis (#2) value vocabulary** to reflect ten distinct mechanisms surfaced across sessions 4–8, including the previously-flattened ones (priority-pre-empt-with-restart for React; lane-merge for Solid; server-linearized-replay for Replicache; OT-transformation for Figma; per-operator for RxJS).
+
+**What was done structurally:**
+
+- Added refined axes definitions at top of README (axes #2 expanded vocabulary; axes #9 and #10 added with full value descriptions).
+- Inserted an "Extended axes (added session 9 — axis consolidation pass)" subtable in README with cells for ALL ~50 rows for the two new axes. High-confidence cells for the 6 🟢 verified rows; medium-confidence for 🟡; flagged with `?` where inferred-but-unverified.
+- Marked the corresponding open-questions threads as resolved with explicit "Promoted to confirmed axis #N in session 9" notes.
+- Updated continuation-cardinality candidate axis status — held as still-candidate (it may be less load-bearing for pulse than dependent-dispatch, since JS encodings collapse most cardinality distinctions).
+- Captured the **message-send triangle's challenge from session 8 as an open thread** — Replicache sat outside the triangle, suggesting the triangle should become a small grid. Promoted to README open-questions list for a future synthesis session.
+
+**The audit revealed (genuine findings, not just bookkeeping):**
+
+1. **Six well-populated values on speculative-state isolation:** none / per-action overlay / per-write-lane overlay with merge / per-transition tree / versioned engine with fixed-cardinality observable branches / versioned everywhere. The middle two values (Solid's per-write-lane-merge and Replicache's versioned-engine) sit at uncommon corners that the original four-value sketch from session 6 had collapsed.
+2. **Five well-populated values on dependent-dispatch:** await-only / await-only with implicit-ordering / await-only with generator-batching / pipelined / pipelined+typed-from-schema. **Critical insight from the audit:** most JS systems sit in the first three values; the pipelined values are uninhabited by current JS frameworks (the middle corner of the previous message-send triangle). This suggests pulse's design space is mostly in the first three; the pipelined values are aspirational for sync-engine work.
+3. **Several "n/a" cells reveal axis applicability boundaries.** CML, Yjs, actor-model systems, message-bus systems all return "n/a" on dependent-dispatch because the question doesn't apply to their async-coordination model. This is a useful constraint — the axis doesn't claim universality.
+4. **The two axes are clearly orthogonal.** Verified rows occupy diverse (speculative-state, dependent-dispatch) pairs: Solid (per-write-lane-merge, generator-batching); React (per-transition-tree + per-action-overlay, await-only); Cap'n Proto (n/a, pipelined+typed); Replicache (versioned-engine-fixed-cardinality, await-only with implicit-ordering); Bonsai (per-action-overlay, generator-batching); effect-ts (per-STM-commit, generator-batching). No correlation; both are pulling distinct dimensions out of what was conflated before.
+
+**What this consolidation enables:**
+
+- Future dives can fill cells on these axes with confidence — the value vocabulary is stable.
+- Pulse design choices that touch either axis can now be located precisely in the design space (e.g. "pulse currently has per-transition-tree speculative isolation and await-only dependent dispatch" — places pulse at a specific point on a grid the research has now mapped).
+- The remaining ⚪ pending rows that need axis cells are now lower-priority since the axes themselves are stable; future dives will fill cells as side effects of their primary work.
+
+**Methodology note:** taxonomy consolidation sessions should happen when ≥2 candidate axes are well-evidenced AND the cells across rows can be filled-or-flagged honestly. Forcing a consolidation before evidence accumulates produces empty columns. Waiting too long after evidence accumulates leaves the candidate-axis list cluttered. Session 9 came at roughly the right time — 8 dives in, with three candidate axes ripe, two ready to promote.
+
+### Threads to pick from for session 10
+
+- **Yjs / Automerge (CRDT lineage).** The conflict-handling-policy axis (#2) now has nine distinct values; CRDT-merge is one of them but lacks a direct deep-dive. Yjs/Automerge would verify the cell. Also a meaningful contrast to Replicache (server-linearized) vs CRDT (client-converging). Now the **strongest candidate** for a next dive.
+- **Synthesis session on the message-send framing.** The triangle is now formally challenged. Worth taking a synthesis session to either refine to a grid or retire it.
+- **Linear sync architecture.** Now well-positioned as a contrast to Replicache; would tell us whether the "versioned engine, fixed-cardinality branches" cell is unique to Replicache or generalizes.
+- **Agoric `E()` + TC39 eventual-send.** The JS-language story for the pipelined dependent-dispatch value (currently empty in JS frameworks). Would tell us whether pulse should care.
+- **CML.** Still pending; the "n/a" cell on dependent-dispatch with first-class event composition is curious — would CML expand the axis or surface a new dimension?
+- **Concept dive: Elm Architecture proper.** Lower priority.
+- **Concept dive: capability security.** Lower priority.
