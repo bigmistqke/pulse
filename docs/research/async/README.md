@@ -52,7 +52,7 @@ Cells filled from prior conversational notes; treat these as DRAFT until a deep-
 | **ROS action servers** | in action goals | n/a | lifecycle-event (preempt) | typed lifecycle value (Goal/Feedback/Result) | n/a | per-action goal | runtime-enforced (state machine) | n/a (robotics) |
 | **Yjs / Automerge (CRDTs)** | replicated CRDT | never-occur (CRDT merge always succeeds) | n/a | operation value | eventual | per-operation | runtime-enforced (CRDT semantics) | typically separate |
 | **Redux + RTK Query** | separate (cache slice) | last-write-wins (cache invalidation) | lifecycle-event (`abortController` per query) | procedure (thunk / mutation) | none | per-action dispatch | convention-only | separate effect layer |
-| **React `useEffect` + `useState`** | separate (effect runs outside render) | last-write-wins | structural via effect cleanup function | procedure | none | per-render | convention-only | separate (effects fire after render) |
+| **React (modern — Suspense / transitions / lanes / `use()` / `useOptimistic`)** | fused (suspended boundaries + work-in-progress trees in the fiber reconciler) | lane-based prioritization (high-priority updates pre-empt lower-priority WIP); not block/retry — instead "render the WIP tree concurrently, commit when ready" | structural — an in-progress WIP tree can be discarded if a higher-priority update arrives; `AbortController` integration for `use(promise)` cancellation paths | thrown Promise (Suspense) + `use(promise \| context)` (React 19 hook) + `startTransition(() => …)` dispatch + `useOptimistic` for sticky-overlay-with-revert | snapshot-ish (the current committed tree stays mounted while the WIP tree renders in background) | per-commit (the WIP tree commits atomically once Suspense resolves + everything settles) | runtime-enforced (the fiber reconciler enforces lane/priority/Suspense semantics) | fused (Suspense + transitions are reconciler-level; not a separate effect layer) |
 | **RxJS** | in observable streams | depends on operator (`switchMap` = replace, `exhaustMap` = ignore, `concatMap` = queue, `mergeMap` = parallel) | lifecycle-event (`Subscription.unsubscribe`) | stream value | n/a | per-emission | convention-only | separate (streams compose; UI subscribes) |
 
 (Table will widen as deep-dives reveal new axes; rows will grow as new systems are studied.)
@@ -66,6 +66,7 @@ These are uncertainties about the *axes*, not the entries. Each one is a thread 
 - **"Where async state lives" vs "Reactive integration"** — are these axes orthogonal or correlated? Most fused-reactive-integration systems have async state in the graph; most separate-effect-layer systems have it outside. But Bonsai-on-incremental is "separate effect layer over a reactive graph," which doesn't fit cleanly.
 - **Discipline location** — is "type-system-enforced" really a single category, or does it split into "checked at compile time" vs "enforced via library types but not language rules"?
 - **What's NOT on the taxonomy yet?** — distribution model (single-process / multi-process / multi-machine / multi-replica), failure model (crash-stop / crash-recover / Byzantine), real-time guarantees (none / soft / hard), determinism (none / per-tick / globally deterministic). These may or may not be relevant to pulse; the research will tell us.
+- **"Work-in-progress tree" as a primitive.** React's modern async story renders a parallel work-in-progress fiber tree for transitions, committing it atomically only when ready. Conceptually similar to MVCC's "the in-progress transaction has its own visible-only-to-itself state" or GGPO's "speculative-state-to-be-validated" but applied to UI rendering. Worth deciding whether this is a separate axis ("speculative WIP vs. direct mutation") or a special case of atomicity granularity. Likely a deep-dive on React's reconciler will clarify.
 
 ---
 
@@ -77,8 +78,10 @@ These are uncertainties about the *axes*, not the entries. Each one is a thread 
 - Drafted the framing — the constraint that "JS doesn't give us the primitives; everything is an encoding with trade-offs" is the central observation that shapes the rest.
 - Extracted an initial 8 axes by reviewing every system touched in prior sessions (Solid 2.x analysis, scenarios doc's prior-art survey, Bonsai/incremental discussion, async-specific traditions discussion).
 - Seeded the taxonomy table with 18 systems × 8 axes. Cells are draft until verified by deep-dives.
-- Surfaced 5 open questions about the axes themselves (effect rep continuum, atomicity-granularity confusion, state-location vs reactive-integration correlation, discipline subcategories, missing dimensions like distribution / failure / real-time).
+- Surfaced open questions about the axes themselves (effect rep continuum, atomicity-granularity confusion, state-location vs reactive-integration correlation, discipline subcategories, missing dimensions like distribution / failure / real-time).
 - Did NOT pick a first deep-dive. Reasoning: the axes themselves need at least one or two deep-dives to validate; jumping into specifics without confidence in the framework risks dead-end research. Next session should pick the first dive based on which axis is most ambiguous or which system is most foundational to multiple cells.
+
+**Mid-session correction.** Initial table had a row for "React `useEffect` + `useState`" — the pre-modern workaround pattern. User pushed back: that's not React's async answer; the actual primitive is the fiber reconciler's lane-based transitions + Suspense + `use()` + `useOptimistic`. Replaced the row accordingly. **Lesson for the rest of the research: when a system has multiple async approaches across versions, pick the one that the system actually claims as its primary primitive — not whatever was the historical workaround that people still use.** Surfaced a new open question about "work-in-progress tree as a primitive" (React's WIP fiber tree maps onto MVCC's in-progress-tx state and GGPO's speculative-state-to-validate; may warrant its own axis).
 
 #### Threads to pick from for the next session
 
@@ -112,6 +115,7 @@ Working list (will be checked off as completed):
 - [ ] GGPO + fighting-game rollback netcode
 - [ ] Yjs + Automerge (CRDT lineage) + Replicache
 - [ ] Solid 2.x lanes + entanglement (we have notes; deepen)
+- [ ] React modern async — fiber reconciler lanes + Suspense + transitions + `use()` + `useOptimistic`. Note: deliberately NOT framed as "useEffect + useState" (that's the pre-modern workaround); the actual primitive is the lane-based concurrent reconciler.
 - [ ] RxJS concurrency operators
 - [ ] Bevy ECS Commands + sync points
 - [ ] Sagas + event sourcing + outbox pattern
