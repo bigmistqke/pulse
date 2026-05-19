@@ -156,3 +156,42 @@ These were candidate first-deep-dives. Session 2 picked **effect-ts** (see entry
 - **Haskell GHC STM** — defer; effect-ts already characterizes the STM family well enough for current research stage.
 - **Concept dive: Elm Architecture proper.** Motivated by Bonsai dive — Bonsai is "Elm + reactive views"; the underlying Elm Architecture deserves its own concept treatment as a recurring design pattern (also Redux, RTK).
 - **Postgres MVCC + SSI.** Still pending; defer until transaction-primitive design becomes concrete.
+
+---
+
+## Session 5 — 2026-05-19 — Cap'n Proto + E promise pipelining (primary dive)
+
+- Conducted primary deep-dive: `deep-dives/capnproto-e-pipelining.md`. Covers E (the language that formalized the design) and Cap'n Proto (the industrial realization). Promotes the taxonomy row from 🟡 to 🟢.
+- Primary sources: capnproto.org/rpc.html spec; Kenton Varda's 2013 blog post (calculator benchmark, "4x longer" claim); OCapN CapTP wire-level draft spec; the canonical `calculator-client.c++` from the capnproto repo (via `gh api`). Practitioner sources: Spritely's Goblins docs + "What is CapTP?" post; Wikipedia for historical attribution (Liskov & Shrira 1988 + Miller/Tribble/Jellinghaus 1989 dual-invention story).
+- **Sourcing gap:** erights.org is offline (`ECONNREFUSED`); the original Mark Miller papers and `elib/distrib/pipeline.html` essay weren't reachable, and web.archive.org is blocked from this environment. The protocol-level primary sources were sufficient to characterize the mechanism precisely, but the foundational E literature is a real gap. Flagged in the dive's "Notes" for re-verification.
+
+**Key findings:**
+
+- The mechanism is precise: a pipelining promise is a typed handle on a future capability; **invoking a method on the unresolved promise dispatches eagerly to the eventual owner via the protocol's `answer-pos` / `desc:answer` machinery**. This is materially stronger than "promise is a value" — JS Promises are values but don't pipeline.
+- Kenton Varda's distinction is the central clarification: **"Promises alone are *not* what I meant by 'time travel'!"** Pipelining is the headline; first-class promises are necessary but insufficient.
+- The wire-level mechanics: the protocol uses an answer-table per RPC session; pipelined calls reference the not-yet-resolved answer-position via `desc:answer`; the server resolves the chain locally on dispatch. The whole dependent chain takes ONE network round-trip instead of N.
+- Historical dual-invention: Liskov & Shrira 1988 (Argus, "call-streams" — never shipped publicly) and Miller/Tribble/Jellinghaus ~1989 (Project Xanadu). E carried the idea forward; Cap'n Proto productized it ~25 years later. JS still doesn't have it natively despite the TC39 eventual-send proposal.
+- The capability-security framing (CapTP) is load-bearing for E but is overkill for a single-process reactive library. The pipelining *mechanism* is portable; the capability *discipline* mostly isn't relevant to pulse.
+
+**Sharpenings to the taxonomy:**
+
+1. **Async representation:** the values "first-class promise value" currently flatten two distinct designs: await-only promises (JS, classic Argus, Java futures) and pipelining promises (E, Cap'n Proto, Agoric `E()`). The headline difference is *method-invocation-on-unresolved*. Suggests a sub-distinction or a new axis.
+2. **Discipline location:** Cap'n Proto pipelining is type-safe because the *IDL schema* declares interface types, not because the language's type system enforces it. This is a third kind of "typed enforcement" distinct from effect-ts's structural typing and from STM's vocabulary restriction. Strengthens the case that discipline-location needs to split by *what kind of typing* (language types / schema types / runtime invariants).
+3. **Candidate axis: dependent-dispatch capability.** Values: none / explicit-then (requires resolved value) / pipelined (method on unresolved) / pipelined+typed (method on unresolved, type-checked from schema). Distinct from the session-3 continuation-cardinality candidate. **Hold pending more dives** — especially React modern, where `use()` and `<Suspense>` have related but mechanically different "before-resolution" semantics.
+
+**Open questions raised:**
+
+- Could pulse adopt proxy-based pipelined accessors? `use(signal<User>())` returning a proxy where `.name` is a pipelined dependent computation rather than a plain field-read. Conceptually parallel to Agoric's `E()` operator. Worth a design exploration AFTER the research surveys enough more systems.
+- Does pulse's `<Loading>` boundary share semantic structure with Cap'n Proto's promise-breakage propagation? Both treat downstream-of-an-unresolved-thing as inheriting unresolved-or-broken state. Possibly the same idea at different scales — worth checking precisely.
+- Is the IDL/schema layer the load-bearing piece? Without it, pipelining requires either runtime proxy reflection or unsafe ad-hoc dispatch. Suggests "schema-as-discipline-source" deserves taxonomy treatment.
+
+**Scenario coverage:** S1 partial (vat-serial), S2 partial, S3 **yes** (the canonical case — one round-trip for an arbitrary dependent chain with automatic error propagation), S4 yes, S5 n/a, S6 partial (drop-and-gc, no interruption guarantee), S7 partial, S8 partial.
+
+### Threads to pick from for session 6
+
+- **React modern (Suspense / lanes / `use()` / `useOptimistic`).** Now triply-motivated: (1) completes the fused-reactive triangulation alongside pulse and Solid 2.x; (2) resolves the WIP-tree-as-primitive question from session 1; (3) tests the new candidate "dependent-dispatch capability" axis against React's `use(promise)` machinery.
+- **Agoric `E()` operator + TC39 eventual-send proposal.** Now genuinely relevant: it's the JS pipelining encoding, would test whether proxy-based pipelined accessors could be a pulse direction.
+- **Replicache / Linear / Rocicorp Zero** as a focused sync-engine dive. The mutation queues ARE pipelined-dependent-calls in disguise; the pipelining session 5 framing should make this dive much sharper.
+- **CML** still pending. Would test the cancellation-discipline axis at a different design point.
+- **Concept dive: capability security (E, ocap principles).** Lower priority — the pipelining mechanism is portable without it, and the dive surfaced no strong reason to make capability discipline central to pulse.
+- **Concept dive: Elm Architecture proper.** Motivated by session 4 (Bonsai), still pending.

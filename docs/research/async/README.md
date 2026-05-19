@@ -54,7 +54,7 @@ Systems that DON'T belong in this table (mechanisms, theoretical concepts, diffe
 | 🟡 | **Postgres MVCC (default SI)** | in tables (versioned rows) | snapshot-iso, write-skew tolerated; explicit `FOR UPDATE` for opt-in entangle | n/a | SQL statement | snapshot | per-transaction (BEGIN/COMMIT) | runtime-enforced | n/a |
 | 🟡 | **Postgres SSI** | in tables | retry-on-conflict (dependency-cycle detection) | n/a | SQL statement | serializable | per-transaction | runtime-enforced | n/a |
 | 🟡 | **Concurrent ML (CML)** | n/a (no shared state assumed) | n/a | atomic via `choose`+`withNack` | first-class event value | n/a | per-`sync` of an event | runtime-enforced | orthogonal |
-| 🟡 | **Cap'n Proto / E language** | in distributed promises | n/a (single-writer per object) | lifecycle-event (cancel the cap) | first-class promise value (composable via pipelining) | n/a | per-RPC call | runtime-enforced | orthogonal |
+| 🟢 | **Cap'n Proto / E language** ([dive](./deep-dives/capnproto-e-pipelining.md)) | in distributed promises (answer-tables per session); object state in vats | n/a within a pipeline; vat-serial dispatch at resolution (last-message-wins per object) | lifecycle-event via reference-counting (`op:gc-answer`); no in-flight cancellation primitive | **first-class typed promise with method-invocation pipelining** (method on unresolved promise is the headline operation) | n/a (no transactions) | per-RPC call (vat-turn atomic); chain is NOT atomic as a whole | runtime-enforced via protocol; types from IDL schema | orthogonal |
 | 🟡 | **Kotlin coroutines** | in coroutines | n/a | structural-by-scope (`CoroutineScope` + `Job`) + cooperative checkpoints | suspend procedure | n/a | n/a | runtime + convention | typically separate; fused via `StateFlow` / `collectAsState` in Compose |
 | 🟡 | **Swift Structured Concurrency** | in actors | n/a (actor isolation prevents races) | structural-by-scope (`TaskGroup`) + cooperative | async procedure / `async let` value | actor-isolated | n/a | type-system-enforced (`Sendable`) | usually separate |
 | 🟡 | **GGPO (rollback netcode)** | in game-state snapshots | snapshot-replay-on-mismatch | per-frame (drop predicted future) | command/input value | snapshot | per-frame | runtime-enforced | n/a |
@@ -141,7 +141,7 @@ These promote a row from 🟡 / ⚪ to 🟢 (verified) by checking the table cel
 - [x] **Bonsai + Jane Street Incremental** ([dive](./deep-dives/bonsai-incremental.md), session 4) — "separate effect layer over reactive graph"; resolved the reactive-integration vs where-async-state-lives orthogonality question
 - [ ] **Erlang / OTP** (gen_server / gen_statem / supervision)
 - [ ] **Concurrent ML** — first-class events with `choose` / `withNack`
-- [ ] **Cap'n Proto + E language** — promise pipelining
+- [x] **Cap'n Proto + E language** ([dive](./deep-dives/capnproto-e-pipelining.md), session 5) — promise pipelining; raised candidate axis for "dependent-dispatch capability" (await-only vs pipelined vs pipelined+typed)
 - [ ] **Postgres MVCC + Serializable Snapshot Isolation** — longest-running production transaction implementation
 - [ ] **Haskell GHC STM**
 - [ ] **Clojure refs + STM** (`ensure` / `commute` distinction)
