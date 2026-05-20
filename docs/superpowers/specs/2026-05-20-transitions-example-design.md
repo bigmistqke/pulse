@@ -6,10 +6,11 @@
 ## Purpose
 
 Build an interactive example, `examples/transitions/`, that visualizes the four
-failure modes a transition mechanism exists to prevent. Pulse does not yet have
-proper transition support, so the example is expected to *exhibit the failures*
-today — it is a living demonstration of the problem space and, via its tests, a
-living regression spec that turns green once transitions land.
+failure modes a transition mechanism exists to prevent. Pulse handles Dim 1 (the
+`<Loading>` gather) but lacks the rest of proper transition support, so the
+example is expected to *exhibit most of the failures* today — FM1 already works;
+FM2–FM4 do not. It is a living demonstration of the problem space and, via its
+tests, a living regression spec that turns fully green once transitions land.
 
 The four failure modes are defined in
 [`docs/research/async/transitions-problem-space.md`](../../research/async/transitions-problem-space.md)
@@ -33,8 +34,11 @@ Settled during brainstorming:
   values. Deterministic and explorable.
 - **Color-coded scenario + event timeline** — each tab makes its fleeting
   failure observable through generation color-coding and a timestamped event log.
-- **Playwright tests asserting correct behavior** — red today, green once
-  transitions land. `pnpm test` for this example is intentionally red.
+- **Idiomatic pulse; Playwright tests as the oracle** — each tab uses pulse the
+  recommended way and shows pulse's *actual* behavior. Tests assert the
+  *correct* transition behavior. FM1 passes today (pulse already gathers via
+  `<Loading>`); FM2–FM4 are expected red until transitions land. The test
+  results, not prose, are the source of truth for what currently fails.
 
 ## Architecture & file layout
 
@@ -132,33 +136,38 @@ data in the new one. A torn frame is then literally a multi-colored pane.
 ### FM1 — Torn state (`tabs/torn-state.tsx`)
 
 Profile page: a `userId` signal feeding three async derivations — `profile`
-(header), `followers` (count), `posts` (list). A "Navigate alice → bob" button
-sets `userId`. Each of the three panes is tinted by which generation's data it
-currently shows (alice color vs bob color). Three latency sliders, one per
-derivation.
+(header), `followers` (count), `posts` (list), all inside one `<Loading>`
+boundary. A "Navigate alice → bob" button sets `userId`. Each of the three panes
+is tinted by which generation's data it currently shows. Three latency sliders.
 
-- **Failure:** the panes flip independently as their fetches resolve, so the page
-  is multi-colored for a window.
-- **Expected:** the page stays one color, holds, then flips to the other color
-  atomically — never mixed.
+This is the tab that demonstrates the quality pulse **already has**: the
+`<Loading>` boundary gathers the three pending fetches and commits them
+together. The page holds one generation's color, then flips to the other
+atomically — never multi-colored.
+
+- **Quality shown:** coherent atomic commit (Dim 1). Pulse passes this — the
+  test is green today.
+- **Without the gather:** the panes would flip independently and the page would
+  be multi-colored for a window; the tab's prose notes this is what `<Loading>`
+  prevents.
 
 ### FM2 — Spinner flash (`tabs/spinner-flash.tsx`)
 
-A `<Loading>`-wrapped pane fed by one async source. Two controls:
+A `<Loading>`-wrapped pane fed by one async source, with a "Refetch" button, a
+latency slider, and a **"Remount boundary"** button.
 
-1. a latency slider — crank it low to watch the fallback flash on/off within a
-   few frames;
-2. a **"Remount boundary"** button — exercises the genuine current pulse failure:
-   `<Loading>`'s `hasEverLoaded` is per-boundary closure state
-   (`src/dom/loading.ts:142`), so a refetch after the boundary is remounted is
-   wrongly treated as a first load and shows the fallback instead of holding
-   prior.
+The genuine current pulse failure is the late-mounted boundary: `<Loading>`'s
+`hasEverLoaded` is per-boundary closure state (`src/dom/loading.ts:142`), so a
+refetch after the boundary is remounted is wrongly treated as a first load and
+shows the fallback instead of holding prior — the spinner flashes when it should
+not. (A plain refetch without remount holds prior correctly, and first load
+showing `initial` is also correct; the remount is what exposes the bug.)
 
-The timeline logs fallback shown/hidden with its (tiny) duration.
+The timeline logs fallback shown/hidden with its duration.
 
-- **Failure:** the fallback flashes for sub-threshold work; after remount, a
-  refetch wrongly shows the fallback.
-- **Expected:** no fallback for sub-threshold work; hold-prior survives remount.
+- **Quality shown:** hold-prior across refetches, independent of boundary mount
+  timing. Pulse fails the remount case — test red today.
+- **Expected:** hold-prior survives a boundary remount.
 
 ### FM3 — Lost interactivity (`tabs/lost-interactivity.tsx`)
 
@@ -188,21 +197,21 @@ scenario already exercises Dim 2 (concurrent) and Dim 4 (state-overlap).
 ## Tests & the living-spec framing
 
 One Playwright spec per tab, each asserting the **correct** transition behavior.
-All are red today (no transition support) and turn green once transitions land:
+The tests are the oracle for what pulse currently does:
 
 - `torn-state.spec.ts` — during the transition, the DOM never has a frame with
-  mixed-generation panes.
-- `spinner-flash.spec.ts` — the fallback never appears for sub-threshold latency,
-  and hold-prior survives a boundary remount.
+  mixed-generation panes. **Green today** — pulse's `<Loading>` gather handles it.
+- `spinner-flash.spec.ts` — hold-prior survives a boundary remount (no fallback
+  flash). **Red today** — the `hasEverLoaded` fragility.
 - `lost-interactivity.spec.ts` — the input keeps focus and prior results stay
-  visible while a query is pending.
+  visible while a query is pending. **Red today** (expected) — no Dim 3 support.
 - `uncommittable-speculation.spec.ts` — a superseded toggle never commits stale
-  data.
+  data. **Red today** (expected) — no Dim 2/4 support.
 
-`package.json`'s `test` script runs them; the suite is intentionally red until
-transitions exist. The example README (and this spec) record that this is by
-design. Each tab's `<TabFrame>` also states Expected/Actual in prose, so the
-example self-documents even while the tests are red.
+`package.json`'s `test` script runs all four; FM2–FM4 are intentionally red
+until transitions land. The example README and this spec record that this is by
+design. Each tab's `<TabFrame>` states the quality and pulse's actual behavior
+in prose, so the example self-documents regardless of test state.
 
 ## Out of scope
 
