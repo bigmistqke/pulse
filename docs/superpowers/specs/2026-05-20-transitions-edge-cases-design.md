@@ -14,17 +14,19 @@ few gaps. The edge-case tabs correct this by demonstrating the genuine
 limitations — the unbuilt transition surface described in
 [`docs/research/async/pulse-design-direction.md`](../../research/async/pulse-design-direction.md).
 
-Each edge-case tab uses pulse **correctly** (not naive throwaway code) and still
-fails, because pulse lacks a specific primitive. Each ships a Playwright spec
-asserting the correct behavior; all four are expected **red** — living regression
-specs that turn green when pulse gains the corresponding capability.
+Each edge-case tab uses pulse **correctly** (not naive throwaway code) and
+exercises a genuine limitation — it probes pulse's machinery, not our own mock or
+our own naive code. Each ships a Playwright spec asserting the correct behavior;
+E2/E3/E4 are expected **red** — living regression specs that turn green when
+pulse gains the corresponding capability — and E1 is an oracle whose outcome
+probes whether pulse cancels superseded work.
 
 ## Scope decisions
 
 Settled during brainstorming:
 
-- **Four edge cases**, one tab each: E1 stale side effects, E2 torn across
-  boundaries, E3 optimistic update + rollback, E4 entanglement.
+- **Four edge cases**, one tab each: E1 superseded-work cancellation, E2 torn
+  across boundaries, E3 optimistic value clobbered by refetch, E4 entanglement.
 - **Input-arrival priority (Dim 3) is out of scope** — it is uniquely React's;
   Solid and Svelte both punt on it (per the research), so it is not a meaningful
   "pulse falls short" demonstration.
@@ -32,8 +34,9 @@ Settled during brainstorming:
   labelled groups: "the four failure modes" and "edge cases — where it falls
   short". 8 tabs total. The existing FM tabs are untouched.
 - **Idiomatic pulse; Playwright tests as the oracle** — each edge-case tab uses
-  pulse the recommended way; its spec asserts the correct behavior; all four are
-  expected red.
+  pulse the recommended way; its spec asserts the correct behavior. E2/E3/E4 are
+  expected red; E1 is a genuine oracle (its outcome depends on whether pulse
+  cancels superseded work, which is not known up front).
 - The approach reuses Approach A of the original example — the shared kernel and
   the `TabFrame` pattern — with one small kernel addition. No new architecture.
 
@@ -43,7 +46,7 @@ Four new tab files in `examples/transitions/src/tabs/`:
 
 - `stale-side-effects.tsx` (E1)
 - `torn-across-boundaries.tsx` (E2)
-- `optimistic-rollback.tsx` (E3)
+- `optimistic-clobbered.tsx` (E3)
 - `entanglement.tsx` (E4)
 
 Each follows the established tab pattern: a `createEventLog()`, one or more
@@ -61,32 +64,46 @@ the new tabs, exactly as the existing four do (each tab remounts on switch).
 
 ### Kernel change
 
-One small addition to `src/kernel/mock-async.ts`: `MockFetchOptions` gains an
-optional `fail?: boolean`. When `fail` is true, `mockFetch` rejects (after the
-latency delay) instead of resolving — E3 needs a failing server. The `resolve`
-event emitted on settle should indicate the rejection (e.g. label `"<name>
-(rejected)"`). `event-log.tsx`, `latency-controls.tsx`, and `tab-frame.tsx` are
-reused unchanged.
+One addition to `src/kernel/mock-async.ts`: `MockFetchOptions` gains an optional
+`signal?: AbortSignal`. When the signal aborts before the latency timer fires,
+`mockFetch` skips `produce()`, emits a `resolve` event labelled `"<name>
+(cancelled)"`, and rejects with an abort reason (`produce` must not run). This
+lets E1 test whether superseded work can be cancelled. `event-log.tsx`,
+`latency-controls.tsx`, and `tab-frame.tsx` are reused unchanged.
 
 ## The four edge-case tabs
 
 ### E1 — Stale side effects (`stale-side-effects.tsx`)
 
-A "save" scenario. A `sideEffectsRan` counter signal. The async work's `produce()`
-callback increments that counter — its side effect. A `version` signal keys the
-`save` derivation. The user clicks "save" twice in quick succession; the second
-supersedes the first.
+A "save" scenario that genuinely probes pulse: when a computed run is superseded,
+can it cancel its in-flight work?
 
-pulse discards the first result's *value* (the `suspendedOn !== p` guard in
-`computed.ts`), but **both `produce()` callbacks run to completion** — the
-superseded fetch is never cancelled — so `sideEffectsRan` ends at 2. The tab
-displays the committed result and the "side effects executed" counter; the
-discrepancy (1 committed, 2 executed) is the visualization.
+The `save` derivation is `computed(() => { … })` keyed on a `version` signal.
+Inside the computed body it creates an `AbortController`, registers
+`onCleanup(() => controller.abort())`, and calls `mockFetch({ signal:
+controller.signal, … })`. `mockFetch`'s `produce()` increments a
+`sideEffectsRan` counter — the observable side effect — but runs only if the
+signal has not aborted.
 
-- **Quality:** a superseded in-flight change should be cancellable — its work,
-  and any side effects, should not land.
-- **Fails:** the spec triggers a save, supersedes it, and asserts
-  `sideEffectsRan === 1`. It is 2 — pulse has no cancellation.
+The user clicks "save" twice in quick succession; the second bumps `version`, so
+the computed re-runs. **The open question is whether pulse runs the previous
+run's `onCleanup` when the computed re-runs** (superseding it), or only on owner
+disposal (unmount). If `onCleanup` fires on re-run, the first `AbortController`
+aborts, `produce()` is skipped, and `sideEffectsRan` stays at 1. If it fires only
+on unmount, the superseded fetch runs to completion and the counter reaches 2.
+The tab displays the committed result and the side-effect counter.
+
+This probes pulse's machinery — not the mock. The earlier-rejected version of
+this tab merely counted how often our own `mockFetch` called `produce()`, which
+is guaranteed by the mock; this version asks a real, unknown question about
+pulse's cleanup lifecycle.
+
+- **Quality:** when a computed run is superseded, its in-flight work should be
+  cancellable — `onCleanup` should fire on re-run so a wired `AbortController`
+  can abort it.
+- **Test (oracle):** trigger a save, supersede it, assert `sideEffectsRan === 1`.
+  Whether pulse passes depends on whether `onCleanup` fires on computed re-run —
+  genuinely unknown up front; the test is the oracle.
 
 ### E2 — Torn across boundaries (`torn-across-boundaries.tsx`)
 
@@ -109,39 +126,61 @@ boundaries.
   (the `<Reveal>` problem space). Contrasts FM1 (one boundary → atomic) with a
   *correct-usage* scenario that still tears.
 
-### E3 — Optimistic update + rollback (`optimistic-rollback.tsx`)
+### E3 — Optimistic value clobbered by refetch (`optimistic-clobbered.tsx`)
 
-A like button. A `liked` signal. Clicking optimistically writes `setLiked(want)`,
-then `await mockFetch({ fail })`; on rejection it reverts (`setLiked(!want)`). A
-"server fails" switch controls `fail`.
+A comment list. A `comments` signal holds the committed list. A "refresh" button
+re-fetches the canonical list from the server (`mockFetch`). An "add comment"
+button performs an optimistic insert: it writes the new comment into `comments`
+immediately, then awaits the server and replaces the optimistic entry with the
+saved one.
 
-The scenario runs the `concurrent-flows.md` S1 race: with the server failing, the
-user clicks like, then unlike, while both requests are in flight. The two reverts
-interleave and restore stale values, leaving `liked` contradicting the user's
-last click.
+The scenario runs `concurrent-flows.md` S7: the user adds a comment (the
+optimistic entry is now in `comments`), and *before the add's server response
+arrives* a refresh lands. The refresh's result is the canonical server list —
+which does not contain the not-yet-saved optimistic entry — so it overwrites
+`comments` and the optimistic comment **vanishes**, then reappears when the add's
+server response arrives. A visible flicker.
 
-- **Quality:** committed state must always reflect the user's latest intent;
-  optimistic writes and their reverts must not corrupt each other.
-- **Fails:** the spec runs the like/unlike race against a failing server and
-  asserts the final committed `liked` matches the last click. pulse has no
-  scoped-write / overlay primitive, so the rollback is hand-rolled and races.
+This is a genuine capability gap, not an ergonomics one: the optimistic overlay
+and the committed truth share **one signal cell**. The refresh is a legitimate
+write of canonical data; no functional updater can fix it, because the refresh
+genuinely does not know an optimistic overlay exists. Distinguishing the two
+requires a scoped / overlay write, which pulse does not have.
+
+- **Quality:** an optimistic write must survive a refetch of the underlying data
+  — the refetch sets committed truth; the optimistic entry stays as an overlay on
+  top until its own request settles.
+- **Fails:** the spec adds a comment, triggers a refresh while the add is in
+  flight, and asserts the optimistic comment stays visible throughout. It
+  vanishes when the refresh commits.
 
 ### E4 — Entanglement (`entanglement.tsx`)
 
-A shared record signal `{ a, b }`. Two buttons: "Action A" sets field `a` after
-an await; "Action B" sets field `b` after an await. Each action reads the current
-record at resolve time and writes back a spread (`{ ...current, a: newA }`).
+Two profile fields: a `displayName` signal and a `bio` signal. Two actions:
 
-Triggered concurrently, both actions capture the same base record; the
-later-resolving write clobbers the earlier one, so one field's update is **lost**
-(a lost update).
+- **Action A — "update bio":** reads `displayName` *now*, captures it, awaits a
+  server round-trip, then writes `bio` to a value derived from the captured name
+  (e.g. `"bio for " + capturedName`).
+- **Action B — "rename":** awaits a server round-trip, then writes `displayName`
+  to a new value.
 
-- **Quality:** two concurrent changes to disjoint fields of shared state must
-  both survive — the engine should detect the overlap (entanglement) or otherwise
-  prevent the lost update.
-- **Fails:** the spec triggers A and B concurrently and asserts the final record
-  carries *both* updates. One is lost — pulse has strict last-write-wins on
-  shared state, no entanglement (Dim 4).
+The scenario runs `concurrent-flows.md` S5: the user triggers Action A, then
+triggers Action B while A is still in flight. A captured the old `displayName`;
+B commits the new `displayName`; A then commits a `bio` that embeds the **old**
+name. Final committed state: a new display name with a bio that references the
+previous one — incoherent.
+
+This is the genuine entanglement gap, and no functional updater fixes it: the
+staleness is baked into A's *captured async input*, not its write. The only
+remedies are entanglement (A re-runs, or blocks, when `displayName` — which it
+read — is changed by B) or conflict detection at commit. pulse has neither
+(Dim 4).
+
+- **Quality:** if one in-flight action read a value that another action then
+  changed, the committed result must stay coherent — the reader should re-run,
+  block, or be flagged.
+- **Fails:** the spec triggers A, then B mid-flight, and asserts the final `bio`
+  references the current `displayName`. It references the stale one.
 
 ## Tests & the living-spec framing
 
@@ -149,17 +188,19 @@ One Playwright spec per new tab, each asserting the **correct** behavior — all
 four expected red:
 
 - `stale-side-effects.spec.ts` — after a superseded save, the side-effect counter
-  is `1`, not `2`.
+  is `1` (the superseded fetch was cancelled). **Oracle** — passes only if pulse
+  fires `onCleanup` on computed re-run.
 - `torn-across-boundaries.spec.ts` — during `navigate()`, the header and body
   boundaries never show different generations simultaneously.
-- `optimistic-rollback.spec.ts` — after the like/unlike race against a failing
-  server, committed `liked` matches the last click.
-- `entanglement.spec.ts` — after concurrent Action A + Action B, the final record
-  carries both updates.
+- `optimistic-clobbered.spec.ts` — an optimistic comment stays visible when a
+  refetch of the list lands before the add's server response.
+- `entanglement.spec.ts` — after Action A then Action B mid-flight, the final
+  `bio` references the current `displayName`.
 
-Full-suite outcome becomes **3 green / 5 red** — FM1/FM3/FM4 green; FM2 + E1–E4
-red. The existing `playwright.config.ts` (`workers: 1`, serial) already covers 8
-specs.
+Full-suite outcome is expected to be **3 green / 5 red** — FM1/FM3/FM4 green;
+FM2 + E2/E3/E4 red. E1 is an oracle: if pulse fires `onCleanup` on computed
+re-run it lands green (making the suite 4 green / 4 red). The existing
+`playwright.config.ts` (`workers: 1`, serial) already covers 8 specs.
 
 `README.md` gains an **"edge cases"** section listing E1–E4 (each: the quality,
 and what pulse does today) and the run note updates to the new 3-green/5-red
@@ -173,7 +214,8 @@ short — the unbuilt transition surface from `pulse-design-direction.md`.
 - **Fixing any of the gaps in pulse itself.** This is a demonstration; the red
   specs are living regression specs.
 - **Changes to the existing FM1–FM4 tabs.** They stay as built.
-- **New kernel modules.** Only the one `fail?: boolean` option on `mockFetch`.
+- **New kernel modules.** Only the one `signal?: AbortSignal` option on
+  `mockFetch`.
 
 ## References
 
@@ -184,5 +226,5 @@ short — the unbuilt transition surface from `pulse-design-direction.md`.
 - [`docs/research/async/pulse-design-direction.md`](../../research/async/pulse-design-direction.md)
   — the unbuilt transition surface the edge cases demonstrate.
 - [`docs/scenarios/concurrent-flows.md`](../../scenarios/concurrent-flows.md) —
-  scenarios S1 (E3) and S5 (E4).
+  scenarios S7 (E3) and S5 (E4).
 - `src/computed.ts` — the `suspendedOn !== p` stale-discard guard E1 exercises.
