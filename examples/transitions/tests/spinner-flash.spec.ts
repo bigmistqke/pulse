@@ -13,10 +13,22 @@ test.describe('FM2 — spinner flash', () => {
     await expect(page.locator('[data-testid="fallback"]')).toHaveCount(0)
     await expect(page.locator('[data-testid="payload"]')).toContainText('payload #1')
 
-    // Remount the boundary, then refetch. Correct behavior: still hold-prior,
-    // no fallback. This is the FM2 failure — red until transitions land.
+    // Remount the boundary, then refetch. Poll the whole post-remount window:
+    // the fallback must never appear (correct hold-prior behavior). This is the
+    // FM2 failure — expected red until pulse gains transition support.
     await page.locator('[data-testid="remount"]').click()
+    // wait for the boundary to come back, then refetch
+    await expect(page.locator('[data-testid="payload"]')).toBeVisible()
     await page.locator('[data-testid="refetch"]').click()
-    await expect(page.locator('[data-testid="fallback"]')).toHaveCount(0)
+    const sawFallback = await page.evaluate(async () => {
+      let saw = false
+      const deadline = performance.now() + 2500
+      while (performance.now() < deadline) {
+        if (document.querySelector('[data-testid="fallback"]')) saw = true
+        await new Promise((r) => setTimeout(r, 8))
+      }
+      return saw
+    })
+    expect(sawFallback).toBe(false)
   })
 })

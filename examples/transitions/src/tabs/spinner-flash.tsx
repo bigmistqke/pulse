@@ -26,7 +26,10 @@ export function SpinnerFlash() {
   function remount() {
     log.emit('action', 'remount boundary')
     setMounted(false)
-    setMounted(true)
+    setTimeout(() => {
+      log.emit('action', 'boundary re-mounted')
+      setMounted(true)
+    }, 30)
   }
 
   const boundary = () => (
