@@ -11,18 +11,18 @@ test.describe('FM2 — spinner flash', () => {
     // A plain refetch holds prior: the fallback must not appear.
     await page.locator('[data-testid="refetch"]').click()
     await expect(page.locator('[data-testid="fallback"]')).toHaveCount(0)
-    await expect(page.locator('[data-testid="payload"]')).toContainText('payload #1')
+    await expect(page.locator('[data-testid="payload"]')).toContainText('payload #1', { timeout: 4000 })
 
-    // Remount the boundary, then refetch. Poll the whole post-remount window:
-    // the fallback must never appear (correct hold-prior behavior). This is the
-    // FM2 failure — expected red until pulse gains transition support.
-    await page.locator('[data-testid="remount"]').click()
-    // wait for the boundary to come back, then refetch
-    await expect(page.locator('[data-testid="payload"]')).toBeVisible()
+    // Refetch, then remount the boundary WHILE that refetch is still in flight.
+    // The freshly-mounted boundary first observes `data` pending, so its
+    // per-boundary hasEverLoaded is false and it wrongly shows the fallback —
+    // though `data` has resolved before. Correct behavior is hold-prior. This
+    // assertion is the FM2 failure: red until pulse gains transition support.
     await page.locator('[data-testid="refetch"]').click()
+    await page.locator('[data-testid="remount"]').click()
     const sawFallback = await page.evaluate(async () => {
       let saw = false
-      const deadline = performance.now() + 2500
+      const deadline = performance.now() + 2000
       while (performance.now() < deadline) {
         if (document.querySelector('[data-testid="fallback"]')) saw = true
         await new Promise((r) => setTimeout(r, 8))
