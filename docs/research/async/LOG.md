@@ -686,3 +686,29 @@ What IS observable from the Solid 2.x dive (and stays cited in that dive) is tha
 **For pulse**, the comparable design question is whether to lean toward (a) React-style low-level primitives + library authors compose ergonomics, (b) Solid-2.x-style higher-level framework primitives, or (c) a third position the research arc hasn't yet identified. Conversation from session 11 articulated (a) as pulse's direction; conversation from session 12 (after the Svelte dive showed "minimum API + rich engine" is possible) refined that — *the minimum applies to user-facing API, not engine surface, and concurrent transitions are not free even with simple primitives.*
 
 This is design context for pulse, not a property of React or Solid; that's why it lives in LOG rather than in either dive.
+
+---
+
+## Session 15 — 2026-05-21 — Solid 2.x empirical verification (transitions example port)
+
+*(Sessions 13–14 — 2026-05-19/20 — opened `pulse-design-direction.md` and ran the grilling pass that produced decisions D1–D3; both fed that doc directly and have no standalone LOG entries. This is the next logged activity.)*
+
+- Ported the async-coordination failure-mode example to Solid 2.x as `examples/transitions-solid/` (`@solidjs/signals` 2.0.0-beta.9) and probed it at runtime via Playwright. The stated purpose was an exercise in understanding Solid's transitions; it doubled as a **runtime cross-check of the source-based Solid 2.x dive** (session 7, beta.13). The dive established the mechanism by reading source; this session established what the mechanism produces by observing it.
+
+**Key findings (folded into `deep-dives/solid-2x.md` as a new "Empirical verification" section):**
+
+1. **Action atomicity is per-action, not per-yield — corrected `solid-2x.md` Cell 6 and several prose spots.** A multi-step `action(function*)` does not commit once per `yield`; the whole generator is one transition that commits once, at completion. The session-7 synthesis claimed "three yields → three observable commits," which contradicted its own mechanical description (the action iterator sits in `ctx._actions` for the whole generator, gating `transitionComplete`). The runtime probe was decisive: a three-step action advanced the UI in one frame, idle → final. This is the headline correction.
+2. **The optimistic overlay reverts unconditionally at transition commit — even on success.** `createOptimistic(plainValue)` returns to its initial value at the end of every transition; a successful result persists only because the action also writes a separate committed source. The working pattern is the derived form `createOptimistic(() => committed())`. Confirms the dive's "Discipline location" claim and corrects looser phrasings (Q5, the "Atomicity" §).
+3. **`action()` rolls back only `createOptimistic` nodes on throw** — plain `createSignal` writes made before a throw still commit. "All-or-nothing on failure" is a property of optimistic state, not of `action()` itself.
+4. **Writes in the same synchronous tick as an `action()` call are swept into its transition** (same-clock `initTransition` reuse) — they need a `flush()` to commit independently.
+5. **`action()` has no built-in supersession of concurrent invocations** — each call is its own transition; superseding an in-flight action is the caller's job (generation guard or per-call `AbortController`).
+
+- **Cell bookkeeping.** `solid-2x.md` Cell 6 (Atomicity granularity) changed from "per-yield-step" to "per-action." It stays 🟢 — re-verified, this time empirically against beta.9 — rather than demoted to 🟡; the original cell drew a wrong conclusion from correct mechanics. Logged here per PROCESS.md step 5.
+- **Synthesis doc updated.** `pulse-design-direction.md`'s comparison table carried the same per-yield error in two cells ("Multi-step async composition" and "Specific oddities"); both corrected to match the dive.
+- **Methodology note.** Source-reading and runtime-probing are complementary, not redundant. The session-7 dive was rigorous source analysis and still shipped a wrong synthesis cell; a ten-line runtime probe caught it. For any system that is both open-source and runnable, a primary dive should include at least one runtime cross-check of its headline claims.
+
+### Threads to pick from for the next session
+
+- Re-verify the Solid findings against beta.13 (the version the original dive read) — confirm per-action atomicity holds across the beta range, not just beta.9.
+- FM2 in the ported example (`hold-prior` across a `<Loading>` boundary remount) stays red: a freshly-mounted boundary cannot hold prior content, and `latest()` does not rescue it. Worth a focused look at boundary-instance lifecycle vs. source lifetime.
+- Decide whether the runtime-cross-check convention above should be written into PROCESS.md / CONTEXT.md.

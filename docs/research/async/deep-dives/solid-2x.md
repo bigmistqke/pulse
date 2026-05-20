@@ -3,6 +3,7 @@
 **Type:** primary
 **Taxonomy row(s) affected:** "Solid 2.x"
 **Status after this dive:** 🟢 verified — cells revised based on direct source-code analysis
+**Amended:** 2026-05-21 — empirical verification against `@solidjs/signals` 2.0.0-beta.9 corrected the Atomicity cell (per-action, not per-yield) and sharpened the optimistic-overlay lifecycle; see "Empirical verification" below
 **Date:** 2026-05-19
 **Session:** 7
 **Scope note:** Source-code-based deep-dive on `@solidjs/signals` 2.0.0-beta.13 — the reactive runtime that powers Solid 2.x. The dive focuses on the async-coordination surface (transitions, optimistic lanes, the `NotReadyError` suspension protocol, `action()` generators, `<Loading>` / `<Errored>` / `<Reveal>`). Three research threads converge here: (1) sharpening the comparison to React modern (session 6); (2) testing the candidate **dependent-dispatch capability** axis (session 5); (3) testing the **message-send triangle** (cross-cutting thread). The cousin relationship — both `@solidjs/signals` and pulse's r3 stem from Ryan Carniato's reactive lineage — makes this the most architecturally adjacent system in the taxonomy. This dive was conducted as **two parallel passes** (one by the main session, one by a fresh background agent given only the source) and merged for accuracy; the merged document below uses the fresh dive's mechanical analysis as its spine.
@@ -119,7 +120,7 @@ A generator is a **resumable transition**. Synchronous batches between `yield`s 
 
 When the transition completes (`transitionComplete()` at `scheduler.ts:703-742` returns `true`): the queue is restored via `restoreQueues`, optimistic nodes are reverted via `resolveOptimisticNodes` (`scheduler.ts:186-200`, called from `finalizePureQueue` at `scheduler.ts:563-567`), entanglement-gate subs are rescheduled (`scheduler.ts:570-585`), and effects fire in render-then-user order (`scheduler.ts:382-385`).
 
-**The unit of atomicity is "one synchronous run between `yield`s of an action,"** not the whole action. An action with three yields produces three observable atomic commits (each `restoreTransition` calls `flush()` — `action.ts:13`). Optimistic overrides give the all-or-nothing illusion at the *visual* layer: they show through during the action and revert if it errors.
+**The unit of atomicity is the whole action**, not the run between `yield`s — *corrected 2026-05-21, see "Empirical verification" below.* Each `restoreTransition` does call `flush()` (`action.ts:13`), but the action iterator sits in `ctx._actions` for the entire generator, so `transitionComplete` cannot return `true` until the action finishes — every mid-action flush *stashes* rather than commits. Plain writes across all yields therefore commit once, when the generator returns. The only state visible mid-action is the optimistic overlay (`_overrideValue`) and pending status. Optimistic overrides give the all-or-nothing illusion at the *visual* layer; they revert at transition commit unconditionally (see "Discipline location"), so a successful result persists only because the action also wrote a committed source.
 
 ### Discipline location
 
@@ -179,8 +180,8 @@ Added after the session-12 cross-cutting synthesis ([LOG.md](../LOG.md#cross-cut
 **Evidence:** `setSignal` chooses between override and staged based on `isOptimistic` (`core.ts:917-960`); readers under a lane see the override (`core.ts:839-842`); entanglement gate replays for subs that read committed during optimistic recompute (`core.ts:849-860`); snapshot fields at `core.ts:89-90`, `constants.ts:18`, `core.ts:812-819` (mechanics not fully traced).
 
 ### 6. Atomicity granularity
-**Cell:** Per-yield-step within an action; per-transition outside actions. Each step's writes commit together at the next flush.
-**Evidence:** `restoreTransition` calls `flush()` after each step (`action.ts:11-16`); bare action without yields runs as one step = one commit; outside actions, multiple synchronous `setSignal` calls share an active `Transition` (`scheduler.ts:410-462`) or a microtask-scheduled flush (`scheduler.ts:221-225`).
+**Cell:** Per-action — the whole generator is one transition; every plain write across all yields commits together when it returns. Per-transition (per-flush) outside actions. *Corrected 2026-05-21 from "per-yield-step"; see "Empirical verification."*
+**Evidence:** The action iterator is held in `ctx._actions` for the whole generator (`action.ts`); `transitionComplete` (`scheduler.ts:703-742`) cannot return `true` while `_actions` is non-empty, so mid-action `restoreTransition`→`flush()` calls stash rather than commit. Runtime-probed against beta.9: a three-yield action committed exactly once. Outside actions, multiple synchronous `setSignal` calls share an active `Transition` (`scheduler.ts:410-462`) or a microtask-scheduled flush (`scheduler.ts:221-225`).
 
 ### 7. Discipline location
 **Cell:** Runtime, with dev-mode diagnostics emitting structured `emitDiagnostic` events. Some type-level branding (`Refreshable<T>` via `$REFRESH` symbol) for `refresh()` target safety.
@@ -210,7 +211,7 @@ Added after the session-12 cross-cutting synthesis ([LOG.md](../LOG.md#cross-cut
 - **Q2 (outside-tx read):** committed truth; can opt into snapshot reads via `_gatedSubs` when entering the lane's scope.
 - **Q3 (commit ordering with shared state):** union-find merge — overlapping lanes converge into one; last-write-wins on the merged lane.
 - **Q4 (default entanglement):** **automatic detection by structural overlap (d)** — lanes merge when they touch shared subscribers. The strongest entanglement detection in the taxonomy; no user declaration required.
-- **Q5 (overlay lifecycle):** revert on transition complete unless action returns successfully; auto-revert is the default.
+- **Q5 (overlay lifecycle):** the overlay reverts on transition complete *unconditionally* — including on success (verified 2026-05-21). A successful result persists only because the action also wrote a committed source the overlay falls back to; with `createOptimistic(plainValue)` and no backing write, the optimistic value is lost even on success.
 
 ---
 
@@ -220,7 +221,7 @@ Added after the session-12 cross-cutting synthesis ([LOG.md](../LOG.md#cross-cut
 
 1. **Lanes as a first-class graph coloring with union-find merge.** Merge-on-overlap means "two optimistic writes whose downstream graphs share a node" doesn't blow up. The parent/child non-merge exception (`lanes.ts:126-133`) is a subtle correctness point pulse would want to crib if it goes the optimistic-overlay route.
 2. **Throw-to-suspend with a source-pointer token (`NotReadyError.source`)** is a remarkably compact mechanism. Boundaries record *which* upstream is pending without explicit registration API — the boundary just inspects errors flowing through its `notify`. The cost: every async-tolerant read site has to be exception-safe; the re-throw vs catch rules are subtle (see `isPending`'s `try/catch` at `core.ts:1217-1222`).
-3. **Generator-as-transaction (`action()`)** is the most expressive thing in the runtime. Each `yield` becomes an atomic commit point; the transition stays alive across awaits; optimistic overrides revert if the generator throws. A beautiful encoding of "an async business operation with intermediate observable states" — and the implementation is only ~95 lines (`action.ts`).
+3. **Generator-as-transaction (`action()`)** is the most expressive thing in the runtime. The whole generator is one transition that stays alive across awaits and commits its plain writes once, at completion (not per-yield — see "Empirical verification"); optimistic overrides applied inside it show immediately and revert at commit. A compact encoding of "an async business operation that commits atomically" — and the implementation is only ~95 lines (`action.ts`).
 4. **Separate slots for `_value` / `_pendingValue` / `_overrideValue` / `_snapshotValue`** is what allows the system to express overlapping views of the same node simultaneously.
 5. **Reveal as a coordination layer above boundaries** — manipulates `_disabled` / `_collapsed` signals on the boundary queues. A "boundary scheduler," not a parallel mechanism. If loading boundaries are first-class objects, you can compose them externally. No other taxonomy row has this primitive.
 6. **`_gatedSubs` replay-at-commit mechanism** — explicit machinery for "this subscriber read a stale value during the optimistic phase; rerun it when we commit."
@@ -259,7 +260,7 @@ This is a refinement of the axis: there may be a fifth value — **"per-write la
 
 ### "Dependent-dispatch capability" axis (from session 5)
 
-**Solid 2.x is "await-only with generator-batching."** The generator action lets you write multi-step dependent work in a single value, but each step is still re-execution on resolve (not pipelined eager-dispatch). The yield-boundary is an *atomicity* primitive, not a *pre-resolve dispatch* primitive.
+**Solid 2.x is "await-only with generator-batching."** The generator action lets you write multi-step dependent work in a single value, but each step is still re-execution on resolve (not pipelined eager-dispatch). The yield-boundary is a *sequencing* boundary — it serialises the awaits and keeps one transition alive across them — not a per-step atomicity boundary (the whole action is one transition; see "Empirical verification") and not a *pre-resolve dispatch* primitive.
 
 Refines the axis values:
 - **none / await-only** — JS Promise, React `use(promise)`
@@ -295,6 +296,29 @@ Design-direction questions raised by the dive:
 
 ---
 
+## Empirical verification — porting the transitions example (2026-05-21)
+
+**Method.** The async-coordination failure-mode example was ported to Solid 2.x as `examples/transitions-solid/` (`@solidjs/signals` 2.0.0-beta.9) and its behavior probed at runtime via Playwright. This complements the source-reading dive above (conducted against beta.13): source-reading establishes the mechanism; runtime-probing establishes what the mechanism actually produces. Where the two disagree, a runtime probe on the exact version is decisive. Five findings — one corrects a cell, the rest sharpen or confirm existing claims.
+
+**Finding 1 — action atomicity is per-action, not per-yield. (Corrects "Atomicity" §, Cell 6.)**
+A multi-step `action(function* () { … yield fetchA(); setA(a); yield fetchB(); setB(b); … })` does *not* produce one observable commit per yield. Probed: a three-step checkout action writing a `phase` signal plus a per-step datum advanced the UI in a single step — `idle` straight to the final state, never the intermediate phases. A bare-value `yield 0` between steps did not force an intermediate commit either. This is what the dive's own mechanical description predicts and what the "Atomicity" §'s original synthesis contradicted: the action iterator sits in `ctx._actions` for the whole generator, and `transitionComplete` cannot return `true` while `_actions` is non-empty, so every mid-action `restoreTransition`→`flush()` *stashes* (writes stay in `_pendingValue`). The single commit happens when the generator returns. **The whole action is one atomic transition.** The contrast is direct: a plain `async` function doing the same three awaits commits each `setX` on its own flush (torn frames); the `action()` version commits all three in one frame.
+
+**Finding 2 — optimistic overlay reverts unconditionally at commit, even on success. (Confirms the "Discipline location" §; corrects Q5 and the "Atomicity" §.)**
+`createOptimistic(plainValue)` reverts to its *initial* value at the end of every transition, including a successful one. An optimistic comment added inside a *successful* `action()` vanished on commit when the list was a `createOptimistic([...])`. The overlay is never "kept on success"; it is always dropped. A successful result persists only because the action *also* wrote a separate committed source the overlay falls back to. The working pattern is the derived form: `const [view, setView] = createOptimistic(() => committed())` — `setView(...)` is the tentative overlay, the real commit goes to the `committed` signal. This matches the "Discipline location" § ("auto-revert … unconditionally") and corrects the looser phrasings elsewhere in the dive.
+
+**Finding 3 — action() does not roll back plain writes on throw; only optimistic nodes revert.**
+When an action's generator throws (e.g. a yielded request rejects), plain `createSignal` writes made *before* the throw still commit. Probed: a checkout where step 3 fails left steps 1 and 2's plain writes committed on screen. `resolveOptimisticNodes` reverts `createOptimistic` / `createOptimisticStore` nodes; it does not revert ordinary signals. "All-or-nothing on failure" is a property of optimistic state specifically, not of `action()` in general — consistent with S3's wording but worth stating explicitly, since the generator-as-transaction framing invites the stronger reading.
+
+**Finding 4 — writes in the same synchronous tick as an action() call are swept into its transition.**
+A plain signal write executed in the same event-handler tick *before* `someAction()` is captured by the action's transition (`initTransition` reuses the same-clock transition — see the `action.ts:58` note under "Notes / aside") and is committed or discarded with it. To commit such a write independently it must be flushed first — `flush()` between the write and the action call. Practical consequence for any "reset state, then start the workflow" handler.
+
+**Finding 5 — action() has no built-in supersession of concurrent invocations.**
+Identity-based stale-discard (`_inFlight !== result`, Cell 3) governs an async *computed* re-running. It does not govern two concurrent invocations of the same `action()` — each is its own transition and both run to completion. Superseding an in-flight action is the caller's responsibility: a generation guard, or an `AbortController` per call that a newer call aborts. Reinforces Cell 3 / S6 — cancellation plumbing is userland at the action layer too, not only at the fetch layer.
+
+**Bears on the application reading of Cell 5 / the "Atomicity" §.** A signal write that feeds an async computed is transition-scoped: until the transition commits, a read from outside it (e.g. the next event handler) returns the committed pre-transition value. Read-modify-write logic in handlers (`next = count() + 1`) therefore computes from stale truth while a transition is in flight — the functional updater form (`setCount(c => c + 1)`) is required. This is the dive's "render path runs against `_value`, the previously-committed state" seen from the application side; it was the original misconception the porting exercise set out to debug.
+
+---
+
 ## Cross-references
 
 - **Other deep-dives this connects to:**
@@ -308,7 +332,7 @@ Design-direction questions raised by the dive:
   - **Conflict-handling policy:** confirms "union-find lane merge with parent-child exception" as a distinct value, materially different from STM retry / MVCC snapshot / React pre-empt.
   - **Speculative-state isolation:** refines — Solid sits between "per-action overlay" and "per-transition tree." May need fifth axis value.
   - **Async representation:** confirms "procedure + throw-protocol-with-source-identity" as a coherent value; the source-identity wrinkle (carrying the offending node) is the precision pulse's `NotReadyError` should match.
-  - **Atomicity granularity:** "per-yield-step / per-transition" is the precise framing. Multi-layer atomicity (effect-ts STM+Scope; Solid yield+transition) may warrant its own value.
+  - **Atomicity granularity:** "per-action / per-transition" is the precise framing (corrected 2026-05-21 from "per-yield-step" — the whole action is one transition that commits once).
   - **Dependent-dispatch capability:** Solid is third datapoint for "await-only with generator batching"; promote axis from candidate to confirmed.
 
 - **Scenarios this dive addressed:** S1 yes-better-than-React, S2 yes, S3 yes-ergonomically, **S4 yes-better-than-React** (independent lanes don't batch), S5 partial-with-gated-subs-mechanism, S6 partial, **S7 yes-canonically with auto-revert** (createOptimistic + action), S8 partial.

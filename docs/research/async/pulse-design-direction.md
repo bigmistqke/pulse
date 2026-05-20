@@ -30,13 +30,13 @@ The current mechanical landscape for the three production frameworks pulse has t
 | **Cancellation discipline** | Structural via WIP discard for rendering; convention-only `AbortController` for I/O effects | Two channels: `OBSOLETE` (per-derived) + `STALE_REACTION` (per-effect); `getAbortSignal` for cooperative I/O abort | Identity-based stale-result discard via `_inFlight !== result`; structural for async iterables (cleanup w/ `.return()`); no auto fetch abort |
 | **Pending observability** | `isPending` from `useTransition` (internally implemented as `useOptimistic`); also `useDeferredValue` for "show old value during prep" | Only via `<svelte:boundary>` + `$effect.pending()`; **no per-value `.loading` on async-derived** | `isPending(() => x())` opt-in at read site; pipeline-OR walks dep graph; also `latest()` for boundary-bypass reads |
 | **Fallback display** | Throttled at ≥300ms before showing; doesn't hide already-revealed content during transitions | Offscreen `DocumentFragment` until `#pending_count == 0`; then swap | Per-`<Loading>` boundary; gather-on-commit |
-| **Multi-step async composition** | `await` inside Action body; multi-transition batched together (limit) | `await` inside `$derived`; compiler tracks deps across await via `capture`/`save` (`await a + b` → `(await $.save(a))() + b`) | `action(function*) { yield … }` — generator yields are atomic commit boundaries; transition stays alive across `await`s |
+| **Multi-step async composition** | `await` inside Action body; multi-transition batched together (limit) | `await` inside `$derived`; compiler tracks deps across await via `capture`/`save` (`await a + b` → `(await $.save(a))() + b`) | `action(function*) { yield … }` — the whole generator is one transition; plain writes commit once at completion, transition stays alive across `await`s |
 | **Dependent dispatch capability** | Await-only (`use(promise)` requires resolution; re-executes component on resolve) | Await-only with implicit ordering (sequential `$derived(await)` decls serialize; framework warns via `await_waterfall`) | Await-only with generator batching |
 | **Entanglement detection** | None (application models conflicts in user code, e.g. via `useOptimistic` revert-on-failure) | Whole-batch granularity (per-microtask-of-writes); coarser than Solid | Per-write granularity (union-find merge of dep graphs); automatic detection by structural overlap |
 | **Compiler involvement** | None (runtime-only) | Heavy: `experimental.async` flag; lowers `await` to `async_derived`/`flatten`/`save`; tracks deps across await | None for reactivity (runtime-only); compiler-style binding for JSX only |
 | **Engine surface (rough)** | Thousands of LOC: fiber reconciler + scheduler + Suspense machinery + Actions | ~800 lines for `batch.js` alone + boundary.js + async.js + deriveds.js | ~1300 lines: core.ts + scheduler.ts + lanes.ts + async.ts + boundaries.ts |
 | **User-facing API count** | ~7+ hooks | 4 primitives | ~8 primitives |
-| **Specific oddities worth knowing** | `useTransition`'s `isPending` is internally `useOptimistic`; Suspense fallback throttling | `{#await}` blocks are anomalous re: runes machinery (may be retired); async-derived value lives in a normal `Source` cell — no `.loading` accessor by design | `<Reveal>` with `sequential`/`together`/`natural` modes; `_gatedSubs` replay-at-commit for cross-transaction reads; three-layer atomicity (per-yield / per-transition / per-lane) |
+| **Specific oddities worth knowing** | `useTransition`'s `isPending` is internally `useOptimistic`; Suspense fallback throttling | `{#await}` blocks are anomalous re: runes machinery (may be retired); async-derived value lives in a normal `Source` cell — no `.loading` accessor by design | `<Reveal>` with `sequential`/`together`/`natural` modes; `_gatedSubs` replay-at-commit for cross-transaction reads; atomicity layers — per-transition (an action is one transition) / per-lane optimistic |
 
 **Three observations from this table** (worth carrying forward to the design decisions):
 
@@ -484,7 +484,65 @@ Open questions the research arc has surfaced. Each is a decision point. Marked a
 
 ## Decisions (so far)
 
-*Empty.* Populated as the session-13+ conversation produces concrete commitments. Each decision should include: which Q it addresses, the chosen position, the rationale (in pulse's terms), the trade-off accepted, and a pointer to the research evidence that informs it.
+Populated as the session-13+ conversation produces concrete commitments. Each
+decision records which question it addresses, the chosen position, the rationale,
+the trade-off accepted, and the evidence behind it.
+
+Decisions below were settled in the session-14 (2026-05-20) grilling pass that
+followed a pressure-test of the node/value-bag candidate against the four red
+edge-case tabs (`examples/transitions`) and scenarios S1–S8.
+
+### D1 — Commit-grouping primitive: body-style `action`, not handle-style `scope()`
+
+*Addresses Q8, Q9.* Async transitions group their writes via a body-style
+`action(function*)` — a generator-driven async body whose signal writes auto-group
+into one atomic commit. The handle-style `scope()` sketch (open writes with a
+threaded `tx`) is dropped. Sync grouping stays implicit: one scheduler batch of
+writes is one commit unit.
+
+Rationale: ambient auto-tagging inside the body removes handle-threading, whose
+omission is a silent opt-out (the same footgun CONTEXT.md flags for `use`); a
+delimited body is required for read-set tracking regardless, so a separate
+`scope()` is redundant; the shape mirrors `computed(function*)`.
+
+Trade-off: `action` must be a generator, not a plain `async function` — only a
+generator lets the driver restore the ambient action context across `await`
+points. Evidence: pressure-test finding 2 (the captured-local problem forces an
+action-shaped abstraction).
+
+### D2 — Action lifecycle: auto-commit on return, auto-discard on throw
+
+*Addresses Q9.* An `action` commits all its writes when the generator returns and
+discards them all if it throws. There is no explicit `commit()`/`discard()`.
+
+Rationale: the body's completion is the commit signal; a thrown step discards the
+whole write-set, giving S3 (multi-step partial failure) atomicity for free; no
+"forgot to commit" footgun. The explicit Apply/Cancel shape (S8 preview) needs
+no change to `action` and is deferred to a later decision.
+
+### D3 — No `optimistic` primitive; in-flight writes are held by the action
+
+*Addresses Q5, and concurrent-flows Q2.* There is no dedicated optimistic
+primitive. Optimistic UI is a use of `action`: a predicted `setX(...)` inside an
+action body is held in that action's write-set; the base signal cell is untouched
+until commit. A plain read of a signal resolves to its committed base value with
+any in-flight action's held write applied on top — so a prediction is visible
+with no ceremony, and a multi-step action's intermediate writes are visible
+mid-flight as pending state. `latest(() => x())` opts out to committed-only.
+Auto-discard (D2) reverts a failed prediction with no manual rollback.
+
+Rationale: the predict → settle → revert lifecycle is exactly what `action`
+already does; a dedicated primitive (`useOptimistic` / `createOptimistic` / an
+`optimistic` node) is redundant. Holding the write in the action rather than the
+shared base cell is what fixes E3 (a concurrent refetch of the base cell cannot
+collide with the prediction) and S1 (discard needs no remembered prior value, so
+interleaved rollbacks cannot corrupt state).
+
+Trade-off: a plain read is no longer "just the cell" — it resolves through
+in-flight held writes. This is benign (a no-op when no action is in flight; it is
+value resolution, not implicit suspension) but it is a real change to the read
+path in `signal.ts`. concurrent-flows Q2 is thereby answered "(b) latest active
+overlay."
 
 ---
 
