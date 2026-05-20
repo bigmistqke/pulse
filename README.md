@@ -1,7 +1,8 @@
 # pulse
 
-A small fine-grained reactive UI framework, built on the [`r3`](../r3) reactive
-core. Pulse is a **research vehicle** exploring an alternative to Solid 2.x's
+A small fine-grained reactive UI framework, built on the
+[`r3`](https://github.com/bigmistqke/r3) reactive core. Pulse is a **research
+vehicle** exploring an alternative to Solid 2.x's
 async direction — the same no-VDOM, compile-to-DOM foundation, with different
 choices about how async data, suspension, and atomic commit interact.
 
@@ -48,11 +49,14 @@ see [`docs/solid-2x-comparison.md`](./docs/solid-2x-comparison.md) and
 
 ## Setup
 
-Pulse is not published to npm yet. It lives in a pnpm workspace alongside its
-reactive core [`r3`](../r3) (expected as a sibling checkout). To work in the
-repo:
+Pulse is not published to npm yet — clone the repo and install. Its reactive
+core, [`r3`](https://github.com/bigmistqke/r3), is pulled automatically as a git
+dependency (built on install via a `prepare` script), so no sibling checkout is
+needed:
 
 ```sh
+git clone https://github.com/bigmistqke/pulse
+cd pulse
 pnpm install
 pnpm test        # vitest
 pnpm typecheck   # tsc --noEmit
@@ -280,5 +284,7 @@ them.
   (`on:`, `prop:`, `attr:`, `class:`, `style:`) with no heuristics — is
   pota-style.
 
-The reactive core, [`r3`](../r3), descends from milomg's `reactively` / `r2`
-research, shared with Solid's signals lineage.
+The reactive core is [`r3`](https://github.com/bigmistqke/r3) — a fork of
+[milomg/r3](https://github.com/milomg/r3) with a few framework-author exports
+added — descending from milomg's `reactively` / `r2` research, shared with
+Solid's signals lineage.

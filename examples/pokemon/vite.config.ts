@@ -10,7 +10,6 @@ export default defineConfig({
       'pulse/jsx-runtime': resolve(here, '../../src/jsx-runtime.ts'),
       'pulse/jsx-dev-runtime': resolve(here, '../../src/jsx-runtime.ts'),
       'pulse': resolve(here, '../../src/index.ts'),
-      'r3': resolve(here, '../../../r3/src/index.ts'),
     },
   },
   esbuild: {
