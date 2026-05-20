@@ -52,3 +52,9 @@ body {
 .evt-request .evt-kind { color: #e0b86b; }
 .evt-resolve .evt-kind { color: #6bd49a; }
 .evt-label { color: #d6d6dd; }
+
+.tab-group { display: flex; flex-direction: column; gap: 2px; margin-right: 16px; }
+.tab-group-label { font-size: 11px; text-transform: uppercase; color: #6f6f7c; }
+.tab-group-buttons { display: flex; gap: 4px; }
+.tabs { align-items: flex-start; }
+.counter { margin-top: 10px; color: #b6b6c0; }
