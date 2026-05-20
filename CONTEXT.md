@@ -22,7 +22,8 @@ whether to coordinate) is a useful alternative to Solid's *per-write opt-in*
 forgetting `use` silently opts out of coordination, but every coordination
 choice is visible at the call site and grep-able.
 
-For the full comparative analysis against Solid 2.x, see [`README.md`](./README.md).
+For the full comparative analysis against Solid 2.x, see
+[`docs/solid-2x-comparison.md`](./docs/solid-2x-comparison.md).
 
 ## Language
 
