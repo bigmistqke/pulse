@@ -1,0 +1,61 @@
+import { createMemo, createSignal, For, Loading } from 'solid-js'
+import { EventTimeline, createEventLog } from '../kernel/event-log'
+import { LatencyControls } from '../kernel/latency-controls'
+import { latencyKnob, mockFetch } from '../kernel/mock-async'
+import { TabFrame } from '../kernel/tab-frame'
+
+function resultsFor(query: string): string[] {
+  if (query === '') return []
+  return [1, 2, 3].map((n) => `${query} — result ${n}`)
+}
+
+export function LostInteractivity() {
+  const log = createEventLog()
+  const knob = latencyKnob('search', 500)
+  const [query, setQuery] = createSignal('')
+
+  const results = createMemo(async () => {
+    const q = query()
+    return mockFetch({
+      log, knob, generation: q || '(empty)',
+      produce: () => ({ query: q, items: resultsFor(q) }),
+    })
+  })
+
+  function onInput(e: Event) {
+    const q = (e.currentTarget as HTMLInputElement).value
+    log.emit('action', `type → "${q}"`, q || '(empty)')
+    setQuery(q)
+  }
+
+  const scenario = (
+    <div class="scenario">
+      <input
+        class="search-input"
+        data-testid="search"
+        placeholder="type a query…"
+        onInput={onInput}
+      />
+      <Loading fallback={<div class="list-card">type to search…</div>}>
+        <ul
+          class="list-card"
+          data-testid="results"
+          data-result-query={results().query}
+        >
+          <For each={results().items}>{(item) => <li>{item()}</li>}</For>
+        </ul>
+      </Loading>
+    </div>
+  )
+
+  return (
+    <TabFrame
+      title="FM3 · Lost interactivity"
+      quality="While async work is in flight the committed UI must stay live — the input stays focused, prior results stay visible, and a stale query's results never replace a newer query's."
+      actual="Solid 2.x <Loading> shows fallback while pending; prior results are not held visible."
+      scenario={scenario}
+      controls={<LatencyControls knobs={[knob]} />}
+      timeline={<EventTimeline log={log} />}
+    />
+  )
+}
