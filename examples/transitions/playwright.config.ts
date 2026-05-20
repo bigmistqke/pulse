@@ -2,6 +2,9 @@ import { defineConfig, devices } from '@playwright/test'
 
 export default defineConfig({
   testDir: './tests',
+  // Serial execution: the transition scenarios are timing-sensitive — tests
+  // drive latency sliders and poll the DOM during in-flight transitions, so
+  // parallel workers cause cross-test interference and flakiness.
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
