@@ -2,7 +2,7 @@
 
 A working research log on how programming has approached **async coordination**: cancellation, isolation, conflict resolution, optimistic UI, transactions, structured concurrency, effect handling. The goal is to inform pulse's API choices for transactions, actions, and the reactive/effect-layer boundary — but the research itself is broader than pulse, because the only way to make informed trade-offs is to understand the full design space.
 
-> **Process conventions for this research live in [`CONTEXT.md`](./CONTEXT.md).** Read it before contributing — it covers sourcing discipline, status-indicator rules, when axes can be added, what each deep-dive should contain, and the anti-patterns we've already learned to avoid.
+> **Process conventions live in [`PROCESS.md`](./PROCESS.md)** — sourcing discipline, status-indicator rules, when axes can be added, what each deep-dive should contain, the anti-patterns we've already learned to avoid. **Defined terms live in the lexicon, [`CONTEXT.md`](./CONTEXT.md)** — the four dimensions, the failure modes, the research vocabulary. Read both before contributing.
 
 ## Framing
 
@@ -187,7 +187,7 @@ These are uncertainties about the *axes*, not the entries. Each one is a thread 
 - **NEW axis candidate: continuation cardinality.** Surfaced by the algebraic-effects dive. Values: 0-shot (exceptions); 1-shot (async/await, generators, effect-ts, pulse within-stage); multi-shot at coarse granularity (pulse across stages, incremental graphs); multi-shot fine (Eff, Koka, Haskell `MonadCont`); runtime-enforced 1-shot (OCaml 5 deliberately forbids multi-shot). Structurally distinguishes systems in a way current axes flatten. **Still candidate after session 9 — JS encodings collapse most of the distinctions, so the axis may be less load-bearing for pulse's design space than dependent-dispatch-capability (which got promoted in session 9). Hold pending evidence that pulse's design choices hinge on this distinction.**
 - ~~**NEW axis candidate: dependent-dispatch capability.**~~ **Promoted to confirmed axis #10 in session 9** after the Replicache dive provided a 4th well-evidenced datapoint. See Extended Axes table above. Five values now populated.
 - **Is multi-shot resumption useful for UI?** Most algebraic-effects "killer apps" (nondeterminism, backtracking, parser combinators, cooperative threading) aren't UI patterns. Speculative rendering, preview/what-if mode (S8), and time-travel state restoration might be the only places multi-shot would help. Worth checking deliberately during scenario reviews — would adopting multi-shot capable encodings buy us anything pulse would actually use?
-- **Cross-cutting thread status — "message-send triangle" (sessions 5–8).** The triangle (Smalltalk / Cap'n Proto / reactive graphs as three corners of "receiver-existence-state × firing-cardinality") was tested against React (same corner as pulse), Solid 2.x (same corner; `action()` is the closest JS gets to the middle), and Replicache (**sits outside the triangle entirely**). Session 8's finding: receiver-existence isn't the load-bearing axis for sync engines; durability + replay cardinality are. **The triangle should be replaced with a small grid** (receiver-existence × execution-cardinality × dispatch-locus). Promoted to an open thread to be worked through in a future synthesis session. See [LOG.md](./LOG.md) "Cross-cutting thread — message-send to receivers of various existence-states."
+- **Cross-cutting thread status — "message-send triangle" (sessions 5–8).** The triangle (Smalltalk / Cap'n Proto / reactive graphs as three corners of "receiver-existence-state × firing-cardinality") was tested against React (same corner as pulse), Solid 2.x (same corner; `action()` is the closest JS gets to the middle), and Replicache (**sits outside the triangle entirely**). Session 8's finding: receiver-existence isn't the load-bearing axis for sync engines; durability + replay cardinality are. **The triangle should be replaced with a small grid** (receiver-existence × execution-cardinality × dispatch-locus). Promoted to an open thread to be worked through in a future synthesis session. See [LOG.md](./LOG.md#cross-cutting-thread--message-send-to-receivers-of-various-existence-states) "Cross-cutting thread — message-send to receivers of various existence-states."
 
 ---
 
@@ -284,6 +284,10 @@ These aren't systems but frameworks for thinking about systems. Each one changes
 
 ## See also
 
+- `./PROCESS.md` — how the research is conducted: cadence, sourcing discipline, status indicators, taxonomy maintenance, anti-patterns. (Formerly `CONTEXT.md`.)
+- `./CONTEXT.md` — the research lexicon: the four dimensions, the failure modes, precise vocabulary.
+- `./transitions-problem-space.md` — the four failure modes of transitions, worked through with concrete examples.
+- `./pulse-design-direction.md` — working synthesis of the research into pulse design positions.
 - `../scenarios/concurrent-flows.md` — the scenario / policy-question / pain-point doc that motivates this research. Scenarios S1–S8 there are the **acceptance tests** any candidate async strategy needs to address. Policy questions Q1–Q5 are the **decision points** the research informs.
 - `../superpowers/specs/2026-05-17-pulse-transitions-redesign.md` — the design history that led to pulse's current async surface (Plans A/B/C).
 - `../../README.md` (root) — comparative analysis against Solid 2.x; should be revisited and revised as the research matures.
@@ -293,10 +297,6 @@ These aren't systems but frameworks for thinking about systems. Each one changes
 
 ## Working glossary
 
-Terms used loosely in conversation; precise definitions belong in deep-dives. Tracked here so we don't drift.
-
-- **Encoding** — a JS implementation that approximates a primitive from another language/system. Always lossy.
-- **Reactive integration** (axis) — whether async work is part of the reactive computation graph or runs alongside it.
-- **Discipline location** (axis) — where the rules are enforced: runtime, type system, programmer convention, or capability system.
-- **Scenario** — a concrete user/dev situation that any async strategy needs to handle correctly. See `../scenarios/concurrent-flows.md`.
-- **Policy question** — a design decision a transaction primitive needs to answer explicitly. See same.
+The research lexicon — vocabulary, the four dimensions, the failure modes — lives
+in [`CONTEXT.md`](./CONTEXT.md). Definitions are maintained there so the docs
+reference one source rather than drifting.

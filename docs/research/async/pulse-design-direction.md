@@ -1,6 +1,6 @@
 # Pulse design direction — async coordination
 
-**Status:** working synthesis, not a decided spec. Populated incrementally as the research-arc findings get translated into pulse design positions. Lives between the research artifacts (`README.md` taxonomy, `deep-dives/*.md`, `LOG.md` chronology) and concrete implementation specs (`docs/superpowers/specs/...-design.md`). Per CONTEXT.md's sourcing-discipline anti-pattern: pulse-specific design context goes here, not into the per-system dives.
+**Status:** working synthesis, not a decided spec. Populated incrementally as the research-arc findings get translated into pulse design positions. Lives between the research artifacts (`README.md` taxonomy, `deep-dives/*.md`, `LOG.md` chronology) and concrete implementation specs (`docs/superpowers/specs/...-design.md`). Per PROCESS.md's sourcing-discipline anti-pattern: pulse-specific design context goes here, not into the per-system dives.
 
 **Origin:** opened session 13 (2026-05-19) after sessions 1–12 produced enough evidence to start articulating pulse's positions concretely. The dives' "what pulse can learn" sections were durable observations about each studied system; this document is the *synthesis across them* and the *decisions pulse takes in response*.
 
@@ -8,7 +8,7 @@
 
 ## What the research arc has shown
 
-Compressed to one paragraph for context. Transitions are coordination machinery for **continuous-observation + concurrent-intent** workloads (UI is the canonical instance; also GGPO rollback, sync engines with optimistic+rebase, realtime collab). They branch in four distinct dimensions ([LOG.md](./LOG.md) "Transitions branch in four dimensions"): internal (tree of dependent async in one transition), concurrent (multiple in flight), input-arrival (new input during transition), state-overlap (transitions touching shared state). Production frameworks differ in which dimensions they handle and how, AND in whether their user-facing API surface is minimal (Svelte) or proliferating (React). Pulse's articulated design philosophy (sessions 11–12 conversations) is **user-visible primitives composed in userland** — distinct from React's "low-level API + library-authors compose ergonomics" and Solid's "framework-provided higher-level primitives" — but Svelte's evidence (sessions 12) showed that "minimum API" does NOT entail "minimum engine"; concurrent transitions cost engine surface regardless of how small the user API is.
+Compressed to one paragraph for context. Transitions are coordination machinery for **continuous-observation + concurrent-intent** workloads (UI is the canonical instance; also GGPO rollback, sync engines with optimistic+rebase, realtime collab). They branch in four distinct dimensions — Dim 1 internal (tree of dependent async in one transition), Dim 2 concurrent (multiple in flight), Dim 3 input-arrival (new input during transition), Dim 4 state-overlap (transitions touching shared state); canonical definitions in the lexicon, [CONTEXT.md](./CONTEXT.md), framing originated in the [LOG.md](./LOG.md#cross-cutting-thread--transitions-branch-in-four-dimensions) thread "Transitions branch in four dimensions". Production frameworks differ in which dimensions they handle and how, AND in whether their user-facing API surface is minimal (Svelte) or proliferating (React). Pulse's articulated design philosophy (sessions 11–12 conversations) is **user-visible primitives composed in userland** — distinct from React's "low-level API + library-authors compose ergonomics" and Solid's "framework-provided higher-level primitives" — but Svelte's evidence (sessions 12) showed that "minimum API" does NOT entail "minimum engine"; concurrent transitions cost engine surface regardless of how small the user API is.
 
 ---
 
@@ -491,6 +491,8 @@ Open questions the research arc has surfaced. Each is a decision point. Marked a
 ## Cross-references
 
 - **Research arc:** [`README.md`](./README.md) taxonomy + [`LOG.md`](./LOG.md) chronology + [`deep-dives/`](./deep-dives/) per-system analyses
+- **Lexicon:** [`CONTEXT.md`](./CONTEXT.md) — canonical definitions of the four dimensions, the failure modes, and research vocabulary
+- **Problem space:** [`transitions-problem-space.md`](./transitions-problem-space.md) — the four failure modes worked through with concrete examples
 - **Cross-cutting threads in LOG:**
   - "Transitions branch in four dimensions" — the framing that motivates Q2–Q4
   - "Message-send to receivers of various existence-states" — broader receiver-existence framing

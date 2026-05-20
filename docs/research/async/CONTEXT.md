@@ -1,200 +1,140 @@
-# Research Conventions — Async Strategies
-
-This document governs how the async-strategies research is conducted. It is read-only for any individual session: changes to the conventions themselves should be discussed and committed deliberately, not in passing during a deep-dive. The conventions exist so each session inherits the prior session's discipline rather than re-litigating it.
-
-See the main research log at `./README.md` for the framing, taxonomy table, session chronology, and deep-dive index. This file is the *meta*: how the work is done.
-
-## Purpose
-
-To inform pulse's async-coordination API choices (transactions, actions, the reactive/effect-layer boundary) by understanding the broader async-coordination design space across programming. The research is **broader than pulse** because:
-
-- Trade-offs aren't local. Picking one model closes doors on adjacent ones; we need to understand the adjacent doors before walking through any.
-- pulse's available primitives are a fraction of what's been explored elsewhere; the research is about what an *encoding* of richer models into JS can and cannot recover.
-- The output isn't "the right answer." It's enough understanding to articulate what we're sacrificing with any given choice.
-
-This is not a survey for publication. It's working knowledge for design decisions. Every entry should pay rent toward an eventual choice pulse will make about its async surface.
-
-## Framing (the immovable constraint)
-
-JavaScript does not provide the primitives most async-coordination traditions assume:
-
-- No first-class continuations (one-shot or multi-shot).
-- No native effect handlers.
-- No channels as a language primitive.
-- No actors as a language primitive.
-- No STM.
-- No linear / affine / capability typing for static resource control.
-- No effect rows in the type system.
-- No structured concurrency as a language feature.
-
-What JS does give us: Promises, generators, ambient mutable slots (module-level vars), owner trees (via convention), try/catch, microtask scheduling, WeakMaps, AbortController. Any model pulse ends up with is an **encoding** of one of the richer models into these tools. **Every encoding loses something.** The research is about understanding each model's full shape well enough to choose which losses are acceptable.
-
-This framing applies to every deep-dive: when summarizing a model, the question isn't just "what does it do" but **"what would an encoding of this into JS lose, and what would it gain over what we have now."**
-
-## Process
-
-### Cadence
-
-Research is slow. Time-box per session, not per-domain. A deep-dive may take multiple sessions to complete properly; that is fine. Don't truncate a deep-dive to fit a session boundary.
-
-The order of deep-dives is not predetermined. Pick based on:
-
-- Which axis of the taxonomy is most ambiguous and which deep-dive would clarify it.
-- Which system is most foundational to multiple other systems (e.g. algebraic-effects theory is upstream of effect-ts, OCaml 5, React Suspense, Koka, all at once).
-- Which thread the previous session opened.
-- Pragmatic interest. Don't force-march through an alphabetical list.
-
-### Per-session shape
-
-Every session should:
-
-1. Read the session log ([`./LOG.md`](./LOG.md)) to recall where the last session left off (open threads, unresolved questions).
-2. Pick *one* concrete piece of work for the session — a single deep-dive (or a continuation), or a taxonomy refinement, or a sourcing pass.
-3. Do the work with primary sources where possible (see sourcing discipline).
-4. Update the relevant artifact (deep-dive doc, taxonomy table, axes list).
-5. Append a session-log entry to [`./LOG.md`](./LOG.md): what was done, what was learned, what open questions emerged, what the next session might pick up.
-
-Sessions should NOT:
-
-- Skip the log entry. The chronology is the only record of *why* the taxonomy looks the way it does.
-- Make sweeping changes to the conventions in passing. Convention changes belong in their own commit with a rationale.
-- Draw cross-cutting conclusions before three or more deep-dives have provided the evidence.
-
-### Deep-dive sourcing discipline
-
-Each deep-dive should have an explicit sources list. Acceptable sources, in order of preference:
-
-1. **Primary** — the system's official documentation, papers by the original authors, the source code if applicable, official tutorials.
-2. **Secondary** — talks by the original authors, blog posts by core contributors, well-cited textbooks.
-3. **Tertiary** — community summaries, blog posts by outsiders, framework comparisons.
-
-When a claim is from memory and unverified, mark it explicitly with `[unverified]` or `[from-memory]`. The goal is not to forbid synthesis from memory — that's how working knowledge accumulates — but to keep the distinction visible so future readers know which parts have been checked.
-
-When a deep-dive contradicts memory-based content in the taxonomy table, the deep-dive wins; update the cells.
-
-Web search and `WebFetch` are appropriate for verifying URLs and pulling primary sources. When fetching, prefer the official site / repo / paper PDF over secondary summaries.
-
-### Status indicators
-
-The taxonomy rows carry status indicators:
-
-- 🟡 **draft** — populated from prior conversational notes or synthesis from memory. Needs verification.
-- ⚪ **pending** — row exists as inventory marker; minimal one-line characterization only.
-- 🟢 **verified** — a deep-dive doc exists, primary sources are cited, and cells reflect what the dive found.
-
-A row may only be promoted to 🟢 when:
-
-- A deep-dive doc exists at `deep-dives/<slug>.md`.
-- The deep-dive cites at least one primary source.
-- All cells in the row have been considered (cells marked `n/a` are fine; cells marked `—` are NOT — they mean "axis hasn't been thought through for this system yet").
-- The deep-dive's session-log entry is added to the chronology.
-
-Promoting to 🟢 is the formal close-out of researching a system. It is allowed (and expected) to demote 🟢 → 🟡 if a later deep-dive reveals contradictions; this is information, not failure.
-
-### When a deep-dive promotes a row
-
-When a deep-dive completes:
-
-1. The deep-dive doc itself is committed to `deep-dives/<slug>.md`.
-2. The corresponding row's status moves 🟡 → 🟢 (or ⚪ → 🟢 if the row was a pending stub).
-3. Cells that the deep-dive revealed to be wrong or imprecise are updated.
-4. Any new axes the deep-dive surfaced are added to the open questions section (with the proposing deep-dive cited), but NOT immediately added to the table without explicit decision (see Taxonomy Maintenance).
-5. Cross-references are added: the deep-dive should link to other deep-dives it relates to, and the main README should link to the new deep-dive in the index.
-6. The session log gets an entry describing what was learned, what changed in the taxonomy, and what threads the dive opened.
-
-## Taxonomy maintenance
-
-### Adding axes
-
-A new axis is added only when:
-
-- A deep-dive (or multiple) reveals that existing axes flatten a meaningful distinction between systems.
-- The distinction matters for pulse's eventual design decisions (i.e. would pulse make a different choice if it landed on different sides of this axis).
-- At least two systems differ meaningfully on the proposed axis.
-
-Adding an axis is a structural change; commit it separately from any deep-dive that motivated it. Update existing rows (most will be ⚪ for the new axis until further dives address them).
-
-Axes should NOT be added preemptively from theoretical interest. Let them emerge.
-
-### Updating cells
-
-Cells can be updated:
-
-- During a deep-dive on that row's system.
-- During a deep-dive on a *different* system that revealed something about this one (e.g. studying effect-ts may sharpen our understanding of Haskell STM).
-- During a taxonomy-only session where existing cells are reviewed against the current axis definitions.
-
-Cell updates that demote 🟢 → 🟡 (because the cell no longer matches the deep-dive's finding) require a session-log entry explaining what changed and why.
-
-### Splitting / merging / renaming rows
-
-If a deep-dive reveals that what we treated as one system is actually two (e.g. "Postgres MVCC" with different isolation levels has fundamentally different cells per level), split the row. The split should be in its own commit with a session-log entry.
-
-If two systems turn out to be encodings of the same model with cosmetic differences only, they can be merged. But this is rare and should require evidence in the deep-dives, not just intuition.
-
-Renaming rows happens when the deep-dive reveals the system is properly called something else (e.g. "React useEffect+useState" → "React modern" or specifically "React Suspense + transitions + lanes" — see the session-1 correction).
-
-### When the taxonomy itself changes
-
-Structural changes (new axes, row splits, axis renames, deletions) should be committed in their own commit, separate from content updates. The commit message should explain the structural change so reviewing git log gives a coherent picture of how the framework evolved.
-
-## Deep-dive structure
-
-A template should live at `deep-dives/_template.md` once it exists. Until then, deep-dives should at minimum include:
-
-1. **System / topic name** — what's being studied.
-2. **Source list** — citations to primary docs, papers, source files, talks. Each citation should be linkable.
-3. **What it is** — one-paragraph description in our vocabulary (not the system's).
-4. **The async-coordination model** — how it handles each of our scenarios where applicable (S1–S8 in `../scenarios/concurrent-flows.md`).
-5. **Taxonomy cells** — explicit per-axis claims with evidence (citing source list).
-6. **What an encoding of this into JS loses or gains** — the central framing applied.
-7. **Open questions raised** — what this dive surfaced for the broader research.
-8. **Cross-references** — to other deep-dives, to taxonomy rows, to scenarios.
-9. **Date + session** — when the dive was conducted.
-
-Deep-dives are not papers. They can be short if the system is simple; they can be long if it's not. Length is governed by what's needed to support the taxonomy cells with evidence, not by a target.
-
-## Vocabulary specific to this research
-
-Terms used precisely in this research; their use elsewhere in pulse may be looser.
-
-- **Encoding** — a JS implementation that approximates a primitive from another language/system. Always lossy. The set of "encodings of model X into JS" is the design space we explore.
-- **Transferable lesson** — an insight from a domain or system that informs pulse's design even if pulse won't adopt the system itself. Cross-domain deep-dives exist to extract these.
-- **Verified cell** — a taxonomy cell whose content has been checked against primary sources in a deep-dive. Marked by the row's 🟢 status.
-- **Axis** — one column of the taxonomy table. A dimension along which async-coordination strategies meaningfully differ. New axes emerge from deep-dives; they are not declared up front.
-- **System** — one row of the taxonomy table. An async-coordination strategy that competes in pulse-adjacent design space.
-- **Cross-domain** — a system or mechanism that does NOT compete in pulse's design space (because it's a different problem, layer, or scale) but has transferable lessons.
-- **Concept** — a theoretical framework that affects how we interpret systems (algebraic effects theory, delimited continuations, CSP, etc.). Concept deep-dives don't taxonomize systems; they sharpen the lens.
-- **Open question** — a known unresolved issue in the framework or in our understanding. Documented in the README's open-questions section; resolved as deep-dives provide evidence.
-
-## Anti-patterns
-
-Mistakes we want to avoid (some learned from prior sessions, some flagged preemptively).
-
-- **Don't describe a system by its historical workaround.** When picking what to put in a system's row, identify what the system's *current* primary primitive is, not what people did before the system shipped a proper answer. Example: React's async story is the fiber reconciler's lane-based Suspense / transitions / `use()` / `useOptimistic`, NOT `useEffect + useState`.
-- **Don't conflate "not in the taxonomy" with "not researched."** Many systems are worth deep-diving even though they don't compete in pulse's design space. The cross-domain section of the deep-dive index exists for exactly this reason.
-- **Don't synthesize trade-offs before three deep-dives.** Cross-cutting conclusions ("the right answer is X") require evidence from multiple systems. Until the evidence is there, treat trade-off claims as hypotheses, not conclusions.
-- **Don't add taxonomy axes preemptively.** New axes should emerge from deep-dives revealing that existing axes flatten meaningful distinctions. Adding axes from theoretical interest produces empty columns that bias future deep-dives.
-- **Don't guess URLs or paper IDs.** When citing, fetch or search. A wrong citation is worse than a vague one.
-- **Verify upstream files before citing them as upstream evidence.** Finding a file at the root of an external repo is not evidence that the project's team produced or endorses it. Run `git status` / `git log` on the file before quoting it as the project's roadmap or design intent. Untracked files, locally-modified files, and forks all look like upstream code at a glance. Session 7 learned this the hard way — a pulse design draft accidentally written into the Solid repo was momentarily cited as "Solid's roadmap." Always check tracking and authorship.
-
-- **Keep deep-dives factual and specific; keep pulse-context and transient framing in LOG.** Deep-dives are durable references about a particular system. Their content should be observations about *that system's* mechanics, sourced from the dive's primary sources, and should hold up over time even as pulse's design conversations evolve. Cross-framework framings ("X is a response to Y's design choices"), responses to design conversations ("this informs pulse's direction"), and session-bound speculation belong in LOG (either in the relevant session entry or as a cross-cutting thread). The rule of thumb: if removing pulse from the picture would make the content meaningless, it's pulse-context and belongs in LOG, not in the dive. Session 12 learned this when a Svelte-dive entry titled "critical refinement to pulse's design philosophy" was written into the dive and then moved to LOG; the same correction was applied to inline Ricky-Hanlon notes that had been added to `react-modern.md` and `solid-2x.md`. Direct quotes from primary sources can be in the dive when they describe the studied system; the framing of *what those quotes mean for pulse* goes in LOG.
-- **Check the repo's `pushed_at` before citing its source as authoritative.** Many projects migrate to monorepos and leave the original repo as a stub. Session 8 caught this: `github.com/rocicorp/replicache` (`pushed_at: 2022-05-07`) is a README-only stub; the actual Replicache source lives in `rocicorp/mono/packages/replicache`. A `gh api` call against the old URL succeeds but returns dead code. For any system check the README, the latest release date, and the monorepo equivalent (if any) before deep-diving.
-- **Don't truncate a deep-dive to fit a session.** Research isn't a sprint. If a dive needs three sessions, take three sessions.
-- **Don't update CONTEXT.md in passing.** Convention changes deserve their own commit and rationale. This file is meta; changing it should be deliberate.
-- **Don't promote a row to 🟢 without a deep-dive doc.** The status indicator is meaningful only if the rules are followed.
-- **Don't treat the taxonomy table as the deliverable.** The table is a working artifact; the deliverable is the cumulative understanding that informs pulse's design decisions. The table organizes what we know; the deep-dives ARE what we know.
-
-## See also
-
-- `./README.md` — the main research log with framing, taxonomy table, deep-dive index. Stable structural document.
-- `./LOG.md` — append-only session chronology. Where each session records what was done, learned, and left for next time.
-- `./deep-dives/` — individual system / cross-domain / concept deep-dives.
-- `../scenarios/concurrent-flows.md` — the scenarios and policy questions that motivate the research. Scenarios S1–S8 are acceptance tests any candidate async strategy must address; policy questions Q1–Q5 are decisions the research informs.
-- `../../CONTEXT.md` (root) — pulse's project conventions and language. The Conceptual model section there is what this research feeds back into.
-- `../superpowers/specs/2026-05-17-pulse-transitions-redesign.md` — the design history that motivated starting this research.
-- `../../README.md` — the comparative analysis against Solid 2.x. Should be revisited and refined as the research matures.
+# Async Research — Lexicon
+
+The lexicon for the async-coordination research: canonical definitions of the
+terms used across [`README.md`](./README.md), [`LOG.md`](./LOG.md), the
+[`deep-dives/`](./deep-dives/), and the synthesis docs. When a term is defined
+here, other docs reference it rather than re-glossing — this file is the single
+source so definitions do not drift.
+
+> **Note on the name.** `CONTEXT.md` was previously the research *process* doc.
+> That content now lives in [`PROCESS.md`](./PROCESS.md). `CONTEXT.md` is now the
+> lexicon — consistent with the project convention where `CONTEXT.md` holds
+> domain language (cf. the root [`../../CONTEXT.md`](../../CONTEXT.md)).
+> References to "CONTEXT.md" in older `LOG.md` entries and deep-dives that
+> concern sourcing discipline, status indicators, or anti-patterns mean
+> `PROCESS.md`.
 
 ---
 
-Changes to this file should be made in their own commits with a rationale in the commit message. Linked from the main README; updated when conventions change.
+## The four dimensions of transitions
+
+A *transition* (see below) is coordination machinery for committing an async
+state change atomically. Transitions branch along four structural dimensions —
+the axes a transition mechanism must each decide how to handle. The framing
+originated in the [`LOG.md`](./LOG.md#cross-cutting-thread--transitions-branch-in-four-dimensions) cross-cutting thread "Transitions branch
+in four dimensions" (sessions 11–13); it is the organizing axis of
+[`pulse-design-direction.md`](./pulse-design-direction.md)'s comparison table and
+of [`transitions-problem-space.md`](./transitions-problem-space.md).
+
+- **Dim 1 — internal branching.** A single transition contains a *tree* of
+  dependent async work — one logical change fans out into several fetches, some
+  of which may depend on others' results. The mechanism gathers all of it and
+  commits the whole tree together.
+- **Dim 2 — concurrent transitions.** More than one transition is in flight at
+  the same time — two independent logical changes, each with its own internal
+  tree.
+- **Dim 3 — input-arrival priority.** New input arrives *while* a transition is
+  still in flight. The newer intent should pre-empt, supersede, or be sequenced
+  against the older one.
+- **Dim 4 — state-overlap (entanglement).** Two concurrent transitions touch the
+  same state. Their commit order — or their mutual discard — must be decided.
+
+**Dim 1 is the irreducible core.** A transition exists to gather one logical
+change's async work and commit it atomically; that is Dim 1 alone. Dims 2–4 exist
+only because a system may permit more than one transition at once: Dim 2 is two
+at once, Dim 3 is one pre-empting another, Dim 4 is two touching shared state. A
+mechanism that allows only one transition at a time needs only Dim 1. See
+[`transitions-problem-space.md`](./transitions-problem-space.md) for worked
+examples and the full argument.
+
+## The four failure modes
+
+The user-visible defects that occur *without* a transition mechanism. Each is
+defined and worked through with concrete examples in
+[`transitions-problem-space.md`](./transitions-problem-space.md); the one-line
+forms below exist for cross-doc reference.
+
+- **FM1 — torn state.** The UI renders a frame mixing old and new data because
+  the several async fetches of one logical change resolve at different times and
+  each is shown as it lands. (Exercises Dim 1.)
+- **FM2 — spinner flash.** A loading fallback appears and vanishes within a few
+  frames because the boundary drops to the fallback the instant anything goes
+  pending, even when the work resolves almost immediately. (Exercises Dim 1.)
+- **FM3 — lost interactivity.** The committed-but-stale UI freezes, strobes, or
+  loses input focus while async work is in flight, instead of staying live and
+  responsive. (Exercises Dim 1 + Dim 3, and Dim 2 if stale work is not
+  cancelled.)
+- **FM4 — uncommittable speculation.** A transition's in-progress state cannot be
+  abandoned without corrupting committed state, so a superseded change or a
+  cancelled preview leaves the UI inconsistent. (Exercises Dim 2 + Dim 4.)
+
+## Core transition terms
+
+- **Transition.** Coordination machinery that makes a state change involving
+  async work commit atomically — the UI moves from one coherent state to another,
+  never showing an incoherent in-between — while staying responsive during the
+  wait.
+- **Gather.** Collecting all the pending async work in a transition's scope and
+  holding every resulting commit until the whole set is ready, so the commits
+  land together. Pulse's `<Loading>` boundary is a gather.
+- **Commit / atomic commit.** The moment a gathered set of changes becomes
+  globally visible, all at once. Nothing inside the transition is observable
+  until the commit.
+- **Hold-prior.** A display policy during a gather: keep showing the last
+  coherent committed state rather than a fallback, so fast async work does not
+  cause a spinner flash (FM2).
+- **Fallback.** The placeholder a boundary shows when there is no prior coherent
+  state to hold — i.e. a genuine first load.
+
+## Research vocabulary
+
+Terms used precisely across the research; their use elsewhere in pulse may be
+looser.
+
+- **Encoding** — a JS implementation that approximates a primitive from another
+  language/system. Always lossy. The set of "encodings of model X into JS" is
+  the design space the research explores.
+- **Transferable lesson** — an insight from a domain or system that informs
+  pulse's design even if pulse won't adopt the system itself. Cross-domain
+  deep-dives exist to extract these.
+- **Reactive integration** (axis) — whether async work is part of the reactive
+  computation graph or runs alongside it.
+- **Discipline location** (axis) — where the rules are enforced: runtime, type
+  system, programmer convention, or capability system.
+- **Scenario** — a concrete user/dev situation any async strategy must handle
+  correctly. The catalog is
+  [`../scenarios/concurrent-flows.md`](../scenarios/concurrent-flows.md)
+  (S1–S8).
+- **Policy question** — a design decision a transaction primitive must answer
+  explicitly. Catalogued as Q1–Q5 in the same scenarios doc.
+- **Axis** — one column of the taxonomy table in [`README.md`](./README.md). A
+  dimension along which async-coordination strategies meaningfully differ. New
+  axes emerge from deep-dives; they are not declared up front.
+- **System** — one row of the taxonomy table. An async-coordination strategy
+  that competes in pulse-adjacent design space.
+- **Verified cell** — a taxonomy cell whose content has been checked against
+  primary sources in a deep-dive. Marked by the row's 🟢 status.
+- **Cross-domain** — a system or mechanism that does NOT compete in pulse's
+  design space (different problem, layer, or scale) but has transferable
+  lessons.
+- **Concept** — a theoretical framework that affects how systems are interpreted
+  (algebraic effects theory, delimited continuations, CSP, …). Concept
+  deep-dives sharpen the lens rather than taxonomizing systems.
+- **Open question** — a known unresolved issue in the framework or in the
+  research's understanding. Documented in the README's open-questions section;
+  resolved as deep-dives provide evidence.
+
+## See also
+
+- [`PROCESS.md`](./PROCESS.md) — how the research is conducted: cadence, sourcing
+  discipline, status indicators, taxonomy maintenance, deep-dive structure,
+  anti-patterns. (Formerly named `CONTEXT.md`.)
+- [`README.md`](./README.md) — framing, the taxonomy table, the deep-dive index.
+- [`LOG.md`](./LOG.md) — append-only session chronology; origin of the
+  four-dimensions framing.
+- [`transitions-problem-space.md`](./transitions-problem-space.md) — the four
+  failure modes worked through with concrete examples.
+- [`pulse-design-direction.md`](./pulse-design-direction.md) — synthesis of the
+  research into pulse design positions.
+- [`../../CONTEXT.md`](../../CONTEXT.md) — pulse's root domain-language doc; this
+  lexicon is the async-research counterpart.

@@ -154,7 +154,7 @@ There's no type-level enforcement of effect signatures (compare effect-ts). The 
 
 ## The problem space of transitions — what React's machinery is coordinating
 
-Added after the session-12 cross-cutting synthesis ([LOG.md](../LOG.md) "Transitions branch in four dimensions"). The framing: transitions look like "ad-hoc UI invention" only if you don't notice that they're actually solving a coordination problem across four distinct branching dimensions. React's mechanisms map onto each dimension as follows.
+Added after the session-12 cross-cutting synthesis ([LOG.md](../LOG.md#cross-cutting-thread--transitions-branch-in-four-dimensions) "Transitions branch in four dimensions"). The framing: transitions look like "ad-hoc UI invention" only if you don't notice that they're actually solving a coordination problem across four distinct branching dimensions. React's mechanisms map onto each dimension as follows.
 
 **Dim 1 — Internal branching** (a single transition's speculative future is a *tree* of dependent async work, not a linear chain): handled by the WIP fiber tree + Suspense boundaries. Any pending source caught by a Suspense in the WIP tree contributes to "this transition isn't done yet." The WIP tree commits atomically once all in-scope Suspense boundaries resolve. **Nested Suspense boundaries can opt into independent commits** — the doc notes "newly rendered Suspense boundaries will still immediately display fallbacks" (`react.dev/reference/react/Suspense`), which is React's escape hatch for "this branch is independent; let it commit on its own."
 

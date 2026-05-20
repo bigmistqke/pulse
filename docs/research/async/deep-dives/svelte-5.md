@@ -3,7 +3,7 @@
 **Type:** primary
 **Date:** 2026-05-19
 **Session:** 12
-**Scope note:** Maps Svelte 5's `await` inside `$derived`, `{#await}` blocks, `<svelte:boundary>`, and the post-5.42 `fork()` API against the four branching dimensions of transitions (cross-cutting framing in [LOG.md](../LOG.md)). Hypothesis under test: "Svelte handles Dim 1 (commit-together) but punts Dims 2/3/4." **Spoiler — partially false.** Svelte handles Dim 2 (concurrent transitions, by *merging*) with substantial machinery; explicitly punts Dim 3 (no priority/cancellation on input arrival); handles Dim 4 by source-set intersection and rebasing rather than union-find lane merge. Conducted using the parallel-passes-then-merge methodology (sixth dive on the pattern). The merged document below uses the fresh pass as its spine; main-session contributions are flagged at points of merge.
+**Scope note:** Maps Svelte 5's `await` inside `$derived`, `{#await}` blocks, `<svelte:boundary>`, and the post-5.42 `fork()` API against the four branching dimensions of transitions (cross-cutting framing in [LOG.md](../LOG.md#cross-cutting-thread--transitions-branch-in-four-dimensions)). Hypothesis under test: "Svelte handles Dim 1 (commit-together) but punts Dims 2/3/4." **Spoiler — partially false.** Svelte handles Dim 2 (concurrent transitions, by *merging*) with substantial machinery; explicitly punts Dim 3 (no priority/cancellation on input arrival); handles Dim 4 by source-set intersection and rebasing rather than union-find lane merge. Conducted using the parallel-passes-then-merge methodology (sixth dive on the pattern). The merged document below uses the fresh pass as its spine; main-session contributions are flagged at points of merge.
 
 ## Sources
 

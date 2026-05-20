@@ -24,7 +24,7 @@ Secondary/tertiary sources (blog posts by core contributors, community summaries
 
 ## What it is
 
-One-paragraph description, **in our research vocabulary** (not the system's own terminology). The goal is to make this dive comparable to other dives. Use terms from [`../CONTEXT.md`](../CONTEXT.md)'s vocabulary section.
+One-paragraph description, **in our research vocabulary** (not the system's own terminology). The goal is to make this dive comparable to other dives. Use terms from the research lexicon, [`../CONTEXT.md`](../CONTEXT.md).
 
 If the system's own terminology must be introduced, name it explicitly: "the system calls this X; we treat it as our concept Y."
 

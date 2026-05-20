@@ -12,7 +12,7 @@ Each session entry should record:
 
 Mid-session pivots, corrections, and conventions changes are recorded as nested bullets within their session.
 
-See [`./README.md`](./README.md) for the framing, taxonomy table, and deep-dive index. See [`./CONTEXT.md`](./CONTEXT.md) for the research conventions that govern how sessions are conducted.
+See [`./README.md`](./README.md) for the framing, taxonomy table, and deep-dive index. See [`./PROCESS.md`](./PROCESS.md) for the research conventions that govern how sessions are conducted, and [`./CONTEXT.md`](./CONTEXT.md) for the lexicon of defined terms.
 
 ---
 

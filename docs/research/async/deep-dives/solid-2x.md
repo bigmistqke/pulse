@@ -142,7 +142,7 @@ The cost is per-node memory footprint: every node potentially carries `_pendingV
 
 ## The problem space of transitions — what Solid's machinery is coordinating
 
-Added after the session-12 cross-cutting synthesis ([LOG.md](../LOG.md) "Transitions branch in four dimensions"). The framing: transitions look like "ad-hoc UI invention" only if you don't notice that they're actually solving a coordination problem across four distinct branching dimensions. Solid 2.x's mechanisms map onto each dimension as follows.
+Added after the session-12 cross-cutting synthesis ([LOG.md](../LOG.md#cross-cutting-thread--transitions-branch-in-four-dimensions) "Transitions branch in four dimensions"). The framing: transitions look like "ad-hoc UI invention" only if you don't notice that they're actually solving a coordination problem across four distinct branching dimensions. Solid 2.x's mechanisms map onto each dimension as follows.
 
 **Dim 1 — Internal branching** (a single transition's speculative future is a *tree* of dependent async work, not a linear chain): handled by `Transition._asyncReporters` (`scheduler.ts:159` — a `Map<Computed, Set<Computed>>` tracking which pending source is blocking which downstream reporter). `transitionComplete` (`scheduler.ts:703-742`) walks this map per-source to decide commit readiness — **per-source, not just per-transition**. This is materially more precise than React's "any pending Suspense in scope blocks the WIP commit"; Solid's transition knows *which* source is blocking and can decide independently.
 
