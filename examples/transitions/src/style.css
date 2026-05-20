@@ -1,0 +1,54 @@
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: #e7e7ea;
+  background: #16161a;
+}
+.app-head { padding: 16px 20px 0; }
+.app-head h1 { font-size: 18px; margin: 0 0 12px; }
+.tabs { display: flex; gap: 4px; flex-wrap: wrap; }
+.tabs button {
+  background: #232329; color: #9a9aa6; border: 1px solid #34343d;
+  padding: 6px 12px; cursor: pointer; font: inherit; border-radius: 6px 6px 0 0;
+}
+.tabs button.active { background: #2f2f3a; color: #fff; border-bottom-color: #2f2f3a; }
+.tab-host { padding: 16px 20px; }
+
+.tab-frame { border: 1px solid #34343d; border-radius: 0 8px 8px 8px; padding: 16px; }
+.tab-head h2 { margin: 0 0 8px; font-size: 16px; }
+.tab-head p { margin: 2px 0; color: #b6b6c0; }
+.tab-head .actual { color: #e0b86b; }
+.tab-body { display: flex; gap: 16px; margin-top: 14px; flex-wrap: wrap; }
+.scenario-pane { flex: 1 1 360px; }
+.tab-side { flex: 1 1 280px; display: flex; flex-direction: column; gap: 12px; }
+
+.scenario button {
+  background: #3a3a82; color: #fff; border: 0; padding: 8px 14px;
+  cursor: pointer; font: inherit; border-radius: 6px; margin-bottom: 12px;
+}
+.btn-row { display: flex; gap: 8px; }
+
+/* generation color-coding — torn state is a literally multi-coloured card */
+.pane, .list-card, .payload { padding: 8px 10px; border-radius: 6px; margin: 4px 0; }
+[data-gen='alice'], [data-gen='active'], [data-gen='current'] { background: #1d3a52; }
+[data-gen='bob'], [data-gen='archived'], [data-gen='superseded'] { background: #1d5238; }
+[data-gen='stale'] { background: #52331d; }
+.profile-card, .list-card { border: 1px solid #34343d; border-radius: 8px; padding: 8px; }
+.payload.is-fallback { background: #52331d; color: #e0b86b; }
+
+.latency-controls { border: 1px solid #34343d; border-radius: 8px; padding: 10px; }
+.latency-controls h3 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; color: #9a9aa6; }
+.knob { display: flex; align-items: center; gap: 8px; margin: 4px 0; }
+.knob-name { width: 72px; color: #b6b6c0; }
+.knob-value { width: 56px; text-align: right; color: #9a9aa6; }
+
+.timeline { list-style: none; margin: 0; padding: 8px; max-height: 260px; overflow: auto;
+  border: 1px solid #34343d; border-radius: 8px; font-size: 12px; }
+.evt { display: flex; gap: 8px; padding: 1px 0; }
+.evt-t { width: 56px; color: #6f6f7c; text-align: right; }
+.evt-kind { width: 64px; }
+.evt-action .evt-kind { color: #c98bdb; }
+.evt-request .evt-kind { color: #e0b86b; }
+.evt-resolve .evt-kind { color: #6bd49a; }
+.evt-label { color: #d6d6dd; }

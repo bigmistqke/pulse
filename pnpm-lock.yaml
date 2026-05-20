@@ -52,6 +52,18 @@ importers:
         specifier: ^6.0.0
         version: 6.4.2(jiti@2.7.0)
 
+  examples/transitions:
+    devDependencies:
+      '@playwright/test':
+        specifier: ^1.60.0
+        version: 1.60.0
+      typescript:
+        specifier: ^5.8.3
+        version: 5.9.3
+      vite:
+        specifier: ^6.0.0
+        version: 6.4.2(jiti@2.7.0)
+
 packages:
 
   '@babel/code-frame@7.29.0':
