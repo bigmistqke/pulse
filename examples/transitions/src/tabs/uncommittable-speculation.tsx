@@ -21,9 +21,11 @@ export function UncommittableSpeculation() {
   })
 
   function toggle() {
-    const next = !archived()
-    log.emit('action', `toggle → ${next ? 'archived' : 'active'}`, next ? 'archived' : 'active')
-    setArchived(next)
+    setArchived((a) => {
+      const next = !a
+      log.emit('action', `toggle → ${next ? 'archived' : 'active'}`, next ? 'archived' : 'active')
+      return next
+    })
   }
 
   const scenario = (

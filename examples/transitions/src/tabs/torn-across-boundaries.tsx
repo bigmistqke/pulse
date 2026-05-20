@@ -31,9 +31,11 @@ export function TornAcrossBoundaries() {
   })
 
   function navigate() {
-    const next: UserId = userId() === 'alice' ? 'bob' : 'alice'
-    log.emit('action', `navigate → ${next}`, next)
-    setUserId(next)
+    setUserId((u) => {
+      const next: UserId = u === 'alice' ? 'bob' : 'alice'
+      log.emit('action', `navigate → ${next}`, next)
+      return next
+    })
   }
 
   const scenario = (

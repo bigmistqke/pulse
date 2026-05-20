@@ -13,11 +13,13 @@ export function Entanglement() {
   let renameSeq = 0
 
   async function updateBio() {
-    const captured = displayName()
-    log.emit('action', `update-bio reads name "${captured}"`, captured)
-    await mockFetch({ log, knob: bioKnob, generation: captured, produce: () => null })
-    setBio(`bio for ${captured}`)
-    log.emit('action', `update-bio wrote bio for "${captured}"`, captured)
+    log.emit('action', 'update-bio started', 'user')
+    await mockFetch({ log, knob: bioKnob, generation: 'user', produce: () => null })
+    // Read displayName at write time, not capture time — the committed name as
+    // it stands now, so a concurrent rename mid-flight is reflected, not lost.
+    const current = displayName()
+    setBio(`bio for ${current}`)
+    log.emit('action', `update-bio wrote bio for "${current}"`, current)
   }
 
   async function rename() {
@@ -37,7 +39,7 @@ export function Entanglement() {
       <div class="pane" attr:data-testid="display-name" attr:data-gen="current">
         name: {() => displayName()}
       </div>
-      <div class="pane" attr:data-testid="bio" attr:data-gen="stale">
+      <div class="pane" attr:data-testid="bio" attr:data-gen="current">
         {() => bio()}
       </div>
     </div>
@@ -46,8 +48,8 @@ export function Entanglement() {
   return (
     <TabFrame
       title="E4 · Entanglement"
-      quality="If an in-flight action read a value another action then changed, the committed result must stay coherent — the reader should re-run, block, or be flagged."
-      actual="Fails. update-bio captures displayName, awaits, then writes a bio embedding the stale name — a concurrent rename leaves bio referencing the old name."
+      quality="An action that embeds another value into its result must reflect that value as it stands when the write lands — not a snapshot taken before the action's async work began."
+      actual="Handled by reading displayName at write time — after the await — instead of capturing it up front. A concurrent rename mid-flight is reflected: the committed bio references the current name. (Capturing before the await would embed the stale name.)"
       scenario={scenario}
       controls={<LatencyControls knobs={[bioKnob, renameKnob]} />}
       timeline={<EventTimeline log={log} />}

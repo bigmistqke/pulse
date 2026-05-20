@@ -27,9 +27,11 @@ export function StaleSideEffects() {
   })
 
   function doSave() {
-    const next = version() + 1
-    log.emit('action', `save → v${next}`, `v${next}`)
-    setVersion(next)
+    setVersion((v) => {
+      const next = v + 1
+      log.emit('action', `save → v${next}`, `v${next}`)
+      return next
+    })
   }
 
   const scenario = (

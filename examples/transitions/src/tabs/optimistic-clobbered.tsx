@@ -68,7 +68,7 @@ export function OptimisticClobbered() {
     <TabFrame
       title="E3 · Optimistic value clobbered by refetch"
       quality="An optimistic write must survive a refetch of the underlying data — the refetch sets committed truth; the optimistic entry stays on top until its own request settles."
-      actual="Fails. Optimistic overlay and committed truth share one signal cell, so a refetch that lands first overwrites the list and the optimistic comment vanishes."
+      actual="Fails as written — optimistic overlay and committed truth share one signal cell, so a refetch that lands first overwrites the list and the optimistic comment vanishes. Solvable in userland: hold the overlay in its own signal and merge it with committed truth via a computed. The gap is an ergonomic optimistic primitive, not a missing capability."
       scenario={scenario}
       controls={<LatencyControls knobs={[addKnob, refreshKnob]} />}
       timeline={<EventTimeline log={log} />}
