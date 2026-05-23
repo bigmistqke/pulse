@@ -461,6 +461,48 @@ These are different render modes. If pulse's `<Loading>` exposes just one `held`
 
 ---
 
+## Guiding values / principles
+
+These are the durable values that shape pulse's direction. The sketches in the later section are best-guesses at how to honour them; *implementations are negotiable, principles less so*. Each principle states a value and the failure mode it rejects. Where a sketch (D1–D12) is named below, it is *one* current attempt at honouring the principle, not the principle's definition.
+
+### P1 — Speculation is one concept with two faces
+
+What pulse delimits is a **speculative scope**: a tentatively-applied write-set held over committed state, observable to reads, eventually committed or discarded. The same scope has two faces — a **write side** (`action`-shaped: writes flowing toward commit) and a **read side** (a "speculative zone": gating downstream publication until upstream speculations settle).
+
+"Optimistic", "transition" (in the React/Solid sense), "loading", "entanglement", "preview" are *use-labels* for speculation, not separate mechanisms. The mechanism is one; what differs is what the speculation is *about*.
+
+Why "speculation" over "transition": "transition" presupposes the commit (A → B implies B happens), so every framework using it bolts on a separate vocabulary for the failure mode (revert, rollback, supersede). "Speculation" is symmetric — *speculate / commit / discard* — and imports the CPU-speculation mental model (work done against a predicted outcome, ready to be thrown away if reality disagrees) load-bearingly, not analogically.
+
+Rejects: bespoke per-use-case primitives that hide the underlying unity, and naming that presupposes success.
+
+### P2 — Acknowledge async; don't hide it
+
+A `Promise` in the type is honest information: it indicates the value has (or had) a future. Pulse provides tools to *incorporate* the future, not erasures that pretend it isn't there. The type stays `Accessor<Promise<T>>`, not silently collapsed to `Accessor<T>`. Unwrapping is explicit (`use`, `yield* read`), and the unwrap-site is where the async-handling discipline lives.
+
+Rejects: Solid 2.x's `Accessor<T>` collapse + `NotReadyError`, where hidden async resurfaces as a thrown error in unrelated read sites.
+
+### P3 — Plain reads are honest
+
+A plain `signal()` read always returns a defined value (committed or speculative overlay) and never throws. Pending-ness, error-state, and async non-readiness are separate queries — not exceptions raised from a read.
+
+Rejects: any design where reading a value is a discipline you must learn to do safely.
+
+### P4 — Explicit boundaries over implicit pervasiveness
+
+A speculative scope is *opt-in*. Outside a scope, writes commit immediately and reads are honest. Inside a scope, write-level speculation semantics apply. There is no implicit ambient speculation that every write must reckon with.
+
+Trade accepted: no-flash behaviour is opt-in — a bare write that triggers a refetch flashes unless wrapped (the Solid 1.x bargain).
+
+Rejects: Solid 2.x's per-write transition semantics that turn every async-feeding write into an implicit held speculation.
+
+### P5 — Compose, don't proliferate (in either direction)
+
+A small primitive set should cover the use cases. Specialised ergonomic sugar over the primitives is *allowed* when it earns its keep — added because the bare shape is awkward enough for a common case to warrant a name. It is also not *forbidden* on principle: negative-shape commitments ("no `optimistic` primitive") lock out design space without serving any value the doc has named.
+
+Rejects (in both directions): React-style proliferation of specialised hooks for cases that compose cleanly; and pre-emptive refusal of ergonomic sugar when it would clarify a common use.
+
+---
+
 ## Design questions to address
 
 Open questions the research arc has surfaced. Each is a decision point. Marked as **open** until addressed concretely below.
@@ -479,46 +521,27 @@ Open questions the research arc has surfaced. Each is a decision point. Marked a
 - **Q7 — The "settle once, never re-pending" pattern** (the friction with Solid 2.x for initialization async): first-class primitive or composed via `latest()`-equivalent? **Open.**
 - **Q8 — Transitions as primitives or `<Loading>` companion:** are `transition()`, `optimistic()` standalone primitives that compose with `<Loading>`, or is `<Loading>` itself a thin wrapper over deeper primitives that userland could re-compose? **Open.**
 - **Q9 — Action / mutator-shaped abstraction:** does pulse want anything action-shaped (Solid `action(function*)`, React Actions, Replicache mutator), or stay closer to "async functions that touch signals"? **Open.**
+- **Q10 — Where does speculative state live?** Is the speculation machinery deeply integrated in the core engine (as in Solid 2.x's per-node `_pendingValue` / `_overrideValue` slots), bolted on as a layer above a sync core (as in Bonsai's separate effect layer over a pure-incremental substrate), or expressed in *userland* over a small set of core primitives that the engine exposes? The node/value-bag framing sketched above leans toward the third — "a signal/computed is the node in the graph, not necessarily the sync value; the value-bag (entries tagged by scope) is a separate, possibly userland-visible structure" — but the locus question is genuinely open. **Open.** Sub-questions:
+  - What is the *minimum* core-engine surface that lets userland implement speculation, optimistic UI, and read-side zones without re-implementing the reactive graph?
+  - Does exposing (node, value-bag, scope) as user-visible primitives violate P5 (proliferation) or honour it (smaller core, composable surface)?
+  - Is there a layering where the *write-side* speculative scope is engine-integrated (because writes must hit some structural slot somewhere) while the *read-side* zone is userland-composable (because it's purely about gating publication)?
+  - How does this interact with Q6 (cancellation): if speculation is in userland, what does scope-discard *do* to the in-flight async work the scope started?
 
 ---
 
-## Decisions (so far)
+## Sketches against the principles (current best-guesses)
 
-Populated as the session-13+ conversation produces concrete commitments. Each
-decision records which question it addresses, the chosen position, the rationale,
-the trade-off accepted, and the evidence behind it.
+The items below (D1–D12) are **working sketches**, not locked-in decisions. Each is a current best-guess at how to honour the principles (P1–P5) given the questions (Q1–Q10) and the concrete pressures from `examples/transitions` edge cases (E1–E4) and scenarios S1–S8. They are durable as *reasoned positions against the principles*; they are negotiable as *implementation surfaces*.
 
-Decisions below were settled in the session-14 (2026-05-20) grilling pass that
+Two reading rules:
+
+- A sketch describing "the underlying mechanism" (the held write-set, the value-bag overlay, the auto-discard lifecycle) is closer to a principle and harder to negotiate without unsettling P1–P5.
+- A sketch describing "the named API surface" (whether sugar exists, what it's called, generator vs. async-function) is genuinely tentative — these are ergonomics calls that the explorative phase has not closed.
+
+Sketches below were articulated in the session-14 (2026-05-20) grilling pass that
 followed a pressure-test of the node/value-bag candidate against the four red
-edge-case tabs (`examples/transitions`) and scenarios S1–S8.
-
-### Speculation: one concept, two faces
-
-A naming reframe that the rest of this section uses. The mechanism pulse is
-designing is **speculation** — a tentatively-applied write-set held over
-committed state, observable to reads, eventually committed or discarded.
-"Transition" is the established field term (React `useTransition`, Solid
-`Transition`), but it presupposes the commit (A → B implies B happens); every
-framework using it then has to bolt on a separate vocabulary for the failure
-mode (revert, rollback, supersede). "Speculation" is symmetric and self-contained
-— *speculate / commit / discard* — and imports the CPU-speculation mental model
-(work done against a predicted outcome, ready to be thrown away if reality
-disagrees) load-bearingly, not analogically.
-
-The unification:
-
-- **One concept** — a speculative scope: a held write-set that may or may not survive.
-- **Two faces of the same scope:**
-  - **Write side** — `action` opens a speculative scope; writes inside are tagged with it; on return → commit, on throw → discard. (D1, D2, D7.)
-  - **Read side** — a **speculative zone** gates publication of a region's downstream view until the speculations it depends on settle. The read-side dual of `action`. (D12. Today's `<Loading>` is one motivation for a speculative zone; entanglement (E4), optimistic prediction, and hovered-route prefetch are others.)
-- **"Optimistic" and "transition" (in the React/Solid sense) are not two mechanisms** — they are two *labels for what a speculation is about* (predicted server state vs. intended client state). Same mechanism, same lifecycle, same scope primitive. (D3.)
-
-The rest of this section uses "speculation" / "speculative scope" / "speculative
-zone" for pulse's concept, and reserves "transition" for cross-references to what
-other frameworks call this. The API names (`action` for write-side; the read-side
-zone primitive is unnamed) don't change as part of this reframe — "transition"
-may even survive as a user-facing word for SEO/discoverability reasons. The
-reframe is conceptual, not an API rename.
+edge-case tabs (`examples/transitions`) and scenarios S1–S8, plus the
+transitions-solid porting exercise (2026-05-21+) that surfaced D4–D12.
 
 ### D1 — Commit-grouping primitive: body-style `action`, not handle-style `scope()`
 
@@ -548,29 +571,15 @@ whole write-set, giving S3 (multi-step partial failure) atomicity for free; no
 "forgot to commit" footgun. The explicit Apply/Cancel shape (S8 preview) needs
 no change to `action` and is deferred to a later decision.
 
-### D3 — No `optimistic` primitive; in-flight writes are held by the action
+### D3 — An optimistic write is one use of speculation; whether sugar is exposed is open
 
-*Addresses Q5, and concurrent-flows Q2.* There is no dedicated optimistic
-primitive. Optimistic UI is a use of `action`: a predicted `setX(...)` inside an
-action body is held in that action's write-set; the base signal cell is untouched
-until commit. A plain read of a signal resolves to its committed base value with
-any in-flight action's held write applied on top — so a prediction is visible
-with no ceremony, and a multi-step action's intermediate writes are visible
-mid-flight as pending state. `latest(() => x())` opts out to committed-only.
-Auto-discard (D2) reverts a failed prediction with no manual rollback.
+*Addresses Q5, and concurrent-flows Q2.* The underlying mechanism (durable, P1): the predict → settle → revert lifecycle of an optimistic UI is what a speculative scope already does. A predicted `setX(...)` inside an action body is held in that action's write-set; the base signal cell is untouched until commit; auto-discard (D2) reverts on failure with no manual rollback. A plain read resolves to the committed base with any in-flight speculative overlay applied on top — so a prediction is visible with no ceremony, and a multi-step action's intermediate writes are visible mid-flight as pending state. `latest(() => x())` opts out to committed-only.
 
-Rationale: the predict → settle → revert lifecycle is exactly what `action`
-already does; a dedicated primitive (`useOptimistic` / `createOptimistic` / an
-`optimistic` node) is redundant. Holding the write in the action rather than the
-shared base cell is what fixes E3 (a concurrent refetch of the base cell cannot
-collide with the prediction) and S1 (discard needs no remembered prior value, so
-interleaved rollbacks cannot corrupt state).
+So "optimistic" is a *use-label* for speculation, not a separate mechanism (per P1). Holding the write in the speculative scope rather than the shared base cell is what fixes E3 (a concurrent refetch of the base cell cannot collide with the prediction) and S1 (discard needs no remembered prior value, so interleaved rollbacks cannot corrupt state).
 
-Trade-off: a plain read is no longer "just the cell" — it resolves through
-in-flight held writes. This is benign (a no-op when no action is in flight; it is
-value resolution, not implicit suspension) but it is a real change to the read
-path in `signal.ts`. concurrent-flows Q2 is thereby answered "(b) latest active
-overlay."
+**Open (the API question, not the mechanism question):** whether to ship an ergonomic primitive *named* `optimistic` (or `createOptimistic`, or a similar sugar) as a thin wrapper over a speculative scope. Per P5, this is decided on whether the bare action shape is awkward enough for the optimistic case to warrant a named wrapper — *not* by a principle-level refusal to expose sugar. Likely yes for the single-predicted-write case (the most common one); the negative-shape "no optimistic primitive" framing of an earlier draft was a premature lock-in and is withdrawn.
+
+Trade-off (durable): a plain read is no longer "just the cell" — it resolves through in-flight held writes. This is benign (a no-op when no action is in flight; it is value resolution, not implicit suspension) but it is a real change to the read path in `signal.ts`. The read-path direction this implies for Q2 is "(b) latest active overlay."
 
 ### D4–D11 — Design direction from the transitions-solid porting exercise (2026-05-21)
 
@@ -582,7 +591,7 @@ overlay."
 
 **D6 — Speculation is explicit-boundary, not implicit.** Solid 2.x makes every async-feeding write an implicit write-level speculation (what it calls a transition) — pulse rejects that (it collides with D4: write-level hold and honest synchronous reads are mutually exclusive). Instead a speculative scope is an explicit boundary you opt into. Outside a scope: writes commit immediately, reads honest. Inside: write-level speculation semantics (held speculation, atomic commit, reads see the scope's own staged writes so read-modify-write is safe *inside*). Trade accepted: no-flash is opt-in — a bare write that triggers a refetch flashes unless wrapped (the Solid 1.x bargain). Reinforces D1.
 
-**D7 — `action` is the sole speculation primitive.** Decided ("let's bank on action") over also having a `startTransition`-equivalent. The speculative scope *is* an `action` invocation; an inline atomic block of writes is just an inline `action` call. Open: whether `action` needs a thin inline form for the trivial "batch these two writes" case, or that case is rare enough to leave as `action(function*(){...})()`. Reinforces D1.
+**D7 — Current best-guess: one write-side primitive, action-shaped.** Leaning toward "bank on action" over also exposing a `startTransition`-style separate sugar. The speculative scope *is* an `action` invocation; an inline atomic block of writes is most naturally just an inline `action` call. Whether `action` also needs a thin inline form for the trivial "batch these two writes" case — or whether a separate `speculate(() => …)`/`startTransition`-style sugar earns its keep — is open per P5; the principle-level commitment is only that "the mechanism is one" (P1), not "the surface is one." Reinforces D1.
 
 **D8 — Async computeds are not auto-unwrapped; futures are unwrapped explicitly.** A `compute` whose body returns a Promise stays typed `Accessor<Promise<T>>` (NOT `Accessor<T>` as in Solid 2.x, where the collapse is what throws `NotReadyError`). The reactive graph stays fully synchronous — a Promise flows through it as an ordinary value (a future). Two unwrap operations with genuinely different semantics:
 
@@ -599,7 +608,7 @@ overlay."
 
 **D12 — Atomic commit of incoming async data is a speculative-zone concern, not a per-read option.** A per-`use` flag (`use(sig, { lockstep: true })`) is structurally wrong: lockstep is a *group* property and a single `use` cannot name what it is in lockstep *with*. Also, a single `compute` reading multiple async sources is *already* internally lockstep (its body yields no value until every `use` resolves) — tearing only happens *across* sibling computeds / JSX holes, i.e. across a set of sibling nodes, i.e. a tree region. So the coordination unit is a **speculative zone** (today's `<Loading>` boundary is one motivation; Solid calls this `<Transition>`/`<Loading>`) — the read-side **dual of `action`**: `action` = write-side speculative scope (commit boundary for outgoing *writes*); a speculative zone = read-side speculative scope (commit boundary for incoming *resolution*). Both are boundaries, not per-element flags. "Lockstep or not" falls out of nesting with zero flags: no zone → independent/streaming commit; a zone → its contents commit in lockstep; a nested zone → that sub-group commits independently of its parent. A zone never controls upstream — it coordinates the commit of its own subtree only (DOM + published values), strictly downstream; sources are untouched. A per-read `{ eager: true }` opt-*out* could exist but is just sugar for a nested singleton zone, never the primary mechanism. This is the fix for the transitions example's E2 ("torn across boundaries"), red because the boundary is currently per-`<Loading>` and one logical change spans two.
 
-**Connecting back.** D4–D12 are consistent with the node/value-bag framing above and with the speculation reframe at the top of this section: a plain read returns the *latest entry* in the bag (committed or speculative overlay), `use` is the explicit unwrap of a future-valued entry with throw-to-suspend semantics inside restartable contexts, an `action` is the write-side speculative scope that tags entries with itself, and a speculative zone is the read-side dual that gates downstream publication of a region's entries until the speculations it depends on settle. The two faces share one mechanism: a held entry-set that either commits as a unit or is discarded as a unit.
+**Connecting back to the principles.** D4–D12 are consistent with the node/value-bag framing above and with P1 (speculation is one concept with two faces): a plain read (P3) returns the *latest entry* in the bag (committed or speculative overlay); `use` is the explicit unwrap (P2) of a future-valued entry with throw-to-suspend semantics inside restartable contexts; an `action` is the write-side speculative scope (P1, P4) that tags entries with itself; a speculative zone is the read-side dual (P1) that gates downstream publication of a region's entries until the speculations it depends on settle. The two faces share one mechanism: a held entry-set that either commits as a unit or is discarded as a unit. Whether any of this is engine-integrated, layer-above, or userland-composable over a smaller core is Q10 — unresolved.
 
 ---
 
