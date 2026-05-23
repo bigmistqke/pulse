@@ -124,6 +124,49 @@ discard old scope, open new one. The old wondering in
 [`pulse-design-direction.md`'s Sketch section](./pulse-design-direction.md)
 hedged toward keeping them separate; revisiting that hedge here.
 
+### Derivation kind matches reactivity scope (computed vs. effect)
+
+A pulse-relevant distinction surfaced by the H5 scenario:
+
+- **Computed** = *scope-aware derivation.* A computed's slot is created on
+  demand; reading it inside a speculative scope `S` recomputes under `S`,
+  walking the chain `[S, …, ROOT_SCOPE]`. The returned value is coherent
+  with `S`'s overlays.
+- **Effect** = *committed-state subscription.* An effect's body runs in
+  response to *commits* (chain selector matches `ROOT_SCOPE` writes), not
+  speculative writes. Downstream signals that an effect maintains reflect
+  committed state. The effect's body re-runs *after* commit; inside an
+  in-flight action that wrote one of the effect's deps, those downstream
+  signals are stale.
+
+The two are not interchangeable for the same "derive Y from X" need:
+
+```ts
+// Effect-mediated derivation: STALE inside the action that wrote X
+effect(() => setValue(read(X) + read(X)))
+action(() => { setX('new'); read(value) })       // returns the OLD value
+
+// Computed-mediated derivation: FRESH inside the action that wrote X
+const value = computed(() => read(X) + read(X))
+action(() => { setX('new'); read(value) })       // returns the NEW value
+```
+
+The mechanism: a *computed* has no consumer scheduler; its slot is populated
+on demand via `invoke` under whatever scope is reading. An *effect* IS a
+consumer whose scheduling is gated by selector chain, and (per H1a-c)
+defer-until-commit naturally excludes in-action visibility.
+
+**Guidance:** choose by whether downstream consumers need *synchronously
+fresh visibility into speculative state* (computed) or *settled-state
+visibility for side effects* (effect — DOM updates, network calls,
+persistence). Mixing them — using an effect to maintain a derived signal
+that gets read inside actions — produces stale-during-action behaviour
+that's correct but surprising.
+
+(This framing is a candidate for promotion to a P-numbered principle in
+[`pulse-design-direction.md`](./pulse-design-direction.md) once the rest of
+the design-direction work stabilises. Tracked branch-locally for now.)
+
 ---
 
 ## Falsified hypotheses
@@ -3453,6 +3496,19 @@ commitment the explorative phase is meant to avoid.
   Post-cleanup body re-run coherence probe.
 - **H4.** Effect that itself calls `action(…)` (effect-triggers-action).
   Cycles? Bans? Worth knowing the policy.
+- **H5.** Effect-mediated derivation coherence during action. An effect
+  maintains a signal `value` derived from `name` (e.g.,
+  `effect(() => setValue(read(name) + read(name)))`). An action writes
+  `name`, then reads `value`. Tests: does `value` reflect the action's
+  `name` overlay (would require eager effect runs, which contradicts
+  H1a-c), or the pre-action committed `value` (stale during the action,
+  fresh after commit + effect re-run)? **Architectural answer: stale
+  during action.** Contrast with K1b's computed-mediated equivalent,
+  which sees fresh. The two distinguish the **computed vs effect
+  derivation** distinction (see the "Derivation kind matches reactivity
+  scope" framing). User-ergonomic implication: effect-driven derivations
+  are *deferred*; use `computed` for synchronously-fresh derivations
+  inside actions.
 
 ### I. Component / JSX integration
 
