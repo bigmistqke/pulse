@@ -1937,6 +1937,12 @@ Position (ii) was tested and ruled out by the trace.
 Each is open. The goal is to *map the question space* before committing to any
 route. Several questions are interrelated; their connections are noted.
 
+*Bookkeeping discipline.* When a trace surfaces a new sub-question, it gets
+**promoted to this section** (either as a new Q-letter or as an appended
+bullet to an existing Q). Trace sections keep notes for reading context, but
+the canonical list of open questions lives here. Trace cross-references
+inside Q-entries name the trace that surfaced them.
+
 ### Q-A — Fall-through and edge policy
 
 Status: working candidate framing identified (Model 2 — selector-on-edge). Not
@@ -2210,7 +2216,10 @@ choices:
 - *When a Promise resolves, what happens?* If a slot's cached value is a Promise
   that resolves to `T`, does the slot's `cached` get updated to `T`? Does that
   count as a "slot change" that fires subs? Probably yes — and that's how a
-  computed-with-async-dep transitions from pending to ready.
+  computed-with-async-dep transitions from pending to ready. **C2 trace
+  confirmed the lean: yes, the engine eagerly updates `slot.cached` on Promise
+  resolve and emits a slot-changed event. Q-C's consumer pattern needs this
+  to fire when async deps resolve.**
 - *Does the engine track which slots are pending?* Or is that a walk's question
   (`isPending(node)` walks the slot, checks if `cached` is a Promise)?
 
@@ -2259,6 +2268,14 @@ Currently typed `unknown` in the sketch. Practically, scopes need:
 Sketch: `interface Scope { parent?: Scope; cleanups: Disposable[]; status:
 'open' | 'closed' }` — minimal, walk-extensible.
 
+**Open sub-question (surfaced by G2 trace):** `chainFor(scope)` walks
+`scope.parent` pointers up to and including `ROOT_SCOPE`. For custom scope
+hierarchies — per-tenant roots, per-document roots, multiple reactive
+"worlds" — the terminal might not be `ROOT_SCOPE`. The library should
+probably expose `chainFor` as user-overridable, or expose `terminalScope`
+as a configurable per-tree property. Open whether this is a library
+concern or whether the engine needs to know about it.
+
 **Related:** Q-B (the unification question), Q-A (selectors quote scope
 identities; scope value-shape constrains how selectors can match).
 
@@ -2278,6 +2295,14 @@ for the requested scope. Is this:
 intent and pushes more convention into the library; (iii) is most flexible.
 Probably a cosmetic question, but worth deciding.
 
+**Sub-question (surfaced by doubleName trace):** what `cached` does a *promoted*
+slot carry? Three sub-positions: (a) preserve `cached` + carry over old deps
+(but old deps had chain selectors keyed to the old scope, which doesn't match
+the new scope's chain); (b) preserve `cached`, drop deps, let next recompute
+rebuild; (c) drop `cached`, force recompute on next read. *Lean (b)*:
+preserves the work done in the scope without carrying selector mismatches
+forward. Related to Q-A (selector identity across scope transitions).
+
 ### Q-H — Tracker vs Scope: separate or unified?
 
 The sketch has a separate `currentTracker` (the slot currently being
@@ -2291,6 +2316,21 @@ that may contain many tracker-events. They're at different granularity.
 Likely answer: tracker is a sub-ambient. A slot recomputes under a scope (its
 slot's scope); reads inside the recompute know both. Either two separate
 ambients, or one ambient with a "current slot recomputing" sub-field. Open.
+
+**K1 confirmed the parallel-and-coupled framing.** When a recompute enters,
+both `currentTracker` and `currentScope` push together (the slot being
+recomputed *and* its scope); both pop together. Re-entrant writes inside the
+recompute correctly inherit the recompute's scope. So they're separate
+ambients with synchronized lifecycles.
+
+**Sub-question (surfaced by K1 + relates to catalog L1):** *`untrack`
+interaction.* `untrack(() => ...)` clears `currentTracker` but not
+`currentScope`. So a `writeSlot` inside `untrack` writes to the current
+scope normally, but its firing isn't gated by `deferredFires` (which is
+keyed on tracker). Writes inside `untrack` would fire synchronously even
+during a recompute. That's plausible (the user explicitly opted out of
+tracking) but worth confirming as the policy. Connects to L1 in the
+scenario catalog.
 
 ### Q-I — Read-populated vs write-populated slots: do they differ structurally?
 
@@ -2330,6 +2370,78 @@ Probably resolved together.
 intent into the library's scope handling. But (i) wins if performance
 measurements show that walking the scope's write-set is slower than checking
 flags during commit. Currently mostly cosmetic.
+
+### Q-J — Commit as transaction: ordering, atomicity, deferred fires
+
+Surfaced cumulatively by doubleName (commit ordering), K1 (deferred fires
+during recompute), and G2 (promotion atomicity at the consumer level). The
+underlying question: **when an action commits, how exactly does the engine
+sequence the multiple slot promotions and edge fires so that consumers see a
+consistent post-commit state, not a sequence of partial updates?**
+
+Three concerns under one umbrella:
+
+- *Multi-write ordering.* If an action wrote to N signals, commit promotes
+  N slots to the parent scope. Each promotion calls `writeSlot`, which fires
+  edges. If a derived consumer's edges target a slot that depends on
+  multiple of these N signals, the order of promotions can fire the consumer
+  multiple times with partial states (after promoting `signal_1` but before
+  `signal_2`). *Working hypothesis: dep-order leaves-first.* Sources promote
+  before their dependents; intermediate fires invalidate but don't re-run
+  until all promotions are done.
+- *Deferred fires during commit.* Even with dep-order, consumers might
+  re-run mid-commit (e.g., if the consumer's body is a synchronous effect).
+  Better: collect *deferred fires* during the entire commit operation, drain
+  them after all promotions complete. This is structurally the same
+  mechanism as K1's `deferredFires` queue — gated on "are we in a commit
+  operation?" rather than "is there a tracker active?".
+- *Atomicity from the consumer's perspective.* External consumers (effects,
+  JSX-bindings) should see *the commit as a single event* — one invalidation
+  per affected consumer, regardless of how many slots got promoted. Same as
+  the K1 deferred mechanism applied at the commit boundary.
+
+Likely resolution: **commit is itself a deferred-fires region.** When
+`closeScope(S, 'commit')` runs:
+
+1. Open a deferred-fires region.
+2. For each `S`-tagged write-populated slot (Q-I), perform `writeSlot(node,
+   parentScope, slot_content)`. Edge fires are *queued* into the deferred
+   region.
+3. Drop the `S`-tagged slots, unlinking edges.
+4. Close the deferred-fires region: deduplicate by `(node, scope)`, then
+   actually call `fireEdges` for each. Consumers see one invalidation per
+   affected slot, regardless of how many writes contributed.
+
+This generalizes K1's `deferredFires` mechanism: deferral is now a property
+of *being inside a commit* OR *being inside a recompute*. Same shape, two
+triggers.
+
+**Open sub-questions:**
+
+- *Nested-commit ordering.* G2 traced inner-commit-promotes-to-outer. If
+  inner commit happens inside a deferred-fires region (because outer is
+  still executing its body), do the inner's promotions fire immediately to
+  external consumers, or are they also deferred until outer finishes? Lean:
+  inner-commit fires immediately *within the outer's body*, because the
+  outer's body might read the post-inner state and the body is imperative.
+  But for *external* consumers (chain matches `ROOT_SCOPE`), they shouldn't
+  fire until outer commits — which falls out of the chain selector anyway
+  (the chain selector for an external consumer doesn't match writes to the
+  outer's scope). So this might be a non-issue under the chain mechanism.
+  Worth verifying with a deliberate trace.
+- *Edge-target-dropped races.* If during a commit, an edge's target slot
+  gets dropped (e.g., the consumer was tied to a different scope that
+  closed during the commit's processing), the deferred fire would target a
+  dead slot. Lazy-prune-on-iteration handles it.
+- *Promise resolution during commit.* If a promoted slot's `cached` is a
+  Promise that's still pending, the commit promotes the Promise. Later
+  resolution fires edges normally — same as any other Promise-resolution
+  write. No special handling.
+
+**Lean: implement commit as a deferred-fires region**, generalizing K1's
+mechanism. The engine's invariant becomes "if `deferredFires` is non-null,
+fires queue; outermost layer drains." Recomputes set up one such region;
+commits set up another. They compose by nesting.
 
 ---
 
