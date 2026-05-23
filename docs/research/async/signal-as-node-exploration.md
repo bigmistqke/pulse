@@ -842,10 +842,18 @@ ambients, or one ambient with a "current slot recomputing" sub-field. Open.
 ## Scenario catalog (problem-space mapping)
 
 A map of architecturally-distinct cases the engine + speculation machinery
-needs to handle. Goal: grip on the problem space before committing to a route.
-The catalog isn't exhaustive — it picks cases that exercise *different parts*
-of the architecture, not variants of the same case. ✓ marks a scenario that's
-already been traced end-to-end; everything else is open.
+needs to handle. Goal: grip on the problem space before committing to a route,
+and a basis for the eventual TDD suite — **each scenario is intended to become
+a test case** with a precise setup, action, and expectation. The catalog
+deliberately favours *specificity over generalisation*: distinct cases stay
+distinct even when they look similar, because each will be its own test. ✓
+marks a scenario that's already been traced end-to-end; everything else is
+open.
+
+*Tracing discipline.* When a scenario is traced, record both the decisions the
+trace exposed and *the alternatives that weren't taken* — otherwise the first
+plausible trace becomes the route by default, which is exactly the premature
+commitment the explorative phase is meant to avoid.
 
 ### A. Single speculation, sync (Dim 1 — internal structure)
 
@@ -856,17 +864,23 @@ already been traced end-to-end; everything else is open.
 - **A3.** Action writes multiple signals (`setX`, `setY`); read derived
   `f(X, Y)`. Tests whether multiple scope-tagged slots compose into one
   derived under the same scope. *Expected: yes — recipe runs once, reads
-  each under `S`.*
+  each under `S`. Conditional on Q-H (tracker-as-scope) and Q-A selector
+  dedup behaving correctly under multi-source reads.*
 - **A4.** Action writes one signal; two distinct deriveds depend on it. Tests
   that both deriveds invalidate independently and re-read under `S`.
-- **A5.** Read-modify-write: `setX(x => x + 1)` inside action (setter takes a
-  function and reads current value). Tests whether the read inside the setter
-  function sees committed or speculative. Library-API design question, not a
-  mechanism question.
-- **A6.** Conditional read (recipe branches): `computed(() => cond() ?
-  read(a) : read(b))`. Inside action, `cond` flips → recipe reads different
-  signals. Tests dynamic deps under scope; old edges drop, new edges form.
-  r3 already handles dynamic deps via push-pull-push fallback.
+- **A5a.** Functional setter: `setX(x => x + 1)` inside action. Tests *what
+  the setter callback's `x` parameter is*: committed value or speculative-
+  slot value. Library-API design question.
+- **A5b.** Functional setter, write side: where does the setter's returned
+  value land? Tests that the write goes to the speculative slot at `S`,
+  consistently with sync `setX(v)`. *Expected: yes.*
+- **A6a.** Conditional read in a recipe under `ROOT_SCOPE`: branches change
+  on input. Tests dynamic deps (drop edge for not-taken branch, form edge
+  for taken). *r3 baseline; no new behavior.*
+- **A6b.** Same conditional read, recipe invoked under a non-root scope
+  `S`. Tests dynamic deps *under scope*: scope-tagged edges drop / form as
+  branches change. This is where Model 2 is exercised; A6a is a smoke
+  prerequisite.
 - **A7.** Action reads only — never writes. Tests whether slots get created
   under `S` for memoisation purposes, or whether read-only access is a no-op
   at the bag level.
@@ -885,9 +899,18 @@ already been traced end-to-end; everything else is open.
 
 - **C1.** `setX(Promise.resolve("v"))` inside action — the new recipe returns
   a Promise. Tests: how does a derived `read(X)` see this? Walks decide.
-- **C2.** Action body `yield* read(asyncSignal)` — body parks until promise
-  resolves. Tests: does the scope stay open across the await? Does the
-  ambient scope restore correctly on resume? Major question.
+- **C2a.** Action body `yield* read(asyncSignal)` — body parks until promise
+  resolves *before any other event*. Tests: does the scope stay open across
+  the await? Does the ambient scope restore correctly on resume?
+- **C2b.** Same, but the awaited promise resolves *after* the action would
+  have committed had it been synchronous (i.e., the scope stays open across
+  a long await). Tests: long-lived open scopes; resource holding.
+- **C2c.** Same, but a supersession (E1) arrives while the action body is
+  parked at the `yield*`. Tests: discard mid-coroutine; cancellation
+  reaches the in-flight promise via `onCleanup`.
+- **C2d.** Same, but writes occur (from a different scope, or from
+  ROOT_SCOPE) during the await window. Tests: when the action body resumes,
+  what does its read see? Did the chain re-evaluate?
 - **C3.** Async signal resolves *after* the action commits — what value lands
   in canonical? The action committed a Promise; resolution happens later
   under no scope. Library policy.
@@ -903,17 +926,21 @@ already been traced end-to-end; everything else is open.
   scope.
 - **D2.** Two actions, both read same signal but only one writes. Reader's
   edges register against the writing scope's chain; should fire correctly on
-  writer commit. Verify selectors handle.
+  writer commit. *Conditional on commit-ordering open question (trace step 5
+  open question #1).*
 - **D3.** Late subscriber: component mounts mid-action and reads under that
   action's scope. Edge formed with the right chain at subscription time.
   Should fall out of Model 2.
 
 ### E. Supersession (Dim 3) — *policy question*
 
-- **E1.** New action arrives while old in-flight; old structurally cancelled
-  (its scope discards). Cancellation discipline; old's in-flight async
-  aborts via `onCleanup`. Mechanism settled; policy of *when* to supersede
-  is higher-level.
+- **E1a.** New action arrives while old in-flight; old structurally
+  cancelled by closing its scope with `discard`. Tests: scope-discard
+  mechanism — slots drop, edges cleanup, cleanups fire.
+- **E1b.** Discarded scope's `onCleanup` chain aborts an `AbortController`
+  that the action body installed for an in-flight fetch. Tests: cancellation
+  reaches in-flight async work via the cleanup chain (Q2 + Q-B
+  composition).
 - **E2.** Old action and new action coexist (no auto-supersession). Both
   scopes alive; reads under each see their own overlay. Likely default.
 - **E3.** Rapid sequence of supersessions (typing in an input). Scope churn
@@ -940,7 +967,8 @@ already been traced end-to-end; everything else is open.
 - **G2.** Inner commits → its slots promote to outer's scope (not ROOT).
   Outer commits → outer's slots promote to ROOT. Two-stage promotion. *Open:
   does inner-commit promote to outer or directly to ROOT? Lean: to outer,
-  preserving nesting.*
+  preserving nesting.* See F2 — same commit-promotion question at outer-most
+  depth.
 - **G3.** Inner commits; outer discards. Inner's promoted-to-outer slots get
   discarded with outer. Nesting respects parent lifecycle.
 - **G4.** Inner discards; outer continues. Inner's writes drop; outer's
@@ -948,9 +976,14 @@ already been traced end-to-end; everything else is open.
 
 ### H. Effects under speculation — *Q-C open*
 
-- **H1.** Effect registered outside; speculative write happens inside an
-  action. Does the effect re-run during the action, on commit, or never?
-  Three positions per Q-C; lean defer-until-commit.
+- **H1a.** Effect registered outside; speculative write happens inside an
+  action. Tests *during the action*: does the effect fire? *Lean: no
+  (defer-until-commit).*
+- **H1b.** Same setup; action commits. Tests *after commit*: does the
+  effect fire exactly once with the committed value? *Lean: yes.*
+- **H1c.** Same setup; action discards. Tests: effect never fired
+  (no speculative trigger leaked). *Lean: yes.* (H1a/b/c together
+  establish the defer-until-commit position from Q-C.)
 - **H2.** Effect created inside an action body. Effect's owner is the
   action's scope; effect's body executes once at registration. Does it
   re-fire on writes inside the same action?
@@ -965,6 +998,7 @@ already been traced end-to-end; everything else is open.
 - **I1.** JSX expression `{read(name)}` rendered inside a component that's
   *inside* an active action. JSX-binding consumer treated like Effect —
   re-renders on speculative writes? Defers to commit? Q-C territory.
+  *Downstream of H1a-c's resolution.*
 - **I2.** Component mounts inside an action. Its computeds and effects
   belong to a child owner of the action's scope. On action discard, all
   the mounted components dispose. Falls out of scope/owner unification.
@@ -979,9 +1013,13 @@ already been traced end-to-end; everything else is open.
   action's overlay. Falls out of selector design.
 - **J2.** `peek(node)` inside an action. Untracked read, same scope, no edge
   formed. Trivial.
-- **J3.** `isPending(node)` — what does it report? Whether *any* scope has a
-  slot for the node? Whether the *current* scope's slot is pending
-  (Promise-valued cache)? Q-D-adjacent; library walk decides.
+- **J3a.** `isPending(node)` — definition 1: returns true if *any* scope
+  has a slot for the node distinct from the canonical chain endpoint
+  (i.e., "something is in flight somewhere").
+- **J3b.** `isPending(node)` — definition 2: returns true only if *the
+  current scope's slot* has a Promise-valued cache (i.e., "this node is
+  pending *for me*"). Distinct walk from J3a; the library should pick one
+  (or expose both with different names). Q-D adjacent.
 - **J4.** Action creates a new signal (`signal(initial)` called inside the
   action body). Does the new signal's "initial slot" tag with `ROOT_SCOPE`
   or with the action's scope? Library policy. If with scope: signal
@@ -992,23 +1030,124 @@ already been traced end-to-end; everything else is open.
   or no scope) reads it. Other scope/no-scope doesn't see the speculative
   value. Falls out — selectors handle.
 
+### K. Re-entrancy & write-during-recompute
+
+- **K1.** `setX` called from *inside* a computed's recipe body during
+  recompute (synchronous side-effect during recompute). Tests: ban or
+  permit? If permitted, when does the write fire — synchronously? deferred?
+  Pressures Q-A (selectors fire mid-recompute), Q-E (signal/computed
+  asymmetry), Q-H (tracker as scope). r3 traditionally bans this.
+- **K2.** `setX` called from inside `onCleanup` of a slot being dropped
+  during commit (cleanup chain triggers further writes). Tests: re-entrant
+  write during commit; commit-ordering subtlety (trace open question #1).
+- **K3.** Action body calls `setX` where `X` is updated by an effect that
+  was itself triggered by that write (would-be cycle). Tests: cycle
+  detection under scope; policy bans or runs.
+
+### L. Boundary-bypass reads inside speculation
+
+- **L1.** `untrack(() => read(node))` inside an action body. Tests: read
+  forms no tracking edge; do writes performed inside the `untrack` block
+  still tag with the action's scope? *Tracker and scope are decoupled per
+  Q-H, so the answer is plausibly "yes for writes, no for tracking edges"
+  — but this is exactly the case where Q-H bites.*
+- **L2.** `latest(node)` inside an action that has *also written* to `node`.
+  Tests: does `latest` see the *pre-action* committed value, or the
+  most-recently-promoted ancestor (which doesn't exist yet if the action
+  hasn't committed)? Edge of selector design.
+- **L3.** `peek(node)` inside an action that has written to `node`. Tests:
+  `peek` is untracked but scope-aware; should return the action's slot
+  value. Distinct from J2 (which is for a non-written node).
+
+### M. Resource ownership across speculation
+
+- **M1.** Action body opens an external resource (`new WebSocket(...)`,
+  `setInterval`) and registers `onCleanup(close)`. Tests: on commit, does
+  the resource live on past the scope? Owned by what? On discard, cleanup
+  fires.
+- **M2.** A `computed` is allocated inside an action body. Tests: owned by
+  the action's scope (disposes on discard) or by the surrounding parent
+  owner? Different answer from a signal (J4)?
+- **M3.** An `effect` is allocated inside an action body. Tests: same as
+  M2 for effects. The effect's own owner is the action's scope; its
+  re-run discipline interacts with H1.
+
+### R. Scheduling & frame coordination
+
+- **R1.** A speculative scope's commit timing: immediate vs deferred to
+  the next animation frame. Tests: is commit timing a scope-policy option
+  (`closeScope(S, 'commit', { schedule: 'raf' })`), a walk concern, or out
+  of scope?
+- **R2.** Two speculations want to commit in the same frame: coalesce or
+  independent? Touches Dim 4 with a *timing* dimension that F2 lacks.
+- **R3.** A long-lived action whose body yields control via
+  `requestAnimationFrame` between writes. Tests: scope persists across
+  frame boundary; ambient restoration works for raf-style awaits the way
+  it does for promise awaits (C2).
+
+### Probably out of scope for the research phase
+
+These shapes were considered and judged probably-out-of-scope for now, but
+named explicitly so the catalog isn't silent about them. Any of them may move
+into scope if a use-case pulls them in.
+
+- *N. Debugging / DevTools introspection.* Visiting every slot/edge for
+  inspection without forming subscriptions.
+- *O. Persistence / serialization.* Snapshotting committed state to
+  IndexedDB; serialising slot recipes is non-trivial since they're code.
+- *P. SSR / hydration / streaming.* Resuming a Node's slot from server-
+  serialised state without recomputing.
+- *Q. Cross-thread / cross-tab.* Worker postMessage, BroadcastChannel,
+  storage events driving slot writes.
+- *S. Memory pressure / GC.* Steady-state cardinality of `node.slots`;
+  per-tenant / per-route scopes never closing.
+- *T. Testing affordances.* Mocking a signal's `defaultRecipe` in a test;
+  "dry-run" actions that don't commit.
+
+If pulse ends up taking any of these on, this section is where they get
+promoted to a real category.
+
 ### Architectural distribution
 
 - *A:* single-scope mechanics — most settled; A2 traced.
 - *B:* lifecycle — mostly settled by scope/owner framing.
-- *C:* async — biggest open area (Q-D).
+- *C:* async — biggest open area (Q-D). *C2 specifically is the highest-
+  yield single trace: it pressures all four framings (Node-as-recipe,
+  walks-first-class, slim-engine + thick-library, scope/owner unification)
+  simultaneously.*
 - *D:* concurrence — mechanically straightforward under Model 2.
 - *E:* supersession — mechanism settled; policy open.
 - *F:* overlap — policy is the question, not mechanism.
-- *G:* nesting — depends on commit-promotion semantics.
-- *H:* effects — large open area (Q-C).
-- *I:* JSX/components — depends on H.
+- *G:* nesting — depends on commit-promotion semantics (same question as
+  F2 at a different depth).
+- *H:* effects — large open area, but the load-bearing question is really
+  Q-C (consumer pattern), which is *upstream* of much of C-engine, H, and
+  I. Q-C's priority ≥ H's.
+- *I:* JSX/components — downstream of H/Q-C.
 - *J:* edges — mostly mechanical verification.
+- *K:* re-entrancy — **pressures more framings simultaneously than any
+  other category** (Node-as-recipe + walks + scope/owner + Q-A + Q-H +
+  commit-ordering). Missing from the initial priority ranking; should be
+  high.
+- *L:* boundary-bypass — small, targeted, exposes Q-H concretely.
+- *M:* resource ownership across commit boundaries — the unstated half of
+  B3; load-bearing for scope/owner unification.
+- *R:* scheduling — touches Dim 3 (priority) which the main doc punts;
+  pulse hasn't articulated against the framings.
 
-Three categories where the architecture is most under-specified: **C (async)**,
-**H (effects)**, and **G (nesting commit-promotion)**. Two where the mechanism
+Categories where the architecture is most under-specified: **C (async)**,
+**H (effects)** *via Q-C*, **G (nesting commit-promotion)**, and **K
+(re-entrancy)** — added after agent review. Categories where the mechanism
 is settled but a policy decision still needs to be made: **E (supersession)**,
-**F (overlap)**.
+**F (overlap)**, **R (scheduling)**.
+
+*Priority for the next trace, ranked:* **(1) C2** — single trace, biggest
+yield. **(2) Q-C-via-H1a-c** — establishes the consumer pattern Q-C, which
+is upstream of much else. **(3) K1** (setter mid-recompute) — pressures
+most framings simultaneously. **(4) G2** (inner-commit-to-outer-or-ROOT) —
+small, cheap, forces a policy out into the open. **(5) H3** (cleanup chains
+across speculative effect runs) — where scope/owner unification either
+holds or breaks.
 
 ---
 
