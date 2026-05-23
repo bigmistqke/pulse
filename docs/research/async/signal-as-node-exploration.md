@@ -1260,14 +1260,35 @@ selectors. Both came out cleanly.
 
 ## End-to-end trace: K1 — re-entrant setter mid-recompute
 
-The hardest scenario to pin down architecturally because re-entrancy crosses
-every layer: a setter is called *from inside* a computed's recipe body during
-that recipe's invocation. K1 was named by the agent review as the
-"single-scenario that pressures the most framings simultaneously" — and the
-trace bears that out. It also forces a *policy decision* (the only one of the
-traced scenarios so far where the architecture itself doesn't pick a winner).
+**Note (post-revision):** the original K1 trace below identified three
+positions (A: ban, B: permit + defer fires, C: permit + fire synchronously)
+and leaned (B) while ruling out (C). That conclusion was *wrong*. Two
+subsequent findings dissolved K1's "design call" entirely:
 
-### The interaction question
+1. **(A) is structurally incompatible** with the slim-engine framing
+   (effects need to write inside their bodies; the engine doesn't
+   distinguish "this tracker is a computed's recipe" from "this tracker
+   is an effect's body" without violating one-Node-primitive).
+2. **(B) returns *stale* values** in the K1b scenario (write a signal
+   then read a derived in the same recipe — see catalog K1b). The
+   deferred fires mean the derived's slot isn't marked dirty until
+   after the recipe returns; the in-recipe `read` returns the stale
+   cached value.
+3. **(C) was ruled out on a confused premise.** "Synchronous fire mid-
+   recompute creates re-entrant invocation" conflated *firing edges*
+   (mark target dirty + emit slot-changed event) with *synchronously
+   invoking the consumer's body*. Firing is just propagate-dirty +
+   queue-microtask; consumers schedule async; no re-entry occurs.
+
+**Settled answer: (C) — permit + fire synchronously.** Consumers schedule
+async via microtasks; cycle detection at consumer level catches loops. The
+K1b sub-trace below walks through why.
+
+The historical trace below remains for reference; the architectural status
+is amended in the "Architecture exposed (post-revision)" section at the
+end of K1.
+
+### The interaction question (historical framing)
 
 Concrete shape:
 
@@ -1282,9 +1303,29 @@ const derived = computed(() => {
 read(derived)
 ```
 
-What happens when the recipe calls `setShadow(0)`? Three positions are
-defensible; pulse hasn't picked one. They differ in *when* the write's edges
-fire relative to the current recompute.
+What happens when the recipe calls `setShadow(0)`? Three positions were
+identified; pulse leaned (B) initially but later flipped to (C) — see
+the K1b sub-trace and "Architecture exposed (post-revision)" below.
+
+### The three positions (historical exposition)
+
+Concrete shape:
+
+```ts
+const [count, setCount] = signal(0)
+const [shadow, setShadow] = signal(0)
+const derived = computed(() => {
+  const c = read(count)
+  setShadow(c * 2)        // ← re-entrant write inside the recipe
+  return c + 1
+})
+read(derived)
+```
+
+What happens when the recipe calls `setShadow(0)`? Three positions were
+identified. The historical conclusions are reproduced below for context;
+the post-revision finding flips (B) → (C) — see "Why (B) is wrong" and
+"K1b sub-trace" sections below.
 
 - **(A) Hard ban.** `writeSlot` called while `currentTracker` is set →
   throw. Defensible: re-entrant writes are usually bugs and prohibiting
@@ -1622,6 +1663,154 @@ architecture itself doesn't pick a winner between two real positions (A vs
 B). That's *signal* — it tells us the question is genuinely a *design call*
 the engine machinery can support either way, and pulse has to make it
 deliberately. Worth keeping the call open in the doc.
+
+### K1b sub-trace: write inside recipe, then read downstream derived
+
+A scenario that was not part of the original K1 wording — surfaced by a
+user question:
+
+```ts
+const [name, setName] = signal("foo")
+const doubleName = computed(() => read(name) + read(name))
+
+const weird = computed(() => {
+  setName("name")                         // write
+  return read(doubleName).capitalize()    // read of downstream derived
+})
+```
+
+Assume `doubleName.slots[ROOT_SCOPE].cached = "foofoo"` (from an earlier
+read).
+
+**Under Position B (defer fires during recompute):**
+
+- Recipe runs. `deferredFires = []` (tracker active).
+- `setName("name")`: `writeSlot(name, ROOT_SCOPE, …)`. `name.slot[ROOT_SCOPE]
+  .cached = "name"` (synchronous). Fire deferred → queue
+  `{ name, ROOT_SCOPE }`.
+- `read(doubleName)`: `invoke(doubleName, ROOT_SCOPE)`. Slot exists, cached
+  `"foofoo"`. **Is the slot dirty?** No — the fire was deferred, so the
+  dirty flag was never set. Returns `"foofoo"`.
+- Recipe: `"foofoo".capitalize() = "Foofoo"`. Cache `weird.slot = "Foofoo"`.
+- Pop tracker, drain queue. Fire `name → doubleName` edge. Mark
+  `doubleName.slot` dirty. (Too late.)
+
+**Result under (B): `read(weird) = "Foofoo"`. Stale.** ✗
+
+The reason: deferred fires mean *the dirty flag on `doubleName.slot` isn't
+set until after the recipe returns*. The in-recipe `read(doubleName)`
+finds the slot clean and returns the stale cached value.
+
+**Under Position C (fire synchronously):**
+
+- Recipe runs. No deferral.
+- `setName("name")`: `writeSlot(name, ROOT_SCOPE, …)`. Walk edges
+  immediately. Fire `name → doubleName`. Mark `doubleName.slot` dirty.
+- `read(doubleName)`: `invoke(doubleName, ROOT_SCOPE)`. Slot is dirty.
+  **Recompute**: reads `name` (now `"name"`), returns `"namename"`. Cache,
+  clear dirty.
+- Recipe: `"namename".capitalize() = "Namename"`. Cache.
+
+**Result under (C): `read(weird) = "Namename"`. Fresh.** ✓
+
+### Why the original K1 trace missed this
+
+The original K1 used `setShadow(c * 2); return c + 1` — the recipe wrote
+to `shadow` but didn't *read* anything afterward, just returned. Without a
+follow-up read of a derived value, Position B looked fine because the
+deferred fires got drained after the recipe returned, with no
+opportunity to observe the stale state mid-recipe.
+
+K1b is the case that distinguishes (B) from (C). The catalog's original
+K1 was *under-specified*: it tested "is the write permitted?" but not
+"is in-recipe state coherent across the write?" Two different questions;
+only the second probes the synchronous-vs-deferred-fires mechanism.
+
+### Why (C) doesn't cause re-entrant invocation
+
+The original K1 trace ruled out (C) with "synchronous firing mid-recompute
+creates re-entrant invocation of the current recompute." This was a
+confusion. Let's name the operations precisely:
+
+- **`writeSlot`** updates `slot.cached` and walks outgoing edges.
+- **`fireEdges`** for each matching edge: mark target slot dirty, emit a
+  slot-changed event to subscribers.
+- **Consumer** (Effect, Computed-cache, JSX-binding) receives the event
+  and responds. Effects: `scheduleMicrotask(runBody)`. Computeds: no-op
+  beyond the dirty flag (next demand recomputes). JSX: schedule DOM
+  update.
+
+Firing is just *mark dirty + emit event + queue microtask*. Crucially,
+**consumers do not synchronously invoke bodies** — effects schedule async,
+computeds wait for demand. So "fire synchronously inside a recipe" doesn't
+re-enter the current recompute's body. It just sets flags on downstream
+slots, which the current recompute may then encounter via its own reads
+(triggering recomputes of *those* slots, not the current one).
+
+### The cycle subcase under (C)
+
+```ts
+const incrementer = computed(() => {
+  const c = read(count)
+  setCount(c + 1)
+  return c
+})
+```
+
+- `read(count)`: edge formed `count → incrementer.slot`.
+- `setCount(c+1)`: `writeSlot(count, …)`. Walk edges. Fire `count →
+  incrementer.slot`. Mark `incrementer.slot` dirty.
+- But `incrementer.slot` is currently being recomputed. Marking it dirty
+  just sets a flag. The recompute completes, caches `c`, leaves dirty
+  set.
+- Next demand for `incrementer`: dirty, recompute. `c = new value`,
+  `setCount` again, mark dirty. Cached, dirty.
+
+Pull-driven: one recompute per demand. No infinite synchronous loop. An
+Effect consumer pulling each microtask loops — caught at consumer level
+("max N re-runs per microtask cycle → bail").
+
+(C) doesn't make cycles worse than (B). It just makes the non-cycle case
+correct.
+
+### Architecture exposed (post-revision)
+
+K1's design call **dissolves**:
+
+- **(A) Hard ban** — incompatible with effects (per the H1a-c-derived
+  observation that effects need to write inside their bodies). The engine
+  doesn't know "this tracker is a computed's recipe vs. an effect's body"
+  without violating the one-Node-primitive framing.
+- **(B) Permit + defer fires** — returns *stale* values on K1b. **Wrong.**
+- **(C) Permit + fire synchronously** — handles K1b correctly; cycles
+  caught at consumer level; no re-entrant invocation.
+
+**Settled: (C).** This is essentially r3's model (writes propagate dirty
+to subs synchronously; consumers schedule async via the heap + microtask).
+Pulse adopts the same semantics, just with Model 2 selectors gating which
+edges actually fire.
+
+Implication for Q-J (commit-as-transaction): the deferred-fires region is
+**commit-mode-only**, not tracker-mode. Recipes don't defer; commits do.
+The two modes don't interfere because a recipe inside a commit is rare
+(commits are themselves outside any recompute).
+
+### Updated framings status after K1+K1b
+
+All four framings still hold:
+
+- *Node-as-recipe*: recipes can write; engine doesn't distinguish kinds.
+- *Walks-first-class*: writes propagate dirty via selector chains;
+  consumers receive events.
+- *Slim engine + thick library*: (C) requires no special engine
+  machinery for recipes — just the normal fireEdges path. Cycle detection
+  is library code.
+- *Scope/owner unification*: unaffected.
+
+**The architecture itself picks (C).** What looked like a deliberate
+policy choice (A vs B) was actually a tracing under-specification (K1
+didn't probe the write-then-read-derived case that distinguishes B from
+C). With the right scenario (K1b), the answer falls out.
 
 ---
 
@@ -2881,11 +3070,20 @@ flags during commit. Currently mostly cosmetic.
 
 ### Q-J — Commit as transaction: ordering, atomicity, deferred fires
 
-Surfaced cumulatively by doubleName (commit ordering), K1 (deferred fires
-during recompute), and G2 (promotion atomicity at the consumer level). The
-underlying question: **when an action commits, how exactly does the engine
-sequence the multiple slot promotions and edge fires so that consumers see a
-consistent post-commit state, not a sequence of partial updates?**
+Surfaced cumulatively by doubleName (commit ordering), K1 (originally; see
+post-revision note below), and G2 (promotion atomicity at the consumer
+level). The underlying question: **when an action commits, how exactly
+does the engine sequence the multiple slot promotions and edge fires so
+that consumers see a consistent post-commit state, not a sequence of
+partial updates?**
+
+**Post-revision scope (after K1+K1b).** Initially this question was framed
+as "deferral applies during recomputes (K1) and during commits (here)."
+K1+K1b flipped to position (C) — recomputes do *not* defer fires; they
+fire synchronously, and consumers schedule async via microtasks. So
+**deferred-fires is commit-mode only**, not tracker-mode. The mechanism
+is the same shape but only one trigger remains: opening a commit
+operation.
 
 Three concerns under one umbrella:
 
@@ -2897,18 +3095,15 @@ Three concerns under one umbrella:
   `signal_2`). *Working hypothesis: dep-order leaves-first.* Sources promote
   before their dependents; intermediate fires invalidate but don't re-run
   until all promotions are done.
-- *Deferred fires during commit.* Even with dep-order, consumers might
-  re-run mid-commit (e.g., if the consumer's body is a synchronous effect).
-  Better: collect *deferred fires* during the entire commit operation, drain
-  them after all promotions complete. This is structurally the same
-  mechanism as K1's `deferredFires` queue — gated on "are we in a commit
-  operation?" rather than "is there a tracker active?".
+- *Deferred fires during commit.* Without deferral, consumers might re-run
+  mid-commit and observe partial states. Better: collect *deferred fires*
+  during the entire commit operation, drain them after all promotions
+  complete.
 - *Atomicity from the consumer's perspective.* External consumers (effects,
   JSX-bindings) should see *the commit as a single event* — one invalidation
-  per affected consumer, regardless of how many slots got promoted. Same as
-  the K1 deferred mechanism applied at the commit boundary.
+  per affected consumer, regardless of how many slots got promoted.
 
-Likely resolution: **commit is itself a deferred-fires region.** When
+Likely resolution: **commit is a deferred-fires region.** When
 `closeScope(S, 'commit')` runs:
 
 1. Open a deferred-fires region.
@@ -2920,9 +3115,12 @@ Likely resolution: **commit is itself a deferred-fires region.** When
    actually call `fireEdges` for each. Consumers see one invalidation per
    affected slot, regardless of how many writes contributed.
 
-This generalizes K1's `deferredFires` mechanism: deferral is now a property
-of *being inside a commit* OR *being inside a recompute*. Same shape, two
-triggers.
+**Recipes** (computed/effect bodies) **do not open a deferred-fires
+region.** Writes inside recipes fire synchronously per K1+K1b's resolution
+to (C). This is necessary for in-recipe state coherence (K1b: write a
+signal, then read a downstream derived → derived must recompute fresh).
+Cycle protection is consumer-level (max N re-runs per microtask),
+unaffected by whether fires are deferred.
 
 **Open sub-questions:**
 
@@ -3211,11 +3409,17 @@ commitment the explorative phase is meant to avoid.
 
 ### K. Re-entrancy & write-during-recompute
 
-- **K1.** `setX` called from *inside* a computed's recipe body during
-  recompute (synchronous side-effect during recompute). Tests: ban or
-  permit? If permitted, when does the write fire — synchronously? deferred?
-  Pressures Q-A (selectors fire mid-recompute), Q-E (signal/computed
-  asymmetry), Q-H (tracker as scope). r3 traditionally bans this.
+- **K1a.** `setX` called from *inside* a computed's recipe body during
+  recompute, with *no follow-up read of a downstream derived*. Tests the
+  "is this permitted at all?" question. *Resolved: permitted (Position A
+  hard-ban is incompatible with effects).*
+- **K1b.** *Same as K1a, but the recipe reads a downstream derived after
+  the write.* E.g., `computed(() => { setName("name"); return
+  read(doubleName).capitalize() })`. Tests **in-recipe coherence**: does
+  the post-write read see the *fresh* derived value, or the stale
+  cached one? This is the case that exposes (B) deferred-fires vs (C)
+  synchronous-fires. *Resolved: (C) synchronous-fires gives fresh; (B)
+  gives stale.*
 - **K2.** `setX` called from inside `onCleanup` of a slot being dropped
   during commit (cleanup chain triggers further writes). Tests: re-entrant
   write during commit; commit-ordering subtlety (trace open question #1).
