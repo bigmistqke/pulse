@@ -16,17 +16,14 @@ End-to-end traces of architecturally-distinct cases through pulse's engine
 forced deliberate design calls into the open (K1 → resolved to Position
 (C); H3 → Policy α for effect chains, lean).
 
-> **Note on selector notation.** The traces below were written under
-> [Q1](./questions.md#q1--fall-through-and-edge-policy)'s earlier
-> selector-on-edge framing (Model 2). Q1 has since resolved to **Model 1
-> (engine-managed chains)** — edges are plain `(source, target)` pairs
-> and the chain-match predicate lives engine-side rather than in a
-> closure on the edge. The two are *behaviourally equivalent* (same
-> chain-match logic, same fire/skip decisions); only the implementation
-> locus differs. Where a trace step reads `edge1.sourceSelector(name.slots,
-> S)` or `chainSelector([S, ROOT_SCOPE])`, mentally substitute "engine
-> evaluates chain-match for `edge1.target` against writeScope `S`." The
-> traces are kept as-is for the reasoning record.
+> **Note on terminology.** Traces use the resolved
+> [Q1](./questions.md#q1--fall-through-and-edge-policy) framing — **Model 1
+> (engine-managed chains)**: edges are plain `(source, target)` pairs;
+> on a write, the engine derives the chain from each edge's target slot
+> (`chainFor(edge.target.scope)`), checks whether `writeScope` is in
+> the chain and not shadowed by a more-specific slot, and fires if so.
+> Earlier drafts used a selector-on-edge sketch (Model 2); the
+> behaviour is identical, only the locus of the predicate differs.
 
 **Related pulse-repo docs:**
 
@@ -47,7 +44,7 @@ forced deliberate design calls into the open (K1 → resolved to Position
 
 ## `doubleName` under scope `S`
 
-A worked trace verifying that **multi-slot + Model 2 (selector-on-edge)**
+A worked trace verifying that **multi-slot + the chain-match predicate (Q1 Model 1)**
 handles the case the [falsified hypothesis](#speculation-purely-above-unmodified-r3-doesnt-work)
 broke on. Walks every engine call and every state change.
 
@@ -73,9 +70,10 @@ const doubleName = computed(() => get(name) + get(name))
 - Engine: `doubleName.slots.get(ROOT_SCOPE)` → miss. Create slot `slot_DN_R`,
   push `currentTracker = slot_DN_R`, invoke `defaultRecipe`.
   - Recipe body: `get(name) + get(name)`.
-  - First `get(name)`: library `link(name, chainSelector([ROOT_SCOPE]), slot_DN_R)`
-    → engine creates `edge1`. Then `invoke(name, ROOT_SCOPE)` → miss, create
-    `slot_N_R` with recipe `() => "foo"`, cache `"foo"`, return.
+  - First `get(name)`: library `link(name, slot_DN_R)` → engine creates
+    `edge1 = { source: name, target: slot_DN_R }`. Then `invoke(name,
+    ROOT_SCOPE)` → miss, create `slot_N_R` with recipe `() => "foo"`,
+    cache `"foo"`, return.
   - Second `get(name)`: cached hit, returns `"foo"`. `link` dedupes.
   - Body returns `"foofoo"`. Cache. Pop currentTracker.
 - Returns `"foofoo"`. ✓
@@ -85,7 +83,8 @@ const doubleName = computed(() => get(name) + get(name))
 ```
 name.slots       = { ROOT_SCOPE: cached "foo",     subs: [edge1] }
 doubleName.slots = { ROOT_SCOPE: cached "foofoo",  deps: [edge1] }
-edge1 = { source: name, selector: chainSelector([ROOT_SCOPE]), target: doubleName.slots[ROOT_SCOPE] }
+edge1 = { source: name, target: doubleName.slots[ROOT_SCOPE] }
+        // engine's chain at fire time: chainFor(ROOT_SCOPE) = [ROOT_SCOPE]
 ```
 
 ### Step 2: `action(function* () { … })` opens scope `S`
@@ -97,15 +96,17 @@ status: 'open' }`. Ambient scope is now `S`.
 
 - Library: `getCurrentScope()` → `S`. Calls
   `writeSlot(name, S, { recipe: () => "name", … })`.
-- Engine: walk `name`'s outgoing edges with selectors:
-  - `edge1.sourceSelector(name.slots, S)`: `chainSelector([ROOT_SCOPE])` →
-    `S` not in chain → **don't fire.** ✓ Committed state untouched.
+- Engine: walk `name`'s outgoing edges, evaluating chain-match for each:
+  - `edge1`: target's scope is `ROOT_SCOPE`, so chain = `[ROOT_SCOPE]`.
+    `writeScope = S` not in chain → **don't fire.** ✓ Committed state
+    untouched.
 - Set `name.slots[S]` = the new slot.
 
 **The falsified case.** Under unmodified r3, `setName` would have walked
 `name.subs` and fired the only edge → invalidating `doubleName`'s committed
-cache → corrupting committed state. Under multi-slot + selectors: the edge
-correctly stays inert; committed state preserved.
+cache → corrupting committed state. Under multi-slot + the engine's
+chain-match predicate: the edge correctly stays inert; committed state
+preserved.
 
 ### Step 4: `get(doubleName)` inside the action
 
@@ -115,10 +116,9 @@ correctly stays inert; committed state preserved.
 - Engine: `doubleName.slots.get(S)` → miss. Create `slot_DN_S`, push
   `currentTracker = slot_DN_S`, invoke `defaultRecipe`.
   - Recipe body: `get(name) + get(name)`.
-  - First `get(name)`: library
-    `link(name, chainSelector([S, ROOT_SCOPE]), slot_DN_S)` →
-    engine creates `edge2`. Then `invoke(name, S)` → `name.slots[S]` hit,
-    return `"name"`.
+  - First `get(name)`: library `link(name, slot_DN_S)` → engine creates
+    `edge2 = { source: name, target: slot_DN_S }`. Then `invoke(name, S)`
+    → `name.slots[S]` hit, return `"name"`.
   - Second `get(name)`: cached hit, returns `"name"`. `link` dedupes.
   - Body returns `"namename"`. Cache. Pop.
 - Returns `"namename"`. ✓
@@ -134,8 +134,8 @@ doubleName.slots = {
   ROOT_SCOPE: cached "foofoo",   deps: [edge1],
   S:          cached "namename", deps: [edge2],
 }
-edge1 = { ..., chainSelector([ROOT_SCOPE]),    → doubleName.slots[ROOT_SCOPE] }
-edge2 = { ..., chainSelector([S, ROOT_SCOPE]), → doubleName.slots[S] }
+edge1 = { source: name, target: doubleName.slots[ROOT_SCOPE] }  // chain: [ROOT_SCOPE]
+edge2 = { source: name, target: doubleName.slots[S] }            // chain: [S, ROOT_SCOPE]
 ```
 
 ### Step 5a: action returns → `closeScope(S, 'commit')`
@@ -149,12 +149,13 @@ Sketched order: dep-order, leaves-first. Gather `[(name, S), (doubleName, S)]`.
 **Promote `name`:** `writeSlot(name, ROOT_SCOPE, { recipe: () => "name",
 cached: "name", … })`.
 
-- Engine fires:
-  - `edge1`: `chainSelector([ROOT_SCOPE])`, writeScope=ROOT_SCOPE, writeIdx=0 →
-    **fire.** Invalidate `doubleName.slots[ROOT_SCOPE]`.
-  - `edge2`: `chainSelector([S, ROOT_SCOPE])`, writeScope=ROOT_SCOPE,
-    writeIdx=1. More-specific check: `name.slots.has(S)`? At this moment yes
-    (we haven't dropped it) → **don't fire.** ✓
+- Engine evaluates chain-match per edge:
+  - `edge1`: target scope `ROOT_SCOPE` → chain `[ROOT_SCOPE]`. `writeScope =
+    ROOT_SCOPE` at index 0 → no more-specific scopes ahead → **fire.**
+    Invalidate `doubleName.slots[ROOT_SCOPE]`.
+  - `edge2`: target scope `S` → chain `[S, ROOT_SCOPE]`. `writeScope =
+    ROOT_SCOPE` at index 1. More-specific check: `name.slots.has(S)`? At
+    this moment yes (we haven't dropped it) → **don't fire.** ✓
 
 **Drop `name.slots[S]`:** walk `slot_N_S.subs = [edge2]`; unlink `edge2` from
 `name`'s outgoing index and from `slot_DN_S.deps`. Delete the slot.
@@ -199,14 +200,15 @@ The architecture works for this case, but the trace exposed several
 under-specified edges. Listed in roughly load-bearing order:
 
 1. **Commit ordering matters.** Promoting `name` before `doubleName` works
-   because `edge2`'s selector correctly doesn't fire while `name.slots[S]`
+   because `edge2`'s chain-match correctly doesn't fire while `name.slots[S]`
    still exists. Other orders (or dropping `S` slots before writing
-   `ROOT_SCOPE`) can fire selectors wrongly. The library's commit logic needs
+   `ROOT_SCOPE`) can fire wrongly. The library's commit logic needs
    a defined order (likely dep-order leaves-first).
 2. **What `cached` does a promoted slot carry?** Three options: (a) preserve
-   cached + carry over deps (but old deps had chain-S selectors); (b) preserve
-   cached + drop deps (next recompute rebuilds); (c) drop cached + force
-   recompute. Lean (b); related to [Q7](./questions.md#q7--the-defaultrecipe-mechanism).
+   cached + carry over deps (but old deps' edges targeted a slot at the old
+   scope; the chain-match at the new scope would re-resolve anyway); (b)
+   preserve cached + drop deps (next recompute rebuilds); (c) drop cached +
+   force recompute. Lean (b); related to [Q7](./questions.md#q7--the-defaultrecipe-mechanism).
 3. **Action body reads: do they track?** The trace assumed `currentTracker =
 null` for top-level reads inside an action body (imperative, not
    declarative — the action body doesn't re-run on dep change). Probably
@@ -214,18 +216,19 @@ null` for top-level reads inside an action body (imperative, not
    (tracker/scope).
 4. **Edge index location.** The trace shows edges in `slot.subs` for clarity,
    but in practice the engine probably maintains a per-Node outgoing-edges
-   index (selectors do per-slot dispatch at fire time). Per-slot `subs` arrays
-   are useful for cleanup-on-slot-drop, but the firing path likely iterates
-   per-Node. Fold into [Q1](./questions.md#q1--fall-through-and-edge-policy).
-5. **Selector dedup.** `link(name, chainSelector([S, ROOT_SCOPE]), tgt)` is
-   called twice in the recipe; the second should be a no-op. Selector identity
-   matters — naive `chainSelector([S, ROOT_SCOPE])` returns a fresh function
-   each time. Library-side memoisation of selectors by chain content handles
-   it. Fold into [Q1](./questions.md#q1--fall-through-and-edge-policy).
+   index (the chain-match runs per-edge at fire time). Per-slot `subs`
+   arrays are useful for cleanup-on-slot-drop, but the firing path likely
+   iterates per-Node. Fold into [Q1](./questions.md#q1--fall-through-and-edge-policy).
+5. **Edge dedup.** `link(name, slot_DN_S)` is called twice in the recipe;
+   the second should be a no-op. Under Model 1 the edge is plain
+   `(source, target)`, so dedup is straightforward — check whether
+   `(source, target)` is already in `node.subs`. Fold into
+   [Q1](./questions.md#q1--fall-through-and-edge-policy).
 6. **Late subscribers / new edges mid-action.** The trace didn't exercise a
    subscriber arriving mid-action and reading under `S` (e.g., a component
-   mounting inside an action). Model 2 should handle it (new edges form with
-   the right chain at subscription time), but worth a separate trace.
+   mounting inside an action). The chain-match handles it (the new edge's
+   target lives in `S`, so subsequent writes resolve against the right
+   chain), but worth a separate trace.
 7. **Async ([Q4](./questions.md#q4--async-at-the-engine-level)) untouched.** All reads in this trace were sync. The async
    case — `name`'s recipe returns a `Promise<T>`, or the action body awaits —
    needs its own trace.
@@ -235,8 +238,8 @@ null` for top-level reads inside an action body (imperative, not
    the ordering needs verification.
 
 Verification summary: **the falsified hypothesis is genuinely fixed** by
-multi-slot + Model 2 selectors. The trace exposed eight follow-up sub-
-questions, none of which gate the architecture — they're next-level
+multi-slot + engine-side chain-match. The trace exposed eight follow-up
+sub-questions, none of which gate the architecture — they're next-level
 resolution.
 
 ---
@@ -290,7 +293,7 @@ Sketched walk implementation:
 ```ts
 function* read<T>(node: Node<T>): Generator<ParkCommand, T, T> {
 	const scope = getCurrentScope()
-	if (currentTracker) link(node, chainSelector(chainFor(scope)), currentTracker)
+	if (currentTracker) link(node, currentTracker)
 	const result = invoke(node, scope) as T | Promise<T>
 	if (result instanceof Promise) {
 		const resolved = yield { kind: 'park', promise: result } as ParkCommand
@@ -656,7 +659,7 @@ sub-questions into the open:
    The consumer that received the Awaitable from `get(...)` — the action
    body's driver in this trace — holds the reference and attaches its
    own `.then` for resumption. No engine-level `'resolved'` event;
-   selectors fire on writes only.
+   chain-match fires on writes only.
 7. **`Slot` needs `wasWritten` (or equivalent).** Read-populated and
    write-populated slots have different commit semantics; the engine must
    distinguish. **New sub-question — added to [Q7](./questions.md#q7--the-defaultrecipe-mechanism) and [Q1](./questions.md#q1--fall-through-and-edge-policy) territory.**
@@ -774,10 +777,10 @@ const handle = effect(() => {
   - Invoke `fn`:
     - `get(count)`:
       - `getCurrentScope()` → `ROOT_SCOPE`. `currentTracker` → `slot_E_R`.
-      - `link(count, chainSelector([ROOT_SCOPE]), slot_E_R)`.
-        - Engine: `edge1` = { source: count, sourceSelector:
-          `chainSelector([ROOT_SCOPE])`, target: `slot_E_R` }. Add to
-          `count`'s outgoing edges; add to `slot_E_R.deps`.
+      - `link(count, slot_E_R)`.
+        - Engine: `edge1` = { source: count, target: `slot_E_R` }. Add to
+          `count`'s outgoing edges; add to `slot_E_R.deps`. (Chain at fire
+          time will be `chainFor(ROOT_SCOPE) = [ROOT_SCOPE]`.)
       - `invoke(count, ROOT_SCOPE)`:
         - Engine: `count.slots.get(ROOT_SCOPE)` miss. Create `slot_C_R`
           = { recipe: () => 0, deps: [], subs: [edge1] }. Invoke → 0.
@@ -793,8 +796,8 @@ value: 0")`. Returns undefined.
 count.slots = { ROOT_SCOPE: { recipe: () => 0, cached: 0, deps: [], subs: [edge1] } }
 effectNode.slots = { ROOT_SCOPE: { recipe: fn, cached: undefined,
                                     deps: [edge1], subs: [] } }
-edge1 = { source: count, selector: chainSelector([ROOT_SCOPE]),
-          target: effectNode.slots[ROOT_SCOPE] }
+edge1 = { source: count, target: effectNode.slots[ROOT_SCOPE] }
+        // chain at fire time: [ROOT_SCOPE]
 effectRuns = 1
 ```
 
@@ -814,8 +817,9 @@ generator.
 
 - Library: setter runs. `getCurrentScope()` → `S`. `writeSlot(count, S,
 { recipe: () => 5, cached: 5, deps: [], subs: [] })`.
-- Engine: walk `count`'s outgoing edges with `(count.slots, S)`:
-  - `edge1.sourceSelector` = `chainSelector([ROOT_SCOPE])`. Check:
+- Engine: walk `count`'s outgoing edges, evaluating chain-match for
+  `writeScope = S`:
+  - `edge1`: target scope `ROOT_SCOPE` → chain `[ROOT_SCOPE]`.
     `chain.indexOf(S)` → `-1`. **Don't fire.** ✓
 - Set `count.slots[S]` = new slot.
 
@@ -831,13 +835,14 @@ effectNode.slots[ROOT_SCOPE] unchanged. effectRuns = 1.
 
 **Step 1a-3: generator returns.** _(we'll cover commit in H1b.)_
 
-The key observation: **the effect's edge selector (`chainSelector([ROOT_SCOPE])`)
-naturally rejects writes to `S`.** No special "defer-until-commit" logic in
-the engine; the defer behaviour falls out of selector composition. The effect
-doesn't fire during the action because _its subscription chain doesn't
-include `S`_.
+The key observation: **the effect's edge targets a slot in `ROOT_SCOPE`,
+and the engine's chain-match naturally rejects writes to `S`** (since
+`chainFor(ROOT_SCOPE)` doesn't contain `S`). No special "defer-until-commit"
+logic in the engine; the defer behaviour falls out of chain-match
+composition. The effect doesn't fire during the action because _its
+subscription chain doesn't include `S`_.
 
-This is the cleanest possible answer to H1a: the chain-selector machinery
+This is the cleanest possible answer to H1a: the chain-match machinery
 already enforces it. **Confirming the lean: defer-until-commit.**
 
 ### H1b: action commits — effect fires exactly once
@@ -849,8 +854,8 @@ Continuing from the H1a state, with the generator returning normally:
 Library promotes `count.slots[S]` to `count.slots[ROOT_SCOPE]`:
 
 - `writeSlot(count, ROOT_SCOPE, { recipe: () => 5, cached: 5, … })`.
-- Engine: walk `count`'s outgoing edges with `(count.slots, ROOT_SCOPE)`:
-  - `edge1.sourceSelector` = `chainSelector([ROOT_SCOPE])`. Check:
+- Engine: walk `count`'s outgoing edges with `writeScope = ROOT_SCOPE`:
+  - `edge1`: target scope `ROOT_SCOPE` → chain `[ROOT_SCOPE]`.
     `chain.indexOf(ROOT_SCOPE)` → `0`. No more-specific in chain. **Fire.**
   - Engine: invalidate `slot_E_R` (clear `cached`, mark "dirty" — set a
     flag or use `cached === undefined` as the signal).
@@ -874,9 +879,8 @@ The effect's `subscribe` handler received the invalidation event in Step
     index. (`subs` on `count` side: `edge1` removed.)
   - Invoke `fn`:
     - `get(count)`:
-      - `link(count, chainSelector([ROOT_SCOPE]), slot_E_R)` → creates
-        `edge1'` (new identity, same shape). Add to `count`'s outgoing,
-        add to `slot_E_R.deps`.
+      - `link(count, slot_E_R)` → creates `edge1'` (new identity, same
+        shape). Add to `count`'s outgoing, add to `slot_E_R.deps`.
       - `invoke(count, ROOT_SCOPE)`:
         - Engine: `count.slots[ROOT_SCOPE]` exists with `cached: 5`. Return 5.
     - Body: `value = 5`. `effectRuns = 2`. `console.log("Effect runs: 2,
@@ -905,8 +909,8 @@ Same setup as H1a (post Step 0 state). The action body throws (or
   `count.slots[S]`. No edges to unlink on the S side.
 - Engine: fire `S.cleanups` (none).
 - `S.status = 'discarded'`. Pop ambient.
-- **No write to `count.slots[ROOT_SCOPE]` happens.** The effect's selector
-  is never tested against a fire-worthy write.
+- **No write to `count.slots[ROOT_SCOPE]` happens.** The chain-match for
+  the effect's edge is never tested against a fire-worthy write.
 - Subscribers receive no events. The microtask scheduler queues nothing.
 
 **State after Step 1c-1:**
@@ -929,7 +933,7 @@ The trace established **Q3 (consumer pattern)** with a concrete shape:
    primitive needed. The library composes existing pieces: `subscribe(node,
 handler)` for the engine-side notification, `scheduleMicrotask(...)` for
    batching/timing.
-2. **The deferred-until-commit semantics fall out of selector composition.**
+2. **The deferred-until-commit semantics fall out of chain-match composition.**
    An effect at `ROOT_SCOPE` has chain `[ROOT_SCOPE]` on its tracking edges.
    Writes to a speculative scope `S` don't match the chain → don't fire.
    Writes to `ROOT_SCOPE` (commit promotion) match → fire. **No engine
@@ -1018,10 +1022,10 @@ All four framings held:
   chain.
 
 **Q3 is essentially resolved** at the architectural level (mechanism +
-policy via selectors). H2/H3/H4 would test specific compositions but don't
-require a new framing. **Two big upstream pieces are now in place:** C2
-established async-walk discipline; H1a-c established consumer-pattern via
-selectors. Both came out cleanly.
+policy via the chain-match predicate). H2/H3/H4 would test specific
+compositions but don't require a new framing. **Two big upstream pieces are
+now in place:** C2 established async-walk discipline; H1a-c established
+consumer-pattern via the chain-match. Both came out cleanly.
 
 ---
 
@@ -1116,9 +1120,9 @@ computed, it gets recomputed _again_ on the next pass. No explicit ban; no
 explicit defer either — the deferral is implicit because firing means
 "insert into heap," not "invoke synchronously."
 
-For pulse the question is sharper because Model 2 fires edges _immediately_
-on `writeSlot` (selectors run on the call stack). To get B's deferral, we'd
-have to add explicit gating.
+For pulse the question is sharper because the chain-match predicate fires
+edges _immediately_ on `writeSlot` (the predicate runs on the call stack).
+To get B's deferral, we'd have to add explicit gating.
 
 ### Position B traced in detail
 
@@ -1181,7 +1185,7 @@ Initial state: all slots empty.
 - `pushTracker(slot_D_R)`, `pushScope(ROOT_SCOPE)`.
 - Invoke `deriveBody`:
   - `get(count)`:
-    - `link(count, chainSelector([ROOT_SCOPE]), slot_D_R)` → creates
+    - `link(count, slot_D_R)` → creates
       `edge_C_D`. Add to `count`'s outgoing and `slot_D_R.deps`.
     - `invoke(count, ROOT_SCOPE)` → miss → create `slot_C_R` with
       `recipe: () => 0`, invoke → 0, cache → 0, return 0.
@@ -1208,8 +1212,7 @@ cached: 0, deps: [], subs: [] })`.
 count.slots = { ROOT_SCOPE: cached 0,  subs: [edge_C_D] }
 shadow.slots = { ROOT_SCOPE: cached 0, subs: [] }
 derived.slots = { ROOT_SCOPE: cached 1, deps: [edge_C_D], subs: [] }
-edge_C_D = { source: count, selector: chainSelector([ROOT_SCOPE]),
-             target: derived.slots[ROOT_SCOPE] }
+edge_C_D = { source: count, target: derived.slots[ROOT_SCOPE] }
 ```
 
 `get(derived)` returned `1`; `shadow` is now `0`. ✓ The re-entrant write
@@ -1235,7 +1238,7 @@ effect(() => {
 
 The effect's initial run forms an edge `shadow → effectSlot`. Now when
 `get(derived)` runs and `setShadow(0)` fires _synchronously_ during the
-recipe, the effect's selector matches → effect's slot invalidates → effect
+recipe, the chain-match for the effect.s edge matches → effect's slot invalidates → effect
 scheduled. The effect _might_ re-run before the recipe finishes (depending on
 microtask ordering), creating partial-update visibility. With deferral, the
 effect runs after `get(derived)` returns, observing the consistent
@@ -1347,10 +1350,10 @@ visible work:
    entering a recompute and pop together. [Q8](./questions.md#q8--tracker-vs-scope-separate-or-unified)'s "they're at different
    granularities" framing holds — but they're _parallel_ and _coupled_.
 
-2. **Q1 (selectors / fire policy) didn't break.** Under Position B,
-   selectors still run when `fireEdges` drains the deferred queue. The
+2. **Q1 (chain-match / fire policy) didn't break.** Under Position B, the
+   chain-match still runs when `fireEdges` drains the deferred queue. The
    _only_ engine change Position B requires is gating `fireEdges` behind
-   the `deferredFires` queue. The selector logic itself is unchanged.
+   the `deferredFires` queue. The chain-match logic itself is unchanged.
 
 3. **Q3 (consumer pattern) is the right level for cycle detection.**
    Cycles surface at the consumer level (Effects re-running indefinitely),
@@ -1568,7 +1571,7 @@ K1's design call **dissolves**:
 
 **Settled: (C).** This is essentially r3's model (writes propagate dirty
 to subs synchronously; consumers schedule async via the heap + microtask).
-Pulse adopts the same semantics, just with Model 2 selectors gating which
+Pulse adopts the same semantics, just with the engine chain-match gating which
 edges actually fire.
 
 Implication for [Q10](./questions.md#q10--commit-as-transaction-ordering-atomicity-deferred-fires) (commit-as-transaction): the deferred-fires region is
@@ -1581,7 +1584,7 @@ The two modes don't interfere because a recipe inside a commit is rare
 All four framings still hold:
 
 - _Node-as-recipe_: recipes can write; engine doesn't distinguish kinds.
-- _Walks-first-class_: writes propagate dirty via selector chains;
+- _Walks-first-class_: writes propagate dirty via chain-match;
   consumers receive events.
 - _Slim engine + thick library_: (C) requires no special engine
   machinery for recipes — just the normal fireEdges path. Cycle detection
@@ -1597,7 +1600,7 @@ C). With the right scenario (K1b), the answer falls out.
 
 ## G2 — nested actions and commit promotion
 
-A worked trace verifying that the chain-selector mechanism handles nested
+A worked trace verifying that the chain-match mechanism handles nested
 actions cleanly, and surfacing the inner-promotes-to-outer-vs-direct-to-ROOT
 design call. G2 was identified as the smallest-cheap trace that forces a
 real policy choice into the open.
@@ -1853,7 +1856,7 @@ effect(() => {
 ```
 
 Initial run: `observed = 0` (from `count.defaultRecipe`). Edge formed:
-`count → effectSlot` with `chainSelector([ROOT_SCOPE])`.
+`count → effectSlot` with chain `[ROOT_SCOPE]`.
 
 During the nested actions above, does the effect re-run?
 
@@ -1879,7 +1882,7 @@ intermediate `10`.
    everywhere else. The "nesting" lives in the scope hierarchy (each scope
    has a `parent`), and the library's commit logic uses
    `scope.parent` as the target. Engine doesn't know about nesting.
-2. **Chain selectors handle multi-level fall-through automatically.** Reads
+2. **The chain-match handles multi-level fall-through automatically.** Reads
    under `S2` walk `chainFor(S2) = [S2, S1, ROOT_SCOPE]`. Each scope in the
    chain is just an opaque key to the engine; the library composes the
    chain from `scope.parent` walks.
@@ -1901,7 +1904,7 @@ until you hit ROOT_SCOPE`. Confirms the scope-as-tree shape.
 
 All four framings held; **G2 is the cleanest validation of scope/owner
 unification so far**. The "scope is a tree" structure naturally encodes
-savepoints, and the chain selectors naturally encode "consumers see only the
+savepoints, and the chain-match naturally encode "consumers see only the
 final-committed value." No new primitive needed for nested actions; the
 nesting is _emergent_ from the scope hierarchy + the chain mechanism.
 
@@ -2033,7 +2036,7 @@ cleanups: [], status: 'open' }`. Push ambient.
 - Initial body run:
   - `pushTracker(effectNode.slots[S])`, `pushScope(S)`.
   - `get(count)`:
-    - `link(count, chainSelector([S, ROOT_SCOPE]), effectNode.slots[S])` →
+    - `link(count, effectNode.slots[S])` →
       `edge1`.
     - `invoke(count, S)` → miss → `count.slots[S]` created (read-populated;
       `wasWritten = false`, per [Q9](./questions.md#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally)). Recipe = `() => 0`, `cached = 0`.
@@ -2049,8 +2052,7 @@ cleanups: [], status: 'open' }`. Push ambient.
 ```
 count.slots = { S: { recipe: () => 0, cached: 0, wasWritten: false } }
 effectNode.slots = { S: { recipe: body, cached: undefined, deps: [edge1] } }
-edge1 = { source: count, selector: chainSelector([S, ROOT_SCOPE]),
-          target: effectNode.slots[S] }
+edge1 = { source: count, target: effectNode.slots[S] }
 effectNode.bodyCleanups = [cleanupAtZero]
 S.cleanups = [disposeEffectNode]
 log = ["Effect ran with count=0"]
@@ -2062,7 +2064,7 @@ teardowns = []
 - `writeSlot(count, S, { recipe: () => 5, cached: 5, wasWritten: true })`.
   ([Q9](./questions.md#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally) marker: wasWritten=true overwrites the wasWritten=false slot.)
 - Walk `count`'s outgoing edges with `(count.slots, S)`:
-  - `edge1.selector` = `chainSelector([S, ROOT_SCOPE])`. writeScope=S,
+  - `edge1`'s chain `[S, ROOT_SCOPE]`. writeScope=S,
     writeIdx=0. **Fire.** Invalidate `effectNode.slots[S]`. Emit
     slot-changed event.
 - Subscriber receives event. `scheduleMicrotask(runBody)`. Re-run is queued.
@@ -2144,7 +2146,7 @@ commit logic opens a deferred-fires region:
    - `count.slots[S].wasWritten === true` → promote.
      - `writeSlot(count, ROOT_SCOPE, { recipe: () => 5, cached: 5, … })`.
      - Walk `count`'s edges with `(count.slots, ROOT_SCOPE)`:
-       - `edge1.selector` = `chainSelector([S, ROOT_SCOPE])`. writeScope=
+       - `edge1`'s chain `[S, ROOT_SCOPE]`. writeScope=
          ROOT_SCOPE, writeIdx=1. Check more-specific: `count.slots.has(S)`?
          **Yes** (we haven't dropped `S` slots yet). Don't fire.
    - `effectNode.slots[S].wasWritten === false` → don't promote (it's a
@@ -2210,20 +2212,21 @@ action(function* () {
 
 **Initial setup.** Effect's owner = `ROOT_SCOPE`, subscription chain =
 `[ROOT_SCOPE]`. `edge1` formed: `count → effectNode.slots[ROOT_SCOPE]`,
-selector `chainSelector([ROOT_SCOPE])`. After initial run:
+chain `[ROOT_SCOPE]`. After initial run:
 `bodyCleanups = [cleanupAtZero]`. Log has "Effect ran with count=0".
 
 **Action runs. Inside `S`:**
 
-- `setCount(5)`: `writeSlot(count, S, { … })`. `edge1.selector` against
-  writeScope=S: chain doesn't include S → don't fire. ✓ (H1a-c.)
+- `setCount(5)`: `writeSlot(count, S, { … })`. Engine chain-match for
+  `edge1` (target scope `ROOT_SCOPE`, chain `[ROOT_SCOPE]`) against
+  `writeScope = S`: chain doesn't include S → don't fire. ✓ (H1a-c.)
 
 **Commit.**
 
 - Promote: `writeSlot(count, ROOT_SCOPE, { recipe: () => 5, cached: 5 })`.
-- `edge1.selector` against writeScope=ROOT_SCOPE: writeIdx=0, no
-  more-specific → **fire.** Invalidate `effectNode.slots[ROOT_SCOPE]`.
-  Emit invalidation event.
+- Engine chain-match for `edge1` against `writeScope = ROOT_SCOPE`:
+  writeIdx=0, no more-specific → **fire.** Invalidate
+  `effectNode.slots[ROOT_SCOPE]`. Emit invalidation event.
 - Subscriber: `scheduleMicrotask(runBody)`.
 - Drop `count.slots[S]`.
 - `S.status = 'committed'`. (`S.cleanups` is empty; effectNode isn't owned
@@ -2238,9 +2241,8 @@ selector `chainSelector([ROOT_SCOPE])`. After initial run:
   Unlink each — remove `edge1` from `count.slots[ROOT_SCOPE].subs` and
   from `effectNode.slots[ROOT_SCOPE].deps`.
 - _Push tracker, push scope. Invoke body._
-  - `get(count)`: `link(count, chainSelector([ROOT_SCOPE]),
-effectNode.slots[ROOT_SCOPE])` → `edge1'`. `invoke(count, ROOT_SCOPE)`
-    → hit, return 5.
+  - `get(count)`: `link(count, effectNode.slots[ROOT_SCOPE])` → `edge1'`.
+    `invoke(count, ROOT_SCOPE)` → hit, return 5.
   - Body: `c = 5`. `log.push("Effect ran with count=5")`. `onCleanup(...)`
     → registers `cleanupAtFive`. `bodyCleanups = [cleanupAtFive]`.
 - Pop tracker, pop scope.
@@ -2291,7 +2293,7 @@ bodyCleanups` (per-body cleanups). Scope discard fires its own
    per-slot `wasWritten` flag for clarity.
 5. **Q10's deferred-fires region is straightforward at the commit
    boundary.** No deferred fires were actually generated in H3b
-   because the promoted write's selector check (chain `[S, ROOT_SCOPE]`,
+   because the promoted write's chain-match check (chain `[S, ROOT_SCOPE]`,
    write to ROOT_SCOPE, S still has a slot) didn't fire. The deferral
    region exists but was empty. Worth noting: in a multi-write commit,
    the region would actually batch fires.
@@ -2410,7 +2412,7 @@ resuming with the resolved value once it settles:
 ```ts
 function* read<T>(node: Node<T>): Generator<ParkCommand, T, T> {
 	const scope = getCurrentScope()
-	if (currentTracker) link(node, chainSelector(chainFor(scope)), currentTracker)
+	if (currentTracker) link(node, currentTracker)
 	const cached = invoke(node, scope) as T | Promise<T>
 	if (cached instanceof Promise) {
 		const state = promiseState(cached)
@@ -2488,7 +2490,7 @@ hasn't been read yet, so there are no subscribers regardless.
       `currentTracker = slot_G_S`, push scope = `S`. Run greeting's
       stage chain:
       - Stage 0 (source): `get(user)`.
-        - `link(user, chainSelector([S, ROOT_SCOPE]), slot_G_S)` → `edge1`.
+        - `link(user, slot_G_S)` → `edge1`.
         - `invoke(user, S)` → hit, `cached = Awaitable<U, fulfilled>`
           (already resolved from Step 3).
         - `get` sees Awaitable → checks `.status` → `'fulfilled'`. Returns
@@ -2512,7 +2514,7 @@ hasn't been read yet, so there are no subscribers regardless.
 user.slots = { S: { cached: Awaitable<U, fulfilled, "Alice"> } }
 greeting.slots = { S: { cached: Awaitable<G, fulfilled, "Hello, Alice!">,
                          deps: [edge1] } }
-edge1 = { source: user, selector: chainSelector([S, ROOT_SCOPE]), target: slot_G_S }
+edge1 = { source: user, target: slot_G_S }
 ```
 
 Both slots' `cached` values are Awaitables with `status: 'fulfilled'`.
@@ -2752,9 +2754,9 @@ doubled.slots = { ROOT: { recipe: () => get(count)*2, cached: 0,
 effect.slots = { ROOT: { recipe: body, cached: undefined,
                          deps: [edge_C_E, edge_D_E] } }
 
-edge_C_D = { source: count, selector: chainSelector([ROOT_SCOPE]), target: doubled.slot[ROOT] }
-edge_C_E = { source: count, selector: chainSelector([ROOT_SCOPE]), target: effect.slot[ROOT] }
-edge_D_E = { source: doubled, selector: chainSelector([ROOT_SCOPE]), target: effect.slot[ROOT] }
+edge_C_D = { source: count, target: doubled.slot[ROOT] }
+edge_C_E = { source: count, target: effect.slot[ROOT] }
+edge_D_E = { source: doubled, target: effect.slot[ROOT] }
 
 observations = [{ c: 0, d: 0 }]
 ```
@@ -2768,9 +2770,9 @@ observations = [{ c: 0, d: 0 }]
 - `getCurrentScope()` → `S`. `writeSlot(count, S, { recipe: () => 5, cached:
 5, wasWritten: true, deps: [], subs: [] })`.
 - Engine walks `count`'s outgoing edges with `(count.slots, S)`:
-  - `edge_C_D.selector` = `chainSelector([ROOT_SCOPE])`. `chain.indexOf(S) =
+  - `edge_C_D`'s chain `[ROOT_SCOPE]`. `chain.indexOf(S) =
 -1`. **Don't fire.**
-  - `edge_C_E.selector` = same. **Don't fire.**
+  - `edge_C_E`: chain `[ROOT_SCOPE]` (same). **Don't fire.**
 - Set `count.slots[S] = newSlot`.
 
 **State after Step 2:**
@@ -2794,7 +2796,7 @@ deduplication). Per [Q9](./questions.md#q9--read-populated-vs-write-populated-sl
 true })`:**
 
 - Engine walks `count`'s outgoing edges with `(count.slots, ROOT_SCOPE)`:
-  - `edge_C_D`: `chainSelector([ROOT_SCOPE])`. writeScope=ROOT, writeIdx=0,
+  - `edge_C_D`: chain `[ROOT_SCOPE]`. writeScope=ROOT, writeIdx=0,
     no more-specific. **Fire.** Mark `doubled.slot[ROOT]` dirty (clear
     cached). Doubled's consumer-pattern (Computed-cache-propagate)
     cascades dirty to subs:
@@ -2837,12 +2839,12 @@ portion) completes.
 - Push tracker = `effect.slot[ROOT]`. Push scope = `ROOT_SCOPE`.
 - Invoke body:
   - `get(count)`:
-    - `link(count, chainSelector([ROOT_SCOPE]), effect.slot[ROOT])` →
+    - `link(count, effect.slot[ROOT])` →
       `edge_C_E'` (fresh identity).
     - `invoke(count, ROOT_SCOPE)`: cached 5. Return.
   - `c = 5`.
   - `get(doubled)`:
-    - `link(doubled, chainSelector([ROOT_SCOPE]), effect.slot[ROOT])` →
+    - `link(doubled, effect.slot[ROOT])` →
       `edge_D_E'`.
     - `invoke(doubled, ROOT_SCOPE)`: **slot is dirty**. Recompute.
       - Push tracker = `doubled.slot[ROOT]`. Push scope. Unlink doubled's
@@ -2914,7 +2916,7 @@ H1d traced cleanly with no new design calls. The trace validates that:
    state.
 4. **The [doubleName trace](#doublename-under-scope-s) open question #1 (commit ordering) is
    non-load-bearing for consumer correctness.** Ordering matters for
-   selector-check correctness at writeSlot time (the original concern in
+   chain-match correctness at writeSlot time (the original concern in
    doubleName), but post-commit consumer reads are always coherent
    because invalidations are synchronous and consumers are async-
    scheduled.
