@@ -645,14 +645,15 @@ because the body isn't going to re-run on dep change.
 see Q-D for the current framing): the engine attaches a `.then` to the
 Promise stored in `slot_U_S.cached`. When `userPromise` resolves to
 `"alice"`, the handler **does NOT mutate `slot_U_S.cached`** — the slot's
-cached value remains the Promise indefinitely. Instead, the resolved value
-is stored elsewhere (Q-D's lean: `WeakMap<Promise, T>`, with Promise-tweak
-as alternative), and the engine fires a slot-changed event with kind
-`'resolved'`. Walks query `promiseState(slot_U_S.cached)` to retrieve the
+cached value remains the Promise indefinitely. Instead, the Promise itself
+is tweaked with `{ status: 'fulfilled', value: "alice" }` (Q-D's lean,
+matching React's `use()` convention; `WeakMap` fallback for frozen
+Promises), and the engine fires a slot-changed event with kind `'resolved'`.
+Walks query `promiseState(slot_U_S.cached)` to retrieve the
 synchronously-readable resolved value. Downstream consumers receive the
 slot-changed event identically to any other invalidation event. *This is
 strictly cleaner than mutating `cached`*: the slot is immutable for its
-lifetime; multiple walks share one subscription via the WeakMap;
+lifetime; the tweaked Promise is shared across all walks reading it;
 read-vs-write distinction (Q-I) stays unambiguous (the Promise resolving
 is not a write).
 
@@ -899,10 +900,11 @@ sub-questions into the open:
 5. **Discard-guard on resume.** `if (scope.status !== 'open') return`.
 6. **Engine fires slot-changed events on Promise resolution, without
    mutating `slot.cached`.** Refined post-C2; see Q-D. The slot's cached
-   value stays as the Promise; resolved value lives in a `WeakMap<Promise,
-   T>` (or via Promise-tweak); walks query `promiseState(promise)` for
-   synchronous access. Engine attaches one `.then` per Promise-valued slot
-   to fire the resolution event and populate the metadata.
+   value stays as the Promise; the Promise itself is tweaked with `{
+   status, value, reason }` (React's convention) for synchronous query
+   via `promiseState(promise)`. Engine attaches one `.then` per
+   Promise-valued slot to populate the metadata and fire the resolution
+   event.
 7. **`Slot` needs `wasWritten` (or equivalent).** Read-populated and
    write-populated slots have different commit semantics; the engine must
    distinguish. **New sub-question — added to Q-G and Q-A territory.**
@@ -2629,20 +2631,49 @@ genuinely distinct concerns, separated by a recent refinement:
 computed) needs to ask, *without awaiting again*: "is this Promise resolved?
 what's the value?" Two implementations:
 
-- *Promise-tweak* — mutate the Promise object with `.status` and `.value`
-  fields. React's `use()` hook does this (calls them `_payload` / `_result`
-  internally; surfaces `.status` for `use`). Pros: zero allocation, familiar
-  precedent, *potential interop* with React's convention so a Promise
-  resolved by React is sync-queryable by pulse without re-attaching `.then`.
-  Cons: mutates objects we don't own; convention is non-standard; collision
-  risk.
+- *Promise-tweak* — augment the Promise object with `.status`, `.value`,
+  `.reason` fields (the `Promise.allSettled` shape, also React's `use()`
+  convention). Pros: zero allocation, direct property access (JIT-inlinable;
+  faster than `WeakMap.get` in tight read loops), *de facto interop* with
+  React-resolved Promises and TanStack-Query / Apollo / other libraries
+  using the same convention. Cons: mutates objects we don't own; the
+  convention is non-standard but de facto stable.
 - *`WeakMap<Promise, ResolvedT>`* — the engine maintains a side-table.
-  Pros: no mutation of foreign objects; clean abstraction; no collision.
-  Cons: lookup overhead; another structure; less interop.
+  Pros: no mutation of foreign objects. Cons: per-call lookup overhead;
+  another structure; no interop with React's convention.
 
-Isomorphic at the architectural level. **Lean: start with `WeakMap` for
-safety**, adopt the Promise-tweak convention later if interop with React
-or other libraries matters in practice.
+**Lean: Promise-tweak with React's `{ status, value, reason }` convention.**
+Reasons: (a) per-read perf is real for tight loops (a computed reading an
+async signal does this on every recompute); (b) ecosystem alignment with
+React's `use()` makes mixed-library interop free; (c) the collision risk is
+theoretical — React's convention is dominant enough that it's the de facto
+standard for "thenable status." Pulse adopts the same shape:
+
+```ts
+type ThenableStatus = 'pending' | 'fulfilled' | 'rejected'
+type TaggedPromise<T> = Promise<T> & {
+  status?: ThenableStatus
+  value?: T
+  reason?: unknown
+}
+
+function promiseState<T>(p: Promise<T>): TaggedPromise<T> {
+  if ((p as TaggedPromise<T>).status === undefined) {
+    ;(p as TaggedPromise<T>).status = 'pending'
+    p.then(
+      v => { (p as TaggedPromise<T>).status = 'fulfilled'; (p as TaggedPromise<T>).value = v },
+      e => { (p as TaggedPromise<T>).status = 'rejected'; (p as TaggedPromise<T>).reason = e },
+    )
+  }
+  return p as TaggedPromise<T>
+}
+```
+
+**Edge case: frozen Promises.** If a Promise is `Object.freeze`d (rare but
+possible in defensively-frozen libraries), the tweak fails. Fallback: detect
+the frozen case and use a `WeakMap` for those specific Promises. The
+`promiseState` API doesn't change; only its implementation has the fallback
+path. Both backing stores are accessed through the same primitive.
 
 Either way, the engine grows one small primitive:
 
@@ -2685,8 +2716,8 @@ internally awaits and updates cache."
 - Promise-tweak version offers interop with React's `use()` convention if
   pulse later wants it.
 
-**Sub-question remaining open:** the WeakMap vs Promise-tweak choice itself
-is a deferred design call. The architecture supports either.
+**Sub-question now leaned, was previously open:** Promise-tweak over
+WeakMap, with WeakMap as the frozen-Promise fallback. Settled.
 
 **Settled by combination of C2 trace + Promise-tweak/WeakMap refinement:**
 
