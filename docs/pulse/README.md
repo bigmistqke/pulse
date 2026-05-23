@@ -11,9 +11,9 @@ are illustrative; design calls are deliberate.
   signal=node+value-bag recasting, and the empirical pattern across studied
   frameworks (including Solid's transition-machinery trajectory).
 - **[framings.md](./framings.md)** — the current understanding:
-  foundational principles ([P1](./framings.md#p1)–[P5](./framings.md#p5)), operational framings, falsified
+  foundational principles ([P1](./framings.md#p1--speculation-is-one-concept-with-two-faces)–[P5](./framings.md#p5--compose-dont-proliferate-in-either-direction)), operational framings, falsified
   hypotheses, engine + library sketches.
-- **[questions.md](./questions.md)** — open questions ([Q1](./questions.md#q1) through [Q14](./questions.md#q14)):
+- **[questions.md](./questions.md)** — open questions ([Q1](./questions.md#q1--fall-through-and-edge-policy) through [Q14](./questions.md#q14--action-prereqs--standing-state-handle)):
   sub-questions from traces, deliberate design calls, framing gaps.
 - **[scenarios.md](./scenarios.md)** — the catalog (TDD basis): ~83
   architecturally-distinct cases the engine + speculation machinery needs
@@ -46,20 +46,20 @@ that consult them — not a built-in engine concept.
 
 Roughly priority-ordered:
 
-- *Working candidate for [Q1](./questions.md#q1) (selectors-on-edges).* Architecture has a
+- *Working candidate for [Q1](./questions.md#q1--fall-through-and-edge-policy) (selectors-on-edges).* Architecture has a
   plausible framing now. Next: verify by tracing more cases — supersession,
-  nested scopes, late-bound subscribers — and push on [Q1](./questions.md#q1)'s sub-questions
+  nested scopes, late-bound subscribers — and push on [Q1](./questions.md#q1--fall-through-and-edge-policy)'s sub-questions
   (indexing, dropped-slot races, async resolution as a write event) when they
   start mattering.
 - *Trace `doubleName`-under-scope-S end-to-end through this stack.* Verifies
   the falsified hypothesis is genuinely fixed by multi-slot + Model 2 edges;
-  exercises [Q1](./questions.md#q1) and [Q5](./questions.md#q5) along the way. (Partial trace already in [Q1](./questions.md#q1); a full
+  exercises [Q1](./questions.md#q1--fall-through-and-edge-policy) and [Q5](./questions.md#q5--recipe--cache-asymmetry-between-signal-and-computed-slots) along the way. (Partial trace already in [Q1](./questions.md#q1--fall-through-and-edge-policy); a full
   end-to-end with engine and library calls would catch remaining holes.)
-- *Consumer abstraction ([Q3](./questions.md#q3)).* Once edges and slots are clear, the consumer
+- *Consumer abstraction ([Q3](./questions.md#q3--consumer-patterns)).* Once edges and slots are clear, the consumer
   shape determines how Effect/JSX-binding/Computed-cache compose.
-- *Scope/Owner unification ([Q2](./questions.md#q2)).* Likely the cleanest answer; needs verifying
+- *Scope/Owner unification ([Q2](./questions.md#q2--scopeowner-unification)).* Likely the cleanest answer; needs verifying
   against effect lifecycle and dispose-on-discard discipline.
-- *Async ([Q4](./questions.md#q4)).* Mostly downstream of [Q3](./questions.md#q3) — once consumers are known, async
+- *Async ([Q4](./questions.md#q4--async-at-the-engine-level)).* Mostly downstream of [Q3](./questions.md#q3--consumer-patterns) — once consumers are known, async
   re-run discipline can be pinned.
 
 ---

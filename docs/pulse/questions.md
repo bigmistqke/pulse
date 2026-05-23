@@ -18,7 +18,7 @@ either:
 
 ---
 
-### <a id="q1"></a>Q1 — Fall-through and edge policy
+### Q1 — Fall-through and edge policy
 
 Status: working candidate framing identified (Model 2 — selector-on-edge). Not
 locked in; sub-questions remain open at the next level down.
@@ -184,19 +184,19 @@ framing:
   dropped (e.g., scope discard happened between write and notification),
   engine has to detect and skip. Lazy-prune-on-iteration is the natural answer.
   Standard reactive bookkeeping.
-- *Async writes ([Q4](#q4) interaction).* A slot's `cached` may be a Promise that
+- *Async writes ([Q4](#q4--async-at-the-engine-level) interaction).* A slot's `cached` may be a Promise that
   resolves later. Does the resolution count as a "write" that fires edges?
   Probably yes (the slot's effective value changed); but the engine needs to
   know to fire on resolution. The selector itself doesn't change — it still
   fires on writes to the slot's scope — but the *engine's notion of "a write
   happened"* has to include the Promise-resolution event.
 
-**Related:** [Q3](#q3) (consumers subscribe via the same selector mechanism; consumer
+**Related:** [Q3](#q3--consumer-patterns) (consumers subscribe via the same selector mechanism; consumer
 notification IS a "fire an edge" event whose target is a side-effect handler
-instead of a cache invalidation), [Q7](#q7) (`defaultRecipe` is a similar engine-vs-
-walk question at a different level), [Q4](#q4) (async resolution as a "write" event).
+instead of a cache invalidation), [Q7](#q7--the-defaultrecipe-mechanism) (`defaultRecipe` is a similar engine-vs-
+walk question at a different level), [Q4](#q4--async-at-the-engine-level) (async resolution as a "write" event).
 
-### <a id="q2"></a>Q2 — Scope/Owner unification
+### Q2 — Scope/Owner unification
 
 Working hypothesis: one ambient context primitive with `cleanups` + a `mode` at
 close time (`'commit' | 'discard'`). Owner = scope used without slot-tagging;
@@ -219,13 +219,13 @@ Open sub-questions:
   register reads to me." Currently sketched as a separate `currentTracker`
   variable.)
 
-**Related:** [Q3](#q3) (effects register cleanups; whether a scope-with-effects has
-different lifecycle from a scope-with-just-state), [Q2](#q2) in main doc (cancellation
+**Related:** [Q3](#q3--consumer-patterns) (effects register cleanups; whether a scope-with-effects has
+different lifecycle from a scope-with-just-state), [Q2](#q2--scopeowner-unification) in main doc (cancellation
 discipline — likely falls out of scope-discard).
 
-### <a id="q3"></a>Q3 — Consumer patterns
+### Q3 — Consumer patterns
 
-Status: working candidate framing identified via the [H1a-c trace](./scenario-traces.md#trace-h1a-c). Not locked
+Status: working candidate framing identified via the [H1a-c trace](./scenario-traces.md#h1a-c--effect-under-speculation). Not locked
 in; sub-questions remain at the next level down.
 
 **Candidate framing.** Consumers are *library code* over the engine's
@@ -251,7 +251,7 @@ speculative scope don't match the chain → don't fire. Writes to `ROOT_SCOPE`
 (commit promotion) match → fire. *No defer logic anywhere; the chain is the
 policy.*
 
-**Verified by [H1a-c trace](./scenario-traces.md#trace-h1a-c).** H1a (write under S → effect doesn't fire), H1b
+**Verified by [H1a-c trace](./scenario-traces.md#h1a-c--effect-under-speculation).** H1a (write under S → effect doesn't fire), H1b
 (commit → effect fires once), H1c (discard → effect never fires).
 
 **Sub-questions still open:**
@@ -274,14 +274,14 @@ policy.*
   fire-and-invalidate something the engine should expose more directly,
   or is iterating subs in the consumer correct?
 
-**Related:** [Q1](#q1) (selectors are the chain mechanism; [Q3](#q3) subscribes via
-them), [Q4](#q4) (Promise-resolution-as-write fires consumers — confirmed in C2),
-[Q7](#q7) (`defaultRecipe` interacts with consumer's initial run).
+**Related:** [Q1](#q1--fall-through-and-edge-policy) (selectors are the chain mechanism; [Q3](#q3--consumer-patterns) subscribes via
+them), [Q4](#q4--async-at-the-engine-level) (Promise-resolution-as-write fires consumers — confirmed in C2),
+[Q7](#q7--the-defaultrecipe-mechanism) (`defaultRecipe` interacts with consumer's initial run).
 
-### <a id="q4"></a>Q4 — Async at the engine level
+### Q4 — Async at the engine level
 
 The recipe is `() => T` where `T` may itself be `Promise<U>`. The engine sees
-Promises in `cached`. Per [P2](./framings.md#p2) (acknowledge async), walks decide how to handle
+Promises in `cached`. Per [P2](./framings.md#p2--acknowledge-async-dont-hide-it) (acknowledge async), walks decide how to handle
 them.
 
 **Resolved by the `Awaitable<T>` framing** (see the "Awaitable" framing
@@ -332,7 +332,7 @@ Plus the library-side `makeAwaitable` helper that wraps incoming Promises
 in pulse's Awaitable class (so the state fields are populated structurally
 rather than via mutation). See the "Awaitable" framing section.
 
-**Settled by Awaitable + the [C2 trace](./scenario-traces.md#trace-c2):**
+**Settled by Awaitable + the [C2 trace](./scenario-traces.md#c2--action-body-with-async-read):**
 
 - *Does the engine `await` internally?* No — walks handle suspension via
   `yield* get` or `use`. Engine attaches a `.then` only to fire the
@@ -346,13 +346,13 @@ rather than via mutation). See the "Awaitable" framing section.
 - *Mutation of foreign Promises?* Avoided. Pulse never tweaks Promises it
   doesn't own; it wraps them in Awaitable instances.
 
-**Related:** [Q3](#q3) (consumer's re-run discipline for async deps; consumers
+**Related:** [Q3](#q3--consumer-patterns) (consumer's re-run discipline for async deps; consumers
 receive `{ kind: 'resolved' }` events the same way they receive `{ kind:
-'invalidated' }`), `yield* get` vs `use` vs stages (see framings), [Q9](#q9)
+'invalidated' }`), `yield* get` vs `use` vs stages (see framings), [Q9](#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally)
 (a Promise that resolves is "still the same slot," not a write, so doesn't
 trigger commit-promotion).
 
-### <a id="q5"></a>Q5 — Recipe / cache asymmetry between Signal and Computed slots
+### Q5 — Recipe / cache asymmetry between Signal and Computed slots
 
 For a Signal slot, the *recipe is the value* — `() => 42`. The cache is
 trivially `42`.
@@ -376,7 +376,7 @@ distinction*. Slot lifecycle is engine-level (because the cache is). Worth
 working out whether this is a real distinction or whether it dissolves under a
 careful framing.
 
-### <a id="q6"></a>Q6 — What is a Scope as a value?
+### Q6 — What is a Scope as a value?
 
 Currently typed `unknown` in the sketch. Practically, scopes need:
 
@@ -394,7 +394,7 @@ Currently typed `unknown` in the sketch. Practically, scopes need:
 Sketch: `interface Scope { parent?: Scope; cleanups: Disposable[]; status:
 'open' | 'closed' }` — minimal, walk-extensible.
 
-**Open sub-question (surfaced by [G2 trace](./scenario-traces.md#trace-g2)):** `chainFor(scope)` walks
+**Open sub-question (surfaced by [G2 trace](./scenario-traces.md#g2--nested-actions-and-commit-promotion)):** `chainFor(scope)` walks
 `scope.parent` pointers up to and including `ROOT_SCOPE`. For custom scope
 hierarchies — per-tenant roots, per-document roots, multiple reactive
 "worlds" — the terminal might not be `ROOT_SCOPE`. The library should
@@ -402,10 +402,10 @@ probably expose `chainFor` as user-overridable, or expose `terminalScope`
 as a configurable per-tree property. Open whether this is a library
 concern or whether the engine needs to know about it.
 
-**Related:** [Q2](#q2) (the unification question), [Q1](#q1) (selectors quote scope
+**Related:** [Q2](#q2--scopeowner-unification) (the unification question), [Q1](#q1--fall-through-and-edge-policy) (selectors quote scope
 identities; scope value-shape constrains how selectors can match).
 
-### <a id="q7"></a>Q7 — The `defaultRecipe` mechanism
+### Q7 — The `defaultRecipe` mechanism
 
 The Node has an optional `defaultRecipe` used by `invoke` when no slot exists
 for the requested scope. Is this:
@@ -421,15 +421,15 @@ for the requested scope. Is this:
 intent and pushes more convention into the library; (iii) is most flexible.
 Probably a cosmetic question, but worth deciding.
 
-**Sub-question (surfaced by [doubleName trace](./scenario-traces.md#trace-doublename)):** what `cached` does a *promoted*
+**Sub-question (surfaced by [doubleName trace](./scenario-traces.md#doublename-under-scope-s)):** what `cached` does a *promoted*
 slot carry? Three sub-positions: (a) preserve `cached` + carry over old deps
 (but old deps had chain selectors keyed to the old scope, which doesn't match
 the new scope's chain); (b) preserve `cached`, drop deps, let next recompute
 rebuild; (c) drop `cached`, force recompute on next read. *Lean (b)*:
 preserves the work done in the scope without carrying selector mismatches
-forward. Related to [Q1](#q1) (selector identity across scope transitions).
+forward. Related to [Q1](#q1--fall-through-and-edge-policy) (selector identity across scope transitions).
 
-### <a id="q8"></a>Q8 — Tracker vs Scope: separate or unified?
+### Q8 — Tracker vs Scope: separate or unified?
 
 The sketch has a separate `currentTracker` (the slot currently being
 recomputed, used by `get` to register `deps`) and a `getCurrentScope`
@@ -458,7 +458,7 @@ during a recompute. That's plausible (the user explicitly opted out of
 tracking) but worth confirming as the policy. Connects to L1 in the
 scenario catalog.
 
-### <a id="q9"></a>Q9 — Read-populated vs write-populated slots: do they differ structurally?
+### Q9 — Read-populated vs write-populated slots: do they differ structurally?
 
 Surfaced by the C2d trace. When a slot is created lazily during a read (because
 no slot existed for the requested scope yet, so `invoke` populated one with the
@@ -488,7 +488,7 @@ Two ways to handle it:
 cleaner in spirit (scope owns its semantics; slots stay uniform) but (i) is
 more locally evident (a slot knows whether it represents "real" state).
 
-Connects to [Q5](#q5) (the Signal/Computed slot distinction) — that question also
+Connects to [Q5](#q5--recipe--cache-asymmetry-between-signal-and-computed-slots) (the Signal/Computed slot distinction) — that question also
 asks whether the engine needs to know what kind of slot it's looking at.
 Probably resolved together.
 
@@ -497,14 +497,14 @@ intent into the library's scope handling. But (i) wins if performance
 measurements show that walking the scope's write-set is slower than checking
 flags during commit. Currently mostly cosmetic.
 
-### <a id="q10"></a>Q10 — Commit as transaction: ordering, atomicity, deferred fires
+### Q10 — Commit as transaction: ordering, atomicity, deferred fires
 
 When an action commits, how exactly does the engine sequence the multiple
 slot promotions and edge fires so that consumers see a consistent
 post-commit state, not a sequence of partial updates?
 
 **Deferred-fires is commit-mode only**, not tracker-mode. Recomputes fire
-synchronously; consumers schedule async via microtasks (see [K1b trace](./scenario-traces.md#trace-k1)).
+synchronously; consumers schedule async via microtasks (see [K1b trace](./scenario-traces.md#k1--re-entrant-setter-mid-recompute)).
 The deferred-fires mechanism is triggered only by opening a commit
 operation.
 
@@ -530,7 +530,7 @@ Likely resolution: **commit is a deferred-fires region.** When
 `closeScope(S, 'commit')` runs:
 
 1. Open a deferred-fires region.
-2. For each `S`-tagged write-populated slot ([Q9](#q9)), perform `writeSlot(node,
+2. For each `S`-tagged write-populated slot ([Q9](#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally)), perform `writeSlot(node,
    parentScope, slot_content)`. Edge fires are *queued* into the deferred
    region.
 3. Drop the `S`-tagged slots, unlinking edges.
@@ -572,9 +572,9 @@ mechanism. The engine's invariant becomes "if `deferredFires` is non-null,
 fires queue; outermost layer drains." Recomputes set up one such region;
 commits set up another. They compose by nesting.
 
-### <a id="q11"></a>Q11 — Effect chain policy: chain follows owner, or always [ROOT_SCOPE]?
+### Q11 — Effect chain policy: chain follows owner, or always [ROOT_SCOPE]?
 
-Surfaced by the [H3 trace](./scenario-traces.md#trace-h3). When an effect is created inside an action body
+Surfaced by the [H3 trace](./scenario-traces.md#h3--cleanup-chains-across-speculative-effect-runs). When an effect is created inside an action body
 (or inside any scope other than `ROOT_SCOPE`), what's the chain its
 tracking edges form against?
 
@@ -602,13 +602,13 @@ and updating its chain accordingly? Possible but adds machinery; users
 wanting persistent effects can just create them in the outer scope.
 Probably out-of-scope.
 
-**Related:** [Q3](#q3) (consumer pattern depends on chain), [Q2](#q2) (scope/owner
+**Related:** [Q3](#q3--consumer-patterns) (consumer pattern depends on chain), [Q2](#q2--scopeowner-unification) (scope/owner
 unification — the chain question is "does subscription follow owner or
 not").
 
-### <a id="q12"></a>Q12 — Body cleanups vs scope cleanups: composition and re-entrancy
+### Q12 — Body cleanups vs scope cleanups: composition and re-entrancy
 
-Surfaced by [H3 trace](./scenario-traces.md#trace-h3). Two distinct cleanup mechanisms exist:
+Surfaced by [H3 trace](./scenario-traces.md#h3--cleanup-chains-across-speculative-effect-runs). Two distinct cleanup mechanisms exist:
 
 - *Scope-level cleanup* — `onCleanup(fn)` outside an effect body,
   registered to `scope.cleanups`. Fires on scope discard (and possibly
@@ -625,19 +625,19 @@ Open sub-questions:
   closes regardless") want it on both. Possible answer: separate
   `onCleanup` and `onSettle` (the latter fires on both). Open.
 - *Re-entrancy during cleanup fires.* If a body cleanup calls `writeSlot`,
-  is the write deferred (per [Q10](#q10)'s `deferredFires` mechanism)? The
+  is the write deferred (per [Q10](#q10--commit-as-transaction-ordering-atomicity-deferred-fires)'s `deferredFires` mechanism)? The
   cleanup runs inside `closeScope`, which is itself a deferred-fires
-  region per [Q10](#q10). So yes, deferral covers it. Worth confirming with a
+  region per [Q10](#q10--commit-as-transaction-ordering-atomicity-deferred-fires). So yes, deferral covers it. Worth confirming with a
   trace.
 - *Cleanup ordering for nested scopes.* If `S2` is a child of `S1` and
   both have cleanups, does discard of `S1` fire `S2.cleanups` before
   `S1.cleanups` (children-first)? Probably yes. Standard tree-disposal
   pattern.
 
-**Related:** [Q2](#q2) (the scope/owner unification carries this composition),
-[Q10](#q10) (re-entrant cleanups land in the commit's deferred-fires region).
+**Related:** [Q2](#q2--scopeowner-unification) (the scope/owner unification carries this composition),
+[Q10](#q10--commit-as-transaction-ordering-atomicity-deferred-fires) (re-entrant cleanups land in the commit's deferred-fires region).
 
-### <a id="q13"></a>Q13 — Optimistic surface ergonomics (sugar over speculation)
+### Q13 — Optimistic surface ergonomics (sugar over speculation)
 
 Mechanism: an optimistic write is one use of speculation (a predicted
 `setX(...)` inside an action body is held in that action's write-set;
@@ -645,14 +645,14 @@ auto-discard reverts on failure; commit promotes). No new primitive at
 the engine level.
 
 **Open:** does pulse ship a named ergonomic sugar — `optimistic(...)` /
-`createOptimistic` — as a thin wrapper over `action`? Per [P5](./framings.md#p5), this is
+`createOptimistic` — as a thin wrapper over `action`? Per [P5](./framings.md#p5--compose-dont-proliferate-in-either-direction), this is
 decided on whether the bare action shape is awkward enough for the
 optimistic case to warrant a named wrapper. Lean: yes for the
 single-predicted-write case (the most common one — predict, await,
 either promote or roll back). The API surface is genuinely undecided
 beyond that.
 
-### <a id="q14"></a>Q14 — Action prereqs / standing-state handle
+### Q14 — Action prereqs / standing-state handle
 
 An action's readiness to run is information that should be queryable
 *before* the action runs (a button needs `ready` and `pending` to avoid
