@@ -1612,6 +1612,326 @@ deliberately. Worth keeping the call open in the doc.
 
 ---
 
+## End-to-end trace: G2 — nested actions and commit promotion
+
+A worked trace verifying that the chain-selector mechanism handles nested
+actions cleanly, and surfacing the inner-promotes-to-outer-vs-direct-to-ROOT
+design call. G2 was identified as the smallest-cheap trace that forces a
+real policy choice into the open.
+
+### The question
+
+Two positions on what *inner-action commit* should do:
+
+- **(i) Inner promotes to outer.** Inner's slots (tagged `S2`) get promoted
+  to the outer's scope (`S1`), not directly to `ROOT_SCOPE`. Outer continues
+  with the inner's writes folded into its scope; outer-commit later promotes
+  to `ROOT_SCOPE`. Database "savepoint" semantics — inner's effects are
+  *conditional on outer's commit*.
+- **(ii) Inner promotes directly to ROOT.** Inner-commit publishes
+  immediately; outer's scope doesn't see inner's writes (because the chain
+  would still resolve to the outer's earlier slot). Independent-transaction
+  semantics.
+
+The architecture forces (i), as the trace shows — but the *why* is worth
+walking through.
+
+### Setup
+
+```ts
+const [count, setCount] = signal(0)
+const [name, setName] = signal("foo")
+const outerReads: any[] = []
+const innerReads: any[] = []
+
+action(function* () {                       // outer scope S1
+  setCount(10)
+  outerReads.push(read(count))              // expect: 10
+
+  action(function* () {                     // inner scope S2, child of S1
+    setCount(20)
+    setName("bar")
+    innerReads.push(read(count))            // expect: 20
+    innerReads.push(read(name))             // expect: "bar"
+  })
+
+  // After inner commits — what does outer see?
+  outerReads.push(read(count))              // expect under (i): 20
+  outerReads.push(read(name))               // expect under (i): "bar"
+})
+
+// After outer commits
+read(count)                                 // expect: 20
+read(name)                                  // expect: "bar"
+```
+
+Initial state: `count.slots = {}`, `name.slots = {}`. The signals have only
+their `defaultRecipe`s.
+
+### Step-by-step trace under Position (i)
+
+**Step 1: outer opens.** `openScope()` → `S1 = { parent: ROOT_SCOPE,
+cleanups: [], status: 'open' }`. Push `S1` as ambient.
+
+**Step 2: `setCount(10)` under `S1`.**
+- `getCurrentScope()` → `S1`. `writeSlot(count, S1, { recipe: () => 10,
+  cached: 10, deps: [], subs: [] })`.
+- Engine walks `count`'s outgoing edges with `(count.slots, S1)`. None (no
+  prior reads). Set `count.slots[S1]`.
+
+**Step 3: `read(count)` inside outer body.**
+- `getCurrentScope()` → `S1`. `currentTracker` → null (action body
+  imperative, no tracking).
+- `invoke(count, S1)`. Engine: `count.slots.get(S1)` hit, cached 10.
+  Return 10.
+- `outerReads.push(10)`.
+
+State after Step 3:
+```
+count.slots = { S1: cached 10, subs: [] }
+S1.status = 'open', ambient = S1
+```
+
+**Step 4: inner opens.** Nested `action(...)` call. `openScope()` →
+`S2 = { parent: S1, cleanups: [], status: 'open' }`. Push `S2` as ambient
+(the current-scope stack is now `[ROOT_SCOPE, S1, S2]`).
+
+**Step 5: `setCount(20)` under `S2`.**
+- `getCurrentScope()` → `S2`. `writeSlot(count, S2, { recipe: () => 20,
+  cached: 20, … })`.
+- Engine walks `count`'s outgoing edges with `(count.slots, S2)`. None.
+  Set `count.slots[S2]`.
+
+**Step 6: `setName("bar")` under `S2`.**
+- Same shape. `name.slots[S2] = "bar"`.
+
+**Step 7: `read(count)` inside inner body.**
+- `getCurrentScope()` → `S2`. `invoke(count, S2)`. Hit. 20.
+- `innerReads.push(20)`. ✓
+
+**Step 8: `read(name)` inside inner body.**
+- `invoke(name, S2)`. Hit. "bar".
+- `innerReads.push("bar")`. ✓
+
+State after Step 8:
+```
+count.slots = { S1: cached 10, S2: cached 20 }
+name.slots = { S2: cached "bar" }
+```
+
+(Note: `name.slots` has no `S1` entry — the outer never wrote to `name`. The
+inner created `S2` directly.)
+
+**Step 9: inner returns. `closeScope(S2, 'commit')`.**
+
+Library promotes each `S2`-tagged slot to the *parent* scope, `S1`:
+
+- *Promote `count`:* `writeSlot(count, S1, { recipe: () => 20, cached:
+  20, … })`.
+  - Engine walks `count`'s outgoing edges with `(count.slots, S1)`. None.
+  - Overwrite `count.slots[S1]` (was 10; now 20).
+- *Drop `count.slots[S2]`:* walk `slot.subs` (empty); delete.
+- *Promote `name`:* `writeSlot(name, S1, { recipe: () => "bar", cached:
+  "bar", … })`.
+  - Walk `name`'s edges. None. Create `name.slots[S1]`.
+- *Drop `name.slots[S2]`:* empty subs; delete.
+- `S2.status = 'committed'`. Pop ambient back to `S1`.
+
+State after Step 9:
+```
+count.slots = { S1: cached 20, subs: [] }              # was 10, now 20
+name.slots = { S1: cached "bar", subs: [] }
+S2: committed
+ambient = S1
+```
+
+The inner's writes have been "lifted" into the outer's scope. From the
+outer's perspective, it's as if the inner had been inlined into the outer
+body's flow.
+
+**Step 10: `read(count)` after inner commits (still in outer body).**
+- `invoke(count, S1)` → hit, 20. `outerReads.push(20)`. ✓
+
+**Step 11: `read(name)` after inner commits.**
+- `invoke(name, S1)` → hit, "bar". `outerReads.push("bar")`. ✓
+
+**Step 12: outer returns. `closeScope(S1, 'commit')`.**
+
+Library promotes each `S1`-tagged slot to `ROOT_SCOPE`:
+
+- `writeSlot(count, ROOT_SCOPE, { recipe: () => 20, cached: 20, … })`.
+  - Walk `count`'s outgoing edges with `(count.slots, ROOT_SCOPE)`. None.
+  - Create `count.slots[ROOT_SCOPE]`.
+- Drop `count.slots[S1]`.
+- `writeSlot(name, ROOT_SCOPE, { recipe: () => "bar", cached: "bar", … })`.
+- Drop `name.slots[S1]`.
+- `S1.status = 'committed'`. Pop ambient to `ROOT_SCOPE`.
+
+Final state:
+```
+count.slots = { ROOT_SCOPE: cached 20 }
+name.slots = { ROOT_SCOPE: cached "bar" }
+```
+
+`read(count)` outside → 20. `read(name)` → "bar". ✓
+
+### Why Position (ii) doesn't work under the framing
+
+Suppose instead the inner promoted *directly to ROOT_SCOPE*:
+
+**Step 9 (alternate):** `closeScope(S2, 'commit')` promotes to ROOT:
+- `writeSlot(count, ROOT_SCOPE, { cached: 20, … })`.
+- `writeSlot(name, ROOT_SCOPE, { cached: "bar", … })`.
+- Drop `S2` slots.
+
+State after Step 9 alt:
+```
+count.slots = { S1: cached 10, ROOT_SCOPE: cached 20 }
+name.slots = { ROOT_SCOPE: cached "bar" }
+ambient = S1
+```
+
+**Step 10 (alternate):** `read(count)` in outer body. `getCurrentScope()` →
+`S1`. `invoke(count, S1)` → hit, **cached 10**. `outerReads.push(10)`. ✗
+
+The outer's read returns *the outer's earlier write*, not the inner's
+post-commit value. The chain `[S1, ROOT_SCOPE]` resolves to `S1` first; the
+inner's commit-to-ROOT is invisible.
+
+It gets worse at outer-commit. **Step 12 (alternate):** `closeScope(S1,
+'commit')` promotes `count.slots[S1]` (still cached 10) to `ROOT_SCOPE`. This
+**overwrites the inner's earlier commit-to-ROOT** with the outer's stale
+value. Final `count.slots[ROOT_SCOPE].cached = 10`. **The inner's commit was
+clobbered.**
+
+Position (ii) doesn't work without additional bookkeeping — the engine would
+have to detect "outer's slot is stale because a nested scope committed
+through it" and refuse to promote the stale value. That's machinery the
+nesting model already does for free in Position (i).
+
+**Position (i) is the architecturally correct answer.** The chain mechanism
+naturally encodes savepoint semantics; we don't need to engineer them
+separately.
+
+### Discard variants
+
+**Inner discards; outer continues.** Setup: inner body throws.
+- `closeScope(S2, 'discard')`: drop `count.slots[S2]`, drop `name.slots[S2]`.
+  Fire `S2.cleanups` (none). `S2.status = 'discarded'`.
+- State: `count.slots = { S1: 10 }`, `name.slots = {}`.
+- Outer continues. `read(count)` under `S1` → 10. `read(name)` under `S1` →
+  chain `[S1, ROOT_SCOPE]` miss-miss → `name.defaultRecipe()` → "foo".
+- Outer-commit later: `count.slots[ROOT_SCOPE] = 10`, `name.slots` stays empty
+  (no `S1` slot to promote).
+- ✓ Inner's effects fully unwound.
+
+**Outer discards; inner had committed.** Setup: outer body throws after
+inner returns.
+- After inner commits: `count.slots = { S1: 20 }`, `name.slots = { S1: "bar" }`.
+- `closeScope(S1, 'discard')`: drop both `S1` slots.
+- ✓ Outer discard rolls back both outer's *and* inner's writes. Savepoint
+  semantics: inner's commit is conditional on outer's commit. Databases work
+  the same way.
+
+If a use case ever surfaces where the inner should *survive* outer discard
+(autonomous inner action), it would be a *different primitive* — not nested
+`action`. Pulse can pick a different name (e.g., `independentAction(...)`)
+later if needed.
+
+### Edge invalidation across nested commits
+
+What about external consumers that subscribed to `count` or `name`?
+
+Consider an Effect outside both actions:
+```ts
+let observed = -1
+effect(() => { observed = read(count) })   // chain [ROOT_SCOPE]
+```
+
+Initial run: `observed = 0` (from `count.defaultRecipe`). Edge formed:
+`count → effectSlot` with `chainSelector([ROOT_SCOPE])`.
+
+During the nested actions above, does the effect re-run?
+- *Step 2 (setCount under S1):* writeScope=`S1`. Effect's chain
+  `[ROOT_SCOPE]`. `chain.indexOf(S1)=-1`. **Don't fire.** ✓
+- *Step 5 (setCount under S2):* writeScope=`S2`. Don't fire. ✓
+- *Step 9 (inner-commit: writeSlot count to S1):* writeScope=`S1`. Effect
+  chain `[ROOT_SCOPE]`, doesn't include S1. **Don't fire.** ✓
+- *Step 12 (outer-commit: writeSlot count to ROOT_SCOPE):* writeScope=
+  `ROOT_SCOPE`. Effect chain `[ROOT_SCOPE]`, writeIdx=0, no more-specific
+  in chain. **Fire.** Effect invalidates, scheduler queues re-run.
+- Effect re-runs, observes `count = 20`. ✓
+
+The effect fires *exactly once* after outer commits — not on inner-commit,
+not on the outer's earlier `setCount(10)`. Defer-until-commit (H1a-c) holds
+across nesting. The effect sees the final committed value, never the
+intermediate `10`.
+
+### Architecture exposed
+
+1. **Nested commits are not a special engine feature.** They're just
+   `writeSlot(node, parentScope, slot_content)` — the same primitive used
+   everywhere else. The "nesting" lives in the scope hierarchy (each scope
+   has a `parent`), and the library's commit logic uses
+   `scope.parent` as the target. Engine doesn't know about nesting.
+2. **Chain selectors handle multi-level fall-through automatically.** Reads
+   under `S2` walk `chainFor(S2) = [S2, S1, ROOT_SCOPE]`. Each scope in the
+   chain is just an opaque key to the engine; the library composes the
+   chain from `scope.parent` walks.
+3. **Defer-until-commit holds across nesting.** External consumers don't
+   see inner-commits, only the outermost commit. Each inner-commit is a
+   write to an intermediate scope that *no external chain matches*.
+4. **Savepoint semantics fall out of the chain mechanism.** Inner commits
+   are conditional on outer commits; outer discard rolls back inner's
+   effects. We get database-style nested-transaction semantics without any
+   engine-level transaction machinery.
+5. **Q-H (scope nesting via parent pointers).** The scope is a linked
+   structure with `parent` pointers. `chainFor` is just `walk parents
+   until you hit ROOT_SCOPE`. Confirms the scope-as-tree shape.
+6. **Inner-promotes-to-outer is the *only* coherent answer** under our
+   framings. Position (ii) requires explicit bookkeeping that doesn't fit
+   the architecture; Position (i) requires no new machinery.
+
+### Framings status after G2
+
+All four framings held; **G2 is the cleanest validation of scope/owner
+unification so far**. The "scope is a tree" structure naturally encodes
+savepoints, and the chain selectors naturally encode "consumers see only the
+final-committed value." No new primitive needed for nested actions; the
+nesting is *emergent* from the scope hierarchy + the chain mechanism.
+
+The trace forces no design call (unlike K1) — the architecture genuinely
+picks Position (i). Worth noting because it's a *positive falsification*:
+Position (ii) was tested and ruled out by the trace.
+
+### Sub-questions surfaced
+
+1. **`chainFor` policy.** The library's `chainFor(scope)` walks
+   `scope.parent` pointers up to and including `ROOT_SCOPE`. Is this
+   always correct? Two edge cases:
+   - A user-defined custom scope hierarchy (per-tenant roots, multiple
+     reactive "worlds") might want a *non-ROOT_SCOPE* terminal. The
+     library should make `chainFor` user-overridable, or expose
+     `terminalScope` as a configurable per-tree property.
+   - For non-nested contexts (e.g., reads outside any action),
+     `chainFor(ROOT_SCOPE) = [ROOT_SCOPE]` is the natural answer.
+2. **Edge-ordering during multi-write commits.** Step 9 promoted `count`
+   then `name`. If those slots had interlocking edges (a derived computed
+   that read both), the *order* of promotion might fire intermediate
+   invalidations that re-resolve incorrectly. Same issue as the doubleName
+   trace's commit-ordering open question (#1) — dep-order leaves-first is
+   the working hypothesis. Worth keeping in mind for complex commits.
+3. **Promotion atomicity at the consumer level.** External consumers
+   *should* see "outer's commit" as a single event, not a sequence. Right
+   now each `writeSlot(node, ROOT_SCOPE, ...)` during commit fires its
+   edges immediately. If many writes happen, consumers might see partial
+   intermediate states. Solution: same as K1's deferred-fires mechanism —
+   commit collects deferred fires and drains them at the end. Probably
+   the *commit operation* should itself defer fires until all promotions
+   are done.
+
+---
+
 ## Open questions (the actual mapping work)
 
 Each is open. The goal is to *map the question space* before committing to any
