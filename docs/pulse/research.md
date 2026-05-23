@@ -1,15 +1,13 @@
 # Pulse — signal-as-node research
 
-Branch-local exploration of pulse's reactive substrate and speculation
-machinery. Question-mapping mode (not route-deciding): framings are durable
-as exploration directions; implementation sketches are illustrative; design
-calls are deliberate.
+Exploration of pulse's reactive substrate and speculation machinery.
+Framings are durable as exploration directions; implementation sketches
+are illustrative; design calls are deliberate.
 
 **Companion document:** the [scenario catalog](./scenarios.md) lives
 separately. Traces here cross-link to specific scenarios there.
 
 **Related pulse-repo docs:**
-- [`../research/async/pulse-design-direction.md`](../research/async/pulse-design-direction.md) — main-doc principles (P1–P5), dimensions (Dim 1–4), questions (Q1–Q5).
 - [`../research/async/CONTEXT.md`](../research/async/CONTEXT.md) — speculation lexicon, four dimensions, failure modes.
 - [`../research/async/deep-dives/solid-2x.md`](../research/async/deep-dives/solid-2x.md) — per-node multi-slot architecture reference.
 
@@ -21,7 +19,7 @@ Pulse's user-facing `Signal<T>` and `Computed<T>` are **graph relations, not
 values** — `Node<() => T | Promise<T>>`, an identity in the dep graph wrapping a
 recipe (a callback that produces the value). The value is not *in* the Node; it
 is what you get by handing the Node to a *walk* primitive. The library ships
-named patterns and named walks (`signal`, `computed`, `effect`, `get`, `peek`,
+named patterns and named walks (`signal`, `compute`, `effect`, `get`, `peek`,
 `latest`, `use`, `isPending`, `subscribe`) as approachable DX over a slim engine
 that knows only about graph, slots, recipes, edges, and notification. Users
 who want their own semantics over the graph can reach the engine; the default
@@ -279,8 +277,7 @@ ergonomic sugar when it would clarify a common use.
 ## Framings (adopted provisionally)
 
 These are durable as *directions to push on*, not as locked-in design positions.
-Each is a way of seeing the problem that earned its keep during the exploration;
-each can be revised if a later finding falsifies it.
+Each is a way of seeing the problem; each can be revised if a later finding falsifies it.
 
 ### Signals and computeds are graph relations, not values
 
@@ -305,7 +302,7 @@ semantic baked into the signal.
 
 The recipe is `() => T | Promise<T>`; a fully-sync pipeline has no `Promise`;
 walks decide how to handle the async case (return-the-Promise, suspend-and-
-resume, throw-to-restart). Connects directly to main-doc P2 ("acknowledge async,
+resume, throw-to-restart). Connects directly to P2 ("acknowledge async,
 don't hide it").
 
 ### Signal / Computed / Effect / JSX-expression are all the same primitive
@@ -330,7 +327,7 @@ who-walks-whom*; edges form when a recipe walks another Node.
 
 The library ships an approachable surface — named patterns over a generic core.
 Users get familiar DX (`const [name, setName] = signal("foo")`,
-`computed(() => …)`, `get(node)`) without seeing engine internals. *But the
+`compute(() => …)`, `get(node)`) without seeing engine internals. *But the
 engine is reachable* — a user (or library author building on pulse) can drop
 down and define their own semantics over the graph. Custom walks, custom edge
 metadata, custom scope shapes — all expressible in user code without engine
@@ -363,9 +360,7 @@ ambient hierarchical contexts. They share: nestability, identity, lifecycle
 a meaningful commit operation.** Working hypothesis: one ambient primitive, with
 different library patterns over it. Cancellation falls out naturally — discard
 the scope, registered cleanups fire. Supersession falls out naturally —
-discard old scope, open new one. The old wondering in
-[`pulse-design-direction.md`'s Sketch section](../research/async/pulse-design-direction.md)
-hedged toward keeping them separate; revisiting that hedge here.
+discard old scope, open new one.
 
 ### Derivation kind matches reactivity scope (computed vs. effect)
 
@@ -390,7 +385,7 @@ effect(() => setValue(get(X) + get(X)))
 action(() => { setX('new'); get(value) })       // returns the OLD value
 
 // Computed-mediated derivation: FRESH inside the action that wrote X
-const value = computed(() => get(X) + get(X))
+const value = compute(() => get(X) + get(X))
 action(() => { setX('new'); get(value) })       // returns the NEW value
 ```
 
@@ -406,16 +401,11 @@ persistence). Mixing them — using an effect to maintain a derived signal
 that gets read inside actions — produces stale-during-action behaviour
 that's correct but surprising.
 
-(This framing is a candidate for promotion to a P-numbered principle in
-[`pulse-design-direction.md`](../research/async/pulse-design-direction.md) once the rest of
-the design-direction work stabilises. Tracked branch-locally for now.)
-
 ### Stages: a memoized node + a promise auto-unwrap
 
-A reduction discovered during this branch's exploration: **what we've been
-calling a "stage" is just a memoized computed node whose input-read
-auto-unwraps a Promise.** No new engine primitive needed; stages compose
-from `createNode` + `get` + `promiseState` (Q-D).
+A stage is a memoized computed node whose input-read auto-unwraps a
+Promise. No new engine primitive needed; stages compose from `createNode`
++ `get` + `promiseState` (Q-D).
 
 ```ts
 type Resolved<T> = T extends Promise<infer U> ? U : T
@@ -449,15 +439,14 @@ canonical declarative computed form for pulse.
 
 - Each stage is **its own memoized node**. Tracker is restored around the
   stage callback, so signal reads inside the callback track to that
-  stage's node (lifting D9's "no signal reads inside stages" restriction —
-  it was an implementation concern, not a conceptual one).
+  stage's node.
 - The stage callback sees the **unwrapped** value (`Resolved<I>`, not
   `I`); the engine threads the resolved value in.
 - The compute's **output type** is `Promise<U>` if any stage along the
   chain returned a Promise; else just `U`. Same model as `async`/`await`:
   any awaited Promise infects the output.
 - **Per-stage memoization** gives finer-grained partial recomputation
-  than D11's generator form: if signal2 is read in stage 2 and changes,
+  than the generator form: if signal2 is read in stage 2 and changes,
   stage 1 stays cached; only stage 2 (and downstream) re-runs. The
   generator form would have to restart from the top in the equivalent
   case.
@@ -502,7 +491,7 @@ const greeting = compute(
 
 // Generator — imperative coroutine; dynamic deps; resume from yield (Awaitable)
 const profile = compute(function* () {
-  const user = yield* get(asyncUser)           // user: string (via Awaitable's iterator)
+  const user = yield* get(asyncUser)           // user: User (via Awaitable's iterator)
   if (user.role === 'admin') {
     return yield* get(adminProfile)            // dynamic: which signal we read depends on data
   } else {
@@ -562,7 +551,7 @@ return resolved." Pulse adopts the same convention.
 ### Anti-pattern (code smell)
 
 ```ts
-const greeting = computed(() => `Hello, ${use(user)}!`)
+const greeting = compute(() => `Hello, ${use(user)}!`)
 // greeting: Computed<string>  — async hidden, throw-to-suspend mid-graph
 ```
 
@@ -590,18 +579,18 @@ const greeting = compute(() => get(user), (u) => `Hello, ${u}!`)
   primitives. No new engine concept; just `promiseState` + tracker
   push/pop, both already needed.
 
-**Form set sharpened:**
+**Form set:**
 
-- *Computeds:* stages (one-stage form for plain compute, multi-stage
-  form for pipelines). `use()` mid-graph is an anti-pattern.
+- *Computeds:* plain body, stages, or generator form (see "Three
+  authoring forms for computeds" above). `use()` mid-graph in a
+  plain-body recipe is an anti-pattern; stages and generators preserve
+  async in the output type.
 - *Action bodies:* generators with `yield* get(...)` for async unwrap.
 - *Leaves (JSX, action-body-try):* `use(node)` for React-style
   throw-to-suspend.
 
 (Companion to the "Derivation kind matches reactivity scope" framing
-above. Both rules describe where computation work happens. Also a
-candidate for promotion to a P-numbered principle in
-[`pulse-design-direction.md`](../research/async/pulse-design-direction.md).)
+above. Both rules describe where computation work happens.)
 
 ### `Awaitable<T>` — one type, three legitimate uses
 
@@ -718,7 +707,7 @@ through to r3 for committed.
 
 ```ts
 const [name, setName] = signal("foo")
-const doubleName = computed(() => get(name) + get(name))
+const doubleName = compute(() => get(name) + get(name))
 
 action(function* () {
   setName("name")
@@ -740,7 +729,7 @@ engine.
 **Resolution.** The engine needs multi-slot per Node. This is structurally
 Solid 2.x's per-node multi-slot architecture (which Solid arrived at empirically
 after abandoning node-graph-cloning — see
-[`pulse-design-direction.md`'s historical-data-point section](../research/async/pulse-design-direction.md)).
+[`../research/async/deep-dives/solid-2x.md`](../research/async/deep-dives/solid-2x.md)).
 Pulse's user-facing novelty (Node-as-recipe + walks) is preserved; the engine
 internals converge on per-node multi-slot. **The smaller core in Q1's (β) lean
 is not "r3 unchanged"** — it's r3 forked-and-extended (or a pulse-owned engine
@@ -814,7 +803,7 @@ function onCleanup(fn: Disposable): void          // attaches to current ambient
 function getCurrentScope(): Scope                 // always returns a scope (library convention; see ROOT_SCOPE below)
 ```
 
-No `signal`, `computed`, `effect`, `get`, `latest`, `action`, `transition`,
+No `signal`, `compute`, `effect`, `get`, `latest`, `action`, `transition`,
 `speculation`, "canonical," or "committed" in the engine vocabulary. The engine
 sees a map of opaque scope keys to slots, uniformly. Those concepts are all
 library code.
@@ -835,14 +824,18 @@ function signal<T>(initial: T): [Node<T>, (v: T) => void] {
   ]
 }
 
-function computed<T>(fn: () => T): Node<T> {
+function compute<T>(fn: () => T): Node<T> {
   return createNode<T>(fn)
 }
 
-function read<T>(node: Node<T>): T {
+function get<T>(node: Node<T>): GetReturn<T> {
   const scope = getCurrentScope()
   if (currentTracker) link(node, chainSelector(chainFor(scope)), currentTracker)
-  return invoke(node, scope) as T
+  const cached = invoke(node, scope) as T
+  if (cached && typeof (cached as any).then === 'function') {
+    return makeAwaitable(cached as any) as GetReturn<T>
+  }
+  return cached as GetReturn<T>
 }
 
 function latest<T>(node: Node<T>): T {
@@ -876,7 +869,7 @@ Usage retains familiar shape:
 
 ```ts
 const [name, setName] = signal("foo")
-const doubleName = computed(() => get(name) + get(name))
+const doubleName = compute(() => get(name) + get(name))
 
 get(name)         // "foo"
 get(doubleName)   // "foofoo"
@@ -895,8 +888,8 @@ get(name)         // "bar" — committed unchanged outside the scope
 
 ## End-to-end traces
 
-**Moved to [./scenario-traces.md](./scenario-traces.md).** Eight traces
-walk each architecturally-distinct case through engine + library calls:
+See [./scenario-traces.md](./scenario-traces.md). Eight traces walk each
+architecturally-distinct case through engine + library calls:
 
 - [doubleName trace](./scenario-traces.md#end-to-end-trace-doublename-under-scope-s)
 - [C2 trace](./scenario-traces.md#end-to-end-trace-c2--action-body-with-async-read)
@@ -907,7 +900,7 @@ walk each architecturally-distinct case through engine + library calls:
 - [C2e trace](./scenario-traces.md#end-to-end-trace-c2e--post-yield-derived-read-async-k1b-analogue)
 - [H1d trace](./scenario-traces.md#end-to-end-trace-h1d--effect-body-coherence-on-commit)
 
-All eight pass; all four framings still hold; no falsifications.
+All eight pass; all four framings hold; no falsifications.
 
 ## Open questions (the actual mapping work)
 
@@ -925,7 +918,7 @@ inside Q-entries name the trace that surfaced them.
 Status: working candidate framing identified (Model 2 — selector-on-edge). Not
 locked in; sub-questions remain open at the next level down.
 
-**The break, traced concretely.** With `name`, `doubleName = computed(() =>
+**The break, traced concretely.** With `name`, `doubleName = compute(() =>
 get(name) + get(name))`, and the initial outside-action `get(doubleName)`
 populating `doubleName.slots[ROOT_SCOPE] = "foofoo"` plus an edge
 `name.slots[ROOT_SCOPE] → doubleName.slots[ROOT_SCOPE]` (using the library's
@@ -1250,7 +1243,7 @@ rather than via mutation). See the "Awaitable" framing section.
 
 **Related:** Q-C (consumer's re-run discipline for async deps; consumers
 receive `{ kind: 'resolved' }` events the same way they receive `{ kind:
-'invalidated' }`), main-doc D8 (`yield* get` vs `use` vs stages), Q-I
+'invalidated' }`), `yield* get` vs `use` vs stages (see framings), Q-I
 (a Promise that resolves is "still the same slot," not a write, so doesn't
 trigger commit-promotion).
 
@@ -1401,19 +1394,13 @@ flags during commit. Currently mostly cosmetic.
 
 ### Q-J — Commit as transaction: ordering, atomicity, deferred fires
 
-Surfaced cumulatively by doubleName (commit ordering), K1 (originally; see
-post-revision note below), and G2 (promotion atomicity at the consumer
-level). The underlying question: **when an action commits, how exactly
-does the engine sequence the multiple slot promotions and edge fires so
-that consumers see a consistent post-commit state, not a sequence of
-partial updates?**
+When an action commits, how exactly does the engine sequence the multiple
+slot promotions and edge fires so that consumers see a consistent
+post-commit state, not a sequence of partial updates?
 
-**Post-revision scope (after K1+K1b).** Initially this question was framed
-as "deferral applies during recomputes (K1) and during commits (here)."
-K1+K1b flipped to position (C) — recomputes do *not* defer fires; they
-fire synchronously, and consumers schedule async via microtasks. So
-**deferred-fires is commit-mode only**, not tracker-mode. The mechanism
-is the same shape but only one trigger remains: opening a commit
+**Deferred-fires is commit-mode only**, not tracker-mode. Recomputes fire
+synchronously; consumers schedule async via microtasks (see K1b trace).
+The deferred-fires mechanism is triggered only by opening a commit
 operation.
 
 Three concerns under one umbrella:
@@ -1587,10 +1574,9 @@ Not yet traced; this is a future trace target.
 
 ## Scenario catalog
 
-**Moved to [./scenarios.md](./scenarios.md).** The catalog lives in its own
-file so it can serve as the basis for the eventual TDD suite without being
-buried in framings/traces/questions. Traces here cross-link to specific
-scenarios there.
+See [./scenarios.md](./scenarios.md). The catalog lives in its own file so
+it can serve as the basis for the eventual TDD suite without being buried
+in framings/traces/questions. Traces cross-link to specific scenarios.
 
 ## Threads to continue (next pushes)
 
