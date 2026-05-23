@@ -839,6 +839,179 @@ ambients, or one ambient with a "current slot recomputing" sub-field. Open.
 
 ---
 
+## Scenario catalog (problem-space mapping)
+
+A map of architecturally-distinct cases the engine + speculation machinery
+needs to handle. Goal: grip on the problem space before committing to a route.
+The catalog isn't exhaustive — it picks cases that exercise *different parts*
+of the architecture, not variants of the same case. ✓ marks a scenario that's
+already been traced end-to-end; everything else is open.
+
+### A. Single speculation, sync (Dim 1 — internal structure)
+
+- **A1.** `setX` inside action, read `X` back inside the same action. Tests
+  whether a write sees itself on subsequent read inside the scope. *Expected:
+  yes — the slot at `S` is what reads see.*
+- **A2.** ✓ `setX`, read derived `f(X)` — the `doubleName` case. Traced.
+- **A3.** Action writes multiple signals (`setX`, `setY`); read derived
+  `f(X, Y)`. Tests whether multiple scope-tagged slots compose into one
+  derived under the same scope. *Expected: yes — recipe runs once, reads
+  each under `S`.*
+- **A4.** Action writes one signal; two distinct deriveds depend on it. Tests
+  that both deriveds invalidate independently and re-read under `S`.
+- **A5.** Read-modify-write: `setX(x => x + 1)` inside action (setter takes a
+  function and reads current value). Tests whether the read inside the setter
+  function sees committed or speculative. Library-API design question, not a
+  mechanism question.
+- **A6.** Conditional read (recipe branches): `computed(() => cond() ?
+  read(a) : read(b))`. Inside action, `cond` flips → recipe reads different
+  signals. Tests dynamic deps under scope; old edges drop, new edges form.
+  r3 already handles dynamic deps via push-pull-push fallback.
+- **A7.** Action reads only — never writes. Tests whether slots get created
+  under `S` for memoisation purposes, or whether read-only access is a no-op
+  at the bag level.
+
+### B. Lifecycle & cleanup
+
+- **B1.** ✓ Action returns normally → commit. Traced.
+- **B2.** ✓ Action throws → discard. Traced.
+- **B3.** `onCleanup(fn)` inside action body. Tests: discard fires `fn`;
+  commit doesn't. Working hypothesis from Q-B.
+- **B4.** Owner of the action is disposed mid-action (parent owner unmounts).
+  Tests: action's scope discards as a consequence of owner disposal. Falls
+  out of scope/owner unification if it holds.
+
+### C. Async (Dim 1 with async — Q-D territory)
+
+- **C1.** `setX(Promise.resolve("v"))` inside action — the new recipe returns
+  a Promise. Tests: how does a derived `read(X)` see this? Walks decide.
+- **C2.** Action body `yield* read(asyncSignal)` — body parks until promise
+  resolves. Tests: does the scope stay open across the await? Does the
+  ambient scope restore correctly on resume? Major question.
+- **C3.** Async signal resolves *after* the action commits — what value lands
+  in canonical? The action committed a Promise; resolution happens later
+  under no scope. Library policy.
+- **C4.** Concurrent in-flight async + new action arrives. Tests:
+  supersession + async cancellation interaction.
+- **C5.** Action body awaits external work (not a signal — a fetch). Tests:
+  AbortController via `onCleanup` on discard. Cancellation discipline.
+
+### D. Concurrence (Dim 2 — disjoint state)
+
+- **D1.** Two actions `S1`, `S2`, writing disjoint signals. Independent
+  slots; both commit; no interaction. Should be trivial — slots keyed by
+  scope.
+- **D2.** Two actions, both read same signal but only one writes. Reader's
+  edges register against the writing scope's chain; should fire correctly on
+  writer commit. Verify selectors handle.
+- **D3.** Late subscriber: component mounts mid-action and reads under that
+  action's scope. Edge formed with the right chain at subscription time.
+  Should fall out of Model 2.
+
+### E. Supersession (Dim 3) — *policy question*
+
+- **E1.** New action arrives while old in-flight; old structurally cancelled
+  (its scope discards). Cancellation discipline; old's in-flight async
+  aborts via `onCleanup`. Mechanism settled; policy of *when* to supersede
+  is higher-level.
+- **E2.** Old action and new action coexist (no auto-supersession). Both
+  scopes alive; reads under each see their own overlay. Likely default.
+- **E3.** Rapid sequence of supersessions (typing in an input). Scope churn
+  doesn't leak; cleanups fire promptly. Pressure test.
+
+### F. Overlap (Dim 4 — entanglement) — *policy question*
+
+- **F1.** Two concurrent actions both write same signal. Which scope's slot
+  is in play for which reader? Two scopes, two slots, no merge — pulse-
+  direction lean.
+- **F2.** Two actions commit in sequence; both touched the same signal.
+  Commit order determines final canonical. Last-writer-wins per the lean;
+  Solid auto-merges (which pulse rejects).
+- **F3.** Concurrent actions where one's read-set overlaps the other's
+  write-set (one reads `X`, other writes `X`). Reader's selector decides
+  what it sees — selector with chain `[my_scope, ROOT]` doesn't see other
+  scope's write. ✓ (Selector design verified.)
+
+### G. Nesting (scope hierarchy)
+
+- **G1.** Action inside an action. Inner scope is child of outer. Writes
+  tagged with inner scope; reads inside inner walk chain `[inner, outer,
+  ROOT]`. Falls out of the chain framing.
+- **G2.** Inner commits → its slots promote to outer's scope (not ROOT).
+  Outer commits → outer's slots promote to ROOT. Two-stage promotion. *Open:
+  does inner-commit promote to outer or directly to ROOT? Lean: to outer,
+  preserving nesting.*
+- **G3.** Inner commits; outer discards. Inner's promoted-to-outer slots get
+  discarded with outer. Nesting respects parent lifecycle.
+- **G4.** Inner discards; outer continues. Inner's writes drop; outer's
+  state unchanged.
+
+### H. Effects under speculation — *Q-C open*
+
+- **H1.** Effect registered outside; speculative write happens inside an
+  action. Does the effect re-run during the action, on commit, or never?
+  Three positions per Q-C; lean defer-until-commit.
+- **H2.** Effect created inside an action body. Effect's owner is the
+  action's scope; effect's body executes once at registration. Does it
+  re-fire on writes inside the same action?
+- **H3.** Effect with `onCleanup`; speculative write triggers the effect →
+  effect's body runs → registers cleanup. If discard, do those cleanups
+  fire? Cleanup chains across scopes; tricky.
+- **H4.** Effect that itself calls `action(…)` (effect-triggers-action).
+  Cycles? Bans? Worth knowing the policy.
+
+### I. Component / JSX integration
+
+- **I1.** JSX expression `{read(name)}` rendered inside a component that's
+  *inside* an active action. JSX-binding consumer treated like Effect —
+  re-renders on speculative writes? Defers to commit? Q-C territory.
+- **I2.** Component mounts inside an action. Its computeds and effects
+  belong to a child owner of the action's scope. On action discard, all
+  the mounted components dispose. Falls out of scope/owner unification.
+- **I3.** Component unmounts mid-action. Owner disposes; its subscriptions
+  clean up; if the unmount was triggered by an action write, ordering
+  matters.
+
+### J. Edge cases / pressure points
+
+- **J1.** `latest(node)` inside an action. `latest` walk uses
+  `chainSelector([ROOT_SCOPE])`, sees the committed value, ignores the
+  action's overlay. Falls out of selector design.
+- **J2.** `peek(node)` inside an action. Untracked read, same scope, no edge
+  formed. Trivial.
+- **J3.** `isPending(node)` — what does it report? Whether *any* scope has a
+  slot for the node? Whether the *current* scope's slot is pending
+  (Promise-valued cache)? Q-D-adjacent; library walk decides.
+- **J4.** Action creates a new signal (`signal(initial)` called inside the
+  action body). Does the new signal's "initial slot" tag with `ROOT_SCOPE`
+  or with the action's scope? Library policy. If with scope: signal
+  disappears on discard (probably right). If with ROOT: signal survives
+  discard but its values were never written outside the scope (probably
+  wrong).
+- **J5.** Action body sets a value, then somewhere else (a different scope
+  or no scope) reads it. Other scope/no-scope doesn't see the speculative
+  value. Falls out — selectors handle.
+
+### Architectural distribution
+
+- *A:* single-scope mechanics — most settled; A2 traced.
+- *B:* lifecycle — mostly settled by scope/owner framing.
+- *C:* async — biggest open area (Q-D).
+- *D:* concurrence — mechanically straightforward under Model 2.
+- *E:* supersession — mechanism settled; policy open.
+- *F:* overlap — policy is the question, not mechanism.
+- *G:* nesting — depends on commit-promotion semantics.
+- *H:* effects — large open area (Q-C).
+- *I:* JSX/components — depends on H.
+- *J:* edges — mostly mechanical verification.
+
+Three categories where the architecture is most under-specified: **C (async)**,
+**H (effects)**, and **G (nesting commit-promotion)**. Two where the mechanism
+is settled but a policy decision still needs to be made: **E (supersession)**,
+**F (overlap)**.
+
+---
+
 ## Threads to continue (next pushes)
 
 Roughly priority-ordered:
