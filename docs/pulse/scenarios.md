@@ -6,12 +6,15 @@ The catalog deliberately favours *specificity over generalisation*: distinct
 cases stay distinct even when they look similar, because each will be its
 own test.
 
-**Companion document:** the [research](./research.md) doc holds the
-framings, falsified hypotheses, engine/library sketches, end-to-end traces,
-open questions (Q-A through Q-L), and threads.
+**Companion documents:**
+- [research.md](./research.md) — framings, falsified hypotheses,
+  engine/library sketches, open questions (Q-A through Q-L), threads.
+- [scenario-traces.md](./scenario-traces.md) — end-to-end traces of the
+  ✓-marked scenarios below.
 
 **Legend:** ✓ marks a scenario that's been traced end-to-end (see
-[research.md](./research.md) for the trace). Everything else is open.
+[scenario-traces.md](./scenario-traces.md) for the trace). Everything else
+is open.
 
 **Tracing discipline.** When a scenario is traced, record both the
 decisions the trace exposed and *the alternatives that weren't taken* —
@@ -23,18 +26,18 @@ avoid.
 - [`../research/async/pulse-design-direction.md`](../research/async/pulse-design-direction.md) — main-doc principles, dimensions, questions.
 - [`../research/async/CONTEXT.md`](../research/async/CONTEXT.md) — speculation lexicon, four dimensions, failure modes.
 
-## Traces (in [research.md](./research.md))
+## Traces (in [scenario-traces.md](./scenario-traces.md))
 
 Each trace walks a scenario end-to-end through engine + library calls.
 
-- [**doubleName trace**](./research.md#end-to-end-trace-doublename-under-scope-s) — exercises A2, B1, B2.
-- [**C2 trace**](./research.md#end-to-end-trace-c2--action-body-with-async-read) — exercises C2a, C2b, C2c, C2d.
-- [**H1a-c trace**](./research.md#end-to-end-trace-h1a-c--effect-under-speculation) — exercises H1a, H1b, H1c.
-- [**K1 trace**](./research.md#end-to-end-trace-k1--re-entrant-setter-mid-recompute) — exercises K1a, K1b.
-- [**G2 trace**](./research.md#end-to-end-trace-g2--nested-actions-and-commit-promotion) — exercises G1, G2, G3, G4.
-- [**H3 trace**](./research.md#end-to-end-trace-h3--cleanup-chains-across-speculative-effect-runs) — exercises H3 (a, b, b').
-- [**C2e trace**](./research.md#end-to-end-trace-c2e--post-yield-derived-read-async-k1b-analogue) — exercises C2e.
-- [**H1d trace**](./research.md#end-to-end-trace-h1d--effect-body-coherence-on-commit) — exercises H1d.
+- [**doubleName trace**](./scenario-traces.md#end-to-end-trace-doublename-under-scope-s) — exercises A2, B1, B2.
+- [**C2 trace**](./scenario-traces.md#end-to-end-trace-c2--action-body-with-async-read) — exercises C2a, C2b, C2c, C2d.
+- [**H1a-c trace**](./scenario-traces.md#end-to-end-trace-h1a-c--effect-under-speculation) — exercises H1a, H1b, H1c.
+- [**K1 trace**](./scenario-traces.md#end-to-end-trace-k1--re-entrant-setter-mid-recompute) — exercises K1a, K1b.
+- [**G2 trace**](./scenario-traces.md#end-to-end-trace-g2--nested-actions-and-commit-promotion) — exercises G1, G2, G3, G4.
+- [**H3 trace**](./scenario-traces.md#end-to-end-trace-h3--cleanup-chains-across-speculative-effect-runs) — exercises H3 (a, b, b').
+- [**C2e trace**](./scenario-traces.md#end-to-end-trace-c2e--post-yield-derived-read-async-k1b-analogue) — exercises C2e.
+- [**H1d trace**](./scenario-traces.md#end-to-end-trace-h1d--effect-body-coherence-on-commit) — exercises H1d.
 
 ---
 
