@@ -1,11 +1,13 @@
 # Pulse — scenario traces
 
 End-to-end traces of architecturally-distinct cases through pulse's engine
-+ library. Each trace walks every engine call and state change for one
-scenario from the [catalog](./scenarios.md), verifying the framings (or
-falsifying them when they break).
+
+- library. Each trace walks every engine call and state change for one
+  scenario from the [catalog](./scenarios.md), verifying the framings (or
+  falsifying them when they break).
 
 **Companion documents:**
+
 - [scenarios.md](./scenarios.md) — the catalog itself (TDD basis).
 - [README.md](./README.md) — framings, falsified hypotheses, engine /
   library sketches, open questions, threads.
@@ -15,7 +17,8 @@ forced deliberate design calls into the open (K1 → resolved to Position
 (C); H3 → Policy α for effect chains, lean).
 
 **Related pulse-repo docs:**
-- [`../research/async/CONTEXT.md`](../research/async/CONTEXT.md) — speculation lexicon, four dimensions, failure modes.
+
+- [`../async/CONTEXT.md`](../async/CONTEXT.md) — speculation lexicon, four dimensions, failure modes.
 
 ## Contents
 
@@ -39,7 +42,7 @@ broke on. Walks every engine call and every state change.
 ### Setup
 
 ```ts
-const [name, setName] = signal("foo")
+const [name, setName] = signal('foo')
 const doubleName = computed(() => get(name) + get(name))
 ```
 
@@ -66,6 +69,7 @@ const doubleName = computed(() => get(name) + get(name))
 - Returns `"foofoo"`. ✓
 
 **State after Step 1:**
+
 ```
 name.slots       = { ROOT_SCOPE: cached "foo",     subs: [edge1] }
 doubleName.slots = { ROOT_SCOPE: cached "foofoo",  deps: [edge1] }
@@ -108,6 +112,7 @@ correctly stays inert; committed state preserved.
 - Returns `"namename"`. ✓
 
 **State after Step 4:**
+
 ```
 name.slots = {
   ROOT_SCOPE: cached "foo",  subs: [edge1],
@@ -131,6 +136,7 @@ Sketched order: dep-order, leaves-first. Gather `[(name, S), (doubleName, S)]`.
 
 **Promote `name`:** `writeSlot(name, ROOT_SCOPE, { recipe: () => "name",
 cached: "name", … })`.
+
 - Engine fires:
   - `edge1`: `chainSelector([ROOT_SCOPE])`, writeScope=ROOT_SCOPE, writeIdx=0 →
     **fire.** Invalidate `doubleName.slots[ROOT_SCOPE]`.
@@ -152,6 +158,7 @@ overwritten by this write — final cached value `"namename"`. ✓
 (library convention).
 
 **State after Step 5a:**
+
 ```
 name.slots       = { ROOT_SCOPE: cached "name" }
 doubleName.slots = { ROOT_SCOPE: cached "namename" }
@@ -163,6 +170,7 @@ edge1 unchanged. edge2 unlinked.
 ### Step 5b: action throws → `closeScope(S, 'discard')`
 
 Alternative: action body throws.
+
 - Engine: drop every `S`-tagged slot. Walk each dropped slot's `subs`, unlink
   edges. Fire cleanups registered against `S` (none in this trace; would be
   `onCleanup(…)` calls from the action body, e.g. AbortController.abort()).
@@ -188,7 +196,7 @@ under-specified edges. Listed in roughly load-bearing order:
    cached + drop deps (next recompute rebuilds); (c) drop cached + force
    recompute. Lean (b); related to [Q7](./questions.md#q7--the-defaultrecipe-mechanism).
 3. **Action body reads: do they track?** The trace assumed `currentTracker =
-   null` for top-level reads inside an action body (imperative, not
+null` for top-level reads inside an action body (imperative, not
    declarative — the action body doesn't re-run on dep change). Probably
    correct but worth being explicit. Related to [Q2](./questions.md#q2--scopeowner-unification) (scope/owner) and [Q8](./questions.md#q8--tracker-vs-scope-separate-or-unified)
    (tracker/scope).
@@ -233,7 +241,9 @@ unification) and several open questions ([Q1](./questions.md#q1--fall-through-an
 
 ```ts
 let resolveUser: (v: string) => void
-const userPromise = new Promise<string>(r => { resolveUser = r })
+const userPromise = new Promise<string>(r => {
+	resolveUser = r
+})
 
 const [user, setUser] = signal<string | Promise<string>>(userPromise)
 // user.defaultRecipe = () => userPromise (Promise, pending)
@@ -243,6 +253,7 @@ The signal's recipe returns a `Promise<string>`. Reading the signal yields the
 Promise; resolving requires either awaiting or using a walk that suspends.
 
 **State after setup:**
+
 ```
 user = { slots: {}, defaultRecipe: () => userPromise }
 userPromise: pending
@@ -266,14 +277,14 @@ Sketched walk implementation:
 
 ```ts
 function* read<T>(node: Node<T>): Generator<ParkCommand, T, T> {
-  const scope = getCurrentScope()
-  if (currentTracker) link(node, chainSelector(chainFor(scope)), currentTracker)
-  const result = invoke(node, scope) as T | Promise<T>
-  if (result instanceof Promise) {
-    const resolved = yield { kind: 'park', promise: result } as ParkCommand
-    return resolved
-  }
-  return result
+	const scope = getCurrentScope()
+	if (currentTracker) link(node, chainSelector(chainFor(scope)), currentTracker)
+	const result = invoke(node, scope) as T | Promise<T>
+	if (result instanceof Promise) {
+		const resolved = yield { kind: 'park', promise: result } as ParkCommand
+		return resolved
+	}
+	return result
 }
 ```
 
@@ -281,20 +292,25 @@ And the action driver:
 
 ```ts
 function driveAction(scope: Scope, gen: Generator) {
-  const step = (value: unknown) => {
-    if (scope.status !== 'open') return     // discarded mid-await; bail
-    pushScope(scope)
-    try {
-      const { done, value: cmd } = gen.next(value)
-      if (done)                  closeScope(scope, 'commit')
-      else if (cmd.kind==='park') cmd.promise.then(step, stepThrow)
-      // else: other command kinds
-    } catch (e) {
-      closeScope(scope, 'discard'); throw e
-    } finally { popScope() }
-  }
-  const stepThrow = (err: unknown) => { /* analogous, gen.throw */ }
-  step(undefined)
+	const step = (value: unknown) => {
+		if (scope.status !== 'open') return // discarded mid-await; bail
+		pushScope(scope)
+		try {
+			const { done, value: cmd } = gen.next(value)
+			if (done) closeScope(scope, 'commit')
+			else if (cmd.kind === 'park') cmd.promise.then(step, stepThrow)
+			// else: other command kinds
+		} catch (e) {
+			closeScope(scope, 'discard')
+			throw e
+		} finally {
+			popScope()
+		}
+	}
+	const stepThrow = (err: unknown) => {
+		/* analogous, gen.throw */
+	}
+	step(undefined)
 }
 ```
 
@@ -308,8 +324,8 @@ code; engine knows nothing about generators or park commands.
 
 ```ts
 action(function* () {
-  const name = yield* get(user)       // parks until userPromise resolves
-  setUser(Promise.resolve(name + "!"))
+	const name = yield* get(user) // parks until userPromise resolves
+	setUser(Promise.resolve(name + '!'))
 })
 // later: resolveUser("alice")
 ```
@@ -319,23 +335,25 @@ action(function* () {
 as ambient. Library calls `driveAction(S, gen)`.
 
 **Step 2: first `gen.next(undefined)`.** Generator runs until first yield.
+
 - Body calls `yield* get(user)`. The `get` sub-generator runs:
   - `getCurrentScope()` → `S`. `currentTracker` → null (action-body reads
     aren't tracked — see H1a-c discussion). No `link()` call.
   - `invoke(user, S)`:
     - Engine: `user.slots.get(S)` miss. Create `slot_U_S = { recipe:
-      defaultRecipe, deps: [], subs: [] }`. Push `currentTracker = slot_U_S`.
+defaultRecipe, deps: [], subs: [] }`. Push `currentTracker = slot_U_S`.
       Invoke recipe → `userPromise`. `slot_U_S.cached = userPromise`. Pop
       tracker. Set `user.slots[S] = slot_U_S`. Return `userPromise`.
   - `get` sees Promise → yields `{ kind: 'park', promise: userPromise }`.
 - `yield*` propagates the park command up to the action body's iterator. The
   body's `gen.next(undefined)` returns `{ done: false, value: { kind: 'park',
-  promise: userPromise } }`.
+promise: userPromise } }`.
 - Driver: `cmd.kind === 'park'` → attach `userPromise.then(step, stepThrow)`.
 - Driver: `popScope()` runs (finally block). Ambient back to `ROOT_SCOPE`.
 - Driver returns. Synchronous portion of action handler is done.
 
 **State after Step 2:**
+
 ```
 user.slots = { S: { recipe: defaultRecipe, cached: userPromise, deps: [], subs: [] } }
 S.status = 'open'
@@ -349,6 +367,7 @@ because the body isn't going to re-run on dep change.
 **Step 3: time passes; `resolveUser("alice")` is called.**
 
 `userPromise` resolves to `"alice"`. The `.then` callback fires (microtask).
+
 - Driver `step("alice")` runs.
 - Check `scope.status === 'open'` → yes. `pushScope(S)`. Ambient back to `S`.
 - Call `gen.next("alice")`. The `yield*` machinery resumes the `get`
@@ -365,8 +384,8 @@ matching React's `use()` convention; `WeakMap` fallback for frozen
 Promises), and the engine fires a slot-changed event with kind `'resolved'`.
 Walks query `promiseState(slot_U_S.cached)` to retrieve the
 synchronously-readable resolved value. Downstream consumers receive the
-slot-changed event identically to any other invalidation event. *This is
-strictly cleaner than mutating `cached`*: the slot is immutable for its
+slot-changed event identically to any other invalidation event. _This is
+strictly cleaner than mutating `cached`_: the slot is immutable for its
 lifetime; the tweaked Promise is shared across all walks reading it;
 read-vs-write distinction ([Q9](./questions.md#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally)) stays unambiguous (the Promise resolving
 is not a write).
@@ -375,12 +394,13 @@ is not a write).
 
 - Library: `setUser` (closed-over setter) runs. `getCurrentScope()` → `S`.
 - Library: `writeSlot(user, S, { recipe: () => Promise.resolve("alice!"),
-  deps: [], subs: [] })`.
+deps: [], subs: [] })`.
 - Engine: walk `user`'s outgoing edges with `(user.slots, S)`. None. Set
   `user.slots[S]` = new slot. Compute `cached = recipe() = Promise<"alice!">`.
   Engine attaches `.then` to resolve `cached` to `"alice!"` in a microtask.
 
 **State after Step 4 (before microtask):**
+
 ```
 user.slots = { S: { recipe: () => Promise.resolve("alice!"),
                     cached: Promise<"alice!">, deps: [], subs: [] } }
@@ -393,11 +413,12 @@ user.slots = { S: { recipe: () => Promise.resolve("alice!"),
 - Driver: `done` → `closeScope(S, 'commit')`.
 - Library promotes `user.slots[S]` to `user.slots[ROOT_SCOPE]`. Engine:
   `writeSlot(user, ROOT_SCOPE, { recipe: () => Promise.resolve("alice!"),
-  cached: Promise<"alice!"> })`. Walk `user`'s outgoing edges (none in this
+cached: Promise<"alice!"> })`. Walk `user`'s outgoing edges (none in this
   trace). Drop `user.slots[S]`.
 - `S.status = 'committed'`. Pop ambient back to `ROOT_SCOPE`. Driver returns.
 
 **State after Step 5:**
+
 ```
 user.slots = { ROOT_SCOPE: { recipe: () => Promise.resolve("alice!"),
                               cached: Promise<"alice!"> } }
@@ -416,7 +437,7 @@ C2a tested cleanly. The decisions it forced into the open:
 1. **Async-honest walks.** `get(node)` returns `T | Promise<T>`. The walk
    doesn't hide the Promise; the caller chooses how to handle it. [P2](./framings.md#p2--acknowledge-async-dont-hide-it) holds.
 2. **Park commands separate walk intent from action machinery.** `yield*
-   get(node)` yields a `park` command; the action driver decides what to do
+get(node)` yields a `park` command; the action driver decides what to do
    with it (`.then` here; could be `requestAnimationFrame` for an `raf`
    command; library convention, not engine concern). Slim engine + thick
    library (the third framing) holds.
@@ -424,21 +445,21 @@ C2a tested cleanly. The decisions it forced into the open:
    `pushScope(S)` / `popScope()` around every `gen.next` is what makes the
    scope persist across awaits. Without this, `setUser` after the await
    would write to `ROOT_SCOPE` instead of `S`. [Q8](./questions.md#q8--tracker-vs-scope-separate-or-unified) (tracker vs scope):
-   the *scope* persists across awaits via push/pop; the *tracker* doesn't
+   the _scope_ persists across awaits via push/pop; the _tracker_ doesn't
    (the action body has no tracker at all). They're separate.
 4. **Action-body reads don't track.** No edges formed during the trace.
    Confirms the assumption from [doubleName trace](#doublename-under-scope-s)'s open question #3 and
    from H1's premise (action bodies are one-shot).
 5. **The driver's discard-guard on resume.** `if (scope.status !== 'open')
-   return` is what makes C2c safe — see below. [Q2](./questions.md#q2--scopeowner-unification) (cancellation) interacts
+return` is what makes C2c safe — see below. [Q2](./questions.md#q2--scopeowner-unification) (cancellation) interacts
    with [Q4](./questions.md#q4--async-at-the-engine-level) (async) through this guard.
 6. **Engine choice: update cache on Promise resolve, or not.** Open ([Q4](./questions.md#q4--async-at-the-engine-level));
    the lean is yes (so [Q3](./questions.md#q3--consumer-patterns) consumer-pattern fires correctly when async deps
    resolve). Doesn't affect C2a's correctness either way.
 7. **Promise identity as supersession signal.** D8 in the main doc notes
-   *"a new Promise is minted per dependency change, so unwrap keyed on
-   promise identity doubles as the supersession signal."* The trace
-   reaches this: the driver attached `.then` to a *specific*
+   _"a new Promise is minted per dependency change, so unwrap keyed on
+   promise identity doubles as the supersession signal."_ The trace
+   reaches this: the driver attached `.then` to a _specific_
    `userPromise`; if the slot's `cached` later changes to a different
    Promise, the original `.then` is stale. The discard-guard catches it.
 
@@ -473,6 +494,7 @@ handle.discard()                // or: another action arrives and supersedes
 ```
 
 **Step C2c-1: `handle.discard()` while parked.**
+
 - Library: `closeScope(S, 'discard')`.
 - Engine: drop slots tagged `S`. Walk `slot_U_S.subs` (empty); delete
   `user.slots[S]`. (Any edges with `S` in target's chain would also unlink,
@@ -483,6 +505,7 @@ handle.discard()                // or: another action arrives and supersedes
   because `discard()` was called from outside any scope context).
 
 **State after Step C2c-1:**
+
 ```
 user.slots = {}                          // S slot dropped
 S.status = 'discarded'
@@ -490,6 +513,7 @@ userPromise: still pending (no one called resolveUser yet)
 ```
 
 **Step C2c-2: `resolveUser("alice")` fires later.**
+
 - `userPromise.then(...)` callback fires. Driver `step("alice")` runs.
 - **Guard fires:** `scope.status !== 'open'` (it's `'discarded'`) → driver
   returns without calling `gen.next`. ✓
@@ -503,13 +527,13 @@ What this trace exposes:
 - **Cancellation discipline is library code over scope + cleanups.** The
   AbortController pattern composes with `onCleanup`; the engine doesn't
   need a separate cancellation primitive. [Q2](./questions.md#q2--scopeowner-unification) (cancellation) ≈ scope-discard
-  + `onCleanup`. Confirms the working hypothesis from [Q2](./questions.md#q2--scopeowner-unification).
+  - `onCleanup`. Confirms the working hypothesis from [Q2](./questions.md#q2--scopeowner-unification).
 - **Promise still resolves but nothing happens.** The original `.then`
   fires but the guard absorbs it. Resource cleanup: the underlying
   fetch/timer would already have been aborted by `S.cleanups`; the
   `.then` callback firing is harmless.
 - **Memory: the discarded scope can be GC'd once the .then is consumed.**
-  If a discard happens but `userPromise` *never* resolves, the `.then`
+  If a discard happens but `userPromise` _never_ resolves, the `.then`
   holds a reference to the driver, which holds the generator, which holds
   closures. Detail-level open question; pulse may need WeakRef gymnastics
   here.
@@ -518,16 +542,16 @@ What this trace exposes:
 
 ```ts
 action(function* () {
-  const name = yield* get(user)              // parks
-  console.log(name)
+	const name = yield* get(user) // parks
+	console.log(name)
 })
 // while parked:
-setUser(Promise.resolve("bob"))               // write from outside the action
+setUser(Promise.resolve('bob')) // write from outside the action
 // then:
-resolveUser("alice")                          // original promise resolves
+resolveUser('alice') // original promise resolves
 ```
 
-The interesting subtlety: while the action is parked, *someone else* writes
+The interesting subtlety: while the action is parked, _someone else_ writes
 to `user` (in `ROOT_SCOPE` here, since the outside write has no ambient
 scope). What does the action body see when it resumes?
 
@@ -535,12 +559,14 @@ scope). What does the action body see when it resumes?
 After: `user.slots[S]` cached as `userPromise`; driver awaits.
 
 **Step C2d-2: outside `setUser(Promise.resolve("bob"))`.**
+
 - `getCurrentScope()` → `ROOT_SCOPE` (no action active outside).
 - `writeSlot(user, ROOT_SCOPE, { recipe: () => Promise.resolve("bob"),
-  cached: Promise<"bob"> })`.
+cached: Promise<"bob"> })`.
 - Engine: walk `user`'s outgoing edges. None. Set `user.slots[ROOT_SCOPE]`.
 
 **State after C2d-2:**
+
 ```
 user.slots = {
   ROOT_SCOPE: { cached: Promise<"bob">, ... },        // new
@@ -549,6 +575,7 @@ user.slots = {
 ```
 
 **Step C2d-3: `resolveUser("alice")` resolves the original promise.**
+
 - The driver's `.then("alice")` callback fires.
 - Guard: `S.status === 'open'` → continue. `pushScope(S)`.
 - `gen.next("alice")` resumes the body. `name = "alice"`. `console.log("alice")`.
@@ -558,18 +585,18 @@ user.slots = {
   conceptually, `S` may track which Nodes have S-tagged slots). Promotes
   `user.slots[S]` to `ROOT_SCOPE`? **This is the wrinkle.**
 
-The wrinkle: `user.slots[S]` was created by the *read* (lazily populating
-the cache for the scope-S read), not by a *write*. Is it "the action's
+The wrinkle: `user.slots[S]` was created by the _read_ (lazily populating
+the cache for the scope-S read), not by a _write_. Is it "the action's
 write" that gets promoted on commit, or "every slot tagged S regardless of
 how it got there"?
 
 Two positions:
 
-- **(α) Promote every S-tagged slot.** Then committing this action *overwrites*
+- **(α) Promote every S-tagged slot.** Then committing this action _overwrites_
   the outside `setUser("bob")` because `user.slots[S]` (containing the
   original pending promise) is promoted to `ROOT_SCOPE`, clobbering
   `Promise<"bob">`. Wrong.
-- **(β) Promote only slots that were *written* under S (not just read-populated).**
+- **(β) Promote only slots that were _written_ under S (not just read-populated).**
   The engine tags slots as `wasWritten: boolean` to distinguish. Commit
   promotes only `wasWritten` slots. Then the outside `setUser("bob")` wins;
   the action's `user.slots[S]` (which was read-populated, never written)
@@ -588,10 +615,10 @@ What C2d exposes:
   a `wasWritten` flag or equivalent on `Slot`.
 - **Read-skew is real.** The action body saw `"alice"` because it read
   before the outside write. After the action commits, the canonical value
-  is `Promise<"bob">` (from outside) — *not* what the action body "saw."
+  is `Promise<"bob">` (from outside) — _not_ what the action body "saw."
   This is intrinsic to the await-and-resume model; per D8 in the main doc.
 - **The action body had no way to notice the outside write.** Because it
-  didn't form a tracking edge. If it *had* formed an edge, the edge would
+  didn't form a tracking edge. If it _had_ formed an edge, the edge would
   have invalidated → but the action body wouldn't re-run anyway (it's
   one-shot). So edges are useless for action bodies; pure imperative reads
   are the right shape.
@@ -615,7 +642,7 @@ sub-questions into the open:
 6. **Engine fires slot-changed events on Promise resolution, without
    mutating `slot.cached`.** Refined post-C2; see [Q4](./questions.md#q4--async-at-the-engine-level). The slot's cached
    value stays as the Promise; the Promise itself is tweaked with `{
-   status, value, reason }` (React's convention) for synchronous query
+status, value, reason }` (React's convention) for synchronous query
    via `promiseState(promise)`. Engine attaches one `.then` per
    Promise-valued slot to populate the metadata and fire the resolution
    event.
@@ -628,7 +655,7 @@ sub-questions into the open:
    `onCleanup`.** Confirms [Q2](./questions.md#q2--scopeowner-unification) working hypothesis. No new engine primitive
    for cancellation.
 
-**New open question surfaced:** *the read-vs-write slot distinction* — should
+**New open question surfaced:** _the read-vs-write slot distinction_ — should
 slots carry a `wasWritten` flag (or equivalent) so the commit promotion logic
 only promotes write-populated slots? **Lean: yes**, but the alternative
 (promote everything, accept that reads pin values into the scope) is
@@ -638,9 +665,10 @@ snapshot-isolation semantics.
 
 The framings all held: Node-as-recipe survived (recipes can return Promises),
 walks-first-class survived (`get` and `yield* get` are walks), slim-engine
-+ thick-library survived (driver is library; engine sees writes), scope/owner
-unification held (cleanups + scope-status + discard mechanism). No
-falsifications.
+
+- thick-library survived (driver is library; engine sees writes), scope/owner
+  unification held (cleanups + scope-status + discard mechanism). No
+  falsifications.
 
 ---
 
@@ -648,7 +676,7 @@ falsifications.
 
 A worked trace of the three H1 sub-scenarios verifying the **defer-until-commit**
 position for effects-under-speculation: speculative writes inside an action
-*do not* fire effects registered outside; commit fires them once; discard
+_do not_ fire effects registered outside; commit fires them once; discard
 never fires them. The trace also establishes a consumer-pattern abstraction
 ([Q3](./questions.md#q3--consumer-patterns)) that's load-bearing for the next-pressing piece of the architecture.
 
@@ -657,42 +685,51 @@ never fires them. The trace also establishes a consumer-pattern abstraction
 Under the [framings](#signal--computed--jsx-expression--effect-are-all-the-same-primitive),
 Effect is one of the four connection patterns over `Node<() => T>`:
 
-- The Node's recipe is the *body* (which contains reads and side effects).
-- The recipe is *fixed at creation* (like Computed).
-- The **consumer** is a *scheduler* that re-invokes the recipe whenever any
+- The Node's recipe is the _body_ (which contains reads and side effects).
+- The recipe is _fixed at creation_ (like Computed).
+- The **consumer** is a _scheduler_ that re-invokes the recipe whenever any
   of the recipe's tracked deps changes.
-- If the recipe returns a function, that's a *cleanup* run before the next
+- If the recipe returns a function, that's a _cleanup_ run before the next
   invocation (or on disposal).
-- The effect's *ambient scope* at creation time determines what chain its
+- The effect's _ambient scope_ at creation time determines what chain its
   tracking edges form against.
 
 Library shape:
 
 ```ts
 function effect(fn: () => void | (() => void)): EffectHandle {
-  const scope = getCurrentScope()                 // ambient scope = ownership + dep-chain
-  const node = createNode<void>(fn)               // Effect is a Node whose recipe is fn
+	const scope = getCurrentScope() // ambient scope = ownership + dep-chain
+	const node = createNode<void>(fn) // Effect is a Node whose recipe is fn
 
-  let lastCleanup: (() => void) | undefined
+	let lastCleanup: (() => void) | undefined
 
-  const runBody = () => {
-    lastCleanup?.()
-    pushScope(scope)
-    pushTracker(getOrCreateSlot(node, scope))
-    try { lastCleanup = fn() as (() => void) | undefined }
-    finally { popTracker(); popScope() }
-  }
+	const runBody = () => {
+		lastCleanup?.()
+		pushScope(scope)
+		pushTracker(getOrCreateSlot(node, scope))
+		try {
+			lastCleanup = fn() as (() => void) | undefined
+		} finally {
+			popTracker()
+			popScope()
+		}
+	}
 
-  // Initial invocation forms tracking edges
-  runBody()
+	// Initial invocation forms tracking edges
+	runBody()
 
-  // Register as a consumer: when this Node's slot is invalidated, re-run on
-  // next microtask (batched).
-  subscribe(node, e => {
-    if (e.kind === 'invalidated') scheduleMicrotask(runBody)
-  })
+	// Register as a consumer: when this Node's slot is invalidated, re-run on
+	// next microtask (batched).
+	subscribe(node, e => {
+		if (e.kind === 'invalidated') scheduleMicrotask(runBody)
+	})
 
-  return { dispose: () => { lastCleanup?.(); disposeNode(node) } }
+	return {
+		dispose: () => {
+			lastCleanup?.()
+			disposeNode(node)
+		},
+	}
 }
 ```
 
@@ -709,9 +746,9 @@ engine primitive used.
 const [count, setCount] = signal(0)
 let effectRuns = 0
 const handle = effect(() => {
-  const value = get(count)
-  effectRuns += 1
-  console.log(`Effect runs: ${effectRuns}, value: ${value}`)
+	const value = get(count)
+	effectRuns += 1
+	console.log(`Effect runs: ${effectRuns}, value: ${value}`)
 })
 ```
 
@@ -735,11 +772,12 @@ const handle = effect(() => {
           = { recipe: () => 0, deps: [], subs: [edge1] }. Invoke → 0.
           `slot_C_R.cached = 0`. Return 0.
     - Body: `value = 0`. `effectRuns = 1`. `console.log("Effect runs: 1,
-      value: 0")`. Returns undefined.
+value: 0")`. Returns undefined.
   - `lastCleanup = undefined`. Pop tracker. Pop scope.
 - `subscribe(effectNode, handler)`. Engine registers handler.
 
 **State after Step 0:**
+
 ```
 count.slots = { ROOT_SCOPE: { recipe: () => 0, cached: 0, deps: [], subs: [edge1] } }
 effectNode.slots = { ROOT_SCOPE: { recipe: fn, cached: undefined,
@@ -753,7 +791,7 @@ effectRuns = 1
 
 ```ts
 action(function* () {
-  setCount(5)
+	setCount(5)
 })
 // expectation: effect does NOT run inside the action
 ```
@@ -764,13 +802,14 @@ generator.
 **Step 1a-2: `setCount(5)` inside the action.**
 
 - Library: setter runs. `getCurrentScope()` → `S`. `writeSlot(count, S,
-  { recipe: () => 5, cached: 5, deps: [], subs: [] })`.
+{ recipe: () => 5, cached: 5, deps: [], subs: [] })`.
 - Engine: walk `count`'s outgoing edges with `(count.slots, S)`:
   - `edge1.sourceSelector` = `chainSelector([ROOT_SCOPE])`. Check:
     `chain.indexOf(S)` → `-1`. **Don't fire.** ✓
 - Set `count.slots[S]` = new slot.
 
 **State after Step 1a-2:**
+
 ```
 count.slots = {
   ROOT_SCOPE: cached 0,    subs: [edge1],
@@ -779,13 +818,13 @@ count.slots = {
 effectNode.slots[ROOT_SCOPE] unchanged. effectRuns = 1.
 ```
 
-**Step 1a-3: generator returns.** *(we'll cover commit in H1b.)*
+**Step 1a-3: generator returns.** _(we'll cover commit in H1b.)_
 
 The key observation: **the effect's edge selector (`chainSelector([ROOT_SCOPE])`)
 naturally rejects writes to `S`.** No special "defer-until-commit" logic in
 the engine; the defer behaviour falls out of selector composition. The effect
-doesn't fire during the action because *its subscription chain doesn't
-include `S`*.
+doesn't fire during the action because _its subscription chain doesn't
+include `S`_.
 
 This is the cleanest possible answer to H1a: the chain-selector machinery
 already enforces it. **Confirming the lean: defer-until-commit.**
@@ -797,6 +836,7 @@ Continuing from the H1a state, with the generator returning normally:
 **Step 1b-1: `closeScope(S, 'commit')`.**
 
 Library promotes `count.slots[S]` to `count.slots[ROOT_SCOPE]`:
+
 - `writeSlot(count, ROOT_SCOPE, { recipe: () => 5, cached: 5, … })`.
 - Engine: walk `count`'s outgoing edges with `(count.slots, ROOT_SCOPE)`:
   - `edge1.sourceSelector` = `chainSelector([ROOT_SCOPE])`. Check:
@@ -804,7 +844,7 @@ Library promotes `count.slots[S]` to `count.slots[ROOT_SCOPE]`:
   - Engine: invalidate `slot_E_R` (clear `cached`, mark "dirty" — set a
     flag or use `cached === undefined` as the signal).
   - Engine: emit `SlotChangeEvent { kind: 'invalidated', node: effectNode,
-    scope: ROOT_SCOPE }` to subscribers of `effectNode`.
+scope: ROOT_SCOPE }` to subscribers of `effectNode`.
 - Library: drop `count.slots[S]`. (No edges had it as source; nothing to
   unlink on the S side.)
 - `S.status = 'committed'`. Pop ambient back to `ROOT_SCOPE`.
@@ -817,7 +857,7 @@ The effect's `subscribe` handler received the invalidation event in Step
 - `runBody()`:
   - `lastCleanup?.()` — none yet.
   - `pushScope(ROOT_SCOPE)`. `pushTracker(slot_E_R)`.
-  - **Important:** before re-invoking, the library should *unlink* `slot_E_R`'s
+  - **Important:** before re-invoking, the library should _unlink_ `slot_E_R`'s
     old `deps` (so they get rebuilt from scratch). Same discipline as r3's
     `recompute`. Drop `edge1` from `slot_E_R.deps` and from `count`'s outgoing
     index. (`subs` on `count` side: `edge1` removed.)
@@ -829,10 +869,11 @@ The effect's `subscribe` handler received the invalidation event in Step
       - `invoke(count, ROOT_SCOPE)`:
         - Engine: `count.slots[ROOT_SCOPE]` exists with `cached: 5`. Return 5.
     - Body: `value = 5`. `effectRuns = 2`. `console.log("Effect runs: 2,
-      value: 5")`. Returns undefined.
+value: 5")`. Returns undefined.
   - `lastCleanup = undefined`. Pop tracker. Pop scope.
 
 **State after Step 1b-2:**
+
 ```
 count.slots = { ROOT_SCOPE: cached 5, subs: [edge1'] }
 effectNode.slots = { ROOT_SCOPE: cached undefined, deps: [edge1'] }
@@ -840,7 +881,7 @@ edge1' = { ... (same shape as edge1, fresh identity) }
 effectRuns = 2
 ```
 
-✓ The effect fired *exactly once* on commit, with the committed value `5`.
+✓ The effect fired _exactly once_ on commit, with the committed value `5`.
 
 ### H1c: action discards — effect never fires
 
@@ -858,6 +899,7 @@ Same setup as H1a (post Step 0 state). The action body throws (or
 - Subscribers receive no events. The microtask scheduler queues nothing.
 
 **State after Step 1c-1:**
+
 ```
 count.slots = { ROOT_SCOPE: cached 0, subs: [edge1] }      // unchanged from initial
 effectNode.slots[ROOT_SCOPE] cached undefined (or 0 — never re-invoked)
@@ -865,7 +907,7 @@ edge1 still alive (unchanged)
 effectRuns = 1                                              // never advanced
 ```
 
-✓ The effect *never* fired during or after the action. The discard cleanly
+✓ The effect _never_ fired during or after the action. The discard cleanly
 unwinds the speculation with no side-effect leakage.
 
 ### Architecture exposed by H1a-c
@@ -874,7 +916,7 @@ The trace established **Q3 (consumer pattern)** with a concrete shape:
 
 1. **A consumer is just a `subscribe` + a scheduler.** No new engine
    primitive needed. The library composes existing pieces: `subscribe(node,
-   handler)` for the engine-side notification, `scheduleMicrotask(...)` for
+handler)` for the engine-side notification, `scheduleMicrotask(...)` for
    batching/timing.
 2. **The deferred-until-commit semantics fall out of selector composition.**
    An effect at `ROOT_SCOPE` has chain `[ROOT_SCOPE]` on its tracking edges.
@@ -885,8 +927,8 @@ The trace established **Q3 (consumer pattern)** with a concrete shape:
    smaller core" lean we've seen so far.
 3. **Effect re-invocation is recipe re-invocation.** Same `pushTracker` /
    `pushScope` / `invoke` discipline as Computed re-runs. Effects and
-   Computeds share machinery; what differs is *what the consumer does
-   with the result* (Computed caches in the slot; Effect throws away the
+   Computeds share machinery; what differs is _what the consumer does
+   with the result_ (Computed caches in the slot; Effect throws away the
    value but holds the cleanup).
 4. **Edge discipline on re-run.** Before re-invoking, the consumer unlinks
    stale `deps` (so they get rebuilt). Same as r3's existing pattern.
@@ -907,15 +949,15 @@ The library has a uniform consumer shape:
 
 ```ts
 type ConsumerKind =
-  | { run: () => void }          // re-invoke a body (Effect)
-  | { render: () => void }       // re-render a JSX subtree
-  | { invalidate: () => void }   // mark dependent Computed dirty
-  // …
+	| { run: () => void } // re-invoke a body (Effect)
+	| { render: () => void } // re-render a JSX subtree
+	| { invalidate: () => void } // mark dependent Computed dirty
+// …
 
 function consumer(node, onSlotChange: () => void) {
-  return subscribe(node, e => {
-    if (e.kind === 'invalidated') scheduleMicrotask(onSlotChange)
-  })
+	return subscribe(node, e => {
+		if (e.kind === 'invalidated') scheduleMicrotask(onSlotChange)
+	})
 }
 ```
 
@@ -946,21 +988,21 @@ captured:
 4. **Effects under a chain longer than 1.** A component-owned effect has
    chain `[component_scope, ROOT_SCOPE]`; an effect inside an action
    inside a component has chain `[action_scope, component_scope,
-   ROOT_SCOPE]`. The chain composition is implicit in `chainFor(scope)`.
+ROOT_SCOPE]`. The chain composition is implicit in `chainFor(scope)`.
    The trace didn't exercise this; H2 would.
 
 ### Framings status after H1a-c
 
 All four framings held:
 
-- *Node-as-recipe*: an Effect is a Node whose recipe is the body. Same
+- _Node-as-recipe_: an Effect is a Node whose recipe is the body. Same
   shape as Signal/Computed.
-- *Walks-first-class*: `get` inside the body forms edges with the right
-  chain; the chain *is* the consumer's subscription policy.
-- *Slim engine + thick library*: the entire effect mechanism is library
+- _Walks-first-class_: `get` inside the body forms edges with the right
+  chain; the chain _is_ the consumer's subscription policy.
+- _Slim engine + thick library_: the entire effect mechanism is library
   code over `createNode` / `subscribe` / `invoke` / `link` / `writeSlot`.
   Engine knows nothing about effects.
-- *Scope/owner unification*: the effect's ambient scope at creation is
+- _Scope/owner unification_: the effect's ambient scope at creation is
   its owner; disposing the scope disposes the effect via the cleanup
   chain.
 
@@ -976,22 +1018,22 @@ selectors. Both came out cleanly.
 
 **Note (post-revision):** the original [K1 trace](#k1--re-entrant-setter-mid-recompute) below identified three
 positions (A: ban, B: permit + defer fires, C: permit + fire synchronously)
-and leaned (B) while ruling out (C). That conclusion was *wrong*. Two
+and leaned (B) while ruling out (C). That conclusion was _wrong_. Two
 subsequent findings dissolved K1's "design call" entirely:
 
 1. **(A) is structurally incompatible** with the slim-engine framing
    (effects need to write inside their bodies; the engine doesn't
    distinguish "this tracker is a computed's recipe" from "this tracker
    is an effect's body" without violating one-Node-primitive).
-2. **(B) returns *stale* values** in the K1b scenario (write a signal
+2. **(B) returns _stale_ values** in the K1b scenario (write a signal
    then read a derived in the same recipe — see catalog K1b). The
    deferred fires mean the derived's slot isn't marked dirty until
    after the recipe returns; the in-recipe `get` returns the stale
    cached value.
 3. **(C) was ruled out on a confused premise.** "Synchronous fire mid-
-   recompute creates re-entrant invocation" conflated *firing edges*
-   (mark target dirty + emit slot-changed event) with *synchronously
-   invoking the consumer's body*. Firing is just propagate-dirty +
+   recompute creates re-entrant invocation" conflated _firing edges_
+   (mark target dirty + emit slot-changed event) with _synchronously
+   invoking the consumer's body_. Firing is just propagate-dirty +
    queue-microtask; consumers schedule async; no re-entry occurs.
 
 **Settled answer: (C) — permit + fire synchronously.** Consumers schedule
@@ -1010,9 +1052,9 @@ Concrete shape:
 const [count, setCount] = signal(0)
 const [shadow, setShadow] = signal(0)
 const derived = computed(() => {
-  const c = get(count)
-  setShadow(c * 2)        // ← re-entrant write inside the recipe
-  return c + 1
+	const c = get(count)
+	setShadow(c * 2) // ← re-entrant write inside the recipe
+	return c + 1
 })
 get(derived)
 ```
@@ -1029,9 +1071,9 @@ Concrete shape:
 const [count, setCount] = signal(0)
 const [shadow, setShadow] = signal(0)
 const derived = computed(() => {
-  const c = get(count)
-  setShadow(c * 2)        // ← re-entrant write inside the recipe
-  return c + 1
+	const c = get(count)
+	setShadow(c * 2) // ← re-entrant write inside the recipe
+	return c + 1
 })
 get(derived)
 ```
@@ -1047,7 +1089,7 @@ the post-revision finding flips (B) → (C) — see "Why (B) is wrong" and
   reactive libraries (MobX strict mode, Solid in certain contexts) do.
 - **(B) Permit + defer the fire.** `writeSlot` updates the slot
   synchronously (so later reads in the same body see the new value), but
-  *defers* edge-firing until the recompute completes. After the body
+  _defers_ edge-firing until the recompute completes. After the body
   returns, the engine drains a "deferred fire queue." Cycles (writes that
   invalidate the current tracker) re-queue the tracker for a future
   re-run; this can loop pathologically if the recipe always writes to
@@ -1059,11 +1101,11 @@ the post-revision finding flips (B) → (C) — see "Why (B) is wrong" and
 r3's behaviour today is closest to **(B)**: `setSignal` updates `el.value`
 synchronously and inserts subs into the dirty heap; the heap is drained at
 the next `stabilize()`. If the subs include the currently-recomputing
-computed, it gets recomputed *again* on the next pass. No explicit ban; no
+computed, it gets recomputed _again_ on the next pass. No explicit ban; no
 explicit defer either — the deferral is implicit because firing means
 "insert into heap," not "invoke synchronously."
 
-For pulse the question is sharper because Model 2 fires edges *immediately*
+For pulse the question is sharper because Model 2 fires edges _immediately_
 on `writeSlot` (selectors run on the call stack). To get B's deferral, we'd
 have to add explicit gating.
 
@@ -1072,44 +1114,46 @@ have to add explicit gating.
 Library-side: `writeSlot` checks for an active tracker.
 
 ```ts
-let deferredFires: { node: Node<unknown>, scope: Scope }[] | null = null
+let deferredFires: { node: Node<unknown>; scope: Scope }[] | null = null
 
 function writeSlot<T>(node: Node<T>, scope: Scope, slot: Slot<T>): void {
-  node.slots.set(scope, slot)                       // engine: write the slot
-  if (deferredFires !== null) {
-    deferredFires.push({ node, scope })             // defer (we're inside a recompute)
-  } else {
-    fireEdges(node, scope)                          // immediate (no tracker active)
-  }
+	node.slots.set(scope, slot) // engine: write the slot
+	if (deferredFires !== null) {
+		deferredFires.push({ node, scope }) // defer (we're inside a recompute)
+	} else {
+		fireEdges(node, scope) // immediate (no tracker active)
+	}
 }
 
 function invoke<T>(node: Node<T>, scope: Scope): T | Promise<T> {
-  const slot = getOrCreateSlot(node, scope)
-  const savedFires = deferredFires
-  deferredFires = []
-  pushTracker(slot); pushScope(scope)
-  try {
-    slot.cached = slot.recipe()
-    return slot.cached
-  } finally {
-    popScope(); popTracker()
-    const toFire = deferredFires
-    deferredFires = savedFires
-    if (savedFires === null) {
-      // outermost invoke — actually fire
-      for (const { node, scope } of toFire!) fireEdges(node, scope)
-    } else {
-      // nested — propagate up to outer queue
-      savedFires.push(...toFire!)
-    }
-  }
+	const slot = getOrCreateSlot(node, scope)
+	const savedFires = deferredFires
+	deferredFires = []
+	pushTracker(slot)
+	pushScope(scope)
+	try {
+		slot.cached = slot.recipe()
+		return slot.cached
+	} finally {
+		popScope()
+		popTracker()
+		const toFire = deferredFires
+		deferredFires = savedFires
+		if (savedFires === null) {
+			// outermost invoke — actually fire
+			for (const { node, scope } of toFire!) fireEdges(node, scope)
+		} else {
+			// nested — propagate up to outer queue
+			savedFires.push(...toFire!)
+		}
+	}
 }
 ```
 
-Three things worth noting: **(1)** writes are visible *immediately* to
+Three things worth noting: **(1)** writes are visible _immediately_ to
 subsequent reads in the same body (slot is updated synchronously). **(2)**
 edge-firing is gated and queued. **(3)** nested invokes propagate deferred
-fires upward — fires only happen when the *outermost* invoke completes.
+fires upward — fires only happen when the _outermost_ invoke completes.
 
 #### Trace: `get(derived)` from a clean slate
 
@@ -1119,6 +1163,7 @@ Initial state: all slots empty.
 `currentTracker` → null. `invoke(derived, ROOT_SCOPE)`.
 
 **Step 2.** Engine `invoke(derived, ROOT_SCOPE)`:
+
 - `derived.slots.get(ROOT_SCOPE)` miss. Create `slot_D_R` =
   `{ recipe: deriveBody, deps: [], subs: [] }`.
 - `deferredFires` was null (top-level invoke); set to `[]`.
@@ -1132,7 +1177,7 @@ Initial state: all slots empty.
   - Body has `c = 0`.
   - `setShadow(c * 2)` = `setShadow(0)`:
     - Library setter: `writeSlot(shadow, ROOT_SCOPE, { recipe: () => 0,
-      cached: 0, deps: [], subs: [] })`.
+cached: 0, deps: [], subs: [] })`.
     - Engine writes `shadow.slots[ROOT_SCOPE]`.
     - `deferredFires` is non-null → push `{ shadow, ROOT_SCOPE }` to queue.
       **No edge-firing here.**
@@ -1147,6 +1192,7 @@ Initial state: all slots empty.
 - Return 1.
 
 **Final state:**
+
 ```
 count.slots = { ROOT_SCOPE: cached 0,  subs: [edge_C_D] }
 shadow.slots = { ROOT_SCOPE: cached 0, subs: [] }
@@ -1160,8 +1206,9 @@ happened; no loop, no error. If we read `shadow` later, we'd see `0`.
 
 #### Why the deferral matters
 
-If `fireEdges` had run *synchronously* during `setShadow`, what would
+If `fireEdges` had run _synchronously_ during `setShadow`, what would
 happen?
+
 - `shadow` has no outgoing edges yet (we're in the very first invocation),
   so nothing would fire. **In this exact trace, the difference is
   invisible.**
@@ -1170,13 +1217,15 @@ But add a downstream consumer of `shadow`:
 
 ```ts
 let observedShadow = -1
-effect(() => { observedShadow = get(shadow) })
+effect(() => {
+	observedShadow = get(shadow)
+})
 ```
 
 The effect's initial run forms an edge `shadow → effectSlot`. Now when
-`get(derived)` runs and `setShadow(0)` fires *synchronously* during the
+`get(derived)` runs and `setShadow(0)` fires _synchronously_ during the
 recipe, the effect's selector matches → effect's slot invalidates → effect
-scheduled. The effect *might* re-run before the recipe finishes (depending on
+scheduled. The effect _might_ re-run before the recipe finishes (depending on
 microtask ordering), creating partial-update visibility. With deferral, the
 effect runs after `get(derived)` returns, observing the consistent
 post-state.
@@ -1192,14 +1241,15 @@ satisfy.
 ```ts
 const [count, setCount] = signal(0)
 const incrementer = computed(() => {
-  const c = get(count)
-  setCount(c + 1)             // writes to its own dep
-  return c
+	const c = get(count)
+	setCount(c + 1) // writes to its own dep
+	return c
 })
 get(incrementer)
 ```
 
 Trace under Position B:
+
 - Invoke `incrementer`. Push tracker.
 - `get(count)` → 0; form edge `count → incrementer.slot`.
 - `setCount(1)`: writeSlot writes count.slot. Defer fire.
@@ -1208,27 +1258,30 @@ Trace under Position B:
   `incrementer.slot`. Mark dirty.
 
 After the initial `get(incrementer)`:
+
 - `incrementer.slots[ROOT_SCOPE].cached = 0` (returned value) but
   immediately invalidated by the drain.
 - `count.slots[ROOT_SCOPE].cached = 1`.
 
 If a consumer demands `incrementer` again (e.g., a downstream effect fires
 the consumer), it recomputes:
+
 - `get(count)` → 1. `setCount(2)`. Defer.
 - Return 1. Pop. Drain → invalidate `incrementer`. Mark dirty.
 
-Each demand-driven read recomputes one step. **No infinite loop *during* a
-single read** — the recompute completes, returns a value, and only *then* is
+Each demand-driven read recomputes one step. **No infinite loop _during_ a
+single read** — the recompute completes, returns a value, and only _then_ is
 the invalidation processed. The loop only continues if some consumer keeps
 pulling.
 
 If there's a consumer that re-runs on each invalidation (an Effect), the
 Effect's scheduler will keep scheduling re-runs:
+
 - Effect fires → reads incrementer → invalidates incrementer → Effect's
   slot also invalidates (since the Effect depends on incrementer's slot) →
   Effect rescheduled → loops.
 
-Position B catches this *at the consumer level*, not at the recompute level.
+Position B catches this _at the consumer level_, not at the recompute level.
 The library's scheduler can detect "same Effect re-scheduling more than N
 times in one microtask cycle" and bail with an error. r3 doesn't have this
 today; pulse would need to add it.
@@ -1239,11 +1292,13 @@ today; pulse would need to add it.
 
 ```ts
 function writeSlot(node, scope, slot) {
-  if (currentTracker !== null) {
-    throw new Error("Cannot write to a signal during recompute. " +
-                    "Move side-effecting writes to an effect or action.")
-  }
-  // ... otherwise normal write ...
+	if (currentTracker !== null) {
+		throw new Error(
+			'Cannot write to a signal during recompute. ' +
+				'Move side-effecting writes to an effect or action.',
+		)
+	}
+	// ... otherwise normal write ...
 }
 ```
 
@@ -1251,6 +1306,7 @@ For the `derived` example above: `setShadow(0)` throws. The recipe throws.
 `invoke(derived, ROOT_SCOPE)` propagates the throw. `get(derived)` throws.
 
 Trade-offs vs Position B:
+
 - **Pros (A):** simpler invariant, prevents the cycle case at the source,
   encourages cleanly separating computation from side-effect (use Effects
   for side effects). MobX-strict-mode style.
@@ -1272,27 +1328,27 @@ K1 forced the following framings under stress; all held, but with newly-
 visible work:
 
 1. **Q8 (tracker vs scope) matters here.** The re-entrant write's
-   `getCurrentScope()` returns the scope being recomputed under — *not*
+   `getCurrentScope()` returns the scope being recomputed under — _not_
    `ROOT_SCOPE` by default. If `derived` is being recomputed under
    speculation scope `S`, the re-entrant `setShadow(...)` writes to
    `shadow.slots[S]`. **The scope nests cleanly with the tracker.** The
    ambient context's two slots (tracker, scope) push together when
    entering a recompute and pop together. [Q8](./questions.md#q8--tracker-vs-scope-separate-or-unified)'s "they're at different
-   granularities" framing holds — but they're *parallel* and *coupled*.
+   granularities" framing holds — but they're _parallel_ and _coupled_.
 
 2. **Q1 (selectors / fire policy) didn't break.** Under Position B,
    selectors still run when `fireEdges` drains the deferred queue. The
-   *only* engine change Position B requires is gating `fireEdges` behind
+   _only_ engine change Position B requires is gating `fireEdges` behind
    the `deferredFires` queue. The selector logic itself is unchanged.
 
 3. **Q3 (consumer pattern) is the right level for cycle detection.**
    Cycles surface at the consumer level (Effects re-running indefinitely),
    not at the recompute level (recomputes always run to completion).
    The library's scheduler is where the "N re-runs per cycle" guard lives.
-   This is a *new* sub-question for [Q3](./questions.md#q3--consumer-patterns) — not "consumer shape" (resolved
+   This is a _new_ sub-question for [Q3](./questions.md#q3--consumer-patterns) — not "consumer shape" (resolved
    in H1a-c) but "consumer-driven cycle detection."
 
-4. **Q5 (signal vs computed asymmetry) does *not* matter here.** The
+4. **Q5 (signal vs computed asymmetry) does _not_ matter here.** The
    re-entrant write is to a Signal slot; the trace would work the same
    way if it were to a Computed slot (Computed slots can also be written
    via promotion, etc.). The recompute discipline is uniform.
@@ -1310,23 +1366,23 @@ visible work:
 I lean **Position B (permit + defer fires)** with one library-side guard
 (consumer cycle detection). Reasons:
 
-1. *Consistent with r3's existing behaviour* — `setSignal` updates value
+1. _Consistent with r3's existing behaviour_ — `setSignal` updates value
    synchronously, defers notification via the dirty heap. The pulse Model
    2 fork would essentially make this explicit (a `deferredFires` queue
    gated on `currentTracker`).
-2. *Doesn't ban legitimate patterns.* Memoised shadow projections, cache
+2. _Doesn't ban legitimate patterns._ Memoised shadow projections, cache
    warming, derived metrics — these are all useful and don't necessarily
    indicate bugs.
-3. *Cycle detection at the consumer level is the right granularity* —
+3. _Cycle detection at the consumer level is the right granularity_ —
    cycles only loop if a consumer keeps demanding the same value, which
    the scheduler already coordinates. A "max re-runs per microtask cycle"
    guard catches infinite loops without false-positives on legitimate
    self-modifying recomputes.
-4. *Programmer error is still detectable.* Even Position A doesn't catch
-   *all* infinite loops (it just bans the trivial direct case); the
+4. _Programmer error is still detectable._ Even Position A doesn't catch
+   _all_ infinite loops (it just bans the trivial direct case); the
    consumer-level guard catches the more general case.
 
-But the lean is *soft*. Position A has real ergonomic appeal — "writes
+But the lean is _soft_. Position A has real ergonomic appeal — "writes
 during recompute are bugs" is a strong invariant. Pulse may end up shipping
 **a mode flag** that toggles between A (strict, dev-mode) and B (permissive,
 production). Mode flags are a hedge against locking in.
@@ -1335,7 +1391,7 @@ production). Mode flags are a hedge against locking in.
 
 1. **Deferral propagation across nested invokes.** The sketch propagates
    `deferredFires` up to the outermost invoke. Is that the right
-   granularity, or should each invoke's deferred fires fire when *that*
+   granularity, or should each invoke's deferred fires fire when _that_
    invoke returns (so a transitive read sees a consistent intermediate
    state)? The trace suggests outermost — but for nested speculations
    (action inside action), the answer might be "fire at the action
@@ -1349,32 +1405,32 @@ production). Mode flags are a hedge against locking in.
    `untrack(() => ...)` block: does the deferral still apply? Per the
    tracker/scope separation, `untrack` clears `currentTracker` but not
    `currentScope`. So `deferredFires` (which is gated on tracker) would
-   *not* defer in untrack — writes would fire synchronously. That's
+   _not_ defer in untrack — writes would fire synchronously. That's
    plausible but worth confirming. Connects to L1 in the catalog.
 
 4. **The Position A escape hatch.** If A is the default, what's the
-   sanctioned way to do *needed* re-entrant writes? `Promise.resolve().then(
-   () => setShadow(0))` to defer to next microtask? An explicit
+   sanctioned way to do _needed_ re-entrant writes? `Promise.resolve().then(
+() => setShadow(0))` to defer to next microtask? An explicit
    `defer(() => setShadow(0))` helper? Library shape, open.
 
 ### Framings status after K1
 
 All four framings held:
 
-- *Node-as-recipe*: re-entrant writes don't break the framing — the recipe
+- _Node-as-recipe_: re-entrant writes don't break the framing — the recipe
   is just JavaScript that happens to call a setter.
-- *Walks-first-class*: `get` and `writeSlot` are walks; their composition
+- _Walks-first-class_: `get` and `writeSlot` are walks; their composition
   during recompute is the policy question.
-- *Slim engine + thick library*: Position B's deferral is implementable
+- _Slim engine + thick library_: Position B's deferral is implementable
   with one engine flag (`deferredFires`) and library-side scheduling. No
   new engine machinery beyond what's already sketched.
-- *Scope/owner unification*: the re-entrant write inherits the scope from
+- _Scope/owner unification_: the re-entrant write inherits the scope from
   the recompute it's nested in. The scope/tracker pair pushes and pops
   together as a unit.
 
 **No falsifications.** But K1 is the first traced scenario where the
 architecture itself doesn't pick a winner between two real positions (A vs
-B). That's *signal* — it tells us the question is genuinely a *design call*
+B). That's _signal_ — it tells us the question is genuinely a _design call_
 the engine machinery can support either way, and pulse has to make it
 deliberately. Worth keeping the call open in the doc.
 
@@ -1384,12 +1440,12 @@ A scenario that was not part of the original K1 wording — surfaced by a
 user question:
 
 ```ts
-const [name, setName] = signal("foo")
+const [name, setName] = signal('foo')
 const doubleName = computed(() => get(name) + get(name))
 
 const weird = computed(() => {
-  setName("name")                         // write
-  return get(doubleName).capitalize()    // read of downstream derived
+	setName('name') // write
+	return get(doubleName).capitalize() // read of downstream derived
 })
 ```
 
@@ -1400,7 +1456,7 @@ read).
 
 - Recipe runs. `deferredFires = []` (tracker active).
 - `setName("name")`: `writeSlot(name, ROOT_SCOPE, …)`. `name.slot[ROOT_SCOPE]
-  .cached = "name"` (synchronous). Fire deferred → queue
+.cached = "name"` (synchronous). Fire deferred → queue
   `{ name, ROOT_SCOPE }`.
 - `get(doubleName)`: `invoke(doubleName, ROOT_SCOPE)`. Slot exists, cached
   `"foofoo"`. **Is the slot dirty?** No — the fire was deferred, so the
@@ -1411,8 +1467,8 @@ read).
 
 **Result under (B): `get(weird) = "Foofoo"`. Stale.** ✗
 
-The reason: deferred fires mean *the dirty flag on `doubleName.slot` isn't
-set until after the recipe returns*. The in-recipe `get(doubleName)`
+The reason: deferred fires mean _the dirty flag on `doubleName.slot` isn't
+set until after the recipe returns_. The in-recipe `get(doubleName)`
 finds the slot clean and returns the stale cached value.
 
 **Under Position C (fire synchronously):**
@@ -1430,13 +1486,13 @@ finds the slot clean and returns the stale cached value.
 ### Why the original K1 trace missed this
 
 The original K1 used `setShadow(c * 2); return c + 1` — the recipe wrote
-to `shadow` but didn't *read* anything afterward, just returned. Without a
+to `shadow` but didn't _read_ anything afterward, just returned. Without a
 follow-up read of a derived value, Position B looked fine because the
 deferred fires got drained after the recipe returned, with no
 opportunity to observe the stale state mid-recipe.
 
 K1b is the case that distinguishes (B) from (C). The catalog's original
-K1 was *under-specified*: it tested "is the write permitted?" but not
+K1 was _under-specified_: it tested "is the write permitted?" but not
 "is in-recipe state coherent across the write?" Two different questions;
 only the second probes the synchronous-vs-deferred-fires mechanism.
 
@@ -1454,26 +1510,26 @@ confusion. Let's name the operations precisely:
   beyond the dirty flag (next demand recomputes). JSX: schedule DOM
   update.
 
-Firing is just *mark dirty + emit event + queue microtask*. Crucially,
+Firing is just _mark dirty + emit event + queue microtask_. Crucially,
 **consumers do not synchronously invoke bodies** — effects schedule async,
 computeds wait for demand. So "fire synchronously inside a recipe" doesn't
 re-enter the current recompute's body. It just sets flags on downstream
 slots, which the current recompute may then encounter via its own reads
-(triggering recomputes of *those* slots, not the current one).
+(triggering recomputes of _those_ slots, not the current one).
 
 ### The cycle subcase under (C)
 
 ```ts
 const incrementer = computed(() => {
-  const c = get(count)
-  setCount(c + 1)
-  return c
+	const c = get(count)
+	setCount(c + 1)
+	return c
 })
 ```
 
 - `get(count)`: edge formed `count → incrementer.slot`.
 - `setCount(c+1)`: `writeSlot(count, …)`. Walk edges. Fire `count →
-  incrementer.slot`. Mark `incrementer.slot` dirty.
+incrementer.slot`. Mark `incrementer.slot` dirty.
 - But `incrementer.slot` is currently being recomputed. Marking it dirty
   just sets a flag. The recompute completes, caches `c`, leaves dirty
   set.
@@ -1495,7 +1551,7 @@ K1's design call **dissolves**:
   observation that effects need to write inside their bodies). The engine
   doesn't know "this tracker is a computed's recipe vs. an effect's body"
   without violating the one-Node-primitive framing.
-- **(B) Permit + defer fires** — returns *stale* values on K1b. **Wrong.**
+- **(B) Permit + defer fires** — returns _stale_ values on K1b. **Wrong.**
 - **(C) Permit + fire synchronously** — handles K1b correctly; cycles
   caught at consumer level; no re-entrant invocation.
 
@@ -1513,13 +1569,13 @@ The two modes don't interfere because a recipe inside a commit is rare
 
 All four framings still hold:
 
-- *Node-as-recipe*: recipes can write; engine doesn't distinguish kinds.
-- *Walks-first-class*: writes propagate dirty via selector chains;
+- _Node-as-recipe_: recipes can write; engine doesn't distinguish kinds.
+- _Walks-first-class_: writes propagate dirty via selector chains;
   consumers receive events.
-- *Slim engine + thick library*: (C) requires no special engine
+- _Slim engine + thick library_: (C) requires no special engine
   machinery for recipes — just the normal fireEdges path. Cycle detection
   is library code.
-- *Scope/owner unification*: unaffected.
+- _Scope/owner unification_: unaffected.
 
 **The architecture itself picks (C).** What looked like a deliberate
 policy choice (A vs B) was actually a tracing under-specification (K1
@@ -1537,48 +1593,50 @@ real policy choice into the open.
 
 ### The question
 
-Two positions on what *inner-action commit* should do:
+Two positions on what _inner-action commit_ should do:
 
 - **(i) Inner promotes to outer.** Inner's slots (tagged `S2`) get promoted
   to the outer's scope (`S1`), not directly to `ROOT_SCOPE`. Outer continues
   with the inner's writes folded into its scope; outer-commit later promotes
   to `ROOT_SCOPE`. Database "savepoint" semantics — inner's effects are
-  *conditional on outer's commit*.
+  _conditional on outer's commit_.
 - **(ii) Inner promotes directly to ROOT.** Inner-commit publishes
   immediately; outer's scope doesn't see inner's writes (because the chain
   would still resolve to the outer's earlier slot). Independent-transaction
   semantics.
 
-The architecture forces (i), as the trace shows — but the *why* is worth
+The architecture forces (i), as the trace shows — but the _why_ is worth
 walking through.
 
 ### Setup
 
 ```ts
 const [count, setCount] = signal(0)
-const [name, setName] = signal("foo")
+const [name, setName] = signal('foo')
 const outerReads: any[] = []
 const innerReads: any[] = []
 
-action(function* () {                       // outer scope S1
-  setCount(10)
-  outerReads.push(get(count))              // expect: 10
+action(function* () {
+	// outer scope S1
+	setCount(10)
+	outerReads.push(get(count)) // expect: 10
 
-  action(function* () {                     // inner scope S2, child of S1
-    setCount(20)
-    setName("bar")
-    innerReads.push(get(count))            // expect: 20
-    innerReads.push(get(name))             // expect: "bar"
-  })
+	action(function* () {
+		// inner scope S2, child of S1
+		setCount(20)
+		setName('bar')
+		innerReads.push(get(count)) // expect: 20
+		innerReads.push(get(name)) // expect: "bar"
+	})
 
-  // After inner commits — what does outer see?
-  outerReads.push(get(count))              // expect under (i): 20
-  outerReads.push(get(name))               // expect under (i): "bar"
+	// After inner commits — what does outer see?
+	outerReads.push(get(count)) // expect under (i): 20
+	outerReads.push(get(name)) // expect under (i): "bar"
 })
 
 // After outer commits
-get(count)                                 // expect: 20
-get(name)                                  // expect: "bar"
+get(count) // expect: 20
+get(name) // expect: "bar"
 ```
 
 Initial state: `count.slots = {}`, `name.slots = {}`. The signals have only
@@ -1590,12 +1648,14 @@ their `defaultRecipe`s.
 cleanups: [], status: 'open' }`. Push `S1` as ambient.
 
 **Step 2: `setCount(10)` under `S1`.**
+
 - `getCurrentScope()` → `S1`. `writeSlot(count, S1, { recipe: () => 10,
-  cached: 10, deps: [], subs: [] })`.
+cached: 10, deps: [], subs: [] })`.
 - Engine walks `count`'s outgoing edges with `(count.slots, S1)`. None (no
   prior reads). Set `count.slots[S1]`.
 
 **Step 3: `get(count)` inside outer body.**
+
 - `getCurrentScope()` → `S1`. `currentTracker` → null (action body
   imperative, no tracking).
 - `invoke(count, S1)`. Engine: `count.slots.get(S1)` hit, cached 10.
@@ -1603,6 +1663,7 @@ cleanups: [], status: 'open' }`. Push `S1` as ambient.
 - `outerReads.push(10)`.
 
 State after Step 3:
+
 ```
 count.slots = { S1: cached 10, subs: [] }
 S1.status = 'open', ambient = S1
@@ -1613,23 +1674,28 @@ S1.status = 'open', ambient = S1
 (the current-scope stack is now `[ROOT_SCOPE, S1, S2]`).
 
 **Step 5: `setCount(20)` under `S2`.**
+
 - `getCurrentScope()` → `S2`. `writeSlot(count, S2, { recipe: () => 20,
-  cached: 20, … })`.
+cached: 20, … })`.
 - Engine walks `count`'s outgoing edges with `(count.slots, S2)`. None.
   Set `count.slots[S2]`.
 
 **Step 6: `setName("bar")` under `S2`.**
+
 - Same shape. `name.slots[S2] = "bar"`.
 
 **Step 7: `get(count)` inside inner body.**
+
 - `getCurrentScope()` → `S2`. `invoke(count, S2)`. Hit. 20.
 - `innerReads.push(20)`. ✓
 
 **Step 8: `get(name)` inside inner body.**
+
 - `invoke(name, S2)`. Hit. "bar".
 - `innerReads.push("bar")`. ✓
 
 State after Step 8:
+
 ```
 count.slots = { S1: cached 10, S2: cached 20 }
 name.slots = { S2: cached "bar" }
@@ -1640,20 +1706,21 @@ inner created `S2` directly.)
 
 **Step 9: inner returns. `closeScope(S2, 'commit')`.**
 
-Library promotes each `S2`-tagged slot to the *parent* scope, `S1`:
+Library promotes each `S2`-tagged slot to the _parent_ scope, `S1`:
 
-- *Promote `count`:* `writeSlot(count, S1, { recipe: () => 20, cached:
-  20, … })`.
+- _Promote `count`:_ `writeSlot(count, S1, { recipe: () => 20, cached:
+20, … })`.
   - Engine walks `count`'s outgoing edges with `(count.slots, S1)`. None.
   - Overwrite `count.slots[S1]` (was 10; now 20).
-- *Drop `count.slots[S2]`:* walk `slot.subs` (empty); delete.
-- *Promote `name`:* `writeSlot(name, S1, { recipe: () => "bar", cached:
-  "bar", … })`.
+- _Drop `count.slots[S2]`:_ walk `slot.subs` (empty); delete.
+- _Promote `name`:_ `writeSlot(name, S1, { recipe: () => "bar", cached:
+"bar", … })`.
   - Walk `name`'s edges. None. Create `name.slots[S1]`.
-- *Drop `name.slots[S2]`:* empty subs; delete.
+- _Drop `name.slots[S2]`:_ empty subs; delete.
 - `S2.status = 'committed'`. Pop ambient back to `S1`.
 
 State after Step 9:
+
 ```
 count.slots = { S1: cached 20, subs: [] }              # was 10, now 20
 name.slots = { S1: cached "bar", subs: [] }
@@ -1666,9 +1733,11 @@ outer's perspective, it's as if the inner had been inlined into the outer
 body's flow.
 
 **Step 10: `get(count)` after inner commits (still in outer body).**
+
 - `invoke(count, S1)` → hit, 20. `outerReads.push(20)`. ✓
 
 **Step 11: `get(name)` after inner commits.**
+
 - `invoke(name, S1)` → hit, "bar". `outerReads.push("bar")`. ✓
 
 **Step 12: outer returns. `closeScope(S1, 'commit')`.**
@@ -1684,6 +1753,7 @@ Library promotes each `S1`-tagged slot to `ROOT_SCOPE`:
 - `S1.status = 'committed'`. Pop ambient to `ROOT_SCOPE`.
 
 Final state:
+
 ```
 count.slots = { ROOT_SCOPE: cached 20 }
 name.slots = { ROOT_SCOPE: cached "bar" }
@@ -1693,14 +1763,16 @@ name.slots = { ROOT_SCOPE: cached "bar" }
 
 ### Why Position (ii) doesn't work under the framing
 
-Suppose instead the inner promoted *directly to ROOT_SCOPE*:
+Suppose instead the inner promoted _directly to ROOT_SCOPE_:
 
 **Step 9 (alternate):** `closeScope(S2, 'commit')` promotes to ROOT:
+
 - `writeSlot(count, ROOT_SCOPE, { cached: 20, … })`.
 - `writeSlot(name, ROOT_SCOPE, { cached: "bar", … })`.
 - Drop `S2` slots.
 
 State after Step 9 alt:
+
 ```
 count.slots = { S1: cached 10, ROOT_SCOPE: cached 20 }
 name.slots = { ROOT_SCOPE: cached "bar" }
@@ -1710,7 +1782,7 @@ ambient = S1
 **Step 10 (alternate):** `get(count)` in outer body. `getCurrentScope()` →
 `S1`. `invoke(count, S1)` → hit, **cached 10**. `outerReads.push(10)`. ✗
 
-The outer's read returns *the outer's earlier write*, not the inner's
+The outer's read returns _the outer's earlier write_, not the inner's
 post-commit value. The chain `[S1, ROOT_SCOPE]` resolves to `S1` first; the
 inner's commit-to-ROOT is invisible.
 
@@ -1732,6 +1804,7 @@ separately.
 ### Discard variants
 
 **Inner discards; outer continues.** Setup: inner body throws.
+
 - `closeScope(S2, 'discard')`: drop `count.slots[S2]`, drop `name.slots[S2]`.
   Fire `S2.cleanups` (none). `S2.status = 'discarded'`.
 - State: `count.slots = { S1: 10 }`, `name.slots = {}`.
@@ -1743,14 +1816,15 @@ separately.
 
 **Outer discards; inner had committed.** Setup: outer body throws after
 inner returns.
+
 - After inner commits: `count.slots = { S1: 20 }`, `name.slots = { S1: "bar" }`.
 - `closeScope(S1, 'discard')`: drop both `S1` slots.
-- ✓ Outer discard rolls back both outer's *and* inner's writes. Savepoint
+- ✓ Outer discard rolls back both outer's _and_ inner's writes. Savepoint
   semantics: inner's commit is conditional on outer's commit. Databases work
   the same way.
 
-If a use case ever surfaces where the inner should *survive* outer discard
-(autonomous inner action), it would be a *different primitive* — not nested
+If a use case ever surfaces where the inner should _survive_ outer discard
+(autonomous inner action), it would be a _different primitive_ — not nested
 `action`. Pulse can pick a different name (e.g., `independentAction(...)`)
 later if needed.
 
@@ -1759,26 +1833,30 @@ later if needed.
 What about external consumers that subscribed to `count` or `name`?
 
 Consider an Effect outside both actions:
+
 ```ts
 let observed = -1
-effect(() => { observed = get(count) })   // chain [ROOT_SCOPE]
+effect(() => {
+	observed = get(count)
+}) // chain [ROOT_SCOPE]
 ```
 
 Initial run: `observed = 0` (from `count.defaultRecipe`). Edge formed:
 `count → effectSlot` with `chainSelector([ROOT_SCOPE])`.
 
 During the nested actions above, does the effect re-run?
-- *Step 2 (setCount under S1):* writeScope=`S1`. Effect's chain
+
+- _Step 2 (setCount under S1):_ writeScope=`S1`. Effect's chain
   `[ROOT_SCOPE]`. `chain.indexOf(S1)=-1`. **Don't fire.** ✓
-- *Step 5 (setCount under S2):* writeScope=`S2`. Don't fire. ✓
-- *Step 9 (inner-commit: writeSlot count to S1):* writeScope=`S1`. Effect
+- _Step 5 (setCount under S2):_ writeScope=`S2`. Don't fire. ✓
+- _Step 9 (inner-commit: writeSlot count to S1):_ writeScope=`S1`. Effect
   chain `[ROOT_SCOPE]`, doesn't include S1. **Don't fire.** ✓
-- *Step 12 (outer-commit: writeSlot count to ROOT_SCOPE):* writeScope=
+- _Step 12 (outer-commit: writeSlot count to ROOT_SCOPE):_ writeScope=
   `ROOT_SCOPE`. Effect chain `[ROOT_SCOPE]`, writeIdx=0, no more-specific
   in chain. **Fire.** Effect invalidates, scheduler queues re-run.
 - Effect re-runs, observes `count = 20`. ✓
 
-The effect fires *exactly once* after outer commits — not on inner-commit,
+The effect fires _exactly once_ after outer commits — not on inner-commit,
 not on the outer's earlier `setCount(10)`. Defer-until-commit (H1a-c) holds
 across nesting. The effect sees the final committed value, never the
 intermediate `10`.
@@ -1796,15 +1874,15 @@ intermediate `10`.
    chain from `scope.parent` walks.
 3. **Defer-until-commit holds across nesting.** External consumers don't
    see inner-commits, only the outermost commit. Each inner-commit is a
-   write to an intermediate scope that *no external chain matches*.
+   write to an intermediate scope that _no external chain matches_.
 4. **Savepoint semantics fall out of the chain mechanism.** Inner commits
    are conditional on outer commits; outer discard rolls back inner's
    effects. We get database-style nested-transaction semantics without any
    engine-level transaction machinery.
 5. **Q8 (scope nesting via parent pointers).** The scope is a linked
    structure with `parent` pointers. `chainFor` is just `walk parents
-   until you hit ROOT_SCOPE`. Confirms the scope-as-tree shape.
-6. **Inner-promotes-to-outer is the *only* coherent answer** under our
+until you hit ROOT_SCOPE`. Confirms the scope-as-tree shape.
+6. **Inner-promotes-to-outer is the _only_ coherent answer** under our
    framings. Position (ii) requires explicit bookkeeping that doesn't fit
    the architecture; Position (i) requires no new machinery.
 
@@ -1814,10 +1892,10 @@ All four framings held; **G2 is the cleanest validation of scope/owner
 unification so far**. The "scope is a tree" structure naturally encodes
 savepoints, and the chain selectors naturally encode "consumers see only the
 final-committed value." No new primitive needed for nested actions; the
-nesting is *emergent* from the scope hierarchy + the chain mechanism.
+nesting is _emergent_ from the scope hierarchy + the chain mechanism.
 
 The trace forces no design call (unlike K1) — the architecture genuinely
-picks Position (i). Worth noting because it's a *positive falsification*:
+picks Position (i). Worth noting because it's a _positive falsification_:
 Position (ii) was tested and ruled out by the trace.
 
 ### Sub-questions surfaced
@@ -1826,24 +1904,24 @@ Position (ii) was tested and ruled out by the trace.
    `scope.parent` pointers up to and including `ROOT_SCOPE`. Is this
    always correct? Two edge cases:
    - A user-defined custom scope hierarchy (per-tenant roots, multiple
-     reactive "worlds") might want a *non-ROOT_SCOPE* terminal. The
+     reactive "worlds") might want a _non-ROOT_SCOPE_ terminal. The
      library should make `chainFor` user-overridable, or expose
      `terminalScope` as a configurable per-tree property.
    - For non-nested contexts (e.g., reads outside any action),
      `chainFor(ROOT_SCOPE) = [ROOT_SCOPE]` is the natural answer.
 2. **Edge-ordering during multi-write commits.** Step 9 promoted `count`
    then `name`. If those slots had interlocking edges (a derived computed
-   that read both), the *order* of promotion might fire intermediate
+   that read both), the _order_ of promotion might fire intermediate
    invalidations that re-resolve incorrectly. Same issue as the doubleName
    trace's commit-ordering open question (#1) — dep-order leaves-first is
    the working hypothesis. Worth keeping in mind for complex commits.
 3. **Promotion atomicity at the consumer level.** External consumers
-   *should* see "outer's commit" as a single event, not a sequence. Right
+   _should_ see "outer's commit" as a single event, not a sequence. Right
    now each `writeSlot(node, ROOT_SCOPE, ...)` during commit fires its
    edges immediately. If many writes happen, consumers might see partial
    intermediate states. Solution: same as K1's deferred-fires mechanism —
    commit collects deferred fires and drains them at the end. Probably
-   the *commit operation* should itself defer fires until all promotions
+   the _commit operation_ should itself defer fires until all promotions
    are done.
 
 ---
@@ -1852,10 +1930,10 @@ Position (ii) was tested and ruled out by the trace.
 
 A worked trace of two related cleanup-discipline scenarios:
 
-- **H3a:** an effect created *inside* an action body, action then discards.
+- **H3a:** an effect created _inside_ an action body, action then discards.
   Tests: do the effect's body cleanups fire as part of the scope discard,
   in the right order, and does the previously-scheduled re-run get suppressed?
-- **H3b:** an effect created *outside* an action with an established
+- **H3b:** an effect created _outside_ an action with an established
   cleanup from its initial run; action commits and triggers the effect.
   Tests: does the previous body's cleanup fire before the new body runs?
 
@@ -1868,11 +1946,11 @@ chain policy for effects-inside-actions).
 Before tracing, name the two cleanup mechanisms used in this trace:
 
 - **Scope-level cleanup** — `onCleanup(fn)` called outside an effect body,
-  inside any scope (action, component, root). The callback fires when *that
-  scope discards*. Sits on `scope.cleanups: Disposable[]`. Used for
+  inside any scope (action, component, root). The callback fires when _that
+  scope discards_. Sits on `scope.cleanups: Disposable[]`. Used for
   "resource X belongs to this scope; tear it down when the scope ends."
-- **Body-level cleanup** — `onCleanup(fn)` called *inside an effect body*.
-  Registers a callback that fires before the *next invocation* of that
+- **Body-level cleanup** — `onCleanup(fn)` called _inside an effect body_.
+  Registers a callback that fires before the _next invocation_ of that
   effect's body, **or** when the effect itself is disposed. Sits on
   `effectNode.bodyCleanups`. Used for "this body run produced a
   subscription / timer; cancel it before re-running or when the effect
@@ -1880,7 +1958,7 @@ Before tracing, name the two cleanup mechanisms used in this trace:
 
 These are distinct: `scope.cleanups` is per-scope; `bodyCleanups` is
 per-effect-body-invocation. They compose — an effect's disposal triggers
-its bodyCleanups; the scope's discard triggers scope-level cleanups *and*
+its bodyCleanups; the scope's discard triggers scope-level cleanups _and_
 disposes everything that scope owns (including effects).
 
 ### The chain policy for effects-inside-actions
@@ -1889,16 +1967,16 @@ Open design call surfacing here: when an effect is created inside an action
 body, what's the chain its tracking edges form against?
 
 - **(Policy α) Chain = chainFor(owner).** Effect created inside action `S`
-  has chain `[S, ROOT_SCOPE]`. It *fires* on writes inside the action (the
+  has chain `[S, ROOT_SCOPE]`. It _fires_ on writes inside the action (the
   scope-tagged writes). Useful for "this effect should react to changes
   during the action's life."
 - **(Policy β) Chain = `[ROOT_SCOPE]` always.** Effects only fire on
   committed-state changes regardless of where created. The effect's
   lifecycle is tied to the owner, but its subscription isn't.
 
-H1a-c established that effects *outside* actions have chain `[ROOT_SCOPE]`
+H1a-c established that effects _outside_ actions have chain `[ROOT_SCOPE]`
 and don't fire on speculative writes. This is the same answer under both
-policies (an outside-effect's owner *is* `ROOT_SCOPE`, so `chainFor(owner)
+policies (an outside-effect's owner _is_ `ROOT_SCOPE`, so `chainFor(owner)
 = [ROOT_SCOPE]` under α, matching β).
 
 The policies diverge for inside-action effects. **Lean: Policy α** — the
@@ -1918,14 +1996,15 @@ const [count, setCount] = signal(0)
 const teardowns: string[] = []
 const log: string[] = []
 
-const handle = action(function* () {                 // outer scope S
-  effect(() => {
-    const c = get(count)
-    log.push(`Effect ran with count=${c}`)
-    onCleanup(() => teardowns.push(`cleanup at count=${c}`))
-  })
-  setCount(5)                                         // triggers effect's edge
-  // (we'll vary what happens next per H3a/H3b)
+const handle = action(function* () {
+	// outer scope S
+	effect(() => {
+		const c = get(count)
+		log.push(`Effect ran with count=${c}`)
+		onCleanup(() => teardowns.push(`cleanup at count=${c}`))
+	})
+	setCount(5) // triggers effect's edge
+	// (we'll vary what happens next per H3a/H3b)
 })
 ```
 
@@ -1935,6 +2014,7 @@ const handle = action(function* () {                 // outer scope S
 cleanups: [], status: 'open' }`. Push ambient.
 
 **Step 2: `effect(fn)` called.**
+
 - `getCurrentScope()` → `S`. `effectNode` = `createNode(fn)`. Owner = `S`,
   subscription chain = `chainFor(S)` = `[S, ROOT_SCOPE]`.
 - Register `S.cleanups`-side disposer: when `S` discards, dispose
@@ -1947,13 +2027,14 @@ cleanups: [], status: 'open' }`. Push ambient.
     - `invoke(count, S)` → miss → `count.slots[S]` created (read-populated;
       `wasWritten = false`, per [Q9](./questions.md#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally)). Recipe = `() => 0`, `cached = 0`.
   - Body: `c = 0`. `log.push("Effect ran with count=0")`. `onCleanup(cb)`
-    registers a *body-level* cleanup: `cb = () => teardowns.push(
-    "cleanup at count=0")`. `effectNode.bodyCleanups = [cb]`.
+    registers a _body-level_ cleanup: `cb = () => teardowns.push(
+"cleanup at count=0")`. `effectNode.bodyCleanups = [cb]`.
   - Pop tracker, pop scope.
 - `subscribe(effectNode, handler)` — handler queues microtask re-run on
   invalidation.
 
 **State after Step 2:**
+
 ```
 count.slots = { S: { recipe: () => 0, cached: 0, wasWritten: false } }
 effectNode.slots = { S: { recipe: body, cached: undefined, deps: [edge1] } }
@@ -1966,6 +2047,7 @@ teardowns = []
 ```
 
 **Step 3: `setCount(5)` under `S`.**
+
 - `writeSlot(count, S, { recipe: () => 5, cached: 5, wasWritten: true })`.
   ([Q9](./questions.md#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally) marker: wasWritten=true overwrites the wasWritten=false slot.)
 - Walk `count`'s outgoing edges with `(count.slots, S)`:
@@ -1975,6 +2057,7 @@ teardowns = []
 - Subscriber receives event. `scheduleMicrotask(runBody)`. Re-run is queued.
 
 **State after Step 3:**
+
 ```
 count.slots = { S: { recipe: () => 5, cached: 5, wasWritten: true } }
 effectNode.slots[S].cached = undefined (invalidated)
@@ -1983,18 +2066,19 @@ log = ["Effect ran with count=0"]
 teardowns = []
 ```
 
-The body cleanup is *still installed* — `effectNode.bodyCleanups =
+The body cleanup is _still installed_ — `effectNode.bodyCleanups =
 [cleanupAtZero]`. It hasn't fired yet.
 
 **Step 4: action body throws — `handle.discard()` or generator rejects.**
 
 `closeScope(S, 'discard')`:
-1. *Drop `S`-tagged slots.* Walk each slot's `subs`, unlink edges.
+
+1. _Drop `S`-tagged slots._ Walk each slot's `subs`, unlink edges.
    - `count.slots[S].subs = [edge1]`. Unlink `edge1`: remove from
      `count.slots[S].subs` and from `effectNode.slots[S].deps`.
    - Drop `count.slots[S]`.
    - `effectNode.slots[S]`: drop. Walk its `subs` (none). Done.
-2. *Fire `S.cleanups`.* `S.cleanups = [disposeEffectNode]`.
+2. _Fire `S.cleanups`._ `S.cleanups = [disposeEffectNode]`.
    - `disposeEffectNode()`:
      - Walk `effectNode.bodyCleanups`. Fire each.
        - `cleanupAtZero()` → `teardowns.push("cleanup at count=0")`.
@@ -2003,6 +2087,7 @@ The body cleanup is *still installed* — `effectNode.bodyCleanups =
 3. `S.status = 'discarded'`. Pop ambient.
 
 **State after Step 4:**
+
 ```
 count.slots = {}
 effectNode: disposed (slots map empty; bodyCleanups empty)
@@ -2013,13 +2098,15 @@ microtask queue: [runBody]   ← still queued!
 ```
 
 **Step 5: microtask drains.**
+
 - `runBody()` is called.
-- *Guard:* check `effectNode.disposed === true`. **Yes.** Bail. ✓
+- _Guard:_ check `effectNode.disposed === true`. **Yes.** Bail. ✓
 - (Alternative: the scheduler unhooks the subscription on dispose, so the
   microtask is never enqueued in the first place. Either works; the
   guard-on-resume pattern is the simpler/safer one.)
 
 **Final state for H3a:**
+
 ```
 count.slots = {}                                     # restored to pre-action
 effectNode: gone
@@ -2042,7 +2129,7 @@ throwing.
 This is where [Q10](./questions.md#q10--commit-as-transaction-ordering-atomicity-deferred-fires) (commit-as-transaction) is exercised. The library's
 commit logic opens a deferred-fires region:
 
-1. *Promote write-populated slots only* (per [Q9](./questions.md#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally)).
+1. _Promote write-populated slots only_ (per [Q9](./questions.md#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally)).
    - `count.slots[S].wasWritten === true` → promote.
      - `writeSlot(count, ROOT_SCOPE, { recipe: () => 5, cached: 5, … })`.
      - Walk `count`'s edges with `(count.slots, ROOT_SCOPE)`:
@@ -2051,16 +2138,17 @@ commit logic opens a deferred-fires region:
          **Yes** (we haven't dropped `S` slots yet). Don't fire.
    - `effectNode.slots[S].wasWritten === false` → don't promote (it's a
      consumer-cache, not user-state).
-2. *Drop `S`-tagged slots.*
+2. _Drop `S`-tagged slots._
    - `count.slots[S].subs = [edge1]`. Unlink `edge1`. Drop.
    - `effectNode.slots[S]`: drop.
-3. *Fire `S.cleanups`.* `disposeEffectNode()` fires `cleanupAtZero` →
+3. _Fire `S.cleanups`._ `disposeEffectNode()` fires `cleanupAtZero` →
    `teardowns.push("cleanup at count=0")`. Mark effectNode disposed.
-4. *Close deferred-fires region.* No deferred fires queued (the write to
+4. _Close deferred-fires region._ No deferred fires queued (the write to
    `ROOT_SCOPE` in step 1 didn't fire `edge1`).
 5. `S.status = 'committed'`.
 
 **Final state for H3b:**
+
 ```
 count.slots = { ROOT_SCOPE: { recipe: () => 5, cached: 5 } }
 effectNode: disposed
@@ -2073,8 +2161,8 @@ committed value. Is that what we want?
 
 **Yes, for effects created inside the action.** The effect's owner is `S`;
 when `S` closes (commit or discard), the effect disposes. Effects don't
-*outlive* their owners. For an effect that should persist past the action,
-the user would create it in an outer scope (component, root) — *its* owner
+_outlive_ their owners. For an effect that should persist past the action,
+the user would create it in an outer scope (component, root) — _its_ owner
 would be that outer scope, not the action.
 
 This is conventional reactive-framework semantics (Solid, MobX, S.js): an
@@ -2083,7 +2171,7 @@ containers die. Pulse's scope/owner unification preserves this.
 
 The "previous body's cleanup fires before re-run" semantics — what H3b's
 title suggests — applies to a different scenario: an effect that
-*persists across the action* (i.e., was created outside the action).
+_persists across the action_ (i.e., was created outside the action).
 Let me trace that too, as H3b'.
 
 ### H3b': previous body's cleanup fires before re-run (effect outside action)
@@ -2093,16 +2181,17 @@ const [count, setCount] = signal(0)
 const log: string[] = []
 const teardowns: string[] = []
 
-effect(() => {                                       // created outside any action; owner = ROOT_SCOPE
-  const c = get(count)
-  log.push(`Effect ran with count=${c}`)
-  onCleanup(() => teardowns.push(`cleanup at count=${c}`))
+effect(() => {
+	// created outside any action; owner = ROOT_SCOPE
+	const c = get(count)
+	log.push(`Effect ran with count=${c}`)
+	onCleanup(() => teardowns.push(`cleanup at count=${c}`))
 })
 // log = ["Effect ran with count=0"], teardowns = []
 // effectNode.bodyCleanups = [cleanupAtZero]
 
 action(function* () {
-  setCount(5)
+	setCount(5)
 })
 // after commit, the effect should re-run with count=5;
 // cleanupAtZero should fire first, then the new body runs.
@@ -2114,10 +2203,12 @@ selector `chainSelector([ROOT_SCOPE])`. After initial run:
 `bodyCleanups = [cleanupAtZero]`. Log has "Effect ran with count=0".
 
 **Action runs. Inside `S`:**
+
 - `setCount(5)`: `writeSlot(count, S, { … })`. `edge1.selector` against
   writeScope=S: chain doesn't include S → don't fire. ✓ (H1a-c.)
 
 **Commit.**
+
 - Promote: `writeSlot(count, ROOT_SCOPE, { recipe: () => 5, cached: 5 })`.
 - `edge1.selector` against writeScope=ROOT_SCOPE: writeIdx=0, no
   more-specific → **fire.** Invalidate `effectNode.slots[ROOT_SCOPE]`.
@@ -2128,21 +2219,23 @@ selector `chainSelector([ROOT_SCOPE])`. After initial run:
   by `S`, it's owned by `ROOT_SCOPE`.)
 
 **Microtask: `runBody`.**
-- *Guard:* `effectNode.disposed === false`. Proceed.
-- *Fire previous bodyCleanups first.* `cleanupAtZero()` →
+
+- _Guard:_ `effectNode.disposed === false`. Proceed.
+- _Fire previous bodyCleanups first._ `cleanupAtZero()` →
   `teardowns.push("cleanup at count=0")`. `bodyCleanups = []`.
-- *Unlink stale `deps`.* `effectNode.slots[ROOT_SCOPE].deps = [edge1]`.
+- _Unlink stale `deps`._ `effectNode.slots[ROOT_SCOPE].deps = [edge1]`.
   Unlink each — remove `edge1` from `count.slots[ROOT_SCOPE].subs` and
   from `effectNode.slots[ROOT_SCOPE].deps`.
-- *Push tracker, push scope. Invoke body.*
+- _Push tracker, push scope. Invoke body._
   - `get(count)`: `link(count, chainSelector([ROOT_SCOPE]),
-    effectNode.slots[ROOT_SCOPE])` → `edge1'`. `invoke(count, ROOT_SCOPE)`
+effectNode.slots[ROOT_SCOPE])` → `edge1'`. `invoke(count, ROOT_SCOPE)`
     → hit, return 5.
   - Body: `c = 5`. `log.push("Effect ran with count=5")`. `onCleanup(...)`
     → registers `cleanupAtFive`. `bodyCleanups = [cleanupAtFive]`.
 - Pop tracker, pop scope.
 
 **Final state for H3b':**
+
 ```
 count.slots = { ROOT_SCOPE: cached 5 }
 effectNode.slots = { ROOT_SCOPE: { cached: undefined, deps: [edge1'] } }
@@ -2152,7 +2245,7 @@ teardowns = ["cleanup at count=0"]
 bodyCleanups = [cleanupAtFive]
 ```
 
-✓ The previous body's cleanup (`cleanupAtZero`) fired *before* the new
+✓ The previous body's cleanup (`cleanupAtZero`) fired _before_ the new
 body ran. The new body registered its own cleanup (`cleanupAtFive`)
 which will fire on the next re-run or on effect disposal.
 
@@ -2163,8 +2256,8 @@ naming explicitly:
 
 1. **Two cleanup mechanisms compose at the scope-discard boundary.**
    `scope.cleanups` (the scope's own disposers) and `effectNode.
-   bodyCleanups` (per-body cleanups). Scope discard fires its own
-   cleanups; among those, the effect's *disposer* fires the effect's
+bodyCleanups` (per-body cleanups). Scope discard fires its own
+   cleanups; among those, the effect's _disposer_ fires the effect's
    bodyCleanups. **The composition is one-way** (scope discard → effect
    dispose → bodyCleanups fire), and the engine doesn't know about
    bodyCleanups at all — it just fires `scope.cleanups`, and the effect's
@@ -2174,7 +2267,7 @@ naming explicitly:
    their owners. Pulse follows the conventional Solid / S.js / MobX
    model. An effect that should persist across an action is created
    outside it.
-3. **Body cleanups fire *before* re-run, not on resume.** The microtask
+3. **Body cleanups fire _before_ re-run, not on resume.** The microtask
    `runBody` fires the previous body's cleanups first, then unlinks
    stale deps, then invokes the body anew. r3's recompute pattern (run
    disposal → recompute) carries forward unchanged.
@@ -2205,11 +2298,11 @@ naming explicitly:
    action scope) vs Policy β (effects always track ROOT_SCOPE only). The
    trace used α; β would mean an effect inside an action never reacts
    during the action body, only at commit (or dispose). Both are coherent.
-   *Lean α* (composition is more natural), but **this is a real design
+   _Lean α_ (composition is more natural), but **this is a real design
    call** worth keeping open. Adding as [Q11](./questions.md#q11--effect-chain-policy-chain-follows-owner-or-always-root_scope) candidate.
 2. **Effect re-parenting on commit.** Currently the trace disposes
    in-action effects at action close (commit or discard). An alternative:
-   on commit *only*, re-parent the effect's owner to `S.parent`, so the
+   on commit _only_, re-parent the effect's owner to `S.parent`, so the
    effect survives. This requires the effect's chain to also update from
    `[S, ROOT_SCOPE]` to `[ROOT_SCOPE]` (or `[S.parent, ROOT_SCOPE]`).
    Probably not worth it — users wanting persistent effects create them
@@ -2231,14 +2324,14 @@ naming explicitly:
 
 All four framings held:
 
-- *Node-as-recipe*: effects are Nodes with bodies-as-recipes. Same shape.
-- *Walks-first-class*: `get` inside the body forms edges with the right
+- _Node-as-recipe_: effects are Nodes with bodies-as-recipes. Same shape.
+- _Walks-first-class_: `get` inside the body forms edges with the right
   chain (per Policy α, the chain is the effect's owner's chain).
-- *Slim engine + thick library*: all the cleanup-chain composition is
+- _Slim engine + thick library_: all the cleanup-chain composition is
   library code. The engine just fires `scope.cleanups` on discard; the
   library's effect disposer (registered there at creation) does the
   inner unwinding.
-- *Scope/owner unification holds with one design call*: the unification
+- _Scope/owner unification holds with one design call_: the unification
   makes effect-disposal = scope-discard natural, but Policy α vs β is
   the real call (does subscription chain follow owner, or always
   `[ROOT_SCOPE]`?). Both are coherent compositions; α is the lean.
@@ -2264,21 +2357,23 @@ value or the still-Promise-cached value when the action body resumes.
 
 ```ts
 let resolveUser: (v: string) => void
-const userPromise = new Promise<string>(r => { resolveUser = r })
+const userPromise = new Promise<string>(r => {
+	resolveUser = r
+})
 const [user, setUser] = signal<string | Promise<string>>(userPromise)
 
 // Derived computed — stage form (canonical for pulse computeds).
 // The stage callback sees the unwrapped value (string); output is Promise<string>.
 const greeting = compute(
-  () => get(user),                         // stage 0: source — returns Promise<string>
-  (u) => `Hello, ${u}!`                    // stage 1: u is string (auto-unwrapped)
+	() => get(user), // stage 0: source — returns Promise<string>
+	u => `Hello, ${u}!`, // stage 1: u is string (auto-unwrapped)
 )
 // greeting: Computed<Promise<string>>
 
 action(function* () {
-  const name = yield* get(user)            // park until userPromise resolves
-  const g = yield* get(greeting)            // park until greeting resolves
-  console.log(g)                             // expect: "Hello, Alice!"
+	const name = yield* get(user) // park until userPromise resolves
+	const g = yield* get(greeting) // park until greeting resolves
+	console.log(g) // expect: "Hello, Alice!"
 })
 
 // later: resolveUser("Alice")
@@ -2303,20 +2398,20 @@ resuming with the resolved value once it settles:
 
 ```ts
 function* read<T>(node: Node<T>): Generator<ParkCommand, T, T> {
-  const scope = getCurrentScope()
-  if (currentTracker) link(node, chainSelector(chainFor(scope)), currentTracker)
-  const cached = invoke(node, scope) as T | Promise<T>
-  if (cached instanceof Promise) {
-    const state = promiseState(cached)
-    if (state.status === 'fulfilled') return state.value as T
-    if (state.status === 'rejected') throw state.reason
-    return (yield { kind: 'park', promise: cached } as ParkCommand) as T
-  }
-  return cached as T
+	const scope = getCurrentScope()
+	if (currentTracker) link(node, chainSelector(chainFor(scope)), currentTracker)
+	const cached = invoke(node, scope) as T | Promise<T>
+	if (cached instanceof Promise) {
+		const state = promiseState(cached)
+		if (state.status === 'fulfilled') return state.value as T
+		if (state.status === 'rejected') throw state.reason
+		return (yield { kind: 'park', promise: cached } as ParkCommand) as T
+	}
+	return cached as T
 }
 ```
 
-`use(node)` is the *leaf-only* sibling of this: it throws-to-suspend
+`use(node)` is the _leaf-only_ sibling of this: it throws-to-suspend
 inside a restartable context (computed recipe — but per the "Unwrap at
 the leaf" framing, computed recipes should use `yield* get` or stage
 form instead), or peeks-and-throws-on-pending in non-restartable
@@ -2334,11 +2429,11 @@ intermediate.
   - `getCurrentScope()` → `S`. `currentTracker` → null (action body).
   - `invoke(user, S)`:
     - Engine: `user.slots.get(S)` miss. Create `slot_U_S = { recipe:
-      defaultRecipe, deps: [], subs: [] }`. Invoke recipe → `userPromise`.
+defaultRecipe, deps: [], subs: [] }`. Invoke recipe → `userPromise`.
       `slot_U_S.cached = userPromise`.
     - **Engine .then attach (per [Q4](./questions.md#q4--async-at-the-engine-level)):** since `slot_U_S.cached` is a
       Promise, attach `.then(v => { promiseState writeback; fireEdges(user,
-      S, { kind: 'resolved' }) })`. This `.then` is attached **first**
+S, { kind: 'resolved' }) })`. This `.then` is attached **first**
       (during invoke).
     - Return `userPromise`.
   - `get` sees Promise → yields `{ kind: 'park', promise: userPromise }`.
@@ -2348,6 +2443,7 @@ intermediate.
 - Driver returns. Sync portion done. Ambient popped.
 
 **State after Step 2:**
+
 ```
 user.slots = { S: { recipe: defaultRecipe, cached: userPromise, deps: [], subs: [] } }
 userPromise: pending
@@ -2360,13 +2456,13 @@ no edges
 `userPromise` resolves. Microtask queue drains `.then` handlers **in attach
 order**:
 
-- *Engine handler fires first:*
+- _Engine handler fires first:_
   - Per [Q4](./questions.md#q4--async-at-the-engine-level): tweak `userPromise` with `{ status: 'fulfilled', value:
-    "Alice" }`.
+"Alice" }`.
   - `fireEdges(user, S, { kind: 'resolved' })`. Walk `user`'s outgoing
     edges. **None exist** (the action body's `yield* get` didn't track;
     `greeting` hasn't been read yet). No edges to fire.
-- *Driver handler fires second:*
+- _Driver handler fires second:_
   - Driver `step("Alice")`. Push ambient = S. `gen.next("Alice")`.
 
 **Step 4: generator resumes; `const g = yield* get(greeting)` runs.**
@@ -2382,7 +2478,7 @@ order**:
       similarly to how the action driver drives action bodies — see
       main-doc D11):
       - Recipe runs: `function*() { const u = yield* get(user); return
-        \`Hello, ${u}!\` }`
+\`Hello, ${u}!\` }`
       - `yield* get(user)` sub-generator:
         - `link(user, chainSelector([S, ROOT_SCOPE]), slot_G_S)` → `edge1`.
         - `invoke(user, S)` → hit, `cached = userPromise` (tweaked).
@@ -2399,9 +2495,10 @@ order**:
   - `get` sees `Promise` → check `promiseState` → fulfilled,
     `"Hello, Alice!"`. Returns `"Hello, Alice!"` **synchronously**.
 - `yield*` delegates `"Hello, Alice!"` to the action body. `g =
-  "Hello, Alice!"`. `console.log(g)` → prints `"Hello, Alice!"`. ✓
+"Hello, Alice!"`. `console.log(g)` → prints `"Hello, Alice!"`. ✓
 
 **State after Step 4:**
+
 ```
 user.slots = { S: { recipe: defaultRecipe, cached: userPromise (tweaked: fulfilled, "Alice") } }
 greeting.slots = { S: { recipe: generator-recipe,
@@ -2425,6 +2522,7 @@ through the graph; sync access at the leaf via `yield* get`.
 - `S.status = 'committed'`. Pop ambient.
 
 **Final state:**
+
 ```
 user.slots = {}
 greeting.slots = {}
@@ -2438,12 +2536,12 @@ architecture handles C2e correctly.
 ### The timing dependency that made this work
 
 The trace relies on **`.then` attach order**: the engine attaches its
-resolution handler *before* the driver attaches its resume handler. This
+resolution handler _before_ the driver attaches its resume handler. This
 order is preserved naturally because:
 
 - The engine's `.then` is attached inside `invoke` (when the recipe returns
   a Promise and the slot gets populated).
-- The driver's `.then` is attached *after* `invoke` returns — when `get`
+- The driver's `.then` is attached _after_ `invoke` returns — when `get`
   yields the park command and the driver handles it.
 
 So the engine's tweak always lands before the driver's resume in the
@@ -2453,54 +2551,52 @@ microtask queue. Whew.
 recipe would see `promiseState = pending` and throw-to-suspend. `greeting`'s
 slot would be left in a suspended state. `get(greeting)` would return…
 the suspension Promise? Or undefined? **Open ergonomic question** — but the
-architecture *doesn't require this case to be handled* because the natural
+architecture _doesn't require this case to be handled_ because the natural
 attach order guarantees engine-first.
 
 If this ever became a real concern (e.g., if a library author attached
-their own `.then` between engine and driver), the engine could *enforce*
+their own `.then` between engine and driver), the engine could _enforce_
 ordering by making the engine handler always run synchronously inside the
 resolution detection — but that's a hypothetical for now.
 
-### What if the action body had also read `greeting` *before* the yield?
+### What if the action body had also read `greeting` _before_ the yield?
 
 A subtly different scenario worth noting. If:
 
 ```ts
 action(function* () {
-  const g0 = get(greeting)               // BEFORE the yield — sync read
-  const name = yield* get(user)
-  const g1 = yield* get(greeting)        // AFTER the yield — parking read
+	const g0 = get(greeting) // BEFORE the yield — sync read
+	const name = yield* get(user)
+	const g1 = yield* get(greeting) // AFTER the yield — parking read
 })
 ```
 
 Under the corrected setup (generator-form `greeting`):
 
-- *At (A) — `const g0 = get(greeting)` while `user` is pending:*
+- _At (A) — `const g0 = get(greeting)` while `user` is pending:_
   `invoke(greeting, S)` runs the generator-form recipe. The recipe does
   `yield* get(user)`, which finds `userPromise` pending → yields a park
   command. The engine attaches `.then` and **the recipe parks mid-flight**.
   `slot_G_S.cached` becomes the pending Promise representing greeting's
   eventual value.
-  
+
   `get(greeting)` returns the Promise. **`g0` is `Promise<string>`,
   pending.** The user gets a Promise back. Sync read of an async slot is
   type-honest: the slot's cached value is `Promise<string>`, and `get`
   returns exactly that.
 
-- *At (C) — `const g1 = yield* get(greeting)` after the yield:*
-  `userPromise` resolved → engine handler tweaked it → the parked
-  `greeting` generator (registered via .then) resumes, completes, cached
-  is now `Promise<"Hello, Alice!">` (tweaked fulfilled). `yield*
-  get(greeting)` sees fulfilled, returns `"Hello, Alice!"`.
+- _At (C) — `const g1 = yield_ get(greeting)`after the yield:*`userPromise`resolved → engine handler tweaked it → the parked`greeting`generator (registered via .then) resumes, completes, cached
+is now`Promise<"Hello, Alice!">`(tweaked fulfilled).`yield\*
+  get(greeting)`sees fulfilled, returns`"Hello, Alice!"`.
 
 So in this corrected setup:
 
-| Read site | Returns | Type |
-|---|---|---|
-| (A) `get(greeting)` before yield | `Promise<string>` (pending) | `Promise<string>` |
-| (C) `yield* get(greeting)` after yield | `"Hello, Alice!"` | `string` |
+| Read site                              | Returns                     | Type              |
+| -------------------------------------- | --------------------------- | ----------------- |
+| (A) `get(greeting)` before yield       | `Promise<string>` (pending) | `Promise<string>` |
+| (C) `yield* get(greeting)` after yield | `"Hello, Alice!"`           | `string`          |
 
-The types are *different at each site by construction*, not by surprise.
+The types are _different at each site by construction_, not by surprise.
 `get(greeting)` always returns `Promise<string>` (the static type tells
 you so); `yield* get(greeting)` always returns `string` after parking
 as needed. The user chooses sync-with-Promise vs park-with-unwrap
@@ -2511,12 +2607,12 @@ explicitly.
 The original [C2e trace](#c2e--post-yield-derived-read-async-k1b-analogue) setup used:
 
 ```ts
-const greeting = computed(() => `Hello, ${use(user)}!`)   // ⚠ anti-pattern
+const greeting = computed(() => `Hello, ${use(user)}!`) // ⚠ anti-pattern
 ```
 
 `use()` mid-graph collapses `Promise<string>` into `string` at the
 callsite, hiding async-ness from greeting's type. Then `get(greeting)`
-in the action body had a *misleading* sync-looking type but could
+in the action body had a _misleading_ sync-looking type but could
 actually return a suspension Promise when `user` was pending. The same
 expression returned different types at different times — the surprise.
 
@@ -2549,7 +2645,7 @@ C2e traced cleanly. No falsifications. The key findings:
    complexity** — `greeting` just returns a string. The whole async dance
    is hidden inside `greeting`'s recipe via `use`.
 4. **Q9 is load-bearing.** Nothing promoted on commit because all slots
-   were read-populated. This is correct — the action didn't *write*
+   were read-populated. This is correct — the action didn't _write_
    anything; it just performed reads with side effects (the
    `console.log`). The action's only purpose was awaiting + observing.
    [Q9](./questions.md#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally) distinguishes this from a write-and-commit action cleanly.
@@ -2571,7 +2667,7 @@ C2e traced cleanly. No falsifications. The key findings:
 
 ### Framings status after C2e
 
-All four framings still hold. C2e was a *successful coherence trace*: the
+All four framings still hold. C2e was a _successful coherence trace_: the
 architecture composes correctly across `yield* get` → `use` → recipe →
 `promiseState`. The audit's worry — "does the engine's `'resolved'` event
 have to fire before resume?" — turned out to have a clean answer based on
@@ -2579,10 +2675,10 @@ microtask ordering of `.then` attaches.
 
 **Two framings the trace validated, the second new:**
 
-1. *Derivation kind matches reactivity scope (computed vs effect).* H5's
+1. _Derivation kind matches reactivity scope (computed vs effect)._ H5's
    sibling: derivations that depend on async signals don't compose
    cleanly inside imperative action bodies without explicit awaits.
-2. *Unwrap async at the leaf, not in the middle of the graph.* The
+2. _Unwrap async at the leaf, not in the middle of the graph._ The
    original C2e setup used `use()` mid-graph (an anti-pattern); the
    corrected setup uses generator-form or stage-form for intermediate
    computeds, with `use()` / `yield* get` reserved for leaf
@@ -2594,7 +2690,7 @@ microtask ordering of `.then` attaches.
 ## H1d — effect-body coherence on commit
 
 Probes commit-promotion ordering through the effect's lens: when an effect's
-body reads both a primitive signal *and* a derived computed that depends on
+body reads both a primitive signal _and_ a derived computed that depends on
 it, and an action commit promotes the primitive, does the effect's re-run see
 the (X, f(X)) pair coherently?
 
@@ -2603,17 +2699,17 @@ the (X, f(X)) pair coherently?
 ```ts
 const [count, setCount] = signal(0)
 const doubled = computed(() => get(count) * 2)
-const observations: Array<{ c: number, d: number }> = []
+const observations: Array<{ c: number; d: number }> = []
 
 effect(() => {
-  const c = get(count)
-  const d = get(doubled)
-  observations.push({ c, d })
+	const c = get(count)
+	const d = get(doubled)
+	observations.push({ c, d })
 })
 // Initial: observations = [{ c: 0, d: 0 }]
 
 action(function* () {
-  setCount(5)
+	setCount(5)
 })
 // Expected: observations = [{ c: 0, d: 0 }, { c: 5, d: 10 }]
 ```
@@ -2643,14 +2739,15 @@ observations = [{ c: 0, d: 0 }]
 ### Step 2: `setCount(5)` inside the action
 
 - `getCurrentScope()` → `S`. `writeSlot(count, S, { recipe: () => 5, cached:
-  5, wasWritten: true, deps: [], subs: [] })`.
+5, wasWritten: true, deps: [], subs: [] })`.
 - Engine walks `count`'s outgoing edges with `(count.slots, S)`:
   - `edge_C_D.selector` = `chainSelector([ROOT_SCOPE])`. `chain.indexOf(S) =
-    -1`. **Don't fire.**
+-1`. **Don't fire.**
   - `edge_C_E.selector` = same. **Don't fire.**
 - Set `count.slots[S] = newSlot`.
 
 **State after Step 2:**
+
 ```
 count.slots = { ROOT: cached 0, S: cached 5 (wasWritten) }
 doubled.slots[ROOT] unchanged (cached 0)
@@ -2690,6 +2787,7 @@ true })`:**
 `S.status = 'committed'`. Pop ambient.
 
 **State after Step 3:**
+
 ```
 count.slots = { ROOT: cached 5 (wasWritten) }
 doubled.slots = { ROOT: dirty, cached cleared, deps: [edge_C_D] }
@@ -2732,6 +2830,7 @@ portion) completes.
 - Pop tracker, pop scope.
 
 **Final state:**
+
 ```
 count.slots = { ROOT: cached 5, subs: [edge_C_D', edge_C_E'] }
 doubled.slots = { ROOT: cached 10, deps: [edge_C_D'], subs: [edge_D_E'] }
@@ -2749,24 +2848,25 @@ derived's slot at ROOT_SCOPE wasn't invalidated in dep-order during commit
 promotion?" The trace shows: **the architecture makes this impossible by
 two compounding mechanisms:**
 
-1. *Cascading invalidation is synchronous.* When `count → doubled` fires,
-   doubled's slot is marked dirty *immediately*. Doubled's consumer
+1. _Cascading invalidation is synchronous._ When `count → doubled` fires,
+   doubled's slot is marked dirty _immediately_. Doubled's consumer
    pattern (Computed-cache) walks doubled's subs and propagates dirty
    transitively (also synchronously). By the time `closeScope` returns,
    every consumer downstream of count has been marked dirty.
-2. *Consumer re-runs are microtask-scheduled (per H1a-c).* The effect's
-   `runBody` doesn't fire until the next microtask, *after* the
+2. _Consumer re-runs are microtask-scheduled (per H1a-c)._ The effect's
+   `runBody` doesn't fire until the next microtask, _after_ the
    synchronous commit completes. By that time, all dirty flags are set;
    any read inside the body invalidates against the dirty flag and
    recomputes (per Position C from K1+K1b — synchronous reads pick up
    dirty state).
 
 So the effect body, when it runs, sees both:
+
 - `count.slot[ROOT].cached = 5` (set during commit).
 - `doubled.slot[ROOT]` dirty → recomputes → 10 (recipe reads the
   committed count).
 
-**Q10's commit-region deduplication** is what makes this *efficient*
+**Q10's commit-region deduplication** is what makes this _efficient_
 (one re-run instead of N for an effect that depends on N commit-promoted
 signals) — but the coherence itself doesn't depend on [Q10](./questions.md#q10--commit-as-transaction-ordering-atomicity-deferred-fires). Even with N
 re-runs, each one sees coherent state because all invalidations land
@@ -2800,12 +2900,12 @@ H1d traced cleanly with no new design calls. The trace validates that:
 
 ### Sub-questions surfaced (small)
 
-- *Multi-write commits with overlapping consumers.* If the action wrote
+- _Multi-write commits with overlapping consumers._ If the action wrote
   to N signals all depending on the same effect, [Q10](./questions.md#q10--commit-as-transaction-ordering-atomicity-deferred-fires)'s dedupe ensures
   one re-run. But this trace only had one write. Worth a follow-up
   trace if pulse ever finds itself debugging "why does my effect run 5
   times after a commit." Probably absorbed into [Q10](./questions.md#q10--commit-as-transaction-ordering-atomicity-deferred-fires)'s existing scope.
-- *What if `doubled`'s recipe were async?* Then the recompute inside
+- _What if `doubled`'s recipe were async?_ Then the recompute inside
   `invoke(doubled, ROOT)` would yield a park command. The effect body's
   `get(doubled)` would return a Promise; the effect would have to
   `yield* get(doubled)` instead. Crosses into H5 + C2e territory; not
@@ -2824,4 +2924,3 @@ returned stale.
 trace.
 
 ---
-

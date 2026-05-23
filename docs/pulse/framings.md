@@ -3,9 +3,11 @@
 The current understanding of pulse's design: foundational principles
 ([P1](#p1--speculation-is-one-concept-with-two-faces)–[P5](#p5--compose-dont-proliferate-in-either-direction)), operational framings (current best-guesses for how to honour
 the principles), falsified hypotheses (dead ends to avoid), and engine
-+ library sketches.
+
+- library sketches.
 
 **Companion documents:**
+
 - [README.md](./README.md) — overview + index.
 - [prior-art.md](./prior-art.md) — cross-framework analysis (research arc, comparison table, decomposition, node/value-bag recasting).
 - [questions.md](./questions.md) — open questions ([Q1](./questions.md#q1--fall-through-and-edge-policy) through [Q14](./questions.md#q14--action-prereqs--standing-state-handle)).
@@ -13,12 +15,14 @@ the principles), falsified hypotheses (dead ends to avoid), and engine
 - [scenario-traces.md](./scenario-traces.md) — end-to-end traces.
 
 **Related pulse-repo docs:**
-- [`../research/async/CONTEXT.md`](../research/async/CONTEXT.md) — speculation lexicon, four dimensions, failure modes.
-- [`../research/async/deep-dives/solid-2x.md`](../research/async/deep-dives/solid-2x.md) — per-node multi-slot architecture reference.
+
+- [`../async/CONTEXT.md`](../async/CONTEXT.md) — speculation lexicon, four dimensions, failure modes.
+- [`../async/deep-dives/solid-2x.md`](../async/deep-dives/solid-2x.md) — per-node multi-slot architecture reference.
 
 ## Contents
 
 **[Principles](#principles)**
+
 - [P1 — Speculation is one concept with two faces](#p1--speculation-is-one-concept-with-two-faces)
 - [P2 — Acknowledge async; don't hide it](#p2--acknowledge-async-dont-hide-it)
 - [P3 — Plain reads are honest](#p3--plain-reads-are-honest)
@@ -26,6 +30,7 @@ the principles), falsified hypotheses (dead ends to avoid), and engine
 - [P5 — Compose, don't proliferate (in either direction)](#p5--compose-dont-proliferate-in-either-direction)
 
 **[Framings (adopted provisionally)](#framings-adopted-provisionally)**
+
 - [Signals and computeds are graph relations, not values](#signals-and-computeds-are-graph-relations-not-values)
 - [Walks are first-class](#walks-are-first-class)
 - [Async is honest in the type](#async-is-honest-in-the-type)
@@ -43,6 +48,7 @@ the principles), falsified hypotheses (dead ends to avoid), and engine
 - [`Awaitable<T>` — one type, three legitimate uses](#awaitablet--one-type-three-legitimate-uses)
 
 **[Falsified hypotheses](#falsified-hypotheses)**
+
 - [Speculation purely above unmodified r3 doesn't work](#speculation-purely-above-unmodified-r3-doesnt-work)
 - [`.value` / `.peek()` / `.latest()` as methods on the Node would survive without smuggling](#value--peek--latest-as-methods-on-the-node-would-survive-without-smuggling)
 
@@ -68,14 +74,14 @@ committed or discarded. The same scope has two faces — a **write side**
 speculations settle).
 
 "Optimistic", "transition" (in the React/Solid sense), "loading",
-"entanglement", "preview" are *use-labels* for speculation, not separate
+"entanglement", "preview" are _use-labels_ for speculation, not separate
 mechanisms. The mechanism is one; what differs is what the speculation is
-*about*.
+_about_.
 
 Why "speculation" over "transition": "transition" presupposes the commit
 (A → B implies B happens), so every framework using it bolts on a
 separate vocabulary for the failure mode (revert, rollback, supersede).
-"Speculation" is symmetric — *speculate / commit / discard* — and imports
+"Speculation" is symmetric — _speculate / commit / discard_ — and imports
 the CPU-speculation mental model (work done against a predicted outcome,
 ready to be thrown away if reality disagrees) load-bearingly, not
 analogically.
@@ -86,7 +92,7 @@ and naming that presupposes success.
 ### P2 — Acknowledge async; don't hide it
 
 A `Promise` in the type is honest information: it indicates the value
-has (or had) a future. Pulse provides tools to *incorporate* the future,
+has (or had) a future. Pulse provides tools to _incorporate_ the future,
 not erasures that pretend it isn't there. The type stays `Node<Promise<T>>`,
 not silently collapsed to `Node<T>`. Unwrapping is explicit (`use`,
 `yield* get`, or stage-form's auto-unwrap), and the unwrap-site is where
@@ -106,7 +112,7 @@ to do safely.
 
 ### P4 — Explicit boundaries over implicit pervasiveness
 
-A speculative scope is *opt-in*. Outside a scope, writes commit
+A speculative scope is _opt-in_. Outside a scope, writes commit
 immediately and reads are honest. Inside a scope, write-level speculation
 semantics apply. There is no implicit ambient speculation that every
 write must reckon with.
@@ -120,9 +126,9 @@ async-feeding write into an implicit held speculation.
 ### P5 — Compose, don't proliferate (in either direction)
 
 A small primitive set should cover the use cases. Specialised ergonomic
-sugar over the primitives is *allowed* when it earns its keep — added
+sugar over the primitives is _allowed_ when it earns its keep — added
 because the bare shape is awkward enough for a common case to warrant a
-name. It is also not *forbidden* on principle: negative-shape commitments
+name. It is also not _forbidden_ on principle: negative-shape commitments
 ("no `optimistic` primitive") lock out design space without serving any
 value the doc has named.
 
@@ -134,7 +140,7 @@ ergonomic sugar when it would clarify a common use.
 
 ## Framings (adopted provisionally)
 
-These are durable as *directions to push on*, not as locked-in design positions.
+These are durable as _directions to push on_, not as locked-in design positions.
 Each is a way of seeing the problem; each can be revised if a later finding falsifies it.
 
 ### Signals and computeds are graph relations, not values
@@ -144,14 +150,14 @@ identity in the dep graph wrapping a recipe. The value is what you get by
 handing the Node to a walk. Putting `.value`, `.peek()`, `.latest()`, or any
 value-producing method on the Node would re-couple identity and value through
 syntax — so the strictness extends to: the Node has no value-producing methods
-or properties at all. *The signal IS the relation; the value is queried from
-outside via walks.*
+or properties at all. _The signal IS the relation; the value is queried from
+outside via walks._
 
 ### Walks are first-class
 
 Reads are not implicit "call the signal." They are explicit applications of a
 walk primitive (`get`, `latest`, `use`, `isPending`, `subscribe`, …) to
-a relation. The walks *are* the user-visible surface of the engine's value-bag —
+a relation. The walks _are_ the user-visible surface of the engine's value-bag —
 the bag is observed only through walks, never by "the signal's value." This
 makes "how to read" a first-class verb the user composes, rather than a fixed
 semantic baked into the signal.
@@ -165,7 +171,7 @@ don't hide it").
 
 ### Signal / Computed / Effect / JSX-expression are all the same primitive
 
-All four are `Node<() => T>`. What differs is their *connection pattern*:
+All four are `Node<() => T>`. What differs is their _connection pattern_:
 
 - **Signal** — recipe is replaceable via a setter; the initial recipe is
   `() => initial`; setters install new recipes per-slot (tagged with the
@@ -178,34 +184,34 @@ All four are `Node<() => T>`. What differs is their *connection pattern*:
 - **Effect** — recipe is fixed at creation; consumer is the effect scheduler,
   which schedules re-runs on dep-change.
 
-The "graph" isn't a separate thing — it's the *implicit structure of
-who-walks-whom*; edges form when a recipe walks another Node.
+The "graph" isn't a separate thing — it's the _implicit structure of
+who-walks-whom_; edges form when a recipe walks another Node.
 
 ### Slim engine, thick library — engine resolution is open
 
 The library ships an approachable surface — named patterns over a generic core.
 Users get familiar DX (`const [name, setName] = signal("foo")`,
-`compute(() => …)`, `get(node)`) without seeing engine internals. *But the
-engine is reachable* — a user (or library author building on pulse) can drop
+`compute(() => …)`, `get(node)`) without seeing engine internals. _But the
+engine is reachable_ — a user (or library author building on pulse) can drop
 down and define their own semantics over the graph. Custom walks, custom edge
 metadata, custom scope shapes — all expressible in user code without engine
-changes. This is the user-stated principle: *the goal is not complex DX; the
+changes. This is the user-stated principle: _the goal is not complex DX; the
 goal is to give users the option to add their own ideas of what this graph
-resolves to.*
+resolves to._
 
 ### Slot writes and recomputes are the same operation
 
-Setters and engine-driven recomputes both *write a slot with a recipe*. The
+Setters and engine-driven recomputes both _write a slot with a recipe_. The
 engine doesn't need separate `setSignal` and `recompute` primitives — just
 `writeSlot`. The library calls it from user setters; the scheduler calls it from
 its recompute logic. The privileged status of user-initiated writes dissolves.
 
 ### Edges are slot-local, dynamic, and walk-policy-driven
 
-Edges live on *slots*, not Nodes. Each (Node, Scope) slot has its own incoming
+Edges live on _slots_, not Nodes. Each (Node, Scope) slot has its own incoming
 and outgoing edge lists; a recompute rebuilds the slot's `deps` from scratch;
 discarding a slot cascades its edges away. The selector for "which source slots
-fire which target slots" is *walk-defined* (engine routes notifications through
+fire which target slots" is _walk-defined_ (engine routes notifications through
 the selector), so fall-through semantics, scope-aware subscription, latest-only
 subscription, and other policies are library code over a uniform edge mechanism.
 
@@ -224,14 +230,14 @@ discard old scope, open new one.
 
 A pulse-relevant distinction surfaced by the H5 scenario:
 
-- **Computed** = *scope-aware derivation.* A computed's slot is created on
+- **Computed** = _scope-aware derivation._ A computed's slot is created on
   demand; reading it inside a speculative scope `S` recomputes under `S`,
   walking the chain `[S, …, ROOT_SCOPE]`. The returned value is coherent
   with `S`'s overlays.
-- **Effect** = *committed-state subscription.* An effect's body runs in
-  response to *commits* (chain selector matches `ROOT_SCOPE` writes), not
+- **Effect** = _committed-state subscription._ An effect's body runs in
+  response to _commits_ (chain selector matches `ROOT_SCOPE` writes), not
   speculative writes. Downstream signals that an effect maintains reflect
-  committed state. The effect's body re-runs *after* commit; inside an
+  committed state. The effect's body re-runs _after_ commit; inside an
   in-flight action that wrote one of the effect's deps, those downstream
   signals are stale.
 
@@ -240,21 +246,27 @@ The two are not interchangeable for the same "derive Y from X" need:
 ```ts
 // Effect-mediated derivation: STALE inside the action that wrote X
 effect(() => setValue(get(X) + get(X)))
-action(() => { setX('new'); get(value) })       // returns the OLD value
+action(() => {
+	setX('new')
+	get(value)
+}) // returns the OLD value
 
 // Computed-mediated derivation: FRESH inside the action that wrote X
 const value = compute(() => get(X) + get(X))
-action(() => { setX('new'); get(value) })       // returns the NEW value
+action(() => {
+	setX('new')
+	get(value)
+}) // returns the NEW value
 ```
 
-The mechanism: a *computed* has no consumer scheduler; its slot is populated
-on demand via `invoke` under whatever scope is reading. An *effect* IS a
+The mechanism: a _computed_ has no consumer scheduler; its slot is populated
+on demand via `invoke` under whatever scope is reading. An _effect_ IS a
 consumer whose scheduling is gated by selector chain, and (per H1a-c)
 defer-until-commit naturally excludes in-action visibility.
 
-**Guidance:** choose by whether downstream consumers need *synchronously
-fresh visibility into speculative state* (computed) or *settled-state
-visibility for side effects* (effect — DOM updates, network calls,
+**Guidance:** choose by whether downstream consumers need _synchronously
+fresh visibility into speculative state_ (computed) or _settled-state
+visibility for side effects_ (effect — DOM updates, network calls,
 persistence). Mixing them — using an effect to maintain a derived signal
 that gets read inside actions — produces stale-during-action behaviour
 that's correct but surprising.
@@ -271,37 +283,38 @@ const upperName = compute(() => get(name).toUpperCase())
 
 // Multi-stage pipeline, plain callbacks (declarative)
 const greeting = compute(
-  () => get(asyncUser),                        // stage 0: source
-  (u) => `Hello, ${u}!`,                        // stage 1: u is unwrapped
-  (s) => s + "!"                                // stage 2
+	() => get(asyncUser), // stage 0: source
+	u => `Hello, ${u}!`, // stage 1: u is unwrapped
+	s => s + '!', // stage 2
 )
 // greeting: Computed<Promise<string>>
 
 // Single-stage pipeline, generator callback (imperative; can park on async)
 const profile = compute(function* () {
-  const user = yield* get(asyncUser)
-  if (user.role === 'admin') return yield* get(adminProfile)
-  else                       return yield* get(memberProfile)
+	const user = yield* get(asyncUser)
+	if (user.role === 'admin') return yield* get(adminProfile)
+	else return yield* get(memberProfile)
 })
 // profile: Computed<Promise<Profile>>
 
 // Mixed pipeline — plain stages around a generator stage
 const summary = compute(
-  () => get(value),                             // stage 0: plain source
-  function* (value) {                           // stage 1: generator stage
-    const other = yield* get(somethingElse)
-    return value + other
-  },
-  (combined) => combined.toUpperCase()          // stage 2: plain transform
+	() => get(value), // stage 0: plain source
+	function* (value) {
+		// stage 1: generator stage
+		const other = yield* get(somethingElse)
+		return value + other
+	},
+	combined => combined.toUpperCase(), // stage 2: plain transform
 )
 ```
 
 **The stage callback type drives what's possible inside that stage:**
 
-| Stage callback | Async | Dynamic deps | Memoization |
-|---|---|---|---|
-| **Plain function** `(prev) => O` | Receives `Resolved<prev>` (auto-unwrap); returns `O` (sync) | Yes (signal reads inside track to this stage's node) | Per-stage |
-| **Generator** `function* (prev) {...}` | `yield* get(node)` parks; returns `Promise<O>` | Yes, including parking-then-conditional-read patterns | Per-stage |
+| Stage callback                         | Async                                                       | Dynamic deps                                          | Memoization |
+| -------------------------------------- | ----------------------------------------------------------- | ----------------------------------------------------- | ----------- |
+| **Plain function** `(prev) => O`       | Receives `Resolved<prev>` (auto-unwrap); returns `O` (sync) | Yes (signal reads inside track to this stage's node)  | Per-stage   |
+| **Generator** `function* (prev) {...}` | `yield* get(node)` parks; returns `Promise<O>`              | Yes, including parking-then-conditional-read patterns | Per-stage   |
 
 **Per-stage memoization** is the load-bearing property: if a signal read
 in stage N changes, only stage N and downstream re-run; earlier stages
@@ -329,29 +342,32 @@ type Resolved<T> = T extends Promise<infer U> ? U : T
 type StageFn<I, O> = (v: Resolved<I>) => O | Generator<unknown, O, any>
 
 function stage<I, O>(input: Node<I>, transform: StageFn<I, O>): Node<O> {
-  return createNode(() => {
-    const v = get(input)
-    const run = (resolved: Resolved<I>) => {
-      const result = transform(resolved)
-      // If callback returned a generator, drive it (yield-and-park on Promises)
-      return isGenerator(result) ? driveGenerator(result) : result
-    }
-    if (v instanceof Promise) {
-      const tracker = currentTracker
-      return v.then(resolved => {
-        pushTracker(tracker)
-        try { return run(resolved as Resolved<I>) }
-        finally { popTracker() }
-      })
-    }
-    return run(v as Resolved<I>)
-  })
+	return createNode(() => {
+		const v = get(input)
+		const run = (resolved: Resolved<I>) => {
+			const result = transform(resolved)
+			// If callback returned a generator, drive it (yield-and-park on Promises)
+			return isGenerator(result) ? driveGenerator(result) : result
+		}
+		if (v instanceof Promise) {
+			const tracker = currentTracker
+			return v.then(resolved => {
+				pushTracker(tracker)
+				try {
+					return run(resolved as Resolved<I>)
+				} finally {
+					popTracker()
+				}
+			})
+		}
+		return run(v as Resolved<I>)
+	})
 }
 
 function compute<T>(...stages: Array<(prev: any) => any>): Node<unknown> {
-  let current: Node<unknown> = createNode(stages[0])
-  for (let i = 1; i < stages.length; i++) current = stage(current, stages[i])
-  return current
+	let current: Node<unknown> = createNode(stages[0])
+	for (let i = 1; i < stages.length; i++) current = stage(current, stages[i])
+	return current
 }
 ```
 
@@ -407,30 +423,33 @@ const greeting = compute(() => `Hello, ${use(user)}!`)
 hiding async from downstream consumers. Move the unwrap into a stage:
 
 ```ts
-const greeting = compute(() => get(user), (u) => `Hello, ${u}!`)
+const greeting = compute(
+	() => get(user),
+	u => `Hello, ${u}!`,
+)
 // greeting: Computed<Promise<string>>  — async honest, per-stage memoized
 ```
 
 ### Why this rule matters
 
-- *Type honesty.* `Computed<Promise<T>>` tells consumers they're dealing
+- _Type honesty._ `Computed<Promise<T>>` tells consumers they're dealing
   with async; `Computed<T>` says it's sync. Multi-stage and
   generator-stage forms preserve the type; `use()` mid-graph in a
   single-stage plain body lies.
-- *Suspension locality.* `use()` only at leaves means suspension points
+- _Suspension locality._ `use()` only at leaves means suspension points
   are visible — readers know "I committed to extract sync; I might
   suspend." Mid-graph `use()` makes every downstream read potentially
   suspending with no syntactic signal.
-- *Per-stage memoization.* Multi-stage pipelines give
+- _Per-stage memoization._ Multi-stage pipelines give
   partial-recomputation that a single-body recompute can't.
 
 **Where each construct goes:**
 
-- *Computeds:* `compute(...stages)` — stages with plain or generator
+- _Computeds:_ `compute(...stages)` — stages with plain or generator
   callbacks. `use()` inside a single-stage plain body is an anti-pattern.
-- *Action bodies:* `action(function* () {...})` with `yield* get(...)`
+- _Action bodies:_ `action(function* () {...})` with `yield* get(...)`
   for async unwrap.
-- *Leaves (JSX, action-body-try):* `use(node)` for React-style
+- _Leaves (JSX, action-body-try):_ `use(node)` for React-style
   throw-to-suspend.
 
 (Companion to the "Derivation kind matches reactivity scope" framing
@@ -446,86 +465,99 @@ React-convention state fields (`status`, `value`, `reason`) for sync query.
 
 ```ts
 class Awaitable<T> extends Promise<T> {
-  status: 'pending' | 'fulfilled' | 'rejected' = 'pending'
-  value?: T
-  reason?: unknown
+	status: 'pending' | 'fulfilled' | 'rejected' = 'pending'
+	value?: T
+	reason?: unknown
 
-  constructor(executor: (resolve: (v: T) => void, reject: (e: unknown) => void) => void) {
-    super((resolve, reject) => {
-      executor(
-        v => { this.status = 'fulfilled'; this.value = v; resolve(v) },
-        e => { this.status = 'rejected';  this.reason = e; reject(e) },
-      )
-    })
-  }
+	constructor(executor: (resolve: (v: T) => void, reject: (e: unknown) => void) => void) {
+		super((resolve, reject) => {
+			executor(
+				v => {
+					this.status = 'fulfilled'
+					this.value = v
+					resolve(v)
+				},
+				e => {
+					this.status = 'rejected'
+					this.reason = e
+					reject(e)
+				},
+			)
+		})
+	}
 
-  *[Symbol.iterator](): Generator<this, T, T> {
-    return (yield this) as T   // yield self; driver awaits; resume with resolved
-  }
+	*[Symbol.iterator](): Generator<this, T, T> {
+		return (yield this) as T // yield self; driver awaits; resume with resolved
+	}
 }
 
 type Resolved<T> = T extends Promise<infer U> ? U : T
 type GetReturn<T> = T extends Promise<infer U> ? Awaitable<U> : T
 
 function get<T>(node: Node<T>): GetReturn<T> {
-  const cached = invoke(node, getCurrentScope()) as T
-  if (cached && typeof (cached as any).then === 'function') {
-    return makeAwaitable(cached as any) as GetReturn<T>
-  }
-  return cached as GetReturn<T>
+	const cached = invoke(node, getCurrentScope()) as T
+	if (cached && typeof (cached as any).then === 'function') {
+		return makeAwaitable(cached as any) as GetReturn<T>
+	}
+	return cached as GetReturn<T>
 }
 
 function makeAwaitable<T>(p: Promise<T>): Awaitable<T> {
-  if (p instanceof Awaitable) return p
-  const a = new Awaitable<T>((resolve, reject) => p.then(resolve, reject))
-  // Duck-type: if the incoming Promise already has React-convention state
-  // fields, adopt them immediately (interop with React's use(), TanStack
-  // Query, anyone else using Promise.allSettled shape).
-  const tweaked = p as any
-  if (tweaked.status === 'fulfilled')      { a.status = 'fulfilled'; a.value = tweaked.value }
-  else if (tweaked.status === 'rejected')  { a.status = 'rejected';  a.reason = tweaked.reason }
-  return a
+	if (p instanceof Awaitable) return p
+	const a = new Awaitable<T>((resolve, reject) => p.then(resolve, reject))
+	// Duck-type: if the incoming Promise already has React-convention state
+	// fields, adopt them immediately (interop with React's use(), TanStack
+	// Query, anyone else using Promise.allSettled shape).
+	const tweaked = p as any
+	if (tweaked.status === 'fulfilled') {
+		a.status = 'fulfilled'
+		a.value = tweaked.value
+	} else if (tweaked.status === 'rejected') {
+		a.status = 'rejected'
+		a.reason = tweaked.reason
+	}
+	return a
 }
 ```
 
 **The three uses of the same `get` call:**
 
 ```ts
-const u = get(asyncUser)                  // u: Awaitable<string>
+const u = get(asyncUser) // u: Awaitable<string>
 
 // (1) Sync query — honest about state
 if (u.status === 'fulfilled') console.log(u.value)
-if (u.status === 'pending')    showSpinner()
-if (u.status === 'rejected')   showError(u.reason)
+if (u.status === 'pending') showSpinner()
+if (u.status === 'rejected') showError(u.reason)
 
 // (2) Async wait (Awaitable IS Promise)
-const v = await u                         // v: string
-u.then(v => console.log(v))               // works — standard Promise interface
+const v = await u // v: string
+u.then(v => console.log(v)) // works — standard Promise interface
 
 // (3) Generator wait (Awaitable IS iterable)
 function* body() {
-  const v = yield* u                      // v: string (via Iterator's TReturn)
+	const v = yield* u // v: string (via Iterator's TReturn)
 }
 
 // Sync nodes — bare value, no wrapping
-const n = get(syncCount)                  // n: number
+const n = get(syncCount) // n: number
 ```
 
 **What this folds together:**
 
-- *Single verb (`get`)* for all access patterns — no separate `take` /
+- _Single verb (`get`)_ for all access patterns — no separate `take` /
   `wait` / `read` utility for the generator-form unwrap.
-- *Q4's Promise-tweak vs WeakMap question collapses* — state lives on
+- _Q4's Promise-tweak vs WeakMap question collapses_ — state lives on
   the Awaitable class instance (we own it), not mutated onto foreign
   Promises. A `promiseState()` helper is unnecessary; the fields are
   directly on the value.
-- *React-convention interop preserved* via `makeAwaitable`'s duck-type
+- _React-convention interop preserved_ via `makeAwaitable`'s duck-type
   check — pulse adopts the state of any Promise that already carries
   `status`/`value`/`reason` fields, no matter who tweaked them.
-- *Compatible with existing Promise utilities* (`Promise.all`,
+- _Compatible with existing Promise utilities_ (`Promise.all`,
   `Promise.race`, `await`, `.then`) because Awaitable extends Promise.
-- *Action-body generator unwrap is `yield* get(...)`* — Awaitable's
-  `[Symbol.iterator]` makes this work; no separate `take`/`from`/`wait`
+- _Action-body generator unwrap is `yield_ get(...)`* — Awaitable's
+`[Symbol.iterator]`makes this work; no separate`take`/`from`/`wait`
   helper needed.
 
 This is the unifying type. Stages auto-unwrap to `Resolved<T>` via the
@@ -550,12 +582,12 @@ through to r3 for committed.
 **Concrete failure case.** Inside an action scope `S`:
 
 ```ts
-const [name, setName] = signal("foo")
+const [name, setName] = signal('foo')
 const doubleName = compute(() => get(name) + get(name))
 
 action(function* () {
-  setName("name")
-  console.log(get(doubleName))   // expected: "namename"
+	setName('name')
+	console.log(get(doubleName)) // expected: "namename"
 })
 ```
 
@@ -573,7 +605,7 @@ engine.
 **Resolution.** The engine needs multi-slot per Node. This is structurally
 Solid 2.x's per-node multi-slot architecture (which Solid arrived at empirically
 after abandoning node-graph-cloning — see
-[`../research/async/deep-dives/solid-2x.md`](../research/async/deep-dives/solid-2x.md)).
+[`../async/deep-dives/solid-2x.md`](../async/deep-dives/solid-2x.md)).
 Pulse's user-facing novelty (Node-as-recipe + walks) is preserved; the engine
 internals converge on per-node multi-slot. **The smaller core in [Q1](./questions.md#q1--fall-through-and-edge-policy)'s (β) lean
 is not "r3 unchanged"** — it's r3 forked-and-extended (or a pulse-owned engine
@@ -582,7 +614,7 @@ descended from r3).
 ### `.value` / `.peek()` / `.latest()` as methods on the Node would survive without smuggling
 
 **Tried.** "A method on the Node that queries the bag, like `node.value`,
-preserves the framing because the value isn't *stored* on the Node — the method
+preserves the framing because the value isn't _stored_ on the Node — the method
 just looks it up."
 
 **Why it doesn't.** Even a getter that internally queries the bag asserts "the
@@ -604,30 +636,27 @@ semantics, dep meaning, consumer pattern) is library code.
 ```ts
 // ── Engine: types ─────────────────────────────────────────────
 
-type Scope = unknown                              // opaque; library/user defines
+type Scope = unknown // opaque; library/user defines
 
 interface Slot<T> {
-  recipe: () => T | Promise<T>                    // what produces the value
-  cached?: T | Promise<T>                          // engine-managed cache
-  deps: Edge[]                                     // incoming: source slots I was computed against
-  subs: Edge[]                                     // outgoing: target slots that depend on me
+	recipe: () => T | Promise<T> // what produces the value
+	cached?: T | Promise<T> // engine-managed cache
+	deps: Edge[] // incoming: source slots I was computed against
+	subs: Edge[] // outgoing: target slots that depend on me
 }
 
 interface Node<T> {
-  slots: Map<Scope, Slot<T>>                      // engine sees scope→slot uniformly; no privileged key
-  defaultRecipe?: () => T | Promise<T>             // fallback when a scope has no slot
+	slots: Map<Scope, Slot<T>> // engine sees scope→slot uniformly; no privileged key
+	defaultRecipe?: () => T | Promise<T> // fallback when a scope has no slot
 }
 
 interface Edge {
-  source: Node<unknown>
-  sourceSelector: SlotSelector                    // walk-defined: which source slots fire me?
-  target: Slot<unknown>
+	source: Node<unknown>
+	sourceSelector: SlotSelector // walk-defined: which source slots fire me?
+	target: Slot<unknown>
 }
 
-type SlotSelector = (
-  slots: Map<Scope, Slot<unknown>>,
-  writeScope: Scope,
-) => boolean
+type SlotSelector = (slots: Map<Scope, Slot<unknown>>, writeScope: Scope) => boolean
 
 // ── Engine: primitives ────────────────────────────────────────
 
@@ -641,10 +670,10 @@ function subscribe(node: Node<unknown>, handler: (e: SlotChangeEvent) => void): 
 
 // ── Engine: ambient context ───────────────────────────────────
 
-function openScope(): Scope                       // creates child of current
+function openScope(): Scope // creates child of current
 function closeScope(scope: Scope, mode: 'commit' | 'discard'): void
-function onCleanup(fn: Disposable): void          // attaches to current ambient scope
-function getCurrentScope(): Scope                 // always returns a scope (library convention; see ROOT_SCOPE below)
+function onCleanup(fn: Disposable): void // attaches to current ambient scope
+function getCurrentScope(): Scope // always returns a scope (library convention; see ROOT_SCOPE below)
 ```
 
 No `signal`, `compute`, `effect`, `get`, `latest`, `action`, `transition`,
@@ -658,43 +687,40 @@ library code.
 // Library convention: a singleton "root scope" stands in for
 // "outside any speculative context." The engine doesn't know this
 // is special — it's just a scope key the library uses by default.
-const ROOT_SCOPE: Scope = Symbol("root")
+const ROOT_SCOPE: Scope = Symbol('root')
 
 function signal<T>(initial: T): [Node<T>, (v: T) => void] {
-  const node = createNode<T>(() => initial)
-  return [
-    node,
-    (v) => writeSlot(node, getCurrentScope(), { recipe: () => v, deps: [], subs: [] }),
-  ]
+	const node = createNode<T>(() => initial)
+	return [node, v => writeSlot(node, getCurrentScope(), { recipe: () => v, deps: [], subs: [] })]
 }
 
 function compute<T>(fn: () => T): Node<T> {
-  return createNode<T>(fn)
+	return createNode<T>(fn)
 }
 
 function get<T>(node: Node<T>): GetReturn<T> {
-  const scope = getCurrentScope()
-  if (currentTracker) link(node, chainSelector(chainFor(scope)), currentTracker)
-  const cached = invoke(node, scope) as T
-  if (cached && typeof (cached as any).then === 'function') {
-    return makeAwaitable(cached as any) as GetReturn<T>
-  }
-  return cached as GetReturn<T>
+	const scope = getCurrentScope()
+	if (currentTracker) link(node, chainSelector(chainFor(scope)), currentTracker)
+	const cached = invoke(node, scope) as T
+	if (cached && typeof (cached as any).then === 'function') {
+		return makeAwaitable(cached as any) as GetReturn<T>
+	}
+	return cached as GetReturn<T>
 }
 
 function latest<T>(node: Node<T>): T {
-  return invoke(node, ROOT_SCOPE) as T              // bypass any active speculation
+	return invoke(node, ROOT_SCOPE) as T // bypass any active speculation
 }
 
 function action(body): ActionHandle {
-  const scope = openScope()
-  try {
-    runUnderScope(scope, body)
-    closeScope(scope, 'commit')
-  } catch (err) {
-    closeScope(scope, 'discard')
-    throw err
-  }
+	const scope = openScope()
+	try {
+		runUnderScope(scope, body)
+		closeScope(scope, 'commit')
+	} catch (err) {
+		closeScope(scope, 'discard')
+		throw err
+	}
 }
 
 // chainFor(S) returns the scope chain from most-specific to root:
@@ -712,21 +738,20 @@ doesn't care.
 Usage retains familiar shape:
 
 ```ts
-const [name, setName] = signal("foo")
+const [name, setName] = signal('foo')
 const doubleName = compute(() => get(name) + get(name))
 
-get(name)         // "foo"
-get(doubleName)   // "foofoo"
-setName("bar")
-get(name)         // "bar"
-get(doubleName)   // "barbar"
+get(name) // "foo"
+get(doubleName) // "foofoo"
+setName('bar')
+get(name) // "bar"
+get(doubleName) // "barbar"
 
 action(function* () {
-  setName("name")
-  console.log(get(doubleName))    // "namename" — slots resolve under the active scope
+	setName('name')
+	console.log(get(doubleName)) // "namename" — slots resolve under the active scope
 })
-get(name)         // "bar" — committed unchanged outside the scope
+get(name) // "bar" — committed unchanged outside the scope
 ```
 
 ---
-

@@ -8,14 +8,14 @@
 Build an interactive example, `examples/transitions/`, that visualizes the four
 failure modes a transition mechanism exists to prevent. Pulse handles Dim 1 (the
 `<Loading>` gather) but lacks the rest of proper transition support, so the
-example is expected to *exhibit most of the failures* today — FM1 already works;
+example is expected to _exhibit most of the failures_ today — FM1 already works;
 FM2–FM4 do not. It is a living demonstration of the problem space and, via its
 tests, a living regression spec that turns fully green once transitions land.
 
 The four failure modes are defined in
-[`docs/research/async/transitions-problem-space.md`](../../research/async/transitions-problem-space.md)
+[`docs/async/transitions-problem-space.md`](../../async/transitions-problem-space.md)
 and the lexicon
-[`docs/research/async/CONTEXT.md`](../../research/async/CONTEXT.md):
+[`docs/async/CONTEXT.md`](../../async/CONTEXT.md):
 
 - **FM1 — torn state.** A frame mixes old and new data.
 - **FM2 — spinner flash.** A loading fallback appears and vanishes within a few frames.
@@ -35,8 +35,8 @@ Settled during brainstorming:
 - **Color-coded scenario + event timeline** — each tab makes its fleeting
   failure observable through generation color-coding and a timestamped event log.
 - **Idiomatic pulse; Playwright tests as the oracle** — each tab uses pulse the
-  recommended way and shows pulse's *actual* behavior. Tests assert the
-  *correct* transition behavior. FM1 passes today (pulse already gathers via
+  recommended way and shows pulse's _actual_ behavior. Tests assert the
+  _correct_ transition behavior. FM1 passes today (pulse already gathers via
   `<Loading>`); FM2–FM4 are expected red until transitions land. The test
   results, not prose, are the source of truth for what currently fails.
 
@@ -93,7 +93,7 @@ it live. Calling a source (e.g. `fetchProfile('bob')`):
 3. emits a `resolve` event,
 4. returns the value.
 
-Resolve *order* is therefore purely a consequence of the latency values — no
+Resolve _order_ is therefore purely a consequence of the latency values — no
 separate resolve-order control is needed. Sources are read into pulse via the
 existing async-computed pattern (`computed(() => fetchX(arg()))`, read with
 `use()`), exactly as `examples/pokemon` does.
@@ -127,7 +127,7 @@ four tab files then contain only their scenario logic.
 
 ### Color-coding
 
-The core visualization mechanism, used by every tab. Each *generation* of a
+The core visualization mechanism, used by every tab. Each _generation_ of a
 transition gets a color; stale data renders in the old generation's color, fresh
 data in the new one. A torn frame is then literally a multi-colored pane.
 
@@ -215,7 +215,7 @@ in prose, so the example self-documents regardless of test state.
 
 ## Out of scope
 
-- Pulse's actual transition implementation — this example only *visualizes* the
+- Pulse's actual transition implementation — this example only _visualizes_ the
   problem; it does not fix it.
 - FM4's preview / what-if scenario.
 - Pause/step scheduler controls (considered for observability; the event timeline
@@ -224,9 +224,9 @@ in prose, so the example self-documents regardless of test state.
 
 ## References
 
-- [`docs/research/async/transitions-problem-space.md`](../../research/async/transitions-problem-space.md)
+- [`docs/async/transitions-problem-space.md`](../../async/transitions-problem-space.md)
   — the four failure modes, worked through with examples.
-- [`docs/research/async/CONTEXT.md`](../../research/async/CONTEXT.md) — the
+- [`docs/async/CONTEXT.md`](../../async/CONTEXT.md) — the
   lexicon: the four dimensions, the four failure modes.
 - `src/dom/loading.ts` — pulse's current `<Loading>` gather; the `hasEverLoaded`
   fragility FM2 exercises is at line 142.

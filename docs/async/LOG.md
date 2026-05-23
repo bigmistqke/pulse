@@ -18,7 +18,7 @@ See [`./README.md`](./README.md) for the framing, taxonomy table, and deep-dive 
 
 ## Session 1 — 2026-05-19 — Scaffolding + initial axes
 
-- Set up the research directory: `docs/research/async/` with a deep-dives subdirectory.
+- Set up the research directory: `docs/async/` with a deep-dives subdirectory.
 - Drafted the framing — the constraint that "JS doesn't give us the primitives; everything is an encoding with trade-offs" is the central observation that shapes the rest.
 - Extracted an initial 8 axes by reviewing every system touched in prior sessions (Solid 2.x analysis, scenarios doc's prior-art survey, Bonsai/incremental discussion, async-specific traditions discussion).
 - Seeded the taxonomy table with 18 systems × 8 axes. Cells are draft until verified by deep-dives.
@@ -107,7 +107,7 @@ These were candidate first-deep-dives. Session 2 picked **effect-ts** (see entry
 **Open questions surfaced** (rolled into README):
 
 - Is multi-shot resumption useful for UI? Most demonstration examples (nondeterminism, backtracking) aren't UI patterns. Speculative debugging, preview/what-if mode (S8), time-travel state restoration might be the closest UI candidates. Worth checking deliberately during scenario reviews.
-- Can pulse get the *typing benefits* of algebraic effects without the *runtime cost*? TypeScript's structural typing might allow type-level effect tracking via phantom parameters, with the runtime unchanged. Worth a design exploration session once research has more inputs.
+- Can pulse get the _typing benefits_ of algebraic effects without the _runtime cost_? TypeScript's structural typing might allow type-level effect tracking via phantom parameters, with the runtime unchanged. Worth a design exploration session once research has more inputs.
 
 ### Threads to pick from for session 4
 
@@ -168,15 +168,15 @@ These were candidate first-deep-dives. Session 2 picked **effect-ts** (see entry
 **Key findings:**
 
 - The mechanism is precise: a pipelining promise is a typed handle on a future capability; **invoking a method on the unresolved promise dispatches eagerly to the eventual owner via the protocol's `answer-pos` / `desc:answer` machinery**. This is materially stronger than "promise is a value" — JS Promises are values but don't pipeline.
-- Kenton Varda's distinction is the central clarification: **"Promises alone are *not* what I meant by 'time travel'!"** Pipelining is the headline; first-class promises are necessary but insufficient.
+- Kenton Varda's distinction is the central clarification: **"Promises alone are _not_ what I meant by 'time travel'!"** Pipelining is the headline; first-class promises are necessary but insufficient.
 - The wire-level mechanics: the protocol uses an answer-table per RPC session; pipelined calls reference the not-yet-resolved answer-position via `desc:answer`; the server resolves the chain locally on dispatch. The whole dependent chain takes ONE network round-trip instead of N.
 - Historical dual-invention: Liskov & Shrira 1988 (Argus, "call-streams" — never shipped publicly) and Miller/Tribble/Jellinghaus ~1989 (Project Xanadu). E carried the idea forward; Cap'n Proto productized it ~25 years later. JS still doesn't have it natively despite the TC39 eventual-send proposal.
-- The capability-security framing (CapTP) is load-bearing for E but is overkill for a single-process reactive library. The pipelining *mechanism* is portable; the capability *discipline* mostly isn't relevant to pulse.
+- The capability-security framing (CapTP) is load-bearing for E but is overkill for a single-process reactive library. The pipelining _mechanism_ is portable; the capability _discipline_ mostly isn't relevant to pulse.
 
 **Sharpenings to the taxonomy:**
 
-1. **Async representation:** the values "first-class promise value" currently flatten two distinct designs: await-only promises (JS, classic Argus, Java futures) and pipelining promises (E, Cap'n Proto, Agoric `E()`). The headline difference is *method-invocation-on-unresolved*. Suggests a sub-distinction or a new axis.
-2. **Discipline location:** Cap'n Proto pipelining is type-safe because the *IDL schema* declares interface types, not because the language's type system enforces it. This is a third kind of "typed enforcement" distinct from effect-ts's structural typing and from STM's vocabulary restriction. Strengthens the case that discipline-location needs to split by *what kind of typing* (language types / schema types / runtime invariants).
+1. **Async representation:** the values "first-class promise value" currently flatten two distinct designs: await-only promises (JS, classic Argus, Java futures) and pipelining promises (E, Cap'n Proto, Agoric `E()`). The headline difference is _method-invocation-on-unresolved_. Suggests a sub-distinction or a new axis.
+2. **Discipline location:** Cap'n Proto pipelining is type-safe because the _IDL schema_ declares interface types, not because the language's type system enforces it. This is a third kind of "typed enforcement" distinct from effect-ts's structural typing and from STM's vocabulary restriction. Strengthens the case that discipline-location needs to split by _what kind of typing_ (language types / schema types / runtime invariants).
 3. **Candidate axis: dependent-dispatch capability.** Values: none / explicit-then (requires resolved value) / pipelined (method on unresolved) / pipelined+typed (method on unresolved, type-checked from schema). Distinct from the session-3 continuation-cardinality candidate. **Hold pending more dives** — especially React modern, where `use()` and `<Suspense>` have related but mechanically different "before-resolution" semantics.
 
 **Open questions raised:**
@@ -210,17 +210,17 @@ Surfaced 2026-05-19 during reflection on session 5 (Cap'n Proto / E pipelining).
 
 **The triangle these observations form:**
 
-| Pattern | Receiver existence-state | Binding | Firing | Dispatch locus |
-|---|---|---|---|---|
-| Smalltalk | exists now | late | one-shot | local |
-| E / Cap'n Proto pipelining | doesn't exist yet (future capability) | late, via schema/IDL | one-shot | remote-eager |
-| Reactive graphs (pulse, Solid, Incremental) | currently resolved value (re-resolved on input change) | early (typed field accessor) | continuous | local |
+| Pattern                                     | Receiver existence-state                               | Binding                      | Firing     | Dispatch locus |
+| ------------------------------------------- | ------------------------------------------------------ | ---------------------------- | ---------- | -------------- |
+| Smalltalk                                   | exists now                                             | late                         | one-shot   | local          |
+| E / Cap'n Proto pipelining                  | doesn't exist yet (future capability)                  | late, via schema/IDL         | one-shot   | remote-eager   |
+| Reactive graphs (pulse, Solid, Incremental) | currently resolved value (re-resolved on input change) | early (typed field accessor) | continuous | local          |
 
 All three are "operate on something via a message-shaped interface, where the runtime mediates what 'where to actually dispatch' means." Pipelining sits between Smalltalk and reactive graphs on the existence-status axis. Bonsai's `Effect.t` is the message-shaped-value variant at the action layer; effect-ts's `Effect<A, E, R>` is the same idea with a richer type signature.
 
 **Why this might be load-bearing for pulse:**
 
-- The triangle suggests `use(x).name` in pulse is already a message-send-on-resolved-receiver — it's the third corner. The Cap'n Proto / proxy-based pipelined accessor question from the session-5 dive ("could pulse adopt proxy-based pipelined accessors?") is asking whether pulse can also do the *middle* corner — message-send-on-not-yet-resolved-receiver.
+- The triangle suggests `use(x).name` in pulse is already a message-send-on-resolved-receiver — it's the third corner. The Cap'n Proto / proxy-based pipelined accessor question from the session-5 dive ("could pulse adopt proxy-based pipelined accessors?") is asking whether pulse can also do the _middle_ corner — message-send-on-not-yet-resolved-receiver.
 - If pulse ever has a sync-engine story, the dependency-graph-on-the-wire pattern is structurally identical to pulse's local reactive-graph pattern. The two layers (UI reactive graph + sync engine batched mutations) might compose more naturally if they share this framing rather than treating them as separate concerns.
 - The "firing cardinality" axis might be a genuine taxonomy axis hiding in plain sight: one-shot pipeline vs. continuous reactive vs. discrete-event-driven (Bonsai actions, Smalltalk events). It cuts across "where async state lives" and "reactive integration" cleanly.
 
@@ -231,7 +231,7 @@ All three are "operate on something via a message-shaped interface, where the ru
 - Re-visit after the **Replicache / sync-engine dive**. The dependency-graph-on-the-wire pattern is the testable claim here — if Replicache's mutation queues do structurally resemble pipelined dependent calls AND structurally resemble local reactive graphs, that's three datapoints for the same shape.
 - If still load-bearing after those two dives, consider extracting it into a CONCEPT dive (similar to `algebraic-effects.md`) with its own deep-dive document.
 
-**Risk to flag:** the "everything is a message-send" framing is famously *too unifying* — it dissolves real distinctions if used carelessly. The discipline check is "what does this framing predict that the alternatives don't?" If it predicts e.g. that proxy-based pipelined accessors would work as a pulse ergonomic upgrade, OR that sync-engines and reactive-graphs share an implementation strategy, those are testable. If it just feels elegant, it's a metaphor, not a structural insight.
+**Risk to flag:** the "everything is a message-send" framing is famously _too unifying_ — it dissolves real distinctions if used carelessly. The discipline check is "what does this framing predict that the alternatives don't?" If it predicts e.g. that proxy-based pipelined accessors would work as a pulse ergonomic upgrade, OR that sync-engines and reactive-graphs share an implementation strategy, those are testable. If it just feels elegant, it's a metaphor, not a structural insight.
 
 ---
 
@@ -253,21 +253,23 @@ All three are "operate on something via a message-shaped interface, where the ru
 
 1. **WIP-tree-as-primitive (open from session 1):** YES, it's a distinct axis. Recommended name: **"speculative-state isolation."** Values: none / per-action overlay (`useOptimistic`, Recoil) / per-transition tree (React WIP, Solid 2.x lanes, pulse `<Loading>` gather) / versioned everywhere (Postgres, Yjs). Cuts cleanly across the existing isolation-level and atomicity-granularity values. README's open-questions list updated to reflect resolution.
 2. **Dependent-dispatch capability axis (candidate from session 5):** React's `use(promise)` is **await-only** (re-execution after resolve, not eager-dispatch of dependent calls). React is the third datapoint; the axis distinction is real and architectural. Promote to confirmed axis after one more datapoint (likely Replicache/sync-engine dive).
-3. **Message-send triangle (cross-cutting thread):** React's `use(promise)` *appears* to sit at the middle corner ("operate on not-yet-here receiver") but mechanically sits at the third corner ("currently-resolved with re-execution"). The middle corner (Cap'n Proto / Agoric `E()` style pipelining) remains uninhabited by current JS frameworks. Triangle is strengthened, not weakened.
+3. **Message-send triangle (cross-cutting thread):** React's `use(promise)` _appears_ to sit at the middle corner ("operate on not-yet-here receiver") but mechanically sits at the third corner ("currently-resolved with re-execution"). The middle corner (Cap'n Proto / Agoric `E()` style pipelining) remains uninhabited by current JS frameworks. Triangle is strengthened, not weakened.
 
 **Sharpenings to other axes:**
 
 - **Conflict-handling policy:** "priority-pre-empt-with-restart" is a distinct value from STM-retry, MVCC-snapshot, or Bonsai-serial-dispatch. Currently the React cell describes the mechanism but doesn't pattern-match cleanly with other systems. Consider this as a confirmed value for the conflict axis.
-- **Cancellation discipline:** React has *two* cancellation strengths — structural via WIP discard for rendering, convention-only via `AbortController` for I/O effects. The current single-cell summary loses this distinction. Suggests the axis may need to track *layers* (rendering layer vs. I/O layer) per system.
+- **Cancellation discipline:** React has _two_ cancellation strengths — structural via WIP discard for rendering, convention-only via `AbortController` for I/O effects. The current single-cell summary loses this distinction. Suggests the axis may need to track _layers_ (rendering layer vs. I/O layer) per system.
 
 **Encoding gain/loss for pulse:**
 
 What pulse could learn from React modern:
+
 - **Lane-based pre-emption** as the answer to multi-transition coordination. Real machinery — 31 lanes, bitmask, IO vs CPU split. Heavy to implement but the cleanest answer in JS.
 - **`useOptimistic` convergence-in-same-render** as the answer to S7. Pulse's pipeline-OR `isPending` could support this with a small additional API.
 - **Actions as unifying abstraction** for state+pending+optimistic+form. Pulse currently makes users assemble this.
 
 What pulse would lose by adopting React's encoding:
+
 - **Re-execution** as suspension mechanism — pulse's `use(x).name` doesn't re-execute the whole component, only the dependent computed. Cheaper and more compositional.
 - **Behavioral discipline** rather than typed — effect-ts's compile-time enforcement is qualitatively stronger than React's runtime warnings.
 - **No first-class effect-as-value** — Server Actions are just async functions; nothing to pass around / compose / conditionally dispatch.
@@ -304,15 +306,15 @@ What pulse would lose by adopting React's encoding:
 
 **Comparison to React modern (session 6):**
 
-| | Solid 2.x | React modern |
-|---|---|---|
-| Lanes | per-write dynamic, union-find merge | 31 fixed bitmask priorities |
-| Conflict | merge-on-overlap (entanglement detection) | priority-pre-empt-with-restart |
-| Optimistic | `createOptimistic` + lane override with auto-revert | `useOptimistic` per-action overlay |
-| Atomicity | per-yield / per-transition / per-lane (3 layers) | per-WIP-tree-commit (1 layer) |
-| Multi-transition | independent lanes flush independently | currently batched (acknowledged limitation) |
-| Reveal-order | first-class `<Reveal>` primitive | implicit via Suspense nesting + useDeferredValue |
-| Type discipline | runtime only (`NotReadyError` throw bypasses types) | runtime only |
+|                  | Solid 2.x                                           | React modern                                     |
+| ---------------- | --------------------------------------------------- | ------------------------------------------------ |
+| Lanes            | per-write dynamic, union-find merge                 | 31 fixed bitmask priorities                      |
+| Conflict         | merge-on-overlap (entanglement detection)           | priority-pre-empt-with-restart                   |
+| Optimistic       | `createOptimistic` + lane override with auto-revert | `useOptimistic` per-action overlay               |
+| Atomicity        | per-yield / per-transition / per-lane (3 layers)    | per-WIP-tree-commit (1 layer)                    |
+| Multi-transition | independent lanes flush independently               | currently batched (acknowledged limitation)      |
+| Reveal-order     | first-class `<Reveal>` primitive                    | implicit via Suspense nesting + useDeferredValue |
+| Type discipline  | runtime only (`NotReadyError` throw bypasses types) | runtime only                                     |
 
 **Mechanically Solid 2.x is more advanced** in entanglement detection (automatic via overlap), multi-transition coordination (independent lanes), and reveal-ordering (first-class primitive). **React modern is more advanced** in WIP-tree-as-primitive (genuine speculative parallel tree) and ergonomic unification (Actions abstraction).
 
@@ -326,7 +328,7 @@ What pulse would lose by adopting React's encoding:
 
 **Open questions raised:**
 
-- Could pulse adopt `action(function*)` *without* lanes? The generator-as-transition-script is partially decoupled from lane machinery; pulse's gather-on-`<Loading>` could be the substrate. **Worth focused design exploration.**
+- Could pulse adopt `action(function*)` _without_ lanes? The generator-as-transition-script is partially decoupled from lane machinery; pulse's gather-on-`<Loading>` could be the substrate. **Worth focused design exploration.**
 - What's the runtime cost of per-write lane allocation at scale? WeakMap + Set per optimistic write; lane merging on every propagating write. Worth profiling before pulse adopts anything similar.
 - `<Reveal>`'s nested-composition pattern (inner registers as slot in outer) is a fractal-coordination shape that may generalize beyond reveal-ordering. Worth a separate sketch.
 
@@ -353,11 +355,11 @@ What pulse would lose by adopting React's encoding:
 **Key findings (refinements to the prior 🟡 row):**
 
 1. **"Last-write-wins (cache invalidation)" was a mischaracterization.** Corrected to **server-linearized re-execution of named mutators**. There is no LWW at the storage layer — the second execution of the mutator (under `reason: 'rebase'`) gets to do anything: no-op, validation reject, CRDT-like merge, override. The conflict-resolution policy lives in user-authored code, not the engine.
-2. **Pending mutations are NOT a separate queue.** They *are* the commit-suffix between the last server snapshot and the main head in the persistent B-tree DAG (`push.ts:120-127`). Push reads them via `localMutations(mainHeadHash, dagRead)`. This is mechanically very different from "a separate queue alongside cache" — the cache IS the queue.
-3. **Cancellation is lifecycle-scoped only.** One `AbortController` per Replicache instance (`replicache-impl.ts:326`) scoped to `close()`. **There is no per-mutation cancellation API.** This is a *design commitment* (mutations in a log can't be cancelled because the server may have already executed them), not a missing feature.
+2. **Pending mutations are NOT a separate queue.** They _are_ the commit-suffix between the last server snapshot and the main head in the persistent B-tree DAG (`push.ts:120-127`). Push reads them via `localMutations(mainHeadHash, dagRead)`. This is mechanically very different from "a separate queue alongside cache" — the cache IS the queue.
+3. **Cancellation is lifecycle-scoped only.** One `AbortController` per Replicache instance (`replicache-impl.ts:326`) scoped to `close()`. **There is no per-mutation cancellation API.** This is a _design commitment_ (mutations in a log can't be cancelled because the server may have already executed them), not a missing feature.
 4. **Mutation wire form is just `{id, name, args, timestamp, clientID}`** (`push.ts:36-42`). Mutator bodies are NOT shipped — only the (name, args) pair. The client and server hold separate implementations of the same name; this is convention, not engine-enforced.
 5. **`WriteTransaction.reason` is `'initial' | 'rebase' | 'authoriative'`** — a tiny but powerful primitive that lets one function distinguish first-run from replay without separating into two.
-6. **Mutation log fires the subscription graph TWICE** — once on optimistic commit (`replicache-impl.ts:1595`), once on rebase if patch+replay changes the result (`replicache-impl.ts:788`). The mutation isn't a node in the reactive graph; it's a *source of pulses* for it.
+6. **Mutation log fires the subscription graph TWICE** — once on optimistic commit (`replicache-impl.ts:1595`), once on rebase if patch+replay changes the result (`replicache-impl.ts:788`). The mutation isn't a node in the reactive graph; it's a _source of pulses_ for it.
 
 **Research-question answers (all four threads):**
 
@@ -365,13 +367,13 @@ What pulse would lose by adopting React's encoding:
 
 - **B. Message-send triangle:** Replicache **sits outside the triangle, not at any corner.** The "receiver-existence-state" axis isn't load-bearing here — durability + replay cardinality are. Proposed reframing: replace the triangle with a small grid (receiver-existence × execution-cardinality). The triangle was useful as a hypothesis; Replicache is the evidence that pushes us toward a richer structure.
 
-- **C. "Pipelining IS reactive graphs that fire once":** the framing **needs refinement, not just confirmation**. Mutation log and subscription graph are *different artifacts in one system*, related as **producer and consumer of pulses**. Not the same shape distinguished by firing cardinality — they're structurally different and complementary. The original framing was too unifying.
+- **C. "Pipelining IS reactive graphs that fire once":** the framing **needs refinement, not just confirmation**. Mutation log and subscription graph are _different artifacts in one system_, related as **producer and consumer of pulses**. Not the same shape distinguished by firing cardinality — they're structurally different and complementary. The original framing was too unifying.
 
 - **D. Speculative-state isolation axis:** Replicache provides a **new intermediate value** — "versioned engine, fixed-cardinality observable branches." The DAG would support arbitrary branches but the public API exposes only two (main, sync). Strictly stronger than "per-transition tree" (because branches are persistent and explicit) but weaker than "versioned everywhere" (because only two are observable). README open-questions entry updated to reflect five candidate values now spanning the axis.
 
 **Sharpenings to taxonomy axes:**
 
-1. **Dependent-dispatch capability:** now four distinct values — *await-only* / *await-only with generator batching* / *pipelined* / *named log sequenced by sender ID*. **Promote from candidate to confirmed on the next consolidation pass.**
+1. **Dependent-dispatch capability:** now four distinct values — _await-only_ / _await-only with generator batching_ / _pipelined_ / _named log sequenced by sender ID_. **Promote from candidate to confirmed on the next consolidation pass.**
 2. **Conflict-handling policy:** sharpened — Replicache's "server-linearized re-execution" is distinct from STM-retry, MVCC-snapshot, lane-merge, priority-pre-empt-with-restart. Adds a fifth value to the axis.
 3. **Speculative-state isolation:** "versioned engine, fixed-cardinality observable branches" added as fifth value. The axis now has five well-evidenced values; ready for taxonomy table promotion.
 4. **Async representation:** "named-callable abstraction with split client+server implementations" is distinct from typed-value, procedure, throw-protocol, pipelined-promise.
@@ -380,14 +382,14 @@ What pulse would lose by adopting React's encoding:
 
 - **The "register named function, send (name, args)" abstraction is genuinely simpler than typed RPC and gets replay for free.** Pulse's effect/action model could express durable retried work as "named handler + JSON args" without needing a structured Effect ADT — at the cost of losing type-level composition. Worth considering for the eventual sync-engine story.
 - **Snapshot isolation per transaction with a separate replay branch (named heads pattern)** is the cleanest model for "optimistic vs committed" any dive has surfaced. Pulse should consider whether its `<Loading>` gather could be reframed as an explicit named-head pattern.
-- **Read-set-tracked subscriptions over a key-value store** is a precedent for pulse's reactive integration when the underlying state is a cache. The crucial point: subscriptions track *what keys the body read*, not "what was returned."
+- **Read-set-tracked subscriptions over a key-value store** is a precedent for pulse's reactive integration when the underlying state is a cache. The crucial point: subscriptions track _what keys the body read_, not "what was returned."
 - **The `reason: 'initial' | 'rebase' | 'authoriative'` field** is a tiny powerful primitive — same function, three contexts. Pulse's transitions could carry an analogous tag.
-- **No per-operation cancellation is a *design commitment*, not a missing feature.** Pulse should explicitly decide: are pulse transitions cancellable once dispatched, or only retractable via compensating transitions? This is a strategic question Replicache forces clarity on.
+- **No per-operation cancellation is a _design commitment_, not a missing feature.** Pulse should explicitly decide: are pulse transitions cancellable once dispatched, or only retractable via compensating transitions? This is a strategic question Replicache forces clarity on.
 
 **Methodology notes:**
 
 - Parallel-passes-then-merge worked again, even better than session 7. The agent's source-reading caught the "pending mutations ARE the commit-suffix" insight that the docs alone don't surface; the main session's research-question prep was sharp enough that the merge was lighter than session 7 (mostly cross-references + thread updates).
-- The fresh agent flagged the legacy-repo trap *during* its source-reading (it noticed the 2022 stub and pivoted to the monorepo). That kind of provenance vigilance is exactly what the parallel-passes methodology is designed to catch — added to CONTEXT.md anti-patterns.
+- The fresh agent flagged the legacy-repo trap _during_ its source-reading (it noticed the 2022 stub and pivoted to the monorepo). That kind of provenance vigilance is exactly what the parallel-passes methodology is designed to catch — added to CONTEXT.md anti-patterns.
 
 ### Threads to pick from for session 9
 
@@ -462,7 +464,7 @@ What pulse would lose by adopting React's encoding:
    - **Trace-stability sensitivity** — which input-change classes does the system handle in sub-linear time? Predictive — tells you which workloads each system is bad at.
    - **Continuation semantics of reads** — does `read` capture a continuation, or pretend reads are pure value retrievals? Pulse's `read` brand checks are arguably an attempt to recover continuation-ness without using literal CPS.
    - **Memoisation depth** — three-way refinement (none / value / trace), already discussed above.
-   These join the now-confirmed axes #9 and #10 from session 9 as the next research thread. **Don't promote yet — wait for one or two more dives that exercise the distinctions.**
+     These join the now-confirmed axes #9 and #10 from session 9 as the next research thread. **Don't promote yet — wait for one or two more dives that exercise the distinctions.**
 
 5. **The SAC implementation lineage** is well-mapped: AFL/SLf (POPL 2002 SML library) → Delta ML (CPS-compiled) → CEAL (C-based) → Implicit SAC (type-directed translation) → Adapton (demand-driven). Jane Street's Incremental keeps the core (dynamic dep tracking, push-based propagation, height ordering) but de-emphasises the full trace-memoisation story.
 
@@ -497,13 +499,13 @@ What pulse would lose by adopting React's encoding:
 
 1. **Tasks-as-views is the headline mechanism.** Xilem's `task` and `worker` views ARE async tasks expressed as view-tree nodes. `ViewState = JoinHandle<()>`; `teardown` calls `.abort()`. **Cancellation is structural by view-tree shape — no user-held abort handle.** A future is owned by the view that mounted it; remove the view from the tree on the next rebuild, and the future is aborted at its next yield point. This is structurally novel in the research arc: most JS frameworks layer async separately on top of the reactive substrate; Xilem fuses async INTO the view tree by making tasks themselves first-class views.
 
-2. **The IC framing's actual payoff is *typed addresses*, not dataflow.** This is the most important conceptual finding of the session. Raph Levien's essay confirms IC inspiration explicitly: *"Xilem unapologetically contains at its core a lightweight change propagation engine."* But Linebender chose NOT to build on Adapton/Incremental as a substrate — the IC literature inspired the *framing*, not the substrate. What the IC literature DID give Xilem is the discipline of making every view node *addressable* (the `id-path: Arc<[ViewId]>`). And once you have address-by-id, async composes for free: a future just needs to hold the address. `MessageProxy<M>` = typed-message + id-path = "the waker IS the address." **This directly resolves the gap session 10's SAC dive flagged** ("classical SAC has no async story because node-as-thunk doesn't carry an address for wake-up"). The Linebender team arrived at this independently from the SAC literature, by engineering pressure — production-grade datapoint validating the theoretical finding.
+2. **The IC framing's actual payoff is _typed addresses_, not dataflow.** This is the most important conceptual finding of the session. Raph Levien's essay confirms IC inspiration explicitly: _"Xilem unapologetically contains at its core a lightweight change propagation engine."_ But Linebender chose NOT to build on Adapton/Incremental as a substrate — the IC literature inspired the _framing_, not the substrate. What the IC literature DID give Xilem is the discipline of making every view node _addressable_ (the `id-path: Arc<[ViewId]>`). And once you have address-by-id, async composes for free: a future just needs to hold the address. `MessageProxy<M>` = typed-message + id-path = "the waker IS the address." **This directly resolves the gap session 10's SAC dive flagged** ("classical SAC has no async story because node-as-thunk doesn't carry an address for wake-up"). The Linebender team arrived at this independently from the SAC literature, by engineering pressure — production-grade datapoint validating the theoretical finding.
 
-3. **No framework-level Suspense / Loading / transition / optimistic.** Xilem actively chose not to provide these primitives. Loading state is hand-written enum (`ImageState { NotRequested, Pending, Available(T) }`); rendering branches via `OneOf*` views. **The trade-off observation is cross-language design insight:** Rust's exhaustive pattern matching + type-checked enums make the manual approach *survivable*; in JS the same pattern would be too noisy. **The Loading-boundary primitive is more valuable in JS than in Rust** — a genuine design finding about language affordances changing what abstractions earn their complexity.
+3. **No framework-level Suspense / Loading / transition / optimistic.** Xilem actively chose not to provide these primitives. Loading state is hand-written enum (`ImageState { NotRequested, Pending, Available(T) }`); rendering branches via `OneOf*` views. **The trade-off observation is cross-language design insight:** Rust's exhaustive pattern matching + type-checked enums make the manual approach _survivable_; in JS the same pattern would be too noisy. **The Loading-boundary primitive is more valuable in JS than in Rust** — a genuine design finding about language affordances changing what abstractions earn their complexity.
 
 4. **Druid → Xilem progression maps a 4-axis sharpening.** Druid had `ExtEventSink` (Send queue + selector, no Future support, no cancellation, manual bool+Either for loading). Xilem typed the messages (`MessageProxy<M>` vs Druid's untyped commands), made tasks into views (vs Druid's free-running threads), gained structural cancellation (vs Druid's "no cancellation; submit_command silently drops if target gone"), and adopted id-path routing (vs Druid's selector + delegate routing).
 
-5. **`xilem_web::memoized_await` shows the generation-counter pattern for the no-abort case.** On wasm where `spawn_local` cannot be aborted, Xilem uses a `generation: u64` counter on data change; old-generation results arriving back are recognised at the receiver and discarded as `MessageResult::Stale`. This is the same shape as pulse's transitions and Solid 2.x's identity-based stale-discard — the *correct fallback when you can't physically cancel*.
+5. **`xilem_web::memoized_await` shows the generation-counter pattern for the no-abort case.** On wasm where `spawn_local` cannot be aborted, Xilem uses a `generation: u64` counter on data change; old-generation results arriving back are recognised at the receiver and discarded as `MessageResult::Stale`. This is the same shape as pulse's transitions and Solid 2.x's identity-based stale-discard — the _correct fallback when you can't physically cancel_.
 
 6. **The `fork` primitive** is a clean abstraction: `fork(visible_view, alongside_view)` mounts a non-rendering view (`Element = NoElement`) for its lifecycle, without contributing to the rendered output. Structurally analogous to React Portals but for invisible side-effect nodes. Pulse-equivalent role is played by effects-within-an-owner; the design dimension of "explicit vs implicit mounting of long-running tasks" is real.
 
@@ -526,7 +528,7 @@ What pulse would lose by adopting React's encoding:
 
 - [`bonsai-incremental.md`](./deep-dives/bonsai-incremental.md) (session 4) — both Bonsai and Xilem are IC-influenced, but they made opposite substrate choices: Bonsai uses Incremental (full IC engine); Xilem rejected Adapton/Incremental and uses typed virtual-DOM diff. Same theoretical inspiration; different production engineering.
 - [`self-adjusting-computation.md`](./deep-dives/self-adjusting-computation.md) (session 10) — Xilem's id-path-as-waker mechanism directly resolves the gap session 10 flagged ("classical SAC has no async story"). Validates session 10's theoretical claim with a production datapoint.
-- All JS framework dives — the cross-language design finding ("Loading primitive is more valuable in JS than in Rust") gives pulse's `<Loading>` boundary a *language-theoretic reason* to exist, not just a pragmatic one.
+- All JS framework dives — the cross-language design finding ("Loading primitive is more valuable in JS than in Rust") gives pulse's `<Loading>` boundary a _language-theoretic reason_ to exist, not just a pragmatic one.
 
 ### Threads to pick from for session 12
 
@@ -548,7 +550,7 @@ Surfaced 2026-05-19 during reflection on session 11 (Xilem) and the cross-cuttin
 
 **The four dimensions:**
 
-1. **Internal branching** — within a single transition, the speculative state is built from a *tree* of dependent async work (multiple parallel fetches, each producing its own dependent work). The framework must hold the in-flight tree coherently until all branches converge before committing.
+1. **Internal branching** — within a single transition, the speculative state is built from a _tree_ of dependent async work (multiple parallel fetches, each producing its own dependent work). The framework must hold the in-flight tree coherently until all branches converge before committing.
 
 2. **Concurrent branching** — multiple transitions in flight simultaneously, each speculating a different future. The framework must coordinate which speculation is "current" for rendering vs which is being prepared, and ideally let independent speculations make independent progress.
 
@@ -558,17 +560,17 @@ Surfaced 2026-05-19 during reflection on session 11 (Xilem) and the cross-cuttin
 
 **The mapping** (per framework studied so far):
 
-| Framework | Dim 1 (internal) | Dim 2 (concurrent) | Dim 3 (input) | Dim 4 (state-overlap) |
-|---|---|---|---|---|
-| **React modern** | WIP fiber + Suspense in scope | 31-lane bitmask; multi-low-priority currently batched (acknowledged limitation) | **strongest** — high-priority lanes pre-empt; cooperative 5ms yield | not handled (multi-transition batching conflates) |
-| **Solid 2.x** | `_asyncReporters` per-source tracking (sharper than React) | per-write `OptimisticLane`, independent flush (not batched) | identity-based stale-discard only; no priority pre-emption | **strongest** — union-find lane merge on dependency-graph overlap |
-| **pulse (current)** | per-`<Loading>` boundary gather (gather-on-commit) | no explicit machinery | no explicit machinery (transition snapshot but no priority) | no explicit machinery (pipeline-OR walks but doesn't detect entanglement) |
-| **Replicache** | n/a — sidestepped via server-linearized replay | n/a — same | n/a — same | n/a — same |
-| **Xilem** | n/a — no transitions at all | n/a | n/a | n/a |
+| Framework           | Dim 1 (internal)                                           | Dim 2 (concurrent)                                                              | Dim 3 (input)                                                       | Dim 4 (state-overlap)                                                     |
+| ------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------- | ------------------------------------------------------------------- | ------------------------------------------------------------------------- |
+| **React modern**    | WIP fiber + Suspense in scope                              | 31-lane bitmask; multi-low-priority currently batched (acknowledged limitation) | **strongest** — high-priority lanes pre-empt; cooperative 5ms yield | not handled (multi-transition batching conflates)                         |
+| **Solid 2.x**       | `_asyncReporters` per-source tracking (sharper than React) | per-write `OptimisticLane`, independent flush (not batched)                     | identity-based stale-discard only; no priority pre-emption          | **strongest** — union-find lane merge on dependency-graph overlap         |
+| **pulse (current)** | per-`<Loading>` boundary gather (gather-on-commit)         | no explicit machinery                                                           | no explicit machinery (transition snapshot but no priority)         | no explicit machinery (pipeline-OR walks but doesn't detect entanglement) |
+| **Replicache**      | n/a — sidestepped via server-linearized replay             | n/a — same                                                                      | n/a — same                                                          | n/a — same                                                                |
+| **Xilem**           | n/a — no transitions at all                                | n/a                                                                             | n/a                                                                 | n/a                                                                       |
 
 **Why this framing matters for the research arc:**
 
-- **It makes "transitions are hard" concrete.** Ordinary async/await is *linear* (single receiver, no concurrent intent, no state overlap). Transitions have to coordinate trees, concurrent speculations, input interrupts, and state-overlap merges — four distinct problems under one machinery. Pure async/await has none of them; pulse/Solid/React all have to solve them.
+- **It makes "transitions are hard" concrete.** Ordinary async/await is _linear_ (single receiver, no concurrent intent, no state overlap). Transitions have to coordinate trees, concurrent speculations, input interrupts, and state-overlap merges — four distinct problems under one machinery. Pure async/await has none of them; pulse/Solid/React all have to solve them.
 
 - **It explains why Replicache and Xilem look so much simpler.** Replicache sidesteps every dimension by server-linearizing — everything becomes a single ordered sequence of authoritative mutations. Xilem sidesteps by not speculating at all — Rust's `Drop` + exhaustive matching make the manual-enum path survivable. Both avoid the branching problem rather than solve it.
 
@@ -602,28 +604,28 @@ Surfaced 2026-05-19 during reflection on session 11 (Xilem) and the cross-cuttin
 
 **Key findings (real research, not just bookkeeping):**
 
-1. **The hypothesis was falsified.** Pre-launch we expected Svelte to "handle Dim 1 only and punt Dims 2/3/4." Source-reading falsified this: Svelte handles **Dim 1 (commit-together via `<svelte:boundary>` + `batch.#blocking_pending`)**, **Dim 2 (concurrent transitions via linked-list of `Batch` objects with `batch_values` time-travel snapshots)**, mostly punts **Dim 3 (no priority/lanes; only `OBSOLETE` per-derived + `STALE_REACTION` per-effect + explicit `fork()`)**, handles **Dim 4 (whole-batch merge when source-sets intersect; coarser than Solid's union-find lane merge but real machinery).** Svelte does NOT do "minimum transitional behavior" in the implementation sense — it does *concise user-facing API* over a *rich engine* (~800 lines of `batch.js`).
+1. **The hypothesis was falsified.** Pre-launch we expected Svelte to "handle Dim 1 only and punt Dims 2/3/4." Source-reading falsified this: Svelte handles **Dim 1 (commit-together via `<svelte:boundary>` + `batch.#blocking_pending`)**, **Dim 2 (concurrent transitions via linked-list of `Batch` objects with `batch_values` time-travel snapshots)**, mostly punts **Dim 3 (no priority/lanes; only `OBSOLETE` per-derived + `STALE_REACTION` per-effect + explicit `fork()`)**, handles **Dim 4 (whole-batch merge when source-sets intersect; coarser than Solid's union-find lane merge but real machinery).** Svelte does NOT do "minimum transitional behavior" in the implementation sense — it does _concise user-facing API_ over a _rich engine_ (~800 lines of `batch.js`).
 
 2. **Critical refinement to pulse's "minimum primitives" design philosophy** (responding to the conversation from session 11–12 where the user articulated "the only way for complexity to be possible is that it is composed from simple principles"): Svelte 5 is partial evidence both for and against. **For:** the user-facing API is genuinely minimal (3 primitives: `<svelte:boundary>`, `pending` snippet, `$effect.pending()` + optional `fork()`). **Against:** the engine that backs them is ~800 LOC of intricate batch coordination. **The minimum applies to user-facing API, not the engine.** If pulse wants `<Loading>` and `use()` as composable userland primitives, the framework must either (a) not support concurrent transitions, or (b) include enough engine surface to make multi-batch coordination expressible from userland. Svelte chose (b) but hid the engine. Pulse's philosophical position (expose primitives) needs to grapple with this — exposing the engine is a much bigger ask than exposing 3 simple primitives.
 
 3. **New axis value surfaced — "versioned engine, unbounded observable batches".** Svelte 5's linked-list of `Batch` objects (each with `batch_values` snapshot map + write-version per source) sits between Replicache's "fixed-cardinality observable branches" (only main+sync) and full MVCC. Multiple concurrent batches commit independently if non-overlapping; merge into the earlier one if they touch shared sources. `fork()` is a flagged subtype with deeper isolation. Added as the 7th value on speculative-state-isolation axis (#9).
 
-4. **`async_derived` returns `Promise<Source<V>>` — the async-derived value is a regular signal cell.** No user-visible `.loading` / `.pending` / `.error` surface on the derived itself. Loading state is *only* observable via `<svelte:boundary>` + `$effect.pending()`. **This is a deliberate design choice** — refuse to surface per-value loading state; force users through the boundary primitive for all loading UI. Materially different from Solid's `createResource` (which exposes `.loading` / `.latest`) and pulse's `isPending(() => x())` (which lets the user check at the read site).
+4. **`async_derived` returns `Promise<Source<V>>` — the async-derived value is a regular signal cell.** No user-visible `.loading` / `.pending` / `.error` surface on the derived itself. Loading state is _only_ observable via `<svelte:boundary>` + `$effect.pending()`. **This is a deliberate design choice** — refuse to surface per-value loading state; force users through the boundary primitive for all loading UI. Materially different from Solid's `createResource` (which exposes `.loading` / `.latest`) and pulse's `isPending(() => x())` (which lets the user check at the read site).
 
 5. **`OBSOLETE` / `STALE_REACTION` as a two-channel cancellation model.** Per-derived (re-run supersedes previous in-flight) vs per-effect (effect aborted). Composable pattern worth pulse considering as an explicit two-channel cancellation API.
 
-6. **Compiler transform `await a + b` → `(await $.save(a))() + b`** — this is how Svelte preserves dep-tracking across `await` points. The compiler captures `active_effect`, `active_reaction`, `component_context`, `current_batch` *before* the await and restores them on resume. Reads after the await still register as dependencies. Mechanically simpler than React's WIP-tree machinery for the same outcome (post-await reactivity).
+6. **Compiler transform `await a + b` → `(await $.save(a))() + b`** — this is how Svelte preserves dep-tracking across `await` points. The compiler captures `active_effect`, `active_reaction`, `component_context`, `current_batch` _before_ the await and restores them on resume. Reads after the await still register as dependencies. Mechanically simpler than React's WIP-tree machinery for the same outcome (post-await reactivity).
 
 7. **`{#await}` template blocks are anomalous** relative to the runes machinery; in-source comments hint they may be retired in favor of `<svelte:boundary>` + `pending` snippet. Worth tracking but not load-bearing.
 
-8. **`fork()` (since 5.42)** is Svelte's closest analog to React's `useTransition` — explicit user-controlled speculative batch. `is_fork = true` means `source.v` is *not* written; speculative state stays in the batch's `current` map until `.commit()` or `.discard()`. Documented use case: preload on hover, commit on click, discard on leave. **Explicit, not inferred.**
+8. **`fork()` (since 5.42)** is Svelte's closest analog to React's `useTransition` — explicit user-controlled speculative batch. `is_fork = true` means `source.v` is _not_ written; speculative state stays in the batch's `current` map until `.commit()` or `.discard()`. Documented use case: preload on hover, commit on click, discard on leave. **Explicit, not inferred.**
 
 9. **`await_waterfall` warning is unique.** Svelte warns when sequential `$derived(await …)` declarations could have been parallelized. No other framework studied has this. Worth pulse considering as a diagnostic.
 
 **Sharpenings to taxonomy and cross-cutting framings:**
 
 - **Speculative-state isolation:** 7th value added (Svelte's unbounded observable batches). Cleanly between Replicache's fixed-cardinality and full MVCC.
-- **Conflict-handling policy (#2):** Svelte adds *two distinct mechanisms* — per-derived OBSOLETE/STALE_REACTION two-channel cancellation, and per-batch whole-batch merge on source-set intersection. Mechanically distinct from Solid's union-find lane merge (per-write vs per-batch granularity).
+- **Conflict-handling policy (#2):** Svelte adds _two distinct mechanisms_ — per-derived OBSOLETE/STALE_REACTION two-channel cancellation, and per-batch whole-batch merge on source-set intersection. Mechanically distinct from Solid's union-find lane merge (per-write vs per-batch granularity).
 - **Four branching dimensions framing:** Svelte's "handles Dim 1+2+4, punts Dim 3" maps cleanly. The cross-cutting thread in this LOG should be updated to add Svelte's column to the comparison table.
 
 **Methodology lessons:**
@@ -663,17 +665,17 @@ Source: **Syntax.fm episode #943, "Modern React with Ricky Hanlon"** — `https:
 
 What Ricky said that's diagnostically relevant:
 
-- **Transitions vocabulary** — *"You can think of a transition as a UI transition. Fundamentally, it's kinda like you can think of it as a maybe a little bit like a transaction or like a background thread."* The transaction / background-thread vocabulary the React core team uses matches the framing this research arc settled on independently.
+- **Transitions vocabulary** — _"You can think of a transition as a UI transition. Fundamentally, it's kinda like you can think of it as a maybe a little bit like a transaction or like a background thread."_ The transaction / background-thread vocabulary the React core team uses matches the framing this research arc settled on independently.
 
-- **Acknowledged product-code complexity** — *"a lot of product code that's, like, needs to wire up the transitions correctly and use use Optimistic correctly and use all these, like, new hooks in the product code, and you gotta use it all correctly."* The React core team explicitly acknowledging that wiring the modern async APIs in product code is hard.
+- **Acknowledged product-code complexity** — _"a lot of product code that's, like, needs to wire up the transitions correctly and use use Optimistic correctly and use all these, like, new hooks in the product code, and you gotta use it all correctly."_ The React core team explicitly acknowledging that wiring the modern async APIs in product code is hard.
 
-- **`use(promise)` ergonomics are hard** — *"it's kinda hard today to to, like, fetch with use because you have to use this, like, cached promise thing."*
+- **`use(promise)` ergonomics are hard** — _"it's kinda hard today to to, like, fetch with use because you have to use this, like, cached promise thing."_
 
-- **Cache invalidation is the hardest part** — *"cache invalidation is harder. And creating a generic API that anybody could use, is, like, the hardest."*
+- **Cache invalidation is the hardest part** — _"cache invalidation is harder. And creating a generic API that anybody could use, is, like, the hardest."_
 
-- **Two specific mechanical details Ricky surfaced that the React-modern dive didn't capture from the docs alone:** (1) `useTransition`'s `isPending` flag is implemented internally as `useOptimistic` — *"the isPending flag in useTransition is implemented as useOptimistic"*; (2) Suspense fallbacks are throttled at ≥300ms to batch updates and reduce DOM layout thrashing. Both are below-the-API-surface implementation details that affect how React behaves in practice.
+- **Two specific mechanical details Ricky surfaced that the React-modern dive didn't capture from the docs alone:** (1) `useTransition`'s `isPending` flag is implemented internally as `useOptimistic` — _"the isPending flag in useTransition is implemented as useOptimistic"_; (2) Suspense fallbacks are throttled at ≥300ms to batch updates and reduce DOM layout thrashing. Both are below-the-API-surface implementation details that affect how React behaves in practice.
 
-- **The proposed escape route is library infrastructure, not API ergonomics.** Ricky's vision is that *product devs shouldn't be touching these APIs directly* — they get absorbed into routers, data-fetching libraries, and design-system components, which provide the experience "for free by default." A tacit admission that the ergonomics-by-direct-API bet didn't pay off; the answer is to add another abstraction layer on top.
+- **The proposed escape route is library infrastructure, not API ergonomics.** Ricky's vision is that _product devs shouldn't be touching these APIs directly_ — they get absorbed into routers, data-fetching libraries, and design-system components, which provide the experience "for free by default." A tacit admission that the ergonomics-by-direct-API bet didn't pay off; the answer is to add another abstraction layer on top.
 
 ### Inferred and session-bound: what this might mean for Solid 2.x and pulse
 
@@ -683,7 +685,7 @@ What IS observable from the Solid 2.x dive (and stays cited in that dive) is tha
 
 **The plausible-but-unverified interpretation:** Solid 2.x chose to make the higher-level abstraction the API itself, rather than expose React-style low-level primitives that product code composes. If Ryan was influenced by Ricky's framings, that direction reads as a response to React's "we built the engine; let library authors build the ergonomics" stance.
 
-**For pulse**, the comparable design question is whether to lean toward (a) React-style low-level primitives + library authors compose ergonomics, (b) Solid-2.x-style higher-level framework primitives, or (c) a third position the research arc hasn't yet identified. Conversation from session 11 articulated (a) as pulse's direction; conversation from session 12 (after the Svelte dive showed "minimum API + rich engine" is possible) refined that — *the minimum applies to user-facing API, not engine surface, and concurrent transitions are not free even with simple primitives.*
+**For pulse**, the comparable design question is whether to lean toward (a) React-style low-level primitives + library authors compose ergonomics, (b) Solid-2.x-style higher-level framework primitives, or (c) a third position the research arc hasn't yet identified. Conversation from session 11 articulated (a) as pulse's direction; conversation from session 12 (after the Svelte dive showed "minimum API + rich engine" is possible) refined that — _the minimum applies to user-facing API, not engine surface, and concurrent transitions are not free even with simple primitives._
 
 This is design context for pulse, not a property of React or Solid; that's why it lives in LOG rather than in either dive.
 
@@ -691,7 +693,7 @@ This is design context for pulse, not a property of React or Solid; that's why i
 
 ## Session 15 — 2026-05-21 — Solid 2.x empirical verification (transitions example port)
 
-*(Sessions 13–14 — 2026-05-19/20 — opened `pulse-design-direction.md` and ran the grilling pass that produced decisions D1–D3; both fed that doc directly and have no standalone LOG entries. This is the next logged activity.)*
+_(Sessions 13–14 — 2026-05-19/20 — opened `pulse-design-direction.md` and ran the grilling pass that produced decisions D1–D3; both fed that doc directly and have no standalone LOG entries. This is the next logged activity.)_
 
 - Ported the async-coordination failure-mode example to Solid 2.x as `examples/transitions-solid/` (`@solidjs/signals` 2.0.0-beta.9) and probed it at runtime via Playwright. The stated purpose was an exercise in understanding Solid's transitions; it doubled as a **runtime cross-check of the source-based Solid 2.x dive** (session 7, beta.13). The dive established the mechanism by reading source; this session established what the mechanism produces by observing it.
 

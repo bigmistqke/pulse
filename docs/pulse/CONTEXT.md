@@ -5,17 +5,18 @@ terms used across [`README.md`](./README.md), [`prior-art.md`](./prior-art.md),
 [`framings.md`](./framings.md), [`questions.md`](./questions.md),
 [`scenarios.md`](./scenarios.md), and [`scenario-traces.md`](./scenario-traces.md).
 
-This file covers terms whose meaning is *pulse-specific* — the engine and
+This file covers terms whose meaning is _pulse-specific_ — the engine and
 library primitives, the named patterns, the renamings pulse adopts.
 Cross-framework async-coordination vocabulary (transition, gather, the four
 dimensions, the four failure modes, encoding, transferable lesson) lives in
-[`../research/async/CONTEXT.md`](../research/async/CONTEXT.md) and is referenced
+[`../async/CONTEXT.md`](../async/CONTEXT.md) and is referenced
 from here rather than re-defined.
 
 **Companion documents:**
+
 - [`framings.md`](./framings.md) — where most of these terms are introduced and
   motivated. This lexicon is the index; framings is the argument.
-- [`../research/async/CONTEXT.md`](../research/async/CONTEXT.md) — the
+- [`../async/CONTEXT.md`](../async/CONTEXT.md) — the
   cross-framework lexicon pulse builds on.
 
 ## Contents
@@ -34,7 +35,7 @@ from here rather than re-defined.
 ## Speculation and its two faces
 
 - **Speculation.** Pulse's term for what the field (React / Solid / Svelte)
-  calls a *transition* — see [`../research/async/CONTEXT.md`](../research/async/CONTEXT.md)
+  calls a _transition_ — see [`../async/CONTEXT.md`](../async/CONTEXT.md)
   for the cross-framework definition. Pulse renames the concept to make the
   discard-on-failure case as legible as the commit-on-success case: a
   speculation either commits or is discarded; "transition" presupposes the
@@ -50,20 +51,20 @@ from here rather than re-defined.
 
 ## Engine primitives
 
-- **Node.** The graph identity. `Node<() => T | Promise<T>>` — a Node *is* an
+- **Node.** The graph identity. `Node<() => T | Promise<T>>` — a Node _is_ an
   identity in the dep graph wrapping a **recipe** (a callback that produces the
-  value). The value is not *in* the Node; it is what you get by handing the
+  value). The value is not _in_ the Node; it is what you get by handing the
   Node to a [walk](#walks). Signals and computeds are both Nodes; the difference
   is the recipe shape and the cache discipline.
 - **Recipe.** The callback attached to a Node that produces the Node's value.
   Plain function, generator, or stage-list. Re-runs when invalidated.
 - **Slot.** A per-(Node, scope) cache cell. Holds the cached value for that Node
-  *within that scope*. Multi-slot per Node is the engine-level fix for the
+  _within that scope_. Multi-slot per Node is the engine-level fix for the
   speculation cache asymmetry surfaced in
   [`framings.md`'s falsified hypotheses](./framings.md#speculation-purely-above-unmodified-r3-doesnt-work).
 - **Value-bag.** The per-scope collection of slots. Each scope owns a bag;
   walks consult the active scope's bag first.
-- **Edge.** A slot-local subscription. Carries a *selector* (a chain-matching
+- **Edge.** A slot-local subscription. Carries a _selector_ (a chain-matching
   predicate) so a single Node can fan out to consumers with different
   walk-policy needs. Edges are dynamic and walk-policy-driven; see
   [`framings.md`'s edges framing](./framings.md#edges-are-slot-local-dynamic-and-walk-policy-driven)
@@ -74,7 +75,7 @@ from here rather than re-defined.
 
 ## Walks
 
-A *walk* is a read primitive: a function that takes a Node and consults the
+A _walk_ is a read primitive: a function that takes a Node and consults the
 active scope's bag (and possibly the recipe) to produce a value. Walks are
 first-class — the library ships named walks as approachable DX over the engine.
 See [`framings.md`'s walks framing](./framings.md#walks-are-first-class).
@@ -103,8 +104,8 @@ See [`framings.md`'s walks framing](./framings.md#walks-are-first-class).
 
 ## Library patterns
 
-The library ships named patterns over the engine. All of them are *consumer
-patterns* over Nodes — the underlying abstraction is shared; the names exist
+The library ships named patterns over the engine. All of them are _consumer
+patterns_ over Nodes — the underlying abstraction is shared; the names exist
 for DX.
 
 - **`signal(value)`** — a Node whose recipe is "return the last written value."
@@ -116,7 +117,7 @@ for DX.
 - **`onCleanup(fn)`** — registers a teardown to run when the surrounding scope
   disposes or the consumer re-runs.
 
-The four constructs *signal / computed / effect / JSX-expression* are framed as
+The four constructs _signal / computed / effect / JSX-expression_ are framed as
 [the same primitive](./framings.md#signal--computed--effect--jsx-expression-are-all-the-same-primitive)
 distinguished only by where the consumer lives.
 
@@ -124,7 +125,7 @@ distinguished only by where the consumer lives.
 
 - **Scope.** The ambient context primitive. Carries the active value-bag, the
   active speculation (if any), and the owner relationship for cleanup. Pulse's
-  exploration unifies *scope* and *owner* (see
+  exploration unifies _scope_ and _owner_ (see
   [`questions.md`'s Q2](./questions.md#q2--scopeowner-unification)).
 - **Owner.** The cleanup-tree node. Under the unification, owner and scope
   share structure.
@@ -137,7 +138,7 @@ distinguished only by where the consumer lives.
 ## Stages and actions
 
 - **Stage.** One step of a computed's transform pipeline. A computed's recipe
-  is a list of stages; each stage's callback is plain *or* generator. The
+  is a list of stages; each stage's callback is plain _or_ generator. The
   generator form lets a stage `yield* get(asyncNode)` to park on async work and
   resume when it resolves. Per-stage memoization is load-bearing — see
   [`framings.md`'s stages section](./framings.md#computeds-are-stages-with-plain-or-generator-callbacks).
@@ -157,6 +158,6 @@ distinguished only by where the consumer lives.
   [Q3](./questions.md#q3--consumer-patterns) on the consumer abstraction,
   [Q4](./questions.md#q4--async-at-the-engine-level) on async at the engine
   level).
-- [`../research/async/CONTEXT.md`](../research/async/CONTEXT.md) — the
+- [`../async/CONTEXT.md`](../async/CONTEXT.md) — the
   cross-framework lexicon (transition, gather, four dimensions, four failure
   modes, research vocabulary).

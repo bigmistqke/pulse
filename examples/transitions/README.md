@@ -2,7 +2,7 @@
 
 An interactive example demonstrating async-transition behavior in pulse. Each
 tab is a small scenario built with **idiomatic pulse**; it shows pulse's
-*actual* behavior today. Each tab's Playwright spec asserts the *correct*
+_actual_ behavior today. Each tab's Playwright spec asserts the _correct_
 behavior — the spec is the oracle.
 
 ## The four failure modes
@@ -29,7 +29,7 @@ Scenarios that use pulse correctly. E1 and E4 are handled; E2 and E3 probe a gap
 - **E3 · optimistic clobbered** — an optimistic insert and committed truth share
   one signal cell, so a refetch overwrites the optimistic entry. Solvable today
   in userland — hold the overlay in its own signal and merge it with committed
-  truth via a `computed`; the gap is an *ergonomic* optimistic primitive, not a
+  truth via a `computed`; the gap is an _ergonomic_ optimistic primitive, not a
   missing capability. **Test red** (the naive single-cell version shown here).
 - **E4 · entanglement** — an action that embeds another value into its result
   reads that value at write time (after the await), not at capture time — so a
@@ -47,9 +47,9 @@ behavior is observable and reproducible.
 The red specs are a **living regression spec**. FM2 and E2 are genuine
 capability gaps — they turn green when pulse gains the corresponding transition
 machinery (per-instance hold-prior; a commit boundary that spans the whole
-transition, not a single `<Loading>`). E3 is an *ergonomic* gap — solvable in
+transition, not a single `<Loading>`). E3 is an _ergonomic_ gap — solvable in
 userland today, awaiting a first-class optimistic primitive. See
-`docs/research/async/pulse-design-direction.md` for the unbuilt transition
+`docs/async/pulse-design-direction.md` for the unbuilt transition
 surface these probe.
 
 ## Idiom note

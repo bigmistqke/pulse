@@ -7,12 +7,12 @@
 
 Extend the `examples/transitions` example with four **edge-case tabs** — scenarios
 where pulse's current async machinery genuinely falls short. The original four
-tabs (FM1–FM4) showed that pulse, used idiomatically, handles the *narrow*
+tabs (FM1–FM4) showed that pulse, used idiomatically, handles the _narrow_
 single-derivation versions of three of the four failure modes (FM1/FM3/FM4 green,
 FM2 red). That undersells the problem space: it leaves the impression pulse has
 few gaps. The edge-case tabs correct this by demonstrating the genuine
 limitations — the unbuilt transition surface described in
-[`docs/research/async/pulse-design-direction.md`](../../research/async/pulse-design-direction.md).
+[`docs/async/pulse-design-direction.md`](../../async/pulse-design-direction.md).
 
 Each edge-case tab uses pulse **correctly** (not naive throwaway code) and
 exercises a genuine limitation — it probes pulse's machinery, not our own mock or
@@ -113,18 +113,18 @@ async-computeds (header: one derivation; body: two). A single `navigate()`
 (alice → bob) drives async work in both boundaries. Header latency is set lower
 than body latency.
 
-Each boundary commits atomically *on its own* — FM1's guarantee holds inside
+Each boundary commits atomically _on its own_ — FM1's guarantee holds inside
 each — but the two boundaries commit **independently of each other**: the header
-flips to bob while the body still holds alice. The page is torn *across* the
+flips to bob while the body still holds alice. The page is torn _across_ the
 boundaries.
 
 - **Quality:** one logical change spanning multiple boundaries should commit as a
   whole — the header and body should never show different generations at once.
 - **Fails:** the spec runs `navigate()` and polls; the header boundary and body
   boundary show different generations during the window. The gather is
-  per-*boundary*, not per-*change* — pulse has no sibling-boundary coordination
+  per-_boundary_, not per-_change_ — pulse has no sibling-boundary coordination
   (the `<Reveal>` problem space). Contrasts FM1 (one boundary → atomic) with a
-  *correct-usage* scenario that still tears.
+  _correct-usage_ scenario that still tears.
 
 ### E3 — Optimistic value clobbered by refetch (`optimistic-clobbered.tsx`)
 
@@ -135,8 +135,8 @@ immediately, then awaits the server and replaces the optimistic entry with the
 saved one.
 
 The scenario runs `concurrent-flows.md` S7: the user adds a comment (the
-optimistic entry is now in `comments`), and *before the add's server response
-arrives* a refresh lands. The refresh's result is the canonical server list —
+optimistic entry is now in `comments`), and _before the add's server response
+arrives_ a refresh lands. The refresh's result is the canonical server list —
 which does not contain the not-yet-saved optimistic entry — so it overwrites
 `comments` and the optimistic comment **vanishes**, then reappears when the add's
 server response arrives. A visible flicker.
@@ -158,7 +158,7 @@ requires a scoped / overlay write, which pulse does not have.
 
 Two profile fields: a `displayName` signal and a `bio` signal. Two actions:
 
-- **Action A — "update bio":** reads `displayName` *now*, captures it, awaits a
+- **Action A — "update bio":** reads `displayName` _now_, captures it, awaits a
   server round-trip, then writes `bio` to a value derived from the captured name
   (e.g. `"bio for " + capturedName`).
 - **Action B — "rename":** awaits a server round-trip, then writes `displayName`
@@ -171,7 +171,7 @@ name. Final committed state: a new display name with a bio that references the
 previous one — incoherent.
 
 This is the genuine entanglement gap, and no functional updater fixes it: the
-staleness is baked into A's *captured async input*, not its write. The only
+staleness is baked into A's _captured async input_, not its write. The only
 remedies are entanglement (A re-runs, or blocks, when `displayName` — which it
 read — is changed by B) or conflict detection at commit. pulse has neither
 (Dim 4).
@@ -221,9 +221,9 @@ short — the unbuilt transition surface from `pulse-design-direction.md`.
 
 - [`docs/superpowers/specs/2026-05-20-transitions-example-design.md`](./2026-05-20-transitions-example-design.md)
   — the original four-tab example this extends.
-- [`docs/research/async/transitions-problem-space.md`](../../research/async/transitions-problem-space.md)
+- [`docs/async/transitions-problem-space.md`](../../async/transitions-problem-space.md)
   — the four failure modes.
-- [`docs/research/async/pulse-design-direction.md`](../../research/async/pulse-design-direction.md)
+- [`docs/async/pulse-design-direction.md`](../../async/pulse-design-direction.md)
   — the unbuilt transition surface the edge cases demonstrate.
 - [`docs/scenarios/concurrent-flows.md`](../../scenarios/concurrent-flows.md) —
   scenarios S7 (E3) and S5 (E4).

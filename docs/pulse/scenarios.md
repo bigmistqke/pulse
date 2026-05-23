@@ -2,11 +2,12 @@
 
 A map of architecturally-distinct cases the engine + speculation machinery
 needs to handle. **Each scenario is intended to become a test case (TDD).**
-The catalog deliberately favours *specificity over generalisation*: distinct
+The catalog deliberately favours _specificity over generalisation_: distinct
 cases stay distinct even when they look similar, because each will be its
 own test.
 
 **Companion documents:**
+
 - [README.md](./README.md) — framings, falsified hypotheses,
   engine/library sketches, open questions ([Q1](./questions.md#q1--fall-through-and-edge-policy) through [Q12](./questions.md#q12--body-cleanups-vs-scope-cleanups-composition-and-re-entrancy)), threads.
 - [scenario-traces.md](./scenario-traces.md) — end-to-end traces of the
@@ -17,23 +18,24 @@ own test.
 is open.
 
 **Tracing discipline.** When a scenario is traced, record both the
-decisions the trace exposed and *the alternatives that weren't taken* —
+decisions the trace exposed and _the alternatives that weren't taken_ —
 otherwise the first plausible trace becomes the route by default, which
 is exactly the premature commitment the explorative phase is meant to
 avoid.
 
 **Category organisation.** Categories A, C, D, E, F correspond directly
 to the four dimensions of speculation (see
-[`../research/async/CONTEXT.md`](../research/async/CONTEXT.md)):
+[`../async/CONTEXT.md`](../async/CONTEXT.md)):
 A = Dim 1 (internal structure); C = Dim 1 with async; D = Dim 2
 (concurrence); E = Dim 3 (supersession); F = Dim 4 (overlap). The
-remaining categories (B, G, H, I, J, K, L, M, R) are *cross-cutting
-concerns* that don't map to a single dimension — lifecycle, nesting,
+remaining categories (B, G, H, I, J, K, L, M, R) are _cross-cutting
+concerns_ that don't map to a single dimension — lifecycle, nesting,
 effects, JSX, edges, re-entrancy, boundary-bypass reads, resource
 ownership, scheduling.
 
 **Related pulse-repo docs:**
-- [`../research/async/CONTEXT.md`](../research/async/CONTEXT.md) — speculation lexicon, four dimensions, failure modes.
+
+- [`../async/CONTEXT.md`](../async/CONTEXT.md) — speculation lexicon, four dimensions, failure modes.
 
 ## Contents
 
@@ -42,10 +44,10 @@ ownership, scheduling.
 - [B. Lifecycle & cleanup](#b-lifecycle--cleanup)
 - [C. Async (Dim 1 with async — Q4 territory)](#c-async-dim-1-with-async--q4-territory)
 - [D. Concurrence (Dim 2 — disjoint state)](#d-concurrence-dim-2--disjoint-state)
-- [E. Supersession (Dim 3) — *policy question*](#e-supersession-dim-3--policy-question)
-- [F. Overlap (Dim 4 — entanglement) — *policy question*](#f-overlap-dim-4--entanglement--policy-question)
+- [E. Supersession (Dim 3) — _policy question_](#e-supersession-dim-3--policy-question)
+- [F. Overlap (Dim 4 — entanglement) — _policy question_](#f-overlap-dim-4--entanglement--policy-question)
 - [G. Nesting (scope hierarchy)](#g-nesting-scope-hierarchy)
-- [H. Effects under speculation — *Q3 open*](#h-effects-under-speculation--q3-open)
+- [H. Effects under speculation — _Q3 open_](#h-effects-under-speculation--q3-open)
 - [I. Component / JSX integration](#i-component--jsx-integration)
 - [J. Edge cases / pressure points](#j-edge-cases--pressure-points)
 - [K. Re-entrancy & write-during-recompute](#k-re-entrancy--write-during-recompute)
@@ -73,25 +75,25 @@ Each trace walks a scenario end-to-end through engine + library calls.
 ### A. Single speculation, sync (Dim 1 — internal structure)
 
 - **A1.** `setX` inside action, read `X` back inside the same action. Tests
-  whether a write sees itself on subsequent read inside the scope. *Expected:
-  yes — the slot at `S` is what reads see.*
+  whether a write sees itself on subsequent read inside the scope. _Expected:
+  yes — the slot at `S` is what reads see._
 - **A1b.** Same as A1 but interleaved with derived reads:
   `setX(1); get(f(X)); get(X); get(f(X)); setX(2); get(f(X))`. Tests
-  that all reads — primitive *and* derived — see fresh values in the same
+  that all reads — primitive _and_ derived — see fresh values in the same
   scope tick, not just the self-read. (A1 alone could "pass" on a
   single-slot bag without ever invalidating derivative caches.)
 - **A2.** ✓ `setX`, read derived `f(X)` — the `doubleName` case. Traced.
 - **A3.** Action writes multiple signals (`setX`, `setY`); read derived
   `f(X, Y)`. Tests whether multiple scope-tagged slots compose into one
-  derived under the same scope. *Expected: yes — recipe runs once, reads
+  derived under the same scope. _Expected: yes — recipe runs once, reads
   each under `S`. Conditional on [Q8](./questions.md#q8--tracker-vs-scope-separate-or-unified) (tracker-as-scope) and [Q1](./questions.md#q1--fall-through-and-edge-policy) selector
-  dedup behaving correctly under multi-source reads.*
+  dedup behaving correctly under multi-source reads._
 - **A3b.** Order-sensitive intermediate coherence:
   `setX(...); get(f(X, Y)); setY(...); get(f(X, Y))`. Tests whether the
   intermediate read sees `f(newX, oldY)` (Position C synchronous fires
   propagate dirty mid-action) or `f(oldX, oldY)` (Position B
   derived cache only invalidated at action end). Action-body analogue of
-  K1b. *Expected under (C): fresh on each read.*
+  K1b. _Expected under (C): fresh on each read._
 - **A4.** Action writes one signal; two distinct deriveds depend on it. Tests
   that both deriveds invalidate independently and re-read under `S`.
 - **A4b.** Sibling-derived coherence: after `setX`, read derived `d1`, then
@@ -99,12 +101,12 @@ Each trace walks a scenario end-to-end through engine + library calls.
   stale cache for `d2`? Probes whether mid-action recompute of one
   derived leaks staleness to its sibling. Cuts multiple ways depending
   on [Q1](./questions.md#q1--fall-through-and-edge-policy) selector dispatch ordering.
-- **A5a.** Functional setter: `setX(x => x + 1)` inside action. Tests *what
-  the setter callback's `x` parameter is*: committed value or speculative-
+- **A5a.** Functional setter: `setX(x => x + 1)` inside action. Tests _what
+  the setter callback's `x` parameter is_: committed value or speculative-
   slot value. Library-API design question.
 - **A5b.** Functional setter, write side: where does the setter's returned
   value land? Tests that the write goes to the speculative slot at `S`,
-  consistently with sync `setX(v)`. *Expected: yes.*
+  consistently with sync `setX(v)`. _Expected: yes._
 - **A5c.** Functional setter callback reading a downstream derived:
   `setX(x => { const d = get(f(X)); return d + 1 })`. Tests what the
   derived `f(X)` seen inside the callback reflects — the pre-setter
@@ -113,14 +115,14 @@ Each trace walks a scenario end-to-end through engine + library calls.
   computed recipe.
 - **A6a.** Conditional read in a recipe under `ROOT_SCOPE`: branches change
   on input. Tests dynamic deps (drop edge for not-taken branch, form edge
-  for taken). *r3 baseline; no new behavior.*
+  for taken). _r3 baseline; no new behavior._
 - **A6b.** Same conditional read, recipe invoked under a non-root scope
-  `S`. Tests dynamic deps *under scope*: scope-tagged edges drop / form as
+  `S`. Tests dynamic deps _under scope_: scope-tagged edges drop / form as
   branches change. This is where Model 2 is exercised; A6a is a smoke
   prerequisite.
 - **A6c.** Conditional read under `S` where the condition's input was just
   written, then the same conditional derived is read twice in succession.
-  Tests coherence of *graph shape changes mid-recompute*: does the second
+  Tests coherence of _graph shape changes mid-recompute_: does the second
   read see the new branch's value (fresh dep-graph + fresh cache) or a
   hybrid (new branch chosen but evaluated against stale upstream slot)?
 - **A7.** Action reads only — never writes. Tests whether slots get created
@@ -143,13 +145,13 @@ Each trace walks a scenario end-to-end through engine + library calls.
   a Promise. Tests: how does a derived `get(X)` see this? Walks decide.
 - **C1b.** After `setX(promise)`, in the same scope, read a derived `f(X)`
   whose recipe does `get(X).then(...)` or `yield* get(X)`. Tests: does
-  the derived's slot capture the *same Promise identity* the setter
+  the derived's slot capture the _same Promise identity_ the setter
   wrote, or a different one (e.g., re-wrapped)? Promise identity =
   supersession signal per main-doc D8.
 - **C2a.** Action body `yield* get(asyncSignal)` — body parks until promise
-  resolves *before any other event*. Tests: does the scope stay open across
+  resolves _before any other event_. Tests: does the scope stay open across
   the await? Does the ambient scope restore correctly on resume?
-- **C2b.** Same, but the awaited promise resolves *after* the action would
+- **C2b.** Same, but the awaited promise resolves _after_ the action would
   have committed had it been synchronous (i.e., the scope stays open across
   a long await). Tests: long-lived open scopes; resource holding.
 - **C2c.** Same, but a supersession (E1) arrives while the action body is
@@ -161,19 +163,19 @@ Each trace walks a scenario end-to-end through engine + library calls.
 - **C2e.** Post-yield derived read: action body does
   `yield* get(asyncSignal); const d = get(downstreamDerived)`. The
   derived's recipe reads `asyncSignal`. Tests: after resume, does the
-  derived see the *resolved* value of `asyncSignal`, or the still-
+  derived see the _resolved_ value of `asyncSignal`, or the still-
   Promise-cached value in `slot[S]`? Must the engine's slot-changed
   `'resolved'` event have fired (and been observed by the derived's
-  slot) *before* the body's resume runs? **Async analogue of K1b** —
+  slot) _before_ the body's resume runs? **Async analogue of K1b** —
   the canonical post-async-coherence probe. Cuts at least two ways
   depending on microtask ordering vs engine's synchronous `.then`
   handling.
-- **C2f.** Two sequential `yield* get`s of *different* async signals in
+- **C2f.** Two sequential `yield* get`s of _different_ async signals in
   the same body, with a downstream derived depending on both. Probe:
   between yields, does the derived see (resolved-A, pending-B)
   coherently? Probes per-step in-recipe coherence across multiple
   awaits.
-- **C3.** Async signal resolves *after* the action commits — what value lands
+- **C3.** Async signal resolves _after_ the action commits — what value lands
   in canonical? The action committed a Promise; resolution happens later
   under no scope. Library policy.
 - **C4.** Concurrent in-flight async + new action arrives. Tests:
@@ -188,20 +190,20 @@ Each trace walks a scenario end-to-end through engine + library calls.
   scope.
 - **D2.** Two actions, both read same signal but only one writes. Reader's
   edges register against the writing scope's chain; should fire correctly on
-  writer commit. *Conditional on commit-ordering open question (trace step 5
-  open question #1).*
+  writer commit. _Conditional on commit-ordering open question (trace step 5
+  open question #1)._
 - **D2b.** After writer commits, but inside reader's still-open scope,
   reader reads a derived that depends on the writer's signal. Probe: does
   the derived see the just-committed value (`ROOT_SCOPE` chain entry
   updated, reader's chain `[S_reader, ROOT]` walks to ROOT), or did the
   reader's scope already memoize a slot from before the commit?
-  Coherence across the chain when a *more-canonical* entry updates
+  Coherence across the chain when a _more-canonical_ entry updates
   underneath an open scope.
 - **D3.** Late subscriber: component mounts mid-action and reads under that
   action's scope. Edge formed with the right chain at subscription time.
   Should fall out of Model 2.
 
-### E. Supersession (Dim 3) — *policy question*
+### E. Supersession (Dim 3) — _policy question_
 
 - **E1a.** New action arrives while old in-flight; old structurally
   cancelled by closing its scope with `discard`. Tests: scope-discard
@@ -215,7 +217,7 @@ Each trace walks a scenario end-to-end through engine + library calls.
 - **E3.** Rapid sequence of supersessions (typing in an input). Scope churn
   doesn't leak; cleanups fire promptly. Pressure test.
 
-### F. Overlap (Dim 4 — entanglement) — *policy question*
+### F. Overlap (Dim 4 — entanglement) — _policy question_
 
 - **F1.** Two concurrent actions both write same signal. Which scope's slot
   is in play for which reader? Two scopes, two slots, no merge — pulse-
@@ -232,18 +234,18 @@ Each trace walks a scenario end-to-end through engine + library calls.
 
 - **G1.** Action inside an action. Inner scope is child of outer. Writes
   tagged with inner scope; reads inside inner walk chain `[inner, outer,
-  ROOT]`. Falls out of the chain framing.
+ROOT]`. Falls out of the chain framing.
 - **G1b.** Outer wrote `setX('outer')`; inner opens, writes
   `setX('inner')`. Inside inner, read `X` and derived `f(X)`. Then —
-  *hypothetical interleave* — control returns to outer mid-inner and
+  _hypothetical interleave_ — control returns to outer mid-inner and
   outer reads `X`. Does outer see `'outer'` (chain skips inner) or
   `'inner'` (chain inherits)? Whether this scenario is even reachable
   depends on whether actions can interleave; if not, mark as
   out-of-scope or conditional.
 - **G2.** Inner commits → its slots promote to outer's scope (not ROOT).
-  Outer commits → outer's slots promote to ROOT. Two-stage promotion. *Open:
+  Outer commits → outer's slots promote to ROOT. Two-stage promotion. _Open:
   does inner-commit promote to outer or directly to ROOT? Lean: to outer,
-  preserving nesting.* See F2 — same commit-promotion question at outer-most
+  preserving nesting._ See F2 — same commit-promotion question at outer-most
   depth.
 - **G3.** Inner commits; outer discards. Inner's promoted-to-outer slots get
   discarded with outer. Nesting respects parent lifecycle.
@@ -256,17 +258,17 @@ Each trace walks a scenario end-to-end through engine + library calls.
   half-cleaned `'inner'` cache? Coherence-of-discard probe for the
   outer body's subsequent reads.
 
-### H. Effects under speculation — *Q3 open*
+### H. Effects under speculation — _Q3 open_
 
 - **H1a.** Effect registered outside; speculative write happens inside an
-  action. Tests *during the action*: does the effect fire? *Lean: no
-  (defer-until-commit).*
-- **H1b.** Same setup; action commits. Tests *after commit*: does the
-  effect fire exactly once with the committed value? *Lean: yes.*
+  action. Tests _during the action_: does the effect fire? _Lean: no
+  (defer-until-commit)._
+- **H1b.** Same setup; action commits. Tests _after commit_: does the
+  effect fire exactly once with the committed value? _Lean: yes._
 - **H1c.** Same setup; action discards. Tests: effect never fired
-  (no speculative trigger leaked). *Lean: yes.* (H1a/b/c together
+  (no speculative trigger leaked). _Lean: yes._ (H1a/b/c together
   establish the defer-until-commit position from [Q3](./questions.md#q3--consumer-patterns).)
-- **H1d.** Effect body reads `get(X)` *and* `get(f(X))`. Action writes
+- **H1d.** Effect body reads `get(X)` _and_ `get(f(X))`. Action writes
   `setX(5)`, commits. Effect schedules and runs. Tests: does the effect
   see (X=5, f=10) coherently, or could it see (X=5, f=stale) because the
   derived's slot at `ROOT_SCOPE` wasn't invalidated in dep-order during
@@ -302,15 +304,15 @@ Each trace walks a scenario end-to-end through engine + library calls.
   which sees fresh. The two distinguish the **computed vs effect
   derivation** distinction (see the "Derivation kind matches reactivity
   scope" framing). User-ergonomic implication: effect-driven derivations
-  are *deferred*; use `computed` for synchronously-fresh derivations
+  are _deferred_; use `computed` for synchronously-fresh derivations
   inside actions.
 
 ### I. Component / JSX integration
 
 - **I1.** JSX expression `{get(name)}` rendered inside a component that's
-  *inside* an active action. JSX-binding consumer treated like Effect —
+  _inside_ an active action. JSX-binding consumer treated like Effect —
   re-renders on speculative writes? Defers to commit? [Q3](./questions.md#q3--consumer-patterns) territory.
-  *Downstream of H1a-c's resolution.*
+  _Downstream of H1a-c's resolution._
 - **I1b.** JSX expression `{get(f(X))}` where the component is
   mid-render at the moment of an action commit. Tests: does the
   resulting DOM reflect coherent (X, f(X)) values, or could it tear
@@ -331,12 +333,12 @@ Each trace walks a scenario end-to-end through engine + library calls.
   action's overlay. Falls out of selector design.
 - **J2.** `peek(node)` inside an action. Untracked read, same scope, no edge
   formed. Trivial.
-- **J3a.** `isPending(node)` — definition 1: returns true if *any* scope
+- **J3a.** `isPending(node)` — definition 1: returns true if _any_ scope
   has a slot for the node distinct from the canonical chain endpoint
   (i.e., "something is in flight somewhere").
-- **J3b.** `isPending(node)` — definition 2: returns true only if *the
-  current scope's slot* has a Promise-valued cache (i.e., "this node is
-  pending *for me*"). Distinct walk from J3a; the library should pick one
+- **J3b.** `isPending(node)` — definition 2: returns true only if _the
+  current scope's slot_ has a Promise-valued cache (i.e., "this node is
+  pending _for me_"). Distinct walk from J3a; the library should pick one
   (or expose both with different names). [Q4](./questions.md#q4--async-at-the-engine-level) adjacent.
 - **J4.** Action creates a new signal (`signal(initial)` called inside the
   action body). Does the new signal's "initial slot" tag with `ROOT_SCOPE`
@@ -355,17 +357,17 @@ Each trace walks a scenario end-to-end through engine + library calls.
 
 ### K. Re-entrancy & write-during-recompute
 
-- **K1a.** `setX` called from *inside* a computed's recipe body during
-  recompute, with *no follow-up read of a downstream derived*. Tests the
-  "is this permitted at all?" question. *Resolved: permitted (Position A
-  hard-ban is incompatible with effects).*
-- **K1b.** *Same as K1a, but the recipe reads a downstream derived after
-  the write.* E.g., `computed(() => { setName("name"); return
-  get(doubleName).capitalize() })`. Tests **in-recipe coherence**: does
-  the post-write read see the *fresh* derived value, or the stale
+- **K1a.** `setX` called from _inside_ a computed's recipe body during
+  recompute, with _no follow-up read of a downstream derived_. Tests the
+  "is this permitted at all?" question. _Resolved: permitted (Position A
+  hard-ban is incompatible with effects)._
+- **K1b.** _Same as K1a, but the recipe reads a downstream derived after
+  the write._ E.g., `computed(() => { setName("name"); return
+get(doubleName).capitalize() })`. Tests **in-recipe coherence**: does
+  the post-write read see the _fresh_ derived value, or the stale
   cached one? This is the case that exposes (B) deferred-fires vs (C)
-  synchronous-fires. *Resolved: (C) synchronous-fires gives fresh; (B)
-  gives stale.*
+  synchronous-fires. _Resolved: (C) synchronous-fires gives fresh; (B)
+  gives stale._
 - **K2.** `setX` called from inside `onCleanup` of a slot being dropped
   during commit (cleanup chain triggers further writes). Tests: re-entrant
   write during commit; commit-ordering subtlety (trace open question #1).
@@ -382,7 +384,7 @@ Each trace walks a scenario end-to-end through engine + library calls.
 - **K3.** Action body calls `setX` where `X` is updated by an effect that
   was itself triggered by that write (would-be cycle). Tests: cycle
   detection under scope; policy bans or runs.
-- **K3b.** *Conditional on K3 permitting the second write.* If the policy
+- **K3b.** _Conditional on K3 permitting the second write._ If the policy
   permits, does the effect body's read of a derived `f(X)` see fresh-
   fresh (both writes propagated), fresh-stale (first write's derived
   cached, second pending), or some other coherence break? May be moot
@@ -392,11 +394,11 @@ Each trace walks a scenario end-to-end through engine + library calls.
 
 - **L1.** `untrack(() => get(node))` inside an action body. Tests: read
   forms no tracking edge; do writes performed inside the `untrack` block
-  still tag with the action's scope? *Tracker and scope are decoupled per
+  still tag with the action's scope? _Tracker and scope are decoupled per
   [Q8](./questions.md#q8--tracker-vs-scope-separate-or-unified), so the answer is plausibly "yes for writes, no for tracking edges"
-  — but this is exactly the case where [Q8](./questions.md#q8--tracker-vs-scope-separate-or-unified) bites.*
-- **L2.** `latest(node)` inside an action that has *also written* to `node`.
-  Tests: does `latest` see the *pre-action* committed value, or the
+  — but this is exactly the case where [Q8](./questions.md#q8--tracker-vs-scope-separate-or-unified) bites._
+- **L2.** `latest(node)` inside an action that has _also written_ to `node`.
+  Tests: does `latest` see the _pre-action_ committed value, or the
   most-recently-promoted ancestor (which doesn't exist yet if the action
   hasn't committed)? Edge of selector design.
 - **L3.** `peek(node)` inside an action that has written to `node`. Tests:
@@ -423,9 +425,9 @@ Each trace walks a scenario end-to-end through engine + library calls.
   (`closeScope(S, 'commit', { schedule: 'raf' })`), a walk concern, or out
   of scope?
 - **R2.** Two speculations want to commit in the same frame: coalesce or
-  independent? Touches Dim 4 with a *timing* dimension that F2 lacks.
+  independent? Touches Dim 4 with a _timing_ dimension that F2 lacks.
 - **R2b.** Both speculations wrote `X`; both commit in the same frame.
-  What does a derived `f(X)` see *between* the two commit promotions if
+  What does a derived `f(X)` see _between_ the two commit promotions if
   the scheduler runs them sequentially? **Inter-commit-window
   coherence** probe. Cuts multiple ways depending on whether the
   scheduler emits invalidations per-commit or coalesces.
@@ -440,17 +442,17 @@ These shapes were considered and judged probably-out-of-scope for now, but
 named explicitly so the catalog isn't silent about them. Any of them may move
 into scope if a use-case pulls them in.
 
-- *N. Debugging / DevTools introspection.* Visiting every slot/edge for
+- _N. Debugging / DevTools introspection._ Visiting every slot/edge for
   inspection without forming subscriptions.
-- *O. Persistence / serialization.* Snapshotting committed state to
+- _O. Persistence / serialization._ Snapshotting committed state to
   IndexedDB; serialising slot recipes is non-trivial since they're code.
-- *P. SSR / hydration / streaming.* Resuming a Node's slot from server-
+- _P. SSR / hydration / streaming._ Resuming a Node's slot from server-
   serialised state without recomputing.
-- *Q. Cross-thread / cross-tab.* Worker postMessage, BroadcastChannel,
+- _Q. Cross-thread / cross-tab._ Worker postMessage, BroadcastChannel,
   storage events driving slot writes.
-- *S. Memory pressure / GC.* Steady-state cardinality of `node.slots`;
+- _S. Memory pressure / GC._ Steady-state cardinality of `node.slots`;
   per-tenant / per-route scopes never closing.
-- *T. Testing affordances.* Mocking a signal's `defaultRecipe` in a test;
+- _T. Testing affordances._ Mocking a signal's `defaultRecipe` in a test;
   "dry-run" actions that don't commit.
 
 If pulse ends up taking any of these on, this section is where they get
@@ -458,39 +460,39 @@ promoted to a real category.
 
 ### Architectural distribution
 
-- *A:* single-scope mechanics — most settled; A2 traced.
-- *B:* lifecycle — mostly settled by scope/owner framing.
-- *C:* async — biggest open area ([Q4](./questions.md#q4--async-at-the-engine-level)). *C2 specifically is the highest-
+- _A:_ single-scope mechanics — most settled; A2 traced.
+- _B:_ lifecycle — mostly settled by scope/owner framing.
+- _C:_ async — biggest open area ([Q4](./questions.md#q4--async-at-the-engine-level)). _C2 specifically is the highest-
   yield single trace: it pressures all four framings (Node-as-recipe,
   walks-first-class, slim-engine + thick-library, scope/owner unification)
-  simultaneously.*
-- *D:* concurrence — mechanically straightforward under Model 2.
-- *E:* supersession — mechanism settled; policy open.
-- *F:* overlap — policy is the question, not mechanism.
-- *G:* nesting — depends on commit-promotion semantics (same question as
+  simultaneously._
+- _D:_ concurrence — mechanically straightforward under Model 2.
+- _E:_ supersession — mechanism settled; policy open.
+- _F:_ overlap — policy is the question, not mechanism.
+- _G:_ nesting — depends on commit-promotion semantics (same question as
   F2 at a different depth).
-- *H:* effects — large open area, but the load-bearing question is really
-  [Q3](./questions.md#q3--consumer-patterns) (consumer pattern), which is *upstream* of much of C-engine, H, and
+- _H:_ effects — large open area, but the load-bearing question is really
+  [Q3](./questions.md#q3--consumer-patterns) (consumer pattern), which is _upstream_ of much of C-engine, H, and
   I. [Q3](./questions.md#q3--consumer-patterns)'s priority ≥ H's.
-- *I:* JSX/components — downstream of H/[Q3](./questions.md#q3--consumer-patterns).
-- *J:* edges — mostly mechanical verification.
-- *K:* re-entrancy — **pressures more framings simultaneously than any
+- _I:_ JSX/components — downstream of H/[Q3](./questions.md#q3--consumer-patterns).
+- _J:_ edges — mostly mechanical verification.
+- _K:_ re-entrancy — **pressures more framings simultaneously than any
   other category** (Node-as-recipe + walks + scope/owner + [Q1](./questions.md#q1--fall-through-and-edge-policy) + [Q8](./questions.md#q8--tracker-vs-scope-separate-or-unified) +
   commit-ordering). Missing from the initial priority ranking; should be
   high.
-- *L:* boundary-bypass — small, targeted, exposes [Q8](./questions.md#q8--tracker-vs-scope-separate-or-unified) concretely.
-- *M:* resource ownership across commit boundaries — the unstated half of
+- _L:_ boundary-bypass — small, targeted, exposes [Q8](./questions.md#q8--tracker-vs-scope-separate-or-unified) concretely.
+- _M:_ resource ownership across commit boundaries — the unstated half of
   B3; load-bearing for scope/owner unification.
-- *R:* scheduling — touches Dim 3 (priority) which the main doc punts;
+- _R:_ scheduling — touches Dim 3 (priority) which the main doc punts;
   pulse hasn't articulated against the framings.
 
 Categories where the architecture is most under-specified: **C (async)**,
-**H (effects)** *via Q3*, **G (nesting commit-promotion)**, and **K
+**H (effects)** _via Q3_, **G (nesting commit-promotion)**, and **K
 (re-entrancy)** — added after agent review. Categories where the mechanism
 is settled but a policy decision still needs to be made: **E (supersession)**,
 **F (overlap)**, **R (scheduling)**.
 
-*Priority for the next trace, ranked:* **(1) C2** — single trace, biggest
+_Priority for the next trace, ranked:_ **(1) C2** — single trace, biggest
 yield. **(2) Q3-via-H1a-c** — establishes the consumer pattern [Q3](./questions.md#q3--consumer-patterns), which
 is upstream of much else. **(3) K1** (setter mid-recompute) — pressures
 most framings simultaneously. **(4) G2** (inner-commit-to-outer-or-ROOT) —
@@ -499,4 +501,3 @@ across speculative effect runs) — where scope/owner unification either
 holds or breaks.
 
 ---
-

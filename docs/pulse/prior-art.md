@@ -16,8 +16,8 @@ recasting all live here; they're the empirical and conceptual ground that
 
 **Related pulse-repo docs:**
 
-- [`../research/async/CONTEXT.md`](../research/async/CONTEXT.md) — speculation lexicon, four dimensions, failure modes.
-- [`../research/async/deep-dives/solid-2x.md`](../research/async/deep-dives/solid-2x.md) — per-node multi-slot architecture reference.
+- [`../async/CONTEXT.md`](../async/CONTEXT.md) — speculation lexicon, four dimensions, failure modes.
+- [`../async/deep-dives/solid-2x.md`](../async/deep-dives/solid-2x.md) — per-node multi-slot architecture reference.
 
 ## Contents
 
@@ -40,7 +40,7 @@ concurrence (multiple alive, disjoint state), **Dim 3** supersession (newer
 invalidates older), **Dim 4** overlap/entanglement (multiple alive, shared
 state) — the non-trivial corners of `{one, many} × {disjoint, overlapping}
 × {concurrent, sequential}`. Canonical definitions in the lexicon
-[`../research/async/CONTEXT.md`](../research/async/CONTEXT.md). Production
+[`../async/CONTEXT.md`](../async/CONTEXT.md). Production
 frameworks differ in which dimensions they handle and how, AND in whether
 their user-facing API surface is minimal (Svelte) or proliferating (React).
 Pulse's articulated design philosophy is **user-visible primitives composed
