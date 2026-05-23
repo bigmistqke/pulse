@@ -2980,6 +2980,240 @@ microtask ordering of `.then` attaches.
 
 ---
 
+## End-to-end trace: H1d — effect-body coherence on commit
+
+Probes commit-promotion ordering through the effect's lens: when an effect's
+body reads both a primitive signal *and* a derived computed that depends on
+it, and an action commit promotes the primitive, does the effect's re-run see
+the (X, f(X)) pair coherently?
+
+### Setup
+
+```ts
+const [count, setCount] = signal(0)
+const doubled = computed(() => read(count) * 2)
+const observations: Array<{ c: number, d: number }> = []
+
+effect(() => {
+  const c = read(count)
+  const d = read(doubled)
+  observations.push({ c, d })
+})
+// Initial: observations = [{ c: 0, d: 0 }]
+
+action(function* () {
+  setCount(5)
+})
+// Expected: observations = [{ c: 0, d: 0 }, { c: 5, d: 10 }]
+```
+
+### Initial state (after effect registration)
+
+The effect's body ran once at registration, forming edges:
+
+```
+count.slots = { ROOT: { cached: 0, subs: [edge_C_D, edge_C_E] } }
+doubled.slots = { ROOT: { recipe: () => read(count)*2, cached: 0,
+                          deps: [edge_C_D], subs: [edge_D_E] } }
+effect.slots = { ROOT: { recipe: body, cached: undefined,
+                         deps: [edge_C_E, edge_D_E] } }
+
+edge_C_D = { source: count, selector: chainSelector([ROOT_SCOPE]), target: doubled.slot[ROOT] }
+edge_C_E = { source: count, selector: chainSelector([ROOT_SCOPE]), target: effect.slot[ROOT] }
+edge_D_E = { source: doubled, selector: chainSelector([ROOT_SCOPE]), target: effect.slot[ROOT] }
+
+observations = [{ c: 0, d: 0 }]
+```
+
+### Step 1: open scope
+
+`openScope()` → `S = { parent: ROOT_SCOPE, cleanups: [], status: 'open' }`.
+
+### Step 2: `setCount(5)` inside the action
+
+- `getCurrentScope()` → `S`. `writeSlot(count, S, { recipe: () => 5, cached:
+  5, wasWritten: true, deps: [], subs: [] })`.
+- Engine walks `count`'s outgoing edges with `(count.slots, S)`:
+  - `edge_C_D.selector` = `chainSelector([ROOT_SCOPE])`. `chain.indexOf(S) =
+    -1`. **Don't fire.**
+  - `edge_C_E.selector` = same. **Don't fire.**
+- Set `count.slots[S] = newSlot`.
+
+**State after Step 2:**
+```
+count.slots = { ROOT: cached 0, S: cached 5 (wasWritten) }
+doubled.slots[ROOT] unchanged (cached 0)
+effect.slots[ROOT] unchanged
+observations still [{ c: 0, d: 0 }]
+```
+
+Committed state untouched per H1a-c (the chain doesn't include `S`).
+
+### Step 3: action returns. `closeScope(S, 'commit')`
+
+Per Q-J, open a deferred-fires region (for consumer-side scheduling
+deduplication). Per Q-I, promote only write-populated `S` slots:
+`count.slots[S]` is wasWritten.
+
+**`writeSlot(count, ROOT_SCOPE, { recipe: () => 5, cached: 5, wasWritten:
+true })`:**
+
+- Engine walks `count`'s outgoing edges with `(count.slots, ROOT_SCOPE)`:
+  - `edge_C_D`: `chainSelector([ROOT_SCOPE])`. writeScope=ROOT, writeIdx=0,
+    no more-specific. **Fire.** Mark `doubled.slot[ROOT]` dirty (clear
+    cached). Doubled's consumer-pattern (Computed-cache-propagate)
+    cascades dirty to subs:
+    - `doubled.slot[ROOT].subs = [edge_D_E]`. Mark `effect.slot[ROOT]`
+      dirty. Effect's consumer (scheduler) wants to
+      `scheduleMicrotask(runBody)` — but we're in a deferred-fires region.
+      The scheduler queues the schedule-intent.
+  - `edge_C_E`: same chain. **Fire.** Mark `effect.slot[ROOT]` dirty
+    (already dirty — no-op). Scheduler attempts schedule again →
+    deduplicated by Q-J.
+
+**Drop `count.slots[S]`:** walk `slot.subs` (none). Delete.
+
+**Close deferred-fires region:** drain. Effect's `runBody` is scheduled
+**once** (microtask).
+
+`S.status = 'committed'`. Pop ambient.
+
+**State after Step 3:**
+```
+count.slots = { ROOT: cached 5 (wasWritten) }
+doubled.slots = { ROOT: dirty, cached cleared, deps: [edge_C_D] }
+effect.slots = { ROOT: dirty, deps: [edge_C_E, edge_D_E] }
+microtask queue: [runBody]
+observations still [{ c: 0, d: 0 }]
+```
+
+All invalidations are now in place. The effect hasn't actually run yet —
+microtasks fire after the current sync task (the commit's synchronous
+portion) completes.
+
+### Step 4: microtask runs `runBody`
+
+- Guard: `effect.disposed === false`. Proceed.
+- Fire previous bodyCleanups (none in this trace).
+- Unlink stale deps: `effect.slot[ROOT].deps = [edge_C_E, edge_D_E]`.
+  Unlink each — remove from `count.slots[ROOT].subs` and from
+  `doubled.slots[ROOT].subs`. Set `deps = []`.
+- Push tracker = `effect.slot[ROOT]`. Push scope = `ROOT_SCOPE`.
+- Invoke body:
+  - `read(count)`:
+    - `link(count, chainSelector([ROOT_SCOPE]), effect.slot[ROOT])` →
+      `edge_C_E'` (fresh identity).
+    - `invoke(count, ROOT_SCOPE)`: cached 5. Return.
+  - `c = 5`.
+  - `read(doubled)`:
+    - `link(doubled, chainSelector([ROOT_SCOPE]), effect.slot[ROOT])` →
+      `edge_D_E'`.
+    - `invoke(doubled, ROOT_SCOPE)`: **slot is dirty**. Recompute.
+      - Push tracker = `doubled.slot[ROOT]`. Push scope. Unlink doubled's
+        stale deps. Run recipe.
+      - Recipe: `read(count) * 2`. Inside: `link(count, …, doubled.slot[ROOT])`
+        → `edge_C_D'`. `invoke(count, ROOT)` → 5. Return.
+      - Recipe returns `5 * 2 = 10`. Cache `doubled.slot[ROOT].cached = 10`.
+        Pop tracker.
+    - Return 10.
+  - `d = 10`.
+  - `observations.push({ c: 5, d: 10 })`.
+- Pop tracker, pop scope.
+
+**Final state:**
+```
+count.slots = { ROOT: cached 5, subs: [edge_C_D', edge_C_E'] }
+doubled.slots = { ROOT: cached 10, deps: [edge_C_D'], subs: [edge_D_E'] }
+effect.slots = { ROOT: deps: [edge_C_E', edge_D_E'] }
+observations = [{ c: 0, d: 0 }, { c: 5, d: 10 }]   ✓ coherent
+```
+
+The effect's re-run saw `c = 5` and `d = 10` — both reflecting the
+committed state. **Coherent.**
+
+### Why coherence is automatic here
+
+The audit framed H1d as "could the effect see (X=5, f=stale) because the
+derived's slot at ROOT_SCOPE wasn't invalidated in dep-order during commit
+promotion?" The trace shows: **the architecture makes this impossible by
+two compounding mechanisms:**
+
+1. *Cascading invalidation is synchronous.* When `count → doubled` fires,
+   doubled's slot is marked dirty *immediately*. Doubled's consumer
+   pattern (Computed-cache) walks doubled's subs and propagates dirty
+   transitively (also synchronously). By the time `closeScope` returns,
+   every consumer downstream of count has been marked dirty.
+2. *Consumer re-runs are microtask-scheduled (per H1a-c).* The effect's
+   `runBody` doesn't fire until the next microtask, *after* the
+   synchronous commit completes. By that time, all dirty flags are set;
+   any read inside the body invalidates against the dirty flag and
+   recomputes (per Position C from K1+K1b — synchronous reads pick up
+   dirty state).
+
+So the effect body, when it runs, sees both:
+- `count.slot[ROOT].cached = 5` (set during commit).
+- `doubled.slot[ROOT]` dirty → recomputes → 10 (recipe reads the
+  committed count).
+
+**Q-J's commit-region deduplication** is what makes this *efficient*
+(one re-run instead of N for an effect that depends on N commit-promoted
+signals) — but the coherence itself doesn't depend on Q-J. Even with N
+re-runs, each one sees coherent state because all invalidations land
+before the first microtask.
+
+### Architecture exposed
+
+H1d traced cleanly with no new design calls. The trace validates that:
+
+1. **Position C (synchronous fires) + microtask-scheduled consumers =
+   automatic post-commit coherence.** No clever ordering needed at the
+   commit-fire level for effect-body correctness.
+2. **Computed-cache propagation is synchronous and transitive.** Marking
+   doubled dirty cascades to effect through `subs` walking. Standard
+   reactive bookkeeping.
+3. **Q-J's deduplication is an efficiency win, not a correctness
+   requirement.** Even without dedup, repeated re-runs see coherent
+   state.
+4. **The doubleName trace open question #1 (commit ordering) is
+   non-load-bearing for consumer correctness.** Ordering matters for
+   selector-check correctness at writeSlot time (the original concern in
+   doubleName), but post-commit consumer reads are always coherent
+   because invalidations are synchronous and consumers are async-
+   scheduled.
+5. **Q-I (read-vs-write slots) is load-bearing.** `count.slot[S]` is
+   `wasWritten = true` → promotes. The slots in `doubled` and `effect`
+   for `S` (if any had been created via the effect being read inside the
+   action) wouldn't promote because they'd be read-populated. In this
+   trace no such slots were created — the effect runs at `ROOT_SCOPE`
+   and was never invoked under `S`.
+
+### Sub-questions surfaced (small)
+
+- *Multi-write commits with overlapping consumers.* If the action wrote
+  to N signals all depending on the same effect, Q-J's dedupe ensures
+  one re-run. But this trace only had one write. Worth a follow-up
+  trace if pulse ever finds itself debugging "why does my effect run 5
+  times after a commit." Probably absorbed into Q-J's existing scope.
+- *What if `doubled`'s recipe were async?* Then the recompute inside
+  `invoke(doubled, ROOT)` would yield a park command. The effect body's
+  `read(doubled)` would return a Promise; the effect would have to
+  `yield* read(doubled)` instead. Crosses into H5 + C2e territory; not
+  a new issue.
+
+### Framings status after H1d
+
+All four framings still hold. Position C from K1+K1b is reconfirmed at
+the commit-fire level. Q-J's deferred-fires region works as designed for
+deduplication. The "Derivation kind matches reactivity scope" framing is
+implicit here — `doubled` is a Computed (synchronously fresh on read);
+if it had been an effect-driven signal (H5), the trace would have
+returned stale.
+
+**No falsifications. No new design calls.** H1d is a clean validation
+trace.
+
+---
+
 ## Open questions (the actual mapping work)
 
 Each is open. The goal is to *map the question space* before committing to any
