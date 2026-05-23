@@ -316,6 +316,197 @@ read(name)         // "bar" — committed unchanged outside the scope
 
 ---
 
+## End-to-end trace: `doubleName` under scope `S`
+
+A worked trace verifying that **multi-slot + Model 2 (selector-on-edge)**
+handles the case the [falsified hypothesis](#speculation-purely-above-unmodified-r3-doesnt-work)
+broke on. Walks every engine call and every state change.
+
+### Setup
+
+```ts
+const [name, setName] = signal("foo")
+const doubleName = computed(() => read(name) + read(name))
+```
+
+- `signal("foo")` → library calls `createNode<string>(() => "foo")` → engine
+  creates Node `name`. Returns `[name, setName]` where
+  `setName = (v) => writeSlot(name, getCurrentScope(), { recipe: () => v, deps: [], subs: [] })`.
+- `computed(fn)` → library calls `createNode<string>(fn)` → engine creates
+  Node `doubleName`. Returns the Node.
+
+**State.** Both Nodes have empty `slots`. No edges. No reads have happened yet.
+
+### Step 1: `read(doubleName)` outside any action
+
+- Library: `getCurrentScope()` → `ROOT_SCOPE` (library default). `currentTracker`
+  is null. `invoke(doubleName, ROOT_SCOPE)`.
+- Engine: `doubleName.slots.get(ROOT_SCOPE)` → miss. Create slot `slot_DN_R`,
+  push `currentTracker = slot_DN_R`, invoke `defaultRecipe`.
+  - Recipe body: `read(name) + read(name)`.
+  - First `read(name)`: library `link(name, chainSelector([ROOT_SCOPE]), slot_DN_R)`
+    → engine creates `edge1`. Then `invoke(name, ROOT_SCOPE)` → miss, create
+    `slot_N_R` with recipe `() => "foo"`, cache `"foo"`, return.
+  - Second `read(name)`: cached hit, returns `"foo"`. `link` dedupes.
+  - Body returns `"foofoo"`. Cache. Pop currentTracker.
+- Returns `"foofoo"`. ✓
+
+**State after Step 1:**
+```
+name.slots       = { ROOT_SCOPE: cached "foo",     subs: [edge1] }
+doubleName.slots = { ROOT_SCOPE: cached "foofoo",  deps: [edge1] }
+edge1 = { source: name, selector: chainSelector([ROOT_SCOPE]), target: doubleName.slots[ROOT_SCOPE] }
+```
+
+### Step 2: `action(function* () { … })` opens scope `S`
+
+Library `openScope()` → engine creates `S = { parent: ROOT_SCOPE, cleanups: [],
+status: 'open' }`. Ambient scope is now `S`.
+
+### Step 3: `setName("name")` inside the action
+
+- Library: `getCurrentScope()` → `S`. Calls
+  `writeSlot(name, S, { recipe: () => "name", … })`.
+- Engine: walk `name`'s outgoing edges with selectors:
+  - `edge1.sourceSelector(name.slots, S)`: `chainSelector([ROOT_SCOPE])` →
+    `S` not in chain → **don't fire.** ✓ Committed state untouched.
+- Set `name.slots[S]` = the new slot.
+
+**The falsified case.** Under unmodified r3, `setName` would have walked
+`name.subs` and fired the only edge → invalidating `doubleName`'s committed
+cache → corrupting committed state. Under multi-slot + selectors: the edge
+correctly stays inert; committed state preserved.
+
+### Step 4: `read(doubleName)` inside the action
+
+- Library: `getCurrentScope()` → `S`. `currentTracker` null (action-body reads
+  are imperative — see [open question](#open-questions-from-the-trace) below).
+  `invoke(doubleName, S)`.
+- Engine: `doubleName.slots.get(S)` → miss. Create `slot_DN_S`, push
+  `currentTracker = slot_DN_S`, invoke `defaultRecipe`.
+  - Recipe body: `read(name) + read(name)`.
+  - First `read(name)`: library
+    `link(name, chainSelector([S, ROOT_SCOPE]), slot_DN_S)` →
+    engine creates `edge2`. Then `invoke(name, S)` → `name.slots[S]` hit,
+    return `"name"`.
+  - Second `read(name)`: cached hit, returns `"name"`. `link` dedupes.
+  - Body returns `"namename"`. Cache. Pop.
+- Returns `"namename"`. ✓
+
+**State after Step 4:**
+```
+name.slots = {
+  ROOT_SCOPE: cached "foo",  subs: [edge1],
+  S:          cached "name", subs: [edge2],
+}
+doubleName.slots = {
+  ROOT_SCOPE: cached "foofoo",   deps: [edge1],
+  S:          cached "namename", deps: [edge2],
+}
+edge1 = { ..., chainSelector([ROOT_SCOPE]),    → doubleName.slots[ROOT_SCOPE] }
+edge2 = { ..., chainSelector([S, ROOT_SCOPE]), → doubleName.slots[S] }
+```
+
+### Step 5a: action returns → `closeScope(S, 'commit')`
+
+Commit semantics: for each Node with a slot tagged `S`, **promote that slot to
+`ROOT_SCOPE`** (move its `recipe` + `cached`), then drop the `S` slot.
+
+Sketched order: dep-order, leaves-first. Gather `[(name, S), (doubleName, S)]`.
+`name` first; `doubleName` after.
+
+**Promote `name`:** `writeSlot(name, ROOT_SCOPE, { recipe: () => "name",
+cached: "name", … })`.
+- Engine fires:
+  - `edge1`: `chainSelector([ROOT_SCOPE])`, writeScope=ROOT_SCOPE, writeIdx=0 →
+    **fire.** Invalidate `doubleName.slots[ROOT_SCOPE]`.
+  - `edge2`: `chainSelector([S, ROOT_SCOPE])`, writeScope=ROOT_SCOPE,
+    writeIdx=1. More-specific check: `name.slots.has(S)`? At this moment yes
+    (we haven't dropped it) → **don't fire.** ✓
+
+**Drop `name.slots[S]`:** walk `slot_N_S.subs = [edge2]`; unlink `edge2` from
+`name`'s outgoing index and from `slot_DN_S.deps`. Delete the slot.
+
+**Promote `doubleName`:** `writeSlot(doubleName, ROOT_SCOPE, { recipe:
+defaultRecipe, cached: "namename", deps: [], … })`. Engine fires
+`doubleName`'s outgoing edges (none here). The invalidation from `edge1` is
+overwritten by this write — final cached value `"namename"`. ✓
+
+**Drop `doubleName.slots[S]`:** `subs` empty; delete.
+
+**Close scope:** `S.status = 'committed'`. Cleanups don't fire on commit
+(library convention).
+
+**State after Step 5a:**
+```
+name.slots       = { ROOT_SCOPE: cached "name" }
+doubleName.slots = { ROOT_SCOPE: cached "namename" }
+edge1 unchanged. edge2 unlinked.
+```
+
+`read(doubleName)` after commit: cached `"namename"`. ✓
+
+### Step 5b: action throws → `closeScope(S, 'discard')`
+
+Alternative: action body throws.
+- Engine: drop every `S`-tagged slot. Walk each dropped slot's `subs`, unlink
+  edges. Fire cleanups registered against `S` (none in this trace; would be
+  `onCleanup(…)` calls from the action body, e.g. AbortController.abort()).
+- Engine: `S.status = 'discarded'`.
+
+**State after Step 5b:** identical to State after Step 1 (committed state never
+observed the speculation). ✓
+
+`read(doubleName)` after discard: cached `"foofoo"`. ✓
+
+### Open questions from the trace
+
+The architecture works for this case, but the trace exposed several
+under-specified edges. Listed in roughly load-bearing order:
+
+1. **Commit ordering matters.** Promoting `name` before `doubleName` works
+   because `edge2`'s selector correctly doesn't fire while `name.slots[S]`
+   still exists. Other orders (or dropping `S` slots before writing
+   `ROOT_SCOPE`) can fire selectors wrongly. The library's commit logic needs
+   a defined order (likely dep-order leaves-first).
+2. **What `cached` does a promoted slot carry?** Three options: (a) preserve
+   cached + carry over deps (but old deps had chain-S selectors); (b) preserve
+   cached + drop deps (next recompute rebuilds); (c) drop cached + force
+   recompute. Lean (b); related to Q-G.
+3. **Action body reads: do they track?** The trace assumed `currentTracker =
+   null` for top-level reads inside an action body (imperative, not
+   declarative — the action body doesn't re-run on dep change). Probably
+   correct but worth being explicit. Related to Q-B (scope/owner) and Q-H
+   (tracker/scope).
+4. **Edge index location.** The trace shows edges in `slot.subs` for clarity,
+   but in practice the engine probably maintains a per-Node outgoing-edges
+   index (selectors do per-slot dispatch at fire time). Per-slot `subs` arrays
+   are useful for cleanup-on-slot-drop, but the firing path likely iterates
+   per-Node. Fold into Q-A.
+5. **Selector dedup.** `link(name, chainSelector([S, ROOT_SCOPE]), tgt)` is
+   called twice in the recipe; the second should be a no-op. Selector identity
+   matters — naive `chainSelector([S, ROOT_SCOPE])` returns a fresh function
+   each time. Library-side memoisation of selectors by chain content handles
+   it. Fold into Q-A.
+6. **Late subscribers / new edges mid-action.** The trace didn't exercise a
+   subscriber arriving mid-action and reading under `S` (e.g., a component
+   mounting inside an action). Model 2 should handle it (new edges form with
+   the right chain at subscription time), but worth a separate trace.
+7. **Async (Q-D) untouched.** All reads in this trace were sync. The async
+   case — `name`'s recipe returns a `Promise<T>`, or the action body awaits —
+   needs its own trace.
+8. **Dangling-ref window during commit ordering.** When `edge2` is unlinked
+   from `name`'s outgoing index, `slot_DN_S.deps` still briefly references it
+   from the target side. By Step 5a's end, the edge is fully unlinked, but
+   the ordering needs verification.
+
+Verification summary: **the falsified hypothesis is genuinely fixed** by
+multi-slot + Model 2 selectors. The trace exposed eight follow-up sub-
+questions, none of which gate the architecture — they're next-level
+resolution.
+
+---
+
 ## Open questions (the actual mapping work)
 
 Each is open. The goal is to *map the question space* before committing to any
