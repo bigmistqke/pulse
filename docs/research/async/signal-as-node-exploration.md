@@ -507,6 +507,416 @@ resolution.
 
 ---
 
+## End-to-end trace: C2 — action body with async read
+
+A worked trace through the four C2 sub-scenarios (await-and-resume, long-lived
+scope, supersession-during-await, writes-during-await). C2 was identified as
+the highest-yield single trace because it pressures all four framings
+(Node-as-recipe, walks-first-class, slim-engine + thick-library, scope/owner
+unification) and several open questions (Q-A, Q-B, Q-D, Q-H) simultaneously.
+
+### Setup
+
+```ts
+let resolveUser: (v: string) => void
+const userPromise = new Promise<string>(r => { resolveUser = r })
+
+const [user, setUser] = signal<string | Promise<string>>(userPromise)
+// user.defaultRecipe = () => userPromise (Promise, pending)
+```
+
+The signal's recipe returns a `Promise<string>`. Reading the signal yields the
+Promise; resolving requires either awaiting or using a walk that suspends.
+
+**State after setup:**
+```
+user = { slots: {}, defaultRecipe: () => userPromise }
+userPromise: pending
+edges = []
+```
+
+### Walks involved
+
+Two library primitives are exercised in C2:
+
+- **`read(node)`** (the basic walk): returns whatever the recipe returns —
+  `T` or `Promise<T>`. Forms a tracking edge if called inside a recompute
+  context. Doesn't suspend; the caller chooses how to handle Promises.
+- **`yield* read(node)`** (the generator-form walk): inside a generator
+  (compute body or action body), `yield* read(node)` either returns
+  immediately with `T` (sync case) or yields a `park` command (async case)
+  that the calling driver dispatches on.
+
+The action body runs as a generator; it can `yield* read(...)` to park.
+Sketched walk implementation:
+
+```ts
+function* read<T>(node: Node<T>): Generator<ParkCommand, T, T> {
+  const scope = getCurrentScope()
+  if (currentTracker) link(node, chainSelector(chainFor(scope)), currentTracker)
+  const result = invoke(node, scope) as T | Promise<T>
+  if (result instanceof Promise) {
+    const resolved = yield { kind: 'park', promise: result } as ParkCommand
+    return resolved
+  }
+  return result
+}
+```
+
+And the action driver:
+
+```ts
+function driveAction(scope: Scope, gen: Generator) {
+  const step = (value: unknown) => {
+    if (scope.status !== 'open') return     // discarded mid-await; bail
+    pushScope(scope)
+    try {
+      const { done, value: cmd } = gen.next(value)
+      if (done)                  closeScope(scope, 'commit')
+      else if (cmd.kind==='park') cmd.promise.then(step, stepThrow)
+      // else: other command kinds
+    } catch (e) {
+      closeScope(scope, 'discard'); throw e
+    } finally { popScope() }
+  }
+  const stepThrow = (err: unknown) => { /* analogous, gen.throw */ }
+  step(undefined)
+}
+```
+
+Three things to notice in `driveAction`: **(1)** every `gen.next` is bracketed
+by `pushScope` / `popScope` — that's how ambient scope restores across awaits.
+**(2)** the `scope.status !== 'open'` check on resume — if the scope was
+discarded mid-await, the resume callback bails. **(3)** the driver is library
+code; engine knows nothing about generators or park commands.
+
+### C2a: simple await-and-resume
+
+```ts
+action(function* () {
+  const name = yield* read(user)       // parks until userPromise resolves
+  setUser(Promise.resolve(name + "!"))
+})
+// later: resolveUser("alice")
+```
+
+**Step 1: open scope.** `action(body)` → `openScope()` → engine creates
+`S = { parent: ROOT_SCOPE, cleanups: [], status: 'open' }`. Library pushes `S`
+as ambient. Library calls `driveAction(S, gen)`.
+
+**Step 2: first `gen.next(undefined)`.** Generator runs until first yield.
+- Body calls `yield* read(user)`. The `read` sub-generator runs:
+  - `getCurrentScope()` → `S`. `currentTracker` → null (action-body reads
+    aren't tracked — see H1a-c discussion). No `link()` call.
+  - `invoke(user, S)`:
+    - Engine: `user.slots.get(S)` miss. Create `slot_U_S = { recipe:
+      defaultRecipe, deps: [], subs: [] }`. Push `currentTracker = slot_U_S`.
+      Invoke recipe → `userPromise`. `slot_U_S.cached = userPromise`. Pop
+      tracker. Set `user.slots[S] = slot_U_S`. Return `userPromise`.
+  - `read` sees Promise → yields `{ kind: 'park', promise: userPromise }`.
+- `yield*` propagates the park command up to the action body's iterator. The
+  body's `gen.next(undefined)` returns `{ done: false, value: { kind: 'park',
+  promise: userPromise } }`.
+- Driver: `cmd.kind === 'park'` → attach `userPromise.then(step, stepThrow)`.
+- Driver: `popScope()` runs (finally block). Ambient back to `ROOT_SCOPE`.
+- Driver returns. Synchronous portion of action handler is done.
+
+**State after Step 2:**
+```
+user.slots = { S: { recipe: defaultRecipe, cached: userPromise, deps: [], subs: [] } }
+S.status = 'open'
+userPromise: pending (driver awaits)
+edges = []                              // no edges formed — action body doesn't track
+```
+
+Notice: no edges. The action body's reads don't register tracking edges
+because the body isn't going to re-run on dep change.
+
+**Step 3: time passes; `resolveUser("alice")` is called.**
+
+`userPromise` resolves to `"alice"`. The `.then` callback fires (microtask).
+- Driver `step("alice")` runs.
+- Check `scope.status === 'open'` → yes. `pushScope(S)`. Ambient back to `S`.
+- Call `gen.next("alice")`. The `yield*` machinery resumes the `read`
+  sub-generator with `"alice"`. `read` returns `"alice"`. `yield*` resumes
+  the action body with `"alice"`. `name = "alice"`.
+
+**Optional engine optimisation:** when `userPromise` resolves, the engine
+*could* attach its own `.then` to update `slot_U_S.cached` from `userPromise`
+to `"alice"`, and fire a synthetic "slot changed" event so downstream
+consumers notice. This is open (Q-D): does the engine eagerly update slot
+caches on Promise resolution, or does it leave `cached: Promise<T>` forever
+and walks unwrap on read? *Lean: engine eagerly updates, because Q-C's
+consumer pattern needs slot-changed events to fire when async deps resolve.*
+
+**Step 4: body continues — `setUser(Promise.resolve("alice!"))`.**
+
+- Library: `setUser` (closed-over setter) runs. `getCurrentScope()` → `S`.
+- Library: `writeSlot(user, S, { recipe: () => Promise.resolve("alice!"),
+  deps: [], subs: [] })`.
+- Engine: walk `user`'s outgoing edges with `(user.slots, S)`. None. Set
+  `user.slots[S]` = new slot. Compute `cached = recipe() = Promise<"alice!">`.
+  Engine attaches `.then` to resolve `cached` to `"alice!"` in a microtask.
+
+**State after Step 4 (before microtask):**
+```
+user.slots = { S: { recipe: () => Promise.resolve("alice!"),
+                    cached: Promise<"alice!">, deps: [], subs: [] } }
+```
+
+**Step 5: generator returns; action commits.**
+
+- Body's `gen.next(...)` (the one from step 3) continues past `setUser` and
+  reaches the end. Returns `{ done: true }`.
+- Driver: `done` → `closeScope(S, 'commit')`.
+- Library promotes `user.slots[S]` to `user.slots[ROOT_SCOPE]`. Engine:
+  `writeSlot(user, ROOT_SCOPE, { recipe: () => Promise.resolve("alice!"),
+  cached: Promise<"alice!"> })`. Walk `user`'s outgoing edges (none in this
+  trace). Drop `user.slots[S]`.
+- `S.status = 'committed'`. Pop ambient back to `ROOT_SCOPE`. Driver returns.
+
+**State after Step 5:**
+```
+user.slots = { ROOT_SCOPE: { recipe: () => Promise.resolve("alice!"),
+                              cached: Promise<"alice!"> } }
+// next microtask: cached resolves to "alice!"
+S.status = 'committed'
+ambient = ROOT_SCOPE
+```
+
+Subsequent `read(user)` returns `Promise.resolve("alice!")` (or `"alice!"` if
+the cache has settled). ✓
+
+### Architecture exposed by C2a
+
+C2a tested cleanly. The decisions it forced into the open:
+
+1. **Async-honest walks.** `read(node)` returns `T | Promise<T>`. The walk
+   doesn't hide the Promise; the caller chooses how to handle it. P2 holds.
+2. **Park commands separate walk intent from action machinery.** `yield*
+   read(node)` yields a `park` command; the action driver decides what to do
+   with it (`.then` here; could be `requestAnimationFrame` for an `raf`
+   command; library convention, not engine concern). Slim engine + thick
+   library (the third framing) holds.
+3. **Ambient scope restoration is mechanical.** The driver's
+   `pushScope(S)` / `popScope()` around every `gen.next` is what makes the
+   scope persist across awaits. Without this, `setUser` after the await
+   would write to `ROOT_SCOPE` instead of `S`. Q-H (tracker vs scope):
+   the *scope* persists across awaits via push/pop; the *tracker* doesn't
+   (the action body has no tracker at all). They're separate.
+4. **Action-body reads don't track.** No edges formed during the trace.
+   Confirms the assumption from doubleName trace's open question #3 and
+   from H1's premise (action bodies are one-shot).
+5. **The driver's discard-guard on resume.** `if (scope.status !== 'open')
+   return` is what makes C2c safe — see below. Q2 (cancellation) interacts
+   with Q-D (async) through this guard.
+6. **Engine choice: update cache on Promise resolve, or not.** Open (Q-D);
+   the lean is yes (so Q-C consumer-pattern fires correctly when async deps
+   resolve). Doesn't affect C2a's correctness either way.
+7. **Promise identity as supersession signal.** D8 in the main doc notes
+   *"a new Promise is minted per dependency change, so unwrap keyed on
+   promise identity doubles as the supersession signal."* The trace
+   reaches this: the driver attached `.then` to a *specific*
+   `userPromise`; if the slot's `cached` later changes to a different
+   Promise, the original `.then` is stale. The discard-guard catches it.
+
+### C2b: long-lived open scope
+
+Same code as C2a, but `resolveUser` is called minutes later (or never). The
+trace is structurally identical to C2a — the scope `S` simply stays `open`
+for the duration. Slot `user.slots[S]` stays cached as `userPromise`. The
+driver holds its `.then` indefinitely.
+
+What's new:
+
+- **Resource accumulation.** `S` holds `cleanups`, accumulates further
+  writes from the action body if any happen pre-await. The slot at `user.S`
+  pins the original `userPromise`.
+- **External cancellation matters more.** A long-lived action without
+  cancellation is a leak. Practical actions that might wait long need
+  `onCleanup(() => abortController.abort())` so they can be discarded.
+- **No new mechanism.** Same path as C2a; correctness doesn't depend on
+  await duration.
+
+### C2c: supersession during await
+
+```ts
+const handle = action(function* () {
+  yield* read(user)
+  setUser(...)
+})
+// later, while handle is parked:
+handle.discard()                // or: another action arrives and supersedes
+// even later: resolveUser("alice") still fires
+```
+
+**Step C2c-1: `handle.discard()` while parked.**
+- Library: `closeScope(S, 'discard')`.
+- Engine: drop slots tagged `S`. Walk `slot_U_S.subs` (empty); delete
+  `user.slots[S]`. (Any edges with `S` in target's chain would also unlink,
+  but there are none in this trace.)
+- Engine: fire `S.cleanups` (e.g., `abortController.abort()` if the action
+  body had registered one — none in this trace).
+- `S.status = 'discarded'`. Ambient stays at whatever it was (not pushed
+  because `discard()` was called from outside any scope context).
+
+**State after Step C2c-1:**
+```
+user.slots = {}                          // S slot dropped
+S.status = 'discarded'
+userPromise: still pending (no one called resolveUser yet)
+```
+
+**Step C2c-2: `resolveUser("alice")` fires later.**
+- `userPromise.then(...)` callback fires. Driver `step("alice")` runs.
+- **Guard fires:** `scope.status !== 'open'` (it's `'discarded'`) → driver
+  returns without calling `gen.next`. ✓
+- Generator is garbage-collected when references drop. Done.
+
+What this trace exposes:
+
+- **The discard-guard pattern is load-bearing.** Without it, a discarded
+  scope's resume would call `gen.next` and potentially execute body code
+  (including writes!) under a closed scope. Library convention required.
+- **Cancellation discipline is library code over scope + cleanups.** The
+  AbortController pattern composes with `onCleanup`; the engine doesn't
+  need a separate cancellation primitive. Q2 (cancellation) ≈ scope-discard
+  + `onCleanup`. Confirms the working hypothesis from Q-B.
+- **Promise still resolves but nothing happens.** The original `.then`
+  fires but the guard absorbs it. Resource cleanup: the underlying
+  fetch/timer would already have been aborted by `S.cleanups`; the
+  `.then` callback firing is harmless.
+- **Memory: the discarded scope can be GC'd once the .then is consumed.**
+  If a discard happens but `userPromise` *never* resolves, the `.then`
+  holds a reference to the driver, which holds the generator, which holds
+  closures. Detail-level open question; pulse may need WeakRef gymnastics
+  here.
+
+### C2d: writes during the await window
+
+```ts
+action(function* () {
+  const name = yield* read(user)              // parks
+  console.log(name)
+})
+// while parked:
+setUser(Promise.resolve("bob"))               // write from outside the action
+// then:
+resolveUser("alice")                          // original promise resolves
+```
+
+The interesting subtlety: while the action is parked, *someone else* writes
+to `user` (in `ROOT_SCOPE` here, since the outside write has no ambient
+scope). What does the action body see when it resumes?
+
+**Step C2d-1: action parks at `yield* read(user)`.** Same as C2a Steps 1-2.
+After: `user.slots[S]` cached as `userPromise`; driver awaits.
+
+**Step C2d-2: outside `setUser(Promise.resolve("bob"))`.**
+- `getCurrentScope()` → `ROOT_SCOPE` (no action active outside).
+- `writeSlot(user, ROOT_SCOPE, { recipe: () => Promise.resolve("bob"),
+  cached: Promise<"bob"> })`.
+- Engine: walk `user`'s outgoing edges. None. Set `user.slots[ROOT_SCOPE]`.
+
+**State after C2d-2:**
+```
+user.slots = {
+  ROOT_SCOPE: { cached: Promise<"bob">, ... },        // new
+  S:          { cached: userPromise (pending), ... }, // existing
+}
+```
+
+**Step C2d-3: `resolveUser("alice")` resolves the original promise.**
+- The driver's `.then("alice")` callback fires.
+- Guard: `S.status === 'open'` → continue. `pushScope(S)`.
+- `gen.next("alice")` resumes the body. `name = "alice"`. `console.log("alice")`.
+- Body returns. `closeScope(S, 'commit')`.
+- But: `S` has nothing to promote (no scope-tagged writes happened). Engine
+  walks `S.slots` (the engine's slot index, not really shown — but
+  conceptually, `S` may track which Nodes have S-tagged slots). Promotes
+  `user.slots[S]` to `ROOT_SCOPE`? **This is the wrinkle.**
+
+The wrinkle: `user.slots[S]` was created by the *read* (lazily populating
+the cache for the scope-S read), not by a *write*. Is it "the action's
+write" that gets promoted on commit, or "every slot tagged S regardless of
+how it got there"?
+
+Two positions:
+
+- **(α) Promote every S-tagged slot.** Then committing this action *overwrites*
+  the outside `setUser("bob")` because `user.slots[S]` (containing the
+  original pending promise) is promoted to `ROOT_SCOPE`, clobbering
+  `Promise<"bob">`. Wrong.
+- **(β) Promote only slots that were *written* under S (not just read-populated).**
+  The engine tags slots as `wasWritten: boolean` to distinguish. Commit
+  promotes only `wasWritten` slots. Then the outside `setUser("bob")` wins;
+  the action's `user.slots[S]` (which was read-populated, never written)
+  drops without promotion. The action saw `"alice"` (the original promise
+  resolved), but committed nothing about `user`.
+
+Position (β) is clearly correct, but it requires the engine to distinguish
+read-populated vs write-populated slots.
+
+This is a **major surfaced design decision**. Adding to open questions.
+
+What C2d exposes:
+
+- **Read-populated slots aren't the same as write-populated slots.** Both
+  end up in `node.slots[scope]`, but their commit semantics differ. Need
+  a `wasWritten` flag or equivalent on `Slot`.
+- **Read-skew is real.** The action body saw `"alice"` because it read
+  before the outside write. After the action commits, the canonical value
+  is `Promise<"bob">` (from outside) — *not* what the action body "saw."
+  This is intrinsic to the await-and-resume model; per D8 in the main doc.
+- **The action body had no way to notice the outside write.** Because it
+  didn't form a tracking edge. If it *had* formed an edge, the edge would
+  have invalidated → but the action body wouldn't re-run anyway (it's
+  one-shot). So edges are useless for action bodies; pure imperative reads
+  are the right shape.
+- **D-skew between scopes:** when scope `S` is open and outside writes
+  happen to `ROOT_SCOPE`, the scope `S` doesn't see them because reads
+  under `S` walk `chain = [S, ROOT_SCOPE]` and `S` has a slot. To see the
+  outside write, the action would have to drop its slot or read `latest()`.
+
+### Summary
+
+C2 was the highest-yield trace because it forced the following decisions /
+sub-questions into the open:
+
+1. **Walks return `T | Promise<T>` honestly.** (Confirms P2.)
+2. **`yield* read` yields `park` commands; the action driver dispatches.**
+   Library convention; engine knows nothing.
+3. **Ambient-scope restoration via `pushScope`/`popScope` around every
+   `gen.next`.** Driver responsibility.
+4. **Action bodies don't track.** No edges formed.
+5. **Discard-guard on resume.** `if (scope.status !== 'open') return`.
+6. **Engine eagerly updates slot.cached on Promise resolve.** Lean yes
+   (Q-D); not strictly required for C2a but needed for Q-C consumer pattern.
+7. **`Slot` needs `wasWritten` (or equivalent).** Read-populated and
+   write-populated slots have different commit semantics; the engine must
+   distinguish. **New sub-question — added to Q-G and Q-A territory.**
+8. **Read-skew is intrinsic to await-and-resume; programmer's responsibility.**
+   D8 (sequential `yield*`s sample at different instants) confirmed by trace.
+9. **Cancellation discipline is library code over scope-discard +
+   `onCleanup`.** Confirms Q-B working hypothesis. No new engine primitive
+   for cancellation.
+
+**New open question surfaced:** *the read-vs-write slot distinction* — should
+slots carry a `wasWritten` flag (or equivalent) so the commit promotion logic
+only promotes write-populated slots? **Lean: yes**, but the alternative
+(promote everything, accept that reads pin values into the scope) is
+defensible too — it would mean an action that reads but never writes still
+"captures" the state at the moment of the read, which has some appeal for
+snapshot-isolation semantics.
+
+The framings all held: Node-as-recipe survived (recipes can return Promises),
+walks-first-class survived (`read` and `yield* read` are walks), slim-engine
++ thick-library survived (driver is library; engine sees writes), scope/owner
+unification held (cleanups + scope-status + discard mechanism). No
+falsifications.
+
+---
+
 ## Open questions (the actual mapping work)
 
 Each is open. The goal is to *map the question space* before committing to any
@@ -836,6 +1246,45 @@ that may contain many tracker-events. They're at different granularity.
 Likely answer: tracker is a sub-ambient. A slot recomputes under a scope (its
 slot's scope); reads inside the recompute know both. Either two separate
 ambients, or one ambient with a "current slot recomputing" sub-field. Open.
+
+### Q-I — Read-populated vs write-populated slots: do they differ structurally?
+
+Surfaced by the C2d trace. When a slot is created lazily during a read (because
+no slot existed for the requested scope yet, so `invoke` populated one with the
+default recipe), it ends up in `node.slots[scope]` *exactly the same way* as a
+slot created by an explicit `writeSlot` call from a setter. But their commit
+semantics differ:
+
+- *Write-populated slot.* On commit, the slot's recipe (+ cached value) gets
+  promoted to the parent scope. The intent is "this is what the action did to
+  the node; lift it out."
+- *Read-populated slot.* On commit, promoting this slot would clobber any
+  later writes to canonical (e.g., the C2d case where outside-action writes
+  happened during the await). The intent is "this slot was just a memo cache
+  for the duration of the scope; drop it on commit, don't promote."
+
+Two ways to handle it:
+
+- **(i) `wasWritten: boolean` flag on `Slot`.** Engine tags slots at creation
+  time (true on `writeSlot`, false on `invoke`-populated). Commit walks only
+  promotes flagged slots; non-flagged ones drop.
+- **(ii) Library tracks write-set separately.** The scope itself maintains a
+  `writeSet: Set<Node>` populated by `writeSlot` calls. Commit walks
+  `writeSet`, not all slots tagged with the scope. Read-populated slots are
+  invisible to commit because they're not in `writeSet`.
+
+(i) puts the distinction on the slot; (ii) puts it on the scope. (ii) is
+cleaner in spirit (scope owns its semantics; slots stay uniform) but (i) is
+more locally evident (a slot knows whether it represents "real" state).
+
+Connects to Q-E (the Signal/Computed slot distinction) — that question also
+asks whether the engine needs to know what kind of slot it's looking at.
+Probably resolved together.
+
+**Lean: (ii)**, because it keeps the engine's `Slot` shape uniform and pushes
+intent into the library's scope handling. But (i) wins if performance
+measurements show that walking the scope's write-set is slower than checking
+flags during commit. Currently mostly cosmetic.
 
 ---
 
