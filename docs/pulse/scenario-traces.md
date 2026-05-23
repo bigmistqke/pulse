@@ -19,7 +19,8 @@ forced deliberate design calls into the open (K1 → resolved to Position
 
 ---
 
-## End-to-end trace: `doubleName` under scope `S`
+<a id="trace-doublename"></a>
+## `doubleName` under scope `S`
 
 A worked trace verifying that **multi-slot + Model 2 (selector-on-edge)**
 handles the case the [falsified hypothesis](#speculation-purely-above-unmodified-r3-doesnt-work)
@@ -175,27 +176,27 @@ under-specified edges. Listed in roughly load-bearing order:
 2. **What `cached` does a promoted slot carry?** Three options: (a) preserve
    cached + carry over deps (but old deps had chain-S selectors); (b) preserve
    cached + drop deps (next recompute rebuilds); (c) drop cached + force
-   recompute. Lean (b); related to Q-G.
+   recompute. Lean (b); related to [Q7](./questions.md#q7).
 3. **Action body reads: do they track?** The trace assumed `currentTracker =
    null` for top-level reads inside an action body (imperative, not
    declarative — the action body doesn't re-run on dep change). Probably
-   correct but worth being explicit. Related to Q-B (scope/owner) and Q-H
+   correct but worth being explicit. Related to [Q2](./questions.md#q2) (scope/owner) and [Q8](./questions.md#q8)
    (tracker/scope).
 4. **Edge index location.** The trace shows edges in `slot.subs` for clarity,
    but in practice the engine probably maintains a per-Node outgoing-edges
    index (selectors do per-slot dispatch at fire time). Per-slot `subs` arrays
    are useful for cleanup-on-slot-drop, but the firing path likely iterates
-   per-Node. Fold into Q-A.
+   per-Node. Fold into [Q1](./questions.md#q1).
 5. **Selector dedup.** `link(name, chainSelector([S, ROOT_SCOPE]), tgt)` is
    called twice in the recipe; the second should be a no-op. Selector identity
    matters — naive `chainSelector([S, ROOT_SCOPE])` returns a fresh function
    each time. Library-side memoisation of selectors by chain content handles
-   it. Fold into Q-A.
+   it. Fold into [Q1](./questions.md#q1).
 6. **Late subscribers / new edges mid-action.** The trace didn't exercise a
    subscriber arriving mid-action and reading under `S` (e.g., a component
    mounting inside an action). Model 2 should handle it (new edges form with
    the right chain at subscription time), but worth a separate trace.
-7. **Async (Q-D) untouched.** All reads in this trace were sync. The async
+7. **Async ([Q4](./questions.md#q4)) untouched.** All reads in this trace were sync. The async
    case — `name`'s recipe returns a `Promise<T>`, or the action body awaits —
    needs its own trace.
 8. **Dangling-ref window during commit ordering.** When `edge2` is unlinked
@@ -210,13 +211,14 @@ resolution.
 
 ---
 
-## End-to-end trace: C2 — action body with async read
+<a id="trace-c2"></a>
+## C2 — action body with async read
 
 A worked trace through the four C2 sub-scenarios (await-and-resume, long-lived
 scope, supersession-during-await, writes-during-await). C2 was identified as
 the highest-yield single trace because it pressures all four framings
 (Node-as-recipe, walks-first-class, slim-engine + thick-library, scope/owner
-unification) and several open questions (Q-A, Q-B, Q-D, Q-H) simultaneously.
+unification) and several open questions ([Q1](./questions.md#q1), [Q2](./questions.md#q2), [Q4](./questions.md#q4), [Q8](./questions.md#q8)) simultaneously.
 
 ### Setup
 
@@ -345,11 +347,11 @@ because the body isn't going to re-run on dep change.
   the action body with `"alice"`. `name = "alice"`.
 
 **Engine handling of Promise resolution** (refined since C2 was first traced;
-see Q-D for the current framing): the engine attaches a `.then` to the
+see [Q4](./questions.md#q4) for the current framing): the engine attaches a `.then` to the
 Promise stored in `slot_U_S.cached`. When `userPromise` resolves to
 `"alice"`, the handler **does NOT mutate `slot_U_S.cached`** — the slot's
 cached value remains the Promise indefinitely. Instead, the Promise itself
-is tweaked with `{ status: 'fulfilled', value: "alice" }` (Q-D's lean,
+is tweaked with `{ status: 'fulfilled', value: "alice" }` ([Q4](./questions.md#q4)'s lean,
 matching React's `use()` convention; `WeakMap` fallback for frozen
 Promises), and the engine fires a slot-changed event with kind `'resolved'`.
 Walks query `promiseState(slot_U_S.cached)` to retrieve the
@@ -357,7 +359,7 @@ synchronously-readable resolved value. Downstream consumers receive the
 slot-changed event identically to any other invalidation event. *This is
 strictly cleaner than mutating `cached`*: the slot is immutable for its
 lifetime; the tweaked Promise is shared across all walks reading it;
-read-vs-write distinction (Q-I) stays unambiguous (the Promise resolving
+read-vs-write distinction ([Q9](./questions.md#q9)) stays unambiguous (the Promise resolving
 is not a write).
 
 **Step 4: body continues — `setUser(Promise.resolve("alice!"))`.**
@@ -403,7 +405,7 @@ the cache has settled). ✓
 C2a tested cleanly. The decisions it forced into the open:
 
 1. **Async-honest walks.** `get(node)` returns `T | Promise<T>`. The walk
-   doesn't hide the Promise; the caller chooses how to handle it. P2 holds.
+   doesn't hide the Promise; the caller chooses how to handle it. [P2](./framings.md#p2) holds.
 2. **Park commands separate walk intent from action machinery.** `yield*
    get(node)` yields a `park` command; the action driver decides what to do
    with it (`.then` here; could be `requestAnimationFrame` for an `raf`
@@ -412,17 +414,17 @@ C2a tested cleanly. The decisions it forced into the open:
 3. **Ambient scope restoration is mechanical.** The driver's
    `pushScope(S)` / `popScope()` around every `gen.next` is what makes the
    scope persist across awaits. Without this, `setUser` after the await
-   would write to `ROOT_SCOPE` instead of `S`. Q-H (tracker vs scope):
+   would write to `ROOT_SCOPE` instead of `S`. [Q8](./questions.md#q8) (tracker vs scope):
    the *scope* persists across awaits via push/pop; the *tracker* doesn't
    (the action body has no tracker at all). They're separate.
 4. **Action-body reads don't track.** No edges formed during the trace.
-   Confirms the assumption from doubleName trace's open question #3 and
+   Confirms the assumption from [doubleName trace](#trace-doublename)'s open question #3 and
    from H1's premise (action bodies are one-shot).
 5. **The driver's discard-guard on resume.** `if (scope.status !== 'open')
-   return` is what makes C2c safe — see below. Q2 (cancellation) interacts
-   with Q-D (async) through this guard.
-6. **Engine choice: update cache on Promise resolve, or not.** Open (Q-D);
-   the lean is yes (so Q-C consumer-pattern fires correctly when async deps
+   return` is what makes C2c safe — see below. [Q2](./questions.md#q2) (cancellation) interacts
+   with [Q4](./questions.md#q4) (async) through this guard.
+6. **Engine choice: update cache on Promise resolve, or not.** Open ([Q4](./questions.md#q4));
+   the lean is yes (so [Q3](./questions.md#q3) consumer-pattern fires correctly when async deps
    resolve). Doesn't affect C2a's correctness either way.
 7. **Promise identity as supersession signal.** D8 in the main doc notes
    *"a new Promise is minted per dependency change, so unwrap keyed on
@@ -491,8 +493,8 @@ What this trace exposes:
   (including writes!) under a closed scope. Library convention required.
 - **Cancellation discipline is library code over scope + cleanups.** The
   AbortController pattern composes with `onCleanup`; the engine doesn't
-  need a separate cancellation primitive. Q2 (cancellation) ≈ scope-discard
-  + `onCleanup`. Confirms the working hypothesis from Q-B.
+  need a separate cancellation primitive. [Q2](./questions.md#q2) (cancellation) ≈ scope-discard
+  + `onCleanup`. Confirms the working hypothesis from [Q2](./questions.md#q2).
 - **Promise still resolves but nothing happens.** The original `.then`
   fires but the guard absorbs it. Resource cleanup: the underlying
   fetch/timer would already have been aborted by `S.cleanups`; the
@@ -594,7 +596,7 @@ What C2d exposes:
 C2 was the highest-yield trace because it forced the following decisions /
 sub-questions into the open:
 
-1. **Walks return `T | Promise<T>` honestly.** (Confirms P2.)
+1. **Walks return `T | Promise<T>` honestly.** (Confirms [P2](./framings.md#p2).)
 2. **`yield* get` yields `park` commands; the action driver dispatches.**
    Library convention; engine knows nothing.
 3. **Ambient-scope restoration via `pushScope`/`popScope` around every
@@ -602,7 +604,7 @@ sub-questions into the open:
 4. **Action bodies don't track.** No edges formed.
 5. **Discard-guard on resume.** `if (scope.status !== 'open') return`.
 6. **Engine fires slot-changed events on Promise resolution, without
-   mutating `slot.cached`.** Refined post-C2; see Q-D. The slot's cached
+   mutating `slot.cached`.** Refined post-C2; see [Q4](./questions.md#q4). The slot's cached
    value stays as the Promise; the Promise itself is tweaked with `{
    status, value, reason }` (React's convention) for synchronous query
    via `promiseState(promise)`. Engine attaches one `.then` per
@@ -610,11 +612,11 @@ sub-questions into the open:
    event.
 7. **`Slot` needs `wasWritten` (or equivalent).** Read-populated and
    write-populated slots have different commit semantics; the engine must
-   distinguish. **New sub-question — added to Q-G and Q-A territory.**
+   distinguish. **New sub-question — added to [Q7](./questions.md#q7) and [Q1](./questions.md#q1) territory.**
 8. **Read-skew is intrinsic to await-and-resume; programmer's responsibility.**
    D8 (sequential `yield*`s sample at different instants) confirmed by trace.
 9. **Cancellation discipline is library code over scope-discard +
-   `onCleanup`.** Confirms Q-B working hypothesis. No new engine primitive
+   `onCleanup`.** Confirms [Q2](./questions.md#q2) working hypothesis. No new engine primitive
    for cancellation.
 
 **New open question surfaced:** *the read-vs-write slot distinction* — should
@@ -633,13 +635,14 @@ falsifications.
 
 ---
 
-## End-to-end trace: H1a-c — effect under speculation
+<a id="trace-h1a-c"></a>
+## H1a-c — effect under speculation
 
 A worked trace of the three H1 sub-scenarios verifying the **defer-until-commit**
 position for effects-under-speculation: speculative writes inside an action
 *do not* fire effects registered outside; commit fires them once; discard
 never fires them. The trace also establishes a consumer-pattern abstraction
-(Q-C) that's load-bearing for the next-pressing piece of the architecture.
+([Q3](./questions.md#q3)) that's load-bearing for the next-pressing piece of the architecture.
 
 ### What's an Effect, structurally?
 
@@ -859,7 +862,7 @@ unwinds the speculation with no side-effect leakage.
 
 ### Architecture exposed by H1a-c
 
-The trace established **Q-C (consumer pattern)** with a concrete shape:
+The trace established **Q3 (consumer pattern)** with a concrete shape:
 
 1. **A consumer is just a `subscribe` + a scheduler.** No new engine
    primitive needed. The library composes existing pieces: `subscribe(node,
@@ -890,7 +893,7 @@ The trace established **Q-C (consumer pattern)** with a concrete shape:
    is `[action, ROOT_SCOPE]`, so writes to the action's scope DO fire
    the effect — which is what you want for effects inside actions.
 
-### Consumer-pattern abstraction (Q-C answered)
+### Consumer-pattern abstraction (Q3 answered)
 
 The library has a uniform consumer shape:
 
@@ -910,7 +913,7 @@ function consumer(node, onSlotChange: () => void) {
 
 Effect / JSX-binding / Computed-cache-dependent are all `consumer(node, …)`
 calls with different `onSlotChange` bodies. The engine doesn't see the
-difference. **Q-C lands at: "consumers are library code over the engine's
+difference. **Q3 lands at: "consumers are library code over the engine's
 `subscribe` primitive; no new engine primitive needed."**
 
 ### New sub-questions surfaced
@@ -953,7 +956,7 @@ All four framings held:
   its owner; disposing the scope disposes the effect via the cleanup
   chain.
 
-**Q-C is essentially resolved** at the architectural level (mechanism +
+**Q3 is essentially resolved** at the architectural level (mechanism +
 policy via selectors). H2/H3/H4 would test specific compositions but don't
 require a new framing. **Two big upstream pieces are now in place:** C2
 established async-walk discipline; H1a-c established consumer-pattern via
@@ -961,9 +964,10 @@ selectors. Both came out cleanly.
 
 ---
 
-## End-to-end trace: K1 — re-entrant setter mid-recompute
+<a id="trace-k1"></a>
+## K1 — re-entrant setter mid-recompute
 
-**Note (post-revision):** the original K1 trace below identified three
+**Note (post-revision):** the original [K1 trace](#trace-k1) below identified three
 positions (A: ban, B: permit + defer fires, C: permit + fire synchronously)
 and leaned (B) while ruling out (C). That conclusion was *wrong*. Two
 subsequent findings dissolved K1's "design call" entirely:
@@ -1260,28 +1264,28 @@ Listed for completeness; almost certainly wrong.
 K1 forced the following framings under stress; all held, but with newly-
 visible work:
 
-1. **Q-H (tracker vs scope) matters here.** The re-entrant write's
+1. **Q8 (tracker vs scope) matters here.** The re-entrant write's
    `getCurrentScope()` returns the scope being recomputed under — *not*
    `ROOT_SCOPE` by default. If `derived` is being recomputed under
    speculation scope `S`, the re-entrant `setShadow(...)` writes to
    `shadow.slots[S]`. **The scope nests cleanly with the tracker.** The
    ambient context's two slots (tracker, scope) push together when
-   entering a recompute and pop together. Q-H's "they're at different
+   entering a recompute and pop together. [Q8](./questions.md#q8)'s "they're at different
    granularities" framing holds — but they're *parallel* and *coupled*.
 
-2. **Q-A (selectors / fire policy) didn't break.** Under Position B,
+2. **Q1 (selectors / fire policy) didn't break.** Under Position B,
    selectors still run when `fireEdges` drains the deferred queue. The
    *only* engine change Position B requires is gating `fireEdges` behind
    the `deferredFires` queue. The selector logic itself is unchanged.
 
-3. **Q-C (consumer pattern) is the right level for cycle detection.**
+3. **Q3 (consumer pattern) is the right level for cycle detection.**
    Cycles surface at the consumer level (Effects re-running indefinitely),
    not at the recompute level (recomputes always run to completion).
    The library's scheduler is where the "N re-runs per cycle" guard lives.
-   This is a *new* sub-question for Q-C — not "consumer shape" (resolved
+   This is a *new* sub-question for [Q3](./questions.md#q3) — not "consumer shape" (resolved
    in H1a-c) but "consumer-driven cycle detection."
 
-4. **Q-E (signal vs computed asymmetry) does *not* matter here.** The
+4. **Q5 (signal vs computed asymmetry) does *not* matter here.** The
    re-entrant write is to a Signal slot; the trace would work the same
    way if it were to a Computed slot (Computed slots can also be written
    via promotion, etc.). The recompute discipline is uniform.
@@ -1332,7 +1336,7 @@ production). Mode flags are a hedge against locking in.
 
 2. **Consumer cycle-detection policy.** Max re-runs per microtask, or
    per-second, or detect "this consumer scheduled itself with no input
-   change"? Library design call. **New Q-J candidate.**
+   change"? Library design call. **New [Q10](./questions.md#q10) candidate.**
 
 3. **`untrack` interaction.** Calling `setShadow` inside an
    `untrack(() => ...)` block: does the deferral still apply? Per the
@@ -1431,7 +1435,7 @@ only the second probes the synchronous-vs-deferred-fires mechanism.
 
 ### Why (C) doesn't cause re-entrant invocation
 
-The original K1 trace ruled out (C) with "synchronous firing mid-recompute
+The original [K1 trace](#trace-k1) ruled out (C) with "synchronous firing mid-recompute
 creates re-entrant invocation of the current recompute." This was a
 confusion. Let's name the operations precisely:
 
@@ -1493,7 +1497,7 @@ to subs synchronously; consumers schedule async via the heap + microtask).
 Pulse adopts the same semantics, just with Model 2 selectors gating which
 edges actually fire.
 
-Implication for Q-J (commit-as-transaction): the deferred-fires region is
+Implication for [Q10](./questions.md#q10) (commit-as-transaction): the deferred-fires region is
 **commit-mode-only**, not tracker-mode. Recipes don't defer; commits do.
 The two modes don't interfere because a recipe inside a commit is rare
 (commits are themselves outside any recompute).
@@ -1517,7 +1521,8 @@ C). With the right scenario (K1b), the answer falls out.
 
 ---
 
-## End-to-end trace: G2 — nested actions and commit promotion
+<a id="trace-g2"></a>
+## G2 — nested actions and commit promotion
 
 A worked trace verifying that the chain-selector mechanism handles nested
 actions cleanly, and surfacing the inner-promotes-to-outer-vs-direct-to-ROOT
@@ -1790,7 +1795,7 @@ intermediate `10`.
    are conditional on outer commits; outer discard rolls back inner's
    effects. We get database-style nested-transaction semantics without any
    engine-level transaction machinery.
-5. **Q-H (scope nesting via parent pointers).** The scope is a linked
+5. **Q8 (scope nesting via parent pointers).** The scope is a linked
    structure with `parent` pointers. `chainFor` is just `walk parents
    until you hit ROOT_SCOPE`. Confirms the scope-as-tree shape.
 6. **Inner-promotes-to-outer is the *only* coherent answer** under our
@@ -1837,7 +1842,8 @@ Position (ii) was tested and ruled out by the trace.
 
 ---
 
-## End-to-end trace: H3 — cleanup chains across speculative effect runs
+<a id="trace-h3"></a>
+## H3 — cleanup chains across speculative effect runs
 
 A worked trace of two related cleanup-discipline scenarios:
 
@@ -1934,7 +1940,7 @@ cleanups: [], status: 'open' }`. Push ambient.
     - `link(count, chainSelector([S, ROOT_SCOPE]), effectNode.slots[S])` →
       `edge1`.
     - `invoke(count, S)` → miss → `count.slots[S]` created (read-populated;
-      `wasWritten = false`, per Q-I). Recipe = `() => 0`, `cached = 0`.
+      `wasWritten = false`, per [Q9](./questions.md#q9)). Recipe = `() => 0`, `cached = 0`.
   - Body: `c = 0`. `log.push("Effect ran with count=0")`. `onCleanup(cb)`
     registers a *body-level* cleanup: `cb = () => teardowns.push(
     "cleanup at count=0")`. `effectNode.bodyCleanups = [cb]`.
@@ -1956,7 +1962,7 @@ teardowns = []
 
 **Step 3: `setCount(5)` under `S`.**
 - `writeSlot(count, S, { recipe: () => 5, cached: 5, wasWritten: true })`.
-  (Q-I marker: wasWritten=true overwrites the wasWritten=false slot.)
+  ([Q9](./questions.md#q9) marker: wasWritten=true overwrites the wasWritten=false slot.)
 - Walk `count`'s outgoing edges with `(count.slots, S)`:
   - `edge1.selector` = `chainSelector([S, ROOT_SCOPE])`. writeScope=S,
     writeIdx=0. **Fire.** Invalidate `effectNode.slots[S]`. Emit
@@ -2028,10 +2034,10 @@ throwing.
 
 **Step 4 (alternate): `closeScope(S, 'commit')`.**
 
-This is where Q-J (commit-as-transaction) is exercised. The library's
+This is where [Q10](./questions.md#q10) (commit-as-transaction) is exercised. The library's
 commit logic opens a deferred-fires region:
 
-1. *Promote write-populated slots only* (per Q-I).
+1. *Promote write-populated slots only* (per [Q9](./questions.md#q9)).
    - `count.slots[S].wasWritten === true` → promote.
      - `writeSlot(count, ROOT_SCOPE, { recipe: () => 5, cached: 5, … })`.
      - Walk `count`'s edges with `(count.slots, ROOT_SCOPE)`:
@@ -2167,14 +2173,14 @@ naming explicitly:
    `runBody` fires the previous body's cleanups first, then unlinks
    stale deps, then invokes the body anew. r3's recompute pattern (run
    disposal → recompute) carries forward unchanged.
-4. **Q-I (read-populated vs write-populated) was load-bearing in H3a.**
+4. **Q9 (read-populated vs write-populated) was load-bearing in H3a.**
    The trace explicitly distinguished `count.slots[S].wasWritten = true`
    (from setCount) vs `effectNode.slots[S].wasWritten = false` (from
    the body invoking the recipe). Only the write-populated slot
-   promotes on commit. Confirms Q-I's lean toward the (ii) library-side
+   promotes on commit. Confirms [Q9](./questions.md#q9)'s lean toward the (ii) library-side
    `writeSet` is the right call — though the trace uses the simpler
    per-slot `wasWritten` flag for clarity.
-5. **Q-J's deferred-fires region is straightforward at the commit
+5. **Q10's deferred-fires region is straightforward at the commit
    boundary.** No deferred fires were actually generated in H3b
    because the promoted write's selector check (chain `[S, ROOT_SCOPE]`,
    write to ROOT_SCOPE, S still has a slot) didn't fire. The deferral
@@ -2195,7 +2201,7 @@ naming explicitly:
    trace used α; β would mean an effect inside an action never reacts
    during the action body, only at commit (or dispose). Both are coherent.
    *Lean α* (composition is more natural), but **this is a real design
-   call** worth keeping open. Adding as Q-K candidate.
+   call** worth keeping open. Adding as [Q11](./questions.md#q11) candidate.
 2. **Effect re-parenting on commit.** Currently the trace disposes
    in-action effects at action close (commit or discard). An alternative:
    on commit *only*, re-parent the effect's owner to `S.parent`, so the
@@ -2207,7 +2213,7 @@ naming explicitly:
    fired the effect's bodyCleanups after dropping S slots but before
    `S.status = 'committed'`. If an effect's bodyCleanup itself calls
    `writeSlot` (re-entrancy during cleanup), the deferred-fires region
-   (Q-J) should absorb that. The trace didn't exercise it. Worth
+   ([Q10](./questions.md#q10)) should absorb that. The trace didn't exercise it. Worth
    tracing if K1-style re-entrancy concerns surface here.
 4. **`onCleanup` outside an effect body but inside an action.** What's
    the registration target? Working assumption: `scope.cleanups` of the
@@ -2242,7 +2248,8 @@ mechanism doesn't pick a winner.
 
 ---
 
-## End-to-end trace: C2e — post-yield derived read (async K1b analogue)
+<a id="trace-c2e"></a>
+## C2e — post-yield derived read (async K1b analogue)
 
 The canonical async coherence probe. An action body awaits a Promise via
 `yield* get`, then synchronously reads a downstream derived whose recipe
@@ -2325,7 +2332,7 @@ intermediate.
     - Engine: `user.slots.get(S)` miss. Create `slot_U_S = { recipe:
       defaultRecipe, deps: [], subs: [] }`. Invoke recipe → `userPromise`.
       `slot_U_S.cached = userPromise`.
-    - **Engine .then attach (per Q-D):** since `slot_U_S.cached` is a
+    - **Engine .then attach (per [Q4](./questions.md#q4)):** since `slot_U_S.cached` is a
       Promise, attach `.then(v => { promiseState writeback; fireEdges(user,
       S, { kind: 'resolved' }) })`. This `.then` is attached **first**
       (during invoke).
@@ -2350,7 +2357,7 @@ no edges
 order**:
 
 - *Engine handler fires first:*
-  - Per Q-D: tweak `userPromise` with `{ status: 'fulfilled', value:
+  - Per [Q4](./questions.md#q4): tweak `userPromise` with `{ status: 'fulfilled', value:
     "Alice" }`.
   - `fireEdges(user, S, { kind: 'resolved' })`. Walk `user`'s outgoing
     edges. **None exist** (the action body's `yield* get` didn't track;
@@ -2406,7 +2413,7 @@ through the graph; sync access at the leaf via `yield* get`.
 
 **Step 5: action body returns. `closeScope(S, 'commit')`.**
 
-- Per Q-I: only write-populated slots promote. **Both `user.slot[S]` and
+- Per [Q9](./questions.md#q9): only write-populated slots promote. **Both `user.slot[S]` and
   `greeting.slot[S]` were read-populated** (no `writeSlot` was called
   during the action). So nothing promotes.
 - Drop `user.slot[S]` and `greeting.slot[S]`. Walk subs, unlink edges
@@ -2497,7 +2504,7 @@ explicitly.
 
 ### The earlier (anti-pattern) ergonomic surprise — dissolved
 
-The original C2e trace setup used:
+The original [C2e trace](#trace-c2e) setup used:
 
 ```ts
 const greeting = computed(() => `Hello, ${use(user)}!`)   // ⚠ anti-pattern
@@ -2537,12 +2544,12 @@ C2e traced cleanly. No falsifications. The key findings:
 3. **The action body's post-yield `get(greeting)` is unaware of any
    complexity** — `greeting` just returns a string. The whole async dance
    is hidden inside `greeting`'s recipe via `use`.
-4. **Q-I is load-bearing.** Nothing promoted on commit because all slots
+4. **Q9 is load-bearing.** Nothing promoted on commit because all slots
    were read-populated. This is correct — the action didn't *write*
    anything; it just performed reads with side effects (the
    `console.log`). The action's only purpose was awaiting + observing.
-   Q-I distinguishes this from a write-and-commit action cleanly.
-5. **Q-J commit-as-transaction is uneventful** here. Nothing to promote;
+   [Q9](./questions.md#q9) distinguishes this from a write-and-commit action cleanly.
+5. **Q10 commit-as-transaction is uneventful** here. Nothing to promote;
    the deferred-fires region opens and closes with no fires.
 
 ### Sub-questions surfaced (small)
@@ -2553,7 +2560,7 @@ C2e traced cleanly. No falsifications. The key findings:
   provide a `use(node)` walk usable in action bodies too — not just
   computed recipes — that yields a park command when pending. This makes
   action-body imperative reads parking-aware. **Possibly worth adding to
-  Q-C or a new sub-question.**
+  [Q3](./questions.md#q3) or a new sub-question.**
 - **The hypothetical reversed `.then` order**: only concerning if pulse
   exposes `promiseState` as a primitive and a library author attaches
   handlers in unexpected orders. Probably never in practice. Worth noting.
@@ -2580,7 +2587,8 @@ microtask ordering of `.then` attaches.
 
 ---
 
-## End-to-end trace: H1d — effect-body coherence on commit
+<a id="trace-h1d"></a>
+## H1d — effect-body coherence on commit
 
 Probes commit-promotion ordering through the effect's lens: when an effect's
 body reads both a primitive signal *and* a derived computed that depends on
@@ -2651,8 +2659,8 @@ Committed state untouched per H1a-c (the chain doesn't include `S`).
 
 ### Step 3: action returns. `closeScope(S, 'commit')`
 
-Per Q-J, open a deferred-fires region (for consumer-side scheduling
-deduplication). Per Q-I, promote only write-populated `S` slots:
+Per [Q10](./questions.md#q10), open a deferred-fires region (for consumer-side scheduling
+deduplication). Per [Q9](./questions.md#q9), promote only write-populated `S` slots:
 `count.slots[S]` is wasWritten.
 
 **`writeSlot(count, ROOT_SCOPE, { recipe: () => 5, cached: 5, wasWritten:
@@ -2669,7 +2677,7 @@ true })`:**
       The scheduler queues the schedule-intent.
   - `edge_C_E`: same chain. **Fire.** Mark `effect.slot[ROOT]` dirty
     (already dirty — no-op). Scheduler attempts schedule again →
-    deduplicated by Q-J.
+    deduplicated by [Q10](./questions.md#q10).
 
 **Drop `count.slots[S]`:** walk `slot.subs` (none). Delete.
 
@@ -2755,9 +2763,9 @@ So the effect body, when it runs, sees both:
 - `doubled.slot[ROOT]` dirty → recomputes → 10 (recipe reads the
   committed count).
 
-**Q-J's commit-region deduplication** is what makes this *efficient*
+**Q10's commit-region deduplication** is what makes this *efficient*
 (one re-run instead of N for an effect that depends on N commit-promoted
-signals) — but the coherence itself doesn't depend on Q-J. Even with N
+signals) — but the coherence itself doesn't depend on [Q10](./questions.md#q10). Even with N
 re-runs, each one sees coherent state because all invalidations land
 before the first microtask.
 
@@ -2771,16 +2779,16 @@ H1d traced cleanly with no new design calls. The trace validates that:
 2. **Computed-cache propagation is synchronous and transitive.** Marking
    doubled dirty cascades to effect through `subs` walking. Standard
    reactive bookkeeping.
-3. **Q-J's deduplication is an efficiency win, not a correctness
+3. **Q10's deduplication is an efficiency win, not a correctness
    requirement.** Even without dedup, repeated re-runs see coherent
    state.
-4. **The doubleName trace open question #1 (commit ordering) is
+4. **The [doubleName trace](#trace-doublename) open question #1 (commit ordering) is
    non-load-bearing for consumer correctness.** Ordering matters for
    selector-check correctness at writeSlot time (the original concern in
    doubleName), but post-commit consumer reads are always coherent
    because invalidations are synchronous and consumers are async-
    scheduled.
-5. **Q-I (read-vs-write slots) is load-bearing.** `count.slot[S]` is
+5. **Q9 (read-vs-write slots) is load-bearing.** `count.slot[S]` is
    `wasWritten = true` → promotes. The slots in `doubled` and `effect`
    for `S` (if any had been created via the effect being read inside the
    action) wouldn't promote because they'd be read-populated. In this
@@ -2790,10 +2798,10 @@ H1d traced cleanly with no new design calls. The trace validates that:
 ### Sub-questions surfaced (small)
 
 - *Multi-write commits with overlapping consumers.* If the action wrote
-  to N signals all depending on the same effect, Q-J's dedupe ensures
+  to N signals all depending on the same effect, [Q10](./questions.md#q10)'s dedupe ensures
   one re-run. But this trace only had one write. Worth a follow-up
   trace if pulse ever finds itself debugging "why does my effect run 5
-  times after a commit." Probably absorbed into Q-J's existing scope.
+  times after a commit." Probably absorbed into [Q10](./questions.md#q10)'s existing scope.
 - *What if `doubled`'s recipe were async?* Then the recompute inside
   `invoke(doubled, ROOT)` would yield a park command. The effect body's
   `get(doubled)` would return a Promise; the effect would have to
@@ -2803,7 +2811,7 @@ H1d traced cleanly with no new design calls. The trace validates that:
 ### Framings status after H1d
 
 All four framings still hold. Position C from K1+K1b is reconfirmed at
-the commit-fire level. Q-J's deferred-fires region works as designed for
+the commit-fire level. [Q10](./questions.md#q10)'s deferred-fires region works as designed for
 deduplication. The "Derivation kind matches reactivity scope" framing is
 implicit here — `doubled` is a Computed (synchronously fresh on read);
 if it had been an effect-driven signal (H5), the trace would have

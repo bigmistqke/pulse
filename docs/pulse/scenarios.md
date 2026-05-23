@@ -8,7 +8,7 @@ own test.
 
 **Companion documents:**
 - [README.md](./README.md) — framings, falsified hypotheses,
-  engine/library sketches, open questions (Q-A through Q-L), threads.
+  engine/library sketches, open questions ([Q1](./questions.md#q1) through [Q12](./questions.md#q12)), threads.
 - [scenario-traces.md](./scenario-traces.md) — end-to-end traces of the
   ✓-marked scenarios below.
 
@@ -54,7 +54,7 @@ Each trace walks a scenario end-to-end through engine + library calls.
 - **A3.** Action writes multiple signals (`setX`, `setY`); read derived
   `f(X, Y)`. Tests whether multiple scope-tagged slots compose into one
   derived under the same scope. *Expected: yes — recipe runs once, reads
-  each under `S`. Conditional on Q-H (tracker-as-scope) and Q-A selector
+  each under `S`. Conditional on [Q8](./questions.md#q8) (tracker-as-scope) and [Q1](./questions.md#q1) selector
   dedup behaving correctly under multi-source reads.*
 - **A3b.** Order-sensitive intermediate coherence:
   `setX(...); get(f(X, Y)); setY(...); get(f(X, Y))`. Tests whether the
@@ -68,7 +68,7 @@ Each trace walks a scenario end-to-end through engine + library calls.
   derived `d2`. Are both fresh? Does reading `d1` first somehow pin a
   stale cache for `d2`? Probes whether mid-action recompute of one
   derived leaks staleness to its sibling. Cuts multiple ways depending
-  on Q-A selector dispatch ordering.
+  on [Q1](./questions.md#q1) selector dispatch ordering.
 - **A5a.** Functional setter: `setX(x => x + 1)` inside action. Tests *what
   the setter callback's `x` parameter is*: committed value or speculative-
   slot value. Library-API design question.
@@ -102,12 +102,12 @@ Each trace walks a scenario end-to-end through engine + library calls.
 - **B1.** ✓ Action returns normally → commit. Traced.
 - **B2.** ✓ Action throws → discard. Traced.
 - **B3.** `onCleanup(fn)` inside action body. Tests: discard fires `fn`;
-  commit doesn't. Working hypothesis from Q-B.
+  commit doesn't. Working hypothesis from [Q2](./questions.md#q2).
 - **B4.** Owner of the action is disposed mid-action (parent owner unmounts).
   Tests: action's scope discards as a consequence of owner disposal. Falls
   out of scope/owner unification if it holds.
 
-### C. Async (Dim 1 with async — Q-D territory)
+### C. Async (Dim 1 with async — Q4 territory)
 
 - **C1.** `setX(Promise.resolve("v"))` inside action — the new recipe returns
   a Promise. Tests: how does a derived `get(X)` see this? Walks decide.
@@ -178,7 +178,7 @@ Each trace walks a scenario end-to-end through engine + library calls.
   mechanism — slots drop, edges cleanup, cleanups fire.
 - **E1b.** Discarded scope's `onCleanup` chain aborts an `AbortController`
   that the action body installed for an in-flight fetch. Tests: cancellation
-  reaches in-flight async work via the cleanup chain (Q2 + Q-B
+  reaches in-flight async work via the cleanup chain ([Q2](./questions.md#q2) + [Q2](./questions.md#q2)
   composition).
 - **E2.** Old action and new action coexist (no auto-supersession). Both
   scopes alive; reads under each see their own overlay. Likely default.
@@ -226,7 +226,7 @@ Each trace walks a scenario end-to-end through engine + library calls.
   half-cleaned `'inner'` cache? Coherence-of-discard probe for the
   outer body's subsequent reads.
 
-### H. Effects under speculation — *Q-C open*
+### H. Effects under speculation — *Q3 open*
 
 - **H1a.** Effect registered outside; speculative write happens inside an
   action. Tests *during the action*: does the effect fire? *Lean: no
@@ -235,13 +235,13 @@ Each trace walks a scenario end-to-end through engine + library calls.
   effect fire exactly once with the committed value? *Lean: yes.*
 - **H1c.** Same setup; action discards. Tests: effect never fired
   (no speculative trigger leaked). *Lean: yes.* (H1a/b/c together
-  establish the defer-until-commit position from Q-C.)
+  establish the defer-until-commit position from [Q3](./questions.md#q3).)
 - **H1d.** Effect body reads `get(X)` *and* `get(f(X))`. Action writes
   `setX(5)`, commits. Effect schedules and runs. Tests: does the effect
   see (X=5, f=10) coherently, or could it see (X=5, f=stale) because the
   derived's slot at `ROOT_SCOPE` wasn't invalidated in dep-order during
   commit promotion? **Effect-body coherence on commit** — probes
-  commit-promotion ordering (doubleName trace open #1) through the
+  commit-promotion ordering ([doubleName trace](./scenario-traces.md#trace-doublename) open #1) through the
   effect's lens.
 - **H2.** Effect created inside an action body. Effect's owner is the
   action's scope; effect's body executes once at registration. Does it
@@ -252,7 +252,7 @@ Each trace walks a scenario end-to-end through engine + library calls.
   it does), what scope chain is active in its body? Does its `get(X)`
   see the latest in-action value, and if it reads a derived, does the
   derived see the same? Separates "did it fire" (H2) from "did it see
-  coherent state" (H2b). Q-K (effect chain policy α/β) is upstream.
+  coherent state" (H2b). [Q11](./questions.md#q11) (effect chain policy α/β) is upstream.
 - **H3.** Effect with `onCleanup`; speculative write triggers the effect →
   effect's body runs → registers cleanup. If discard, do those cleanups
   fire? Cleanup chains across scopes; tricky.
@@ -279,7 +279,7 @@ Each trace walks a scenario end-to-end through engine + library calls.
 
 - **I1.** JSX expression `{get(name)}` rendered inside a component that's
   *inside* an active action. JSX-binding consumer treated like Effect —
-  re-renders on speculative writes? Defers to commit? Q-C territory.
+  re-renders on speculative writes? Defers to commit? [Q3](./questions.md#q3) territory.
   *Downstream of H1a-c's resolution.*
 - **I1b.** JSX expression `{get(f(X))}` where the component is
   mid-render at the moment of an action commit. Tests: does the
@@ -307,7 +307,7 @@ Each trace walks a scenario end-to-end through engine + library calls.
 - **J3b.** `isPending(node)` — definition 2: returns true only if *the
   current scope's slot* has a Promise-valued cache (i.e., "this node is
   pending *for me*"). Distinct walk from J3a; the library should pick one
-  (or expose both with different names). Q-D adjacent.
+  (or expose both with different names). [Q4](./questions.md#q4) adjacent.
 - **J4.** Action creates a new signal (`signal(initial)` called inside the
   action body). Does the new signal's "initial slot" tag with `ROOT_SCOPE`
   or with the action's scope? Library policy. If with scope: signal
@@ -347,7 +347,7 @@ Each trace walks a scenario end-to-end through engine + library calls.
   re-entrancy? **Cleanup-time re-entrancy + coherence probe.** Cuts
   multiple ways: (i) commit is atomic, cleanups see post-promotion
   state; (ii) cleanups fire mid-promotion, half-state; (iii) cleanups
-  fire pre-promotion, scope-still-open chain. Q-J (commit-as-
+  fire pre-promotion, scope-still-open chain. [Q10](./questions.md#q10) (commit-as-
   transaction) is upstream.
 - **K3.** Action body calls `setX` where `X` is updated by an effect that
   was itself triggered by that write (would-be cycle). Tests: cycle
@@ -363,8 +363,8 @@ Each trace walks a scenario end-to-end through engine + library calls.
 - **L1.** `untrack(() => get(node))` inside an action body. Tests: read
   forms no tracking edge; do writes performed inside the `untrack` block
   still tag with the action's scope? *Tracker and scope are decoupled per
-  Q-H, so the answer is plausibly "yes for writes, no for tracking edges"
-  — but this is exactly the case where Q-H bites.*
+  [Q8](./questions.md#q8), so the answer is plausibly "yes for writes, no for tracking edges"
+  — but this is exactly the case where [Q8](./questions.md#q8) bites.*
 - **L2.** `latest(node)` inside an action that has *also written* to `node`.
   Tests: does `latest` see the *pre-action* committed value, or the
   most-recently-promoted ancestor (which doesn't exist yet if the action
@@ -430,7 +430,7 @@ promoted to a real category.
 
 - *A:* single-scope mechanics — most settled; A2 traced.
 - *B:* lifecycle — mostly settled by scope/owner framing.
-- *C:* async — biggest open area (Q-D). *C2 specifically is the highest-
+- *C:* async — biggest open area ([Q4](./questions.md#q4)). *C2 specifically is the highest-
   yield single trace: it pressures all four framings (Node-as-recipe,
   walks-first-class, slim-engine + thick-library, scope/owner unification)
   simultaneously.*
@@ -440,28 +440,28 @@ promoted to a real category.
 - *G:* nesting — depends on commit-promotion semantics (same question as
   F2 at a different depth).
 - *H:* effects — large open area, but the load-bearing question is really
-  Q-C (consumer pattern), which is *upstream* of much of C-engine, H, and
-  I. Q-C's priority ≥ H's.
-- *I:* JSX/components — downstream of H/Q-C.
+  [Q3](./questions.md#q3) (consumer pattern), which is *upstream* of much of C-engine, H, and
+  I. [Q3](./questions.md#q3)'s priority ≥ H's.
+- *I:* JSX/components — downstream of H/[Q3](./questions.md#q3).
 - *J:* edges — mostly mechanical verification.
 - *K:* re-entrancy — **pressures more framings simultaneously than any
-  other category** (Node-as-recipe + walks + scope/owner + Q-A + Q-H +
+  other category** (Node-as-recipe + walks + scope/owner + [Q1](./questions.md#q1) + [Q8](./questions.md#q8) +
   commit-ordering). Missing from the initial priority ranking; should be
   high.
-- *L:* boundary-bypass — small, targeted, exposes Q-H concretely.
+- *L:* boundary-bypass — small, targeted, exposes [Q8](./questions.md#q8) concretely.
 - *M:* resource ownership across commit boundaries — the unstated half of
   B3; load-bearing for scope/owner unification.
 - *R:* scheduling — touches Dim 3 (priority) which the main doc punts;
   pulse hasn't articulated against the framings.
 
 Categories where the architecture is most under-specified: **C (async)**,
-**H (effects)** *via Q-C*, **G (nesting commit-promotion)**, and **K
+**H (effects)** *via Q3*, **G (nesting commit-promotion)**, and **K
 (re-entrancy)** — added after agent review. Categories where the mechanism
 is settled but a policy decision still needs to be made: **E (supersession)**,
 **F (overlap)**, **R (scheduling)**.
 
 *Priority for the next trace, ranked:* **(1) C2** — single trace, biggest
-yield. **(2) Q-C-via-H1a-c** — establishes the consumer pattern Q-C, which
+yield. **(2) Q3-via-H1a-c** — establishes the consumer pattern [Q3](./questions.md#q3), which
 is upstream of much else. **(3) K1** (setter mid-recompute) — pressures
 most framings simultaneously. **(4) G2** (inner-commit-to-outer-or-ROOT) —
 small, cheap, forces a policy out into the open. **(5) H3** (cleanup chains

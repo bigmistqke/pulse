@@ -1,14 +1,14 @@
 # Pulse — principles, framings, and architecture sketches
 
 The current understanding of pulse's design: foundational principles
-(P1–P5), operational framings (current best-guesses for how to honour
+([P1](#p1)–[P5](#p5)), operational framings (current best-guesses for how to honour
 the principles), falsified hypotheses (dead ends to avoid), and engine
 + library sketches.
 
 **Companion documents:**
 - [README.md](./README.md) — overview + index.
 - [prior-art.md](./prior-art.md) — cross-framework analysis (research arc, comparison table, decomposition, node/value-bag recasting).
-- [questions.md](./questions.md) — open questions (Q-A through Q-N).
+- [questions.md](./questions.md) — open questions ([Q1](./questions.md#q1) through [Q14](./questions.md#q14)).
 - [scenarios.md](./scenarios.md) — TDD catalog.
 - [scenario-traces.md](./scenario-traces.md) — end-to-end traces.
 
@@ -24,6 +24,7 @@ The durable, abstract commitments. Framings (next section) are concrete
 operational positions that play out these principles in pulse-specific
 terms.
 
+<a id="p1"></a>
 ### P1 — Speculation is one concept with two faces
 
 What pulse delimits is a **speculative scope**: a tentatively-applied
@@ -49,6 +50,7 @@ analogically.
 Rejects: bespoke per-use-case primitives that hide the underlying unity,
 and naming that presupposes success.
 
+<a id="p2"></a>
 ### P2 — Acknowledge async; don't hide it
 
 A `Promise` in the type is honest information: it indicates the value
@@ -61,6 +63,7 @@ the async-handling discipline lives.
 Rejects: Solid 2.x's `Accessor<T>` collapse + `NotReadyError`, where
 hidden async resurfaces as a thrown error in unrelated read sites.
 
+<a id="p3"></a>
 ### P3 — Plain reads are honest
 
 A plain `get(node)` returns whatever's cached (committed or speculative
@@ -70,6 +73,7 @@ non-readiness are separate queries — not exceptions raised from a read.
 Rejects: any design where reading a value is a discipline you must learn
 to do safely.
 
+<a id="p4"></a>
 ### P4 — Explicit boundaries over implicit pervasiveness
 
 A speculative scope is *opt-in*. Outside a scope, writes commit
@@ -83,6 +87,7 @@ a refetch flashes unless wrapped.
 Rejects: Solid 2.x's per-write transition semantics that turn every
 async-feeding write into an implicit held speculation.
 
+<a id="p5"></a>
 ### P5 — Compose, don't proliferate (in either direction)
 
 A small primitive set should cover the use cases. Specialised ergonomic
@@ -126,7 +131,7 @@ semantic baked into the signal.
 
 The recipe is `() => T | Promise<T>`; a fully-sync pipeline has no `Promise`;
 walks decide how to handle the async case (return-the-Promise, suspend-and-
-resume, throw-to-restart). Connects directly to P2 ("acknowledge async,
+resume, throw-to-restart). Connects directly to [P2](#p2) ("acknowledge async,
 don't hide it").
 
 ### Signal / Computed / Effect / JSX-expression are all the same primitive
@@ -288,7 +293,7 @@ unwrap helper needed.
 
 A stage is a memoized node whose input-read auto-unwraps a Promise. No
 new engine primitive needed; stages compose from `createNode` + `get` +
-`promiseState` (Q-D):
+`promiseState` ([Q4](./questions.md#q4)):
 
 ```ts
 type Resolved<T> = T extends Promise<infer U> ? U : T
@@ -481,7 +486,7 @@ const n = get(syncCount)                  // n: number
 
 - *Single verb (`get`)* for all access patterns — no separate `take` /
   `wait` / `read` utility for the generator-form unwrap.
-- *Q-D's Promise-tweak vs WeakMap question collapses* — state lives on
+- *Q4's Promise-tweak vs WeakMap question collapses* — state lives on
   the Awaitable class instance (we own it), not mutated onto foreign
   Promises. A `promiseState()` helper is unnecessary; the fields are
   directly on the value.
@@ -541,7 +546,7 @@ Solid 2.x's per-node multi-slot architecture (which Solid arrived at empirically
 after abandoning node-graph-cloning — see
 [`../research/async/deep-dives/solid-2x.md`](../research/async/deep-dives/solid-2x.md)).
 Pulse's user-facing novelty (Node-as-recipe + walks) is preserved; the engine
-internals converge on per-node multi-slot. **The smaller core in Q1's (β) lean
+internals converge on per-node multi-slot. **The smaller core in [Q1](./questions.md#q1)'s (β) lean
 is not "r3 unchanged"** — it's r3 forked-and-extended (or a pulse-owned engine
 descended from r3).
 
