@@ -16,6 +16,23 @@ either:
 - [scenarios.md](./scenarios.md) — TDD catalog.
 - [scenario-traces.md](./scenario-traces.md) — end-to-end traces.
 
+## Contents
+
+- [Q1 — Fall-through and edge policy](#q1--fall-through-and-edge-policy)
+- [Q2 — Scope/Owner unification](#q2--scopeowner-unification)
+- [Q3 — Consumer patterns](#q3--consumer-patterns)
+- [Q4 — Async at the engine level](#q4--async-at-the-engine-level)
+- [Q5 — Recipe / cache asymmetry between Signal and Computed slots](#q5--recipe--cache-asymmetry-between-signal-and-computed-slots)
+- [Q6 — What is a Scope as a value?](#q6--what-is-a-scope-as-a-value)
+- [Q7 — The `defaultRecipe` mechanism](#q7--the-defaultrecipe-mechanism)
+- [Q8 — Tracker vs Scope: separate or unified?](#q8--tracker-vs-scope-separate-or-unified)
+- [Q9 — Read-populated vs write-populated slots: do they differ structurally?](#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally)
+- [Q10 — Commit as transaction: ordering, atomicity, deferred fires](#q10--commit-as-transaction-ordering-atomicity-deferred-fires)
+- [Q11 — Effect chain policy: chain follows owner, or always `[ROOT_SCOPE]`?](#q11--effect-chain-policy-chain-follows-owner-or-always-root_scope)
+- [Q12 — Body cleanups vs scope cleanups: composition and re-entrancy](#q12--body-cleanups-vs-scope-cleanups-composition-and-re-entrancy)
+- [Q13 — Optimistic surface ergonomics (sugar over speculation)](#q13--optimistic-surface-ergonomics-sugar-over-speculation)
+- [Q14 — Action prereqs / standing-state handle](#q14--action-prereqs--standing-state-handle)
+
 ---
 
 ### Q1 — Fall-through and edge policy
