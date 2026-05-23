@@ -1245,6 +1245,373 @@ selectors. Both came out cleanly.
 
 ---
 
+## End-to-end trace: K1 — re-entrant setter mid-recompute
+
+The hardest scenario to pin down architecturally because re-entrancy crosses
+every layer: a setter is called *from inside* a computed's recipe body during
+that recipe's invocation. K1 was named by the agent review as the
+"single-scenario that pressures the most framings simultaneously" — and the
+trace bears that out. It also forces a *policy decision* (the only one of the
+traced scenarios so far where the architecture itself doesn't pick a winner).
+
+### The interaction question
+
+Concrete shape:
+
+```ts
+const [count, setCount] = signal(0)
+const [shadow, setShadow] = signal(0)
+const derived = computed(() => {
+  const c = read(count)
+  setShadow(c * 2)        // ← re-entrant write inside the recipe
+  return c + 1
+})
+read(derived)
+```
+
+What happens when the recipe calls `setShadow(0)`? Three positions are
+defensible; pulse hasn't picked one. They differ in *when* the write's edges
+fire relative to the current recompute.
+
+- **(A) Hard ban.** `writeSlot` called while `currentTracker` is set →
+  throw. Defensible: re-entrant writes are usually bugs and prohibiting
+  them is the simplest invariant. r3 doesn't explicitly throw, but most
+  reactive libraries (MobX strict mode, Solid in certain contexts) do.
+- **(B) Permit + defer the fire.** `writeSlot` updates the slot
+  synchronously (so later reads in the same body see the new value), but
+  *defers* edge-firing until the recompute completes. After the body
+  returns, the engine drains a "deferred fire queue." Cycles (writes that
+  invalidate the current tracker) re-queue the tracker for a future
+  re-run; this can loop pathologically if the recipe always writes to
+  one of its own deps.
+- **(C) Fire synchronously.** `writeSlot` fires edges immediately, even
+  mid-recompute. Naïve; can re-invalidate the currently-running recompute,
+  causing reentrant invocation. Almost certainly wrong.
+
+r3's behaviour today is closest to **(B)**: `setSignal` updates `el.value`
+synchronously and inserts subs into the dirty heap; the heap is drained at
+the next `stabilize()`. If the subs include the currently-recomputing
+computed, it gets recomputed *again* on the next pass. No explicit ban; no
+explicit defer either — the deferral is implicit because firing means
+"insert into heap," not "invoke synchronously."
+
+For pulse the question is sharper because Model 2 fires edges *immediately*
+on `writeSlot` (selectors run on the call stack). To get B's deferral, we'd
+have to add explicit gating.
+
+### Position B traced in detail
+
+Library-side: `writeSlot` checks for an active tracker.
+
+```ts
+let deferredFires: { node: Node<unknown>, scope: Scope }[] | null = null
+
+function writeSlot<T>(node: Node<T>, scope: Scope, slot: Slot<T>): void {
+  node.slots.set(scope, slot)                       // engine: write the slot
+  if (deferredFires !== null) {
+    deferredFires.push({ node, scope })             // defer (we're inside a recompute)
+  } else {
+    fireEdges(node, scope)                          // immediate (no tracker active)
+  }
+}
+
+function invoke<T>(node: Node<T>, scope: Scope): T | Promise<T> {
+  const slot = getOrCreateSlot(node, scope)
+  const savedFires = deferredFires
+  deferredFires = []
+  pushTracker(slot); pushScope(scope)
+  try {
+    slot.cached = slot.recipe()
+    return slot.cached
+  } finally {
+    popScope(); popTracker()
+    const toFire = deferredFires
+    deferredFires = savedFires
+    if (savedFires === null) {
+      // outermost invoke — actually fire
+      for (const { node, scope } of toFire!) fireEdges(node, scope)
+    } else {
+      // nested — propagate up to outer queue
+      savedFires.push(...toFire!)
+    }
+  }
+}
+```
+
+Three things worth noting: **(1)** writes are visible *immediately* to
+subsequent reads in the same body (slot is updated synchronously). **(2)**
+edge-firing is gated and queued. **(3)** nested invokes propagate deferred
+fires upward — fires only happen when the *outermost* invoke completes.
+
+#### Trace: `read(derived)` from a clean slate
+
+Initial state: all slots empty.
+
+**Step 1.** `read(derived)`. Library: `getCurrentScope()` → `ROOT_SCOPE`.
+`currentTracker` → null. `invoke(derived, ROOT_SCOPE)`.
+
+**Step 2.** Engine `invoke(derived, ROOT_SCOPE)`:
+- `derived.slots.get(ROOT_SCOPE)` miss. Create `slot_D_R` =
+  `{ recipe: deriveBody, deps: [], subs: [] }`.
+- `deferredFires` was null (top-level invoke); set to `[]`.
+- `pushTracker(slot_D_R)`, `pushScope(ROOT_SCOPE)`.
+- Invoke `deriveBody`:
+  - `read(count)`:
+    - `link(count, chainSelector([ROOT_SCOPE]), slot_D_R)` → creates
+      `edge_C_D`. Add to `count`'s outgoing and `slot_D_R.deps`.
+    - `invoke(count, ROOT_SCOPE)` → miss → create `slot_C_R` with
+      `recipe: () => 0`, invoke → 0, cache → 0, return 0.
+  - Body has `c = 0`.
+  - `setShadow(c * 2)` = `setShadow(0)`:
+    - Library setter: `writeSlot(shadow, ROOT_SCOPE, { recipe: () => 0,
+      cached: 0, deps: [], subs: [] })`.
+    - Engine writes `shadow.slots[ROOT_SCOPE]`.
+    - `deferredFires` is non-null → push `{ shadow, ROOT_SCOPE }` to queue.
+      **No edge-firing here.**
+  - Body returns `0 + 1 = 1`.
+- `slot_D_R.cached = 1`.
+- `popScope`, `popTracker`.
+- `toFire = [{ shadow, ROOT_SCOPE }]`. `deferredFires = null` (back to outer
+  state).
+- Drain `toFire`: `fireEdges(shadow, ROOT_SCOPE)`.
+  - Walk `shadow`'s outgoing edges with `(shadow.slots, ROOT_SCOPE)`. None.
+  - No-op.
+- Return 1.
+
+**Final state:**
+```
+count.slots = { ROOT_SCOPE: cached 0,  subs: [edge_C_D] }
+shadow.slots = { ROOT_SCOPE: cached 0, subs: [] }
+derived.slots = { ROOT_SCOPE: cached 1, deps: [edge_C_D], subs: [] }
+edge_C_D = { source: count, selector: chainSelector([ROOT_SCOPE]),
+             target: derived.slots[ROOT_SCOPE] }
+```
+
+`read(derived)` returned `1`; `shadow` is now `0`. ✓ The re-entrant write
+happened; no loop, no error. If we read `shadow` later, we'd see `0`.
+
+#### Why the deferral matters
+
+If `fireEdges` had run *synchronously* during `setShadow`, what would
+happen?
+- `shadow` has no outgoing edges yet (we're in the very first invocation),
+  so nothing would fire. **In this exact trace, the difference is
+  invisible.**
+
+But add a downstream consumer of `shadow`:
+
+```ts
+let observedShadow = -1
+effect(() => { observedShadow = read(shadow) })
+```
+
+The effect's initial run forms an edge `shadow → effectSlot`. Now when
+`read(derived)` runs and `setShadow(0)` fires *synchronously* during the
+recipe, the effect's selector matches → effect's slot invalidates → effect
+scheduled. The effect *might* re-run before the recipe finishes (depending on
+microtask ordering), creating partial-update visibility. With deferral, the
+effect runs after `read(derived)` returns, observing the consistent
+post-state.
+
+Even subtler: if the effect itself reads `derived`, we get
+`shadow → effect → derived`-style coupling, and synchronous firing during
+`derived`'s recompute would re-enter `derived` recursively. Defining
+"unwinds correctly" here requires invariants synchronous firing can't
+satisfy.
+
+#### The cycle subcase
+
+```ts
+const [count, setCount] = signal(0)
+const incrementer = computed(() => {
+  const c = read(count)
+  setCount(c + 1)             // writes to its own dep
+  return c
+})
+read(incrementer)
+```
+
+Trace under Position B:
+- Invoke `incrementer`. Push tracker.
+- `read(count)` → 0; form edge `count → incrementer.slot`.
+- `setCount(1)`: writeSlot writes count.slot. Defer fire.
+- Return 0. Pop tracker.
+- Drain: fire `count → incrementer.slot`. Selector matches; invalidate
+  `incrementer.slot`. Mark dirty.
+
+After the initial `read(incrementer)`:
+- `incrementer.slots[ROOT_SCOPE].cached = 0` (returned value) but
+  immediately invalidated by the drain.
+- `count.slots[ROOT_SCOPE].cached = 1`.
+
+If a consumer demands `incrementer` again (e.g., a downstream effect fires
+the consumer), it recomputes:
+- `read(count)` → 1. `setCount(2)`. Defer.
+- Return 1. Pop. Drain → invalidate `incrementer`. Mark dirty.
+
+Each demand-driven read recomputes one step. **No infinite loop *during* a
+single read** — the recompute completes, returns a value, and only *then* is
+the invalidation processed. The loop only continues if some consumer keeps
+pulling.
+
+If there's a consumer that re-runs on each invalidation (an Effect), the
+Effect's scheduler will keep scheduling re-runs:
+- Effect fires → reads incrementer → invalidates incrementer → Effect's
+  slot also invalidates (since the Effect depends on incrementer's slot) →
+  Effect rescheduled → loops.
+
+Position B catches this *at the consumer level*, not at the recompute level.
+The library's scheduler can detect "same Effect re-scheduling more than N
+times in one microtask cycle" and bail with an error. r3 doesn't have this
+today; pulse would need to add it.
+
+### Position A (hard ban) traced
+
+`writeSlot` inside a tracker throws.
+
+```ts
+function writeSlot(node, scope, slot) {
+  if (currentTracker !== null) {
+    throw new Error("Cannot write to a signal during recompute. " +
+                    "Move side-effecting writes to an effect or action.")
+  }
+  // ... otherwise normal write ...
+}
+```
+
+For the `derived` example above: `setShadow(0)` throws. The recipe throws.
+`invoke(derived, ROOT_SCOPE)` propagates the throw. `read(derived)` throws.
+
+Trade-offs vs Position B:
+- **Pros (A):** simpler invariant, prevents the cycle case at the source,
+  encourages cleanly separating computation from side-effect (use Effects
+  for side effects). MobX-strict-mode style.
+- **Cons (A):** some legitimate patterns become awkward (memoised writes to
+  an isomorphic shadow representation; cache warming on demand; logging
+  metrics from a derivation). Workarounds (`untrack`-then-write) feel
+  hacky.
+
+### Position C (fire synchronously) — ruled out
+
+Already covered: synchronous firing mid-recompute creates re-entrant
+invocation of the current recompute, which can corrupt cached state and
+violate the "a recompute runs to completion uninterrupted" invariant.
+Listed for completeness; almost certainly wrong.
+
+### Architecture exposed
+
+K1 forced the following framings under stress; all held, but with newly-
+visible work:
+
+1. **Q-H (tracker vs scope) matters here.** The re-entrant write's
+   `getCurrentScope()` returns the scope being recomputed under — *not*
+   `ROOT_SCOPE` by default. If `derived` is being recomputed under
+   speculation scope `S`, the re-entrant `setShadow(...)` writes to
+   `shadow.slots[S]`. **The scope nests cleanly with the tracker.** The
+   ambient context's two slots (tracker, scope) push together when
+   entering a recompute and pop together. Q-H's "they're at different
+   granularities" framing holds — but they're *parallel* and *coupled*.
+
+2. **Q-A (selectors / fire policy) didn't break.** Under Position B,
+   selectors still run when `fireEdges` drains the deferred queue. The
+   *only* engine change Position B requires is gating `fireEdges` behind
+   the `deferredFires` queue. The selector logic itself is unchanged.
+
+3. **Q-C (consumer pattern) is the right level for cycle detection.**
+   Cycles surface at the consumer level (Effects re-running indefinitely),
+   not at the recompute level (recomputes always run to completion).
+   The library's scheduler is where the "N re-runs per cycle" guard lives.
+   This is a *new* sub-question for Q-C — not "consumer shape" (resolved
+   in H1a-c) but "consumer-driven cycle detection."
+
+4. **Q-E (signal vs computed asymmetry) does *not* matter here.** The
+   re-entrant write is to a Signal slot; the trace would work the same
+   way if it were to a Computed slot (Computed slots can also be written
+   via promotion, etc.). The recompute discipline is uniform.
+
+5. **A new question about read coherence.** Inside a recipe body that
+   does `setShadow(...)` then `read(shadow)`, does the second read see
+   the new shadow value? Under Position B's "write synchronously, fire
+   later" — yes, because the slot is updated synchronously. Worth
+   making explicit: **writes are visible within the recipe body that
+   issued them, even before edges fire.** Read-your-own-write is
+   intra-body.
+
+### Lean
+
+I lean **Position B (permit + defer fires)** with one library-side guard
+(consumer cycle detection). Reasons:
+
+1. *Consistent with r3's existing behaviour* — `setSignal` updates value
+   synchronously, defers notification via the dirty heap. The pulse Model
+   2 fork would essentially make this explicit (a `deferredFires` queue
+   gated on `currentTracker`).
+2. *Doesn't ban legitimate patterns.* Memoised shadow projections, cache
+   warming, derived metrics — these are all useful and don't necessarily
+   indicate bugs.
+3. *Cycle detection at the consumer level is the right granularity* —
+   cycles only loop if a consumer keeps demanding the same value, which
+   the scheduler already coordinates. A "max re-runs per microtask cycle"
+   guard catches infinite loops without false-positives on legitimate
+   self-modifying recomputes.
+4. *Programmer error is still detectable.* Even Position A doesn't catch
+   *all* infinite loops (it just bans the trivial direct case); the
+   consumer-level guard catches the more general case.
+
+But the lean is *soft*. Position A has real ergonomic appeal — "writes
+during recompute are bugs" is a strong invariant. Pulse may end up shipping
+**a mode flag** that toggles between A (strict, dev-mode) and B (permissive,
+production). Mode flags are a hedge against locking in.
+
+### New sub-questions surfaced
+
+1. **Deferral propagation across nested invokes.** The sketch propagates
+   `deferredFires` up to the outermost invoke. Is that the right
+   granularity, or should each invoke's deferred fires fire when *that*
+   invoke returns (so a transitive read sees a consistent intermediate
+   state)? The trace suggests outermost — but for nested speculations
+   (action inside action), the answer might be "fire at the action
+   boundary" instead. Open.
+
+2. **Consumer cycle-detection policy.** Max re-runs per microtask, or
+   per-second, or detect "this consumer scheduled itself with no input
+   change"? Library design call. **New Q-J candidate.**
+
+3. **`untrack` interaction.** Calling `setShadow` inside an
+   `untrack(() => ...)` block: does the deferral still apply? Per the
+   tracker/scope separation, `untrack` clears `currentTracker` but not
+   `currentScope`. So `deferredFires` (which is gated on tracker) would
+   *not* defer in untrack — writes would fire synchronously. That's
+   plausible but worth confirming. Connects to L1 in the catalog.
+
+4. **The Position A escape hatch.** If A is the default, what's the
+   sanctioned way to do *needed* re-entrant writes? `Promise.resolve().then(
+   () => setShadow(0))` to defer to next microtask? An explicit
+   `defer(() => setShadow(0))` helper? Library shape, open.
+
+### Framings status after K1
+
+All four framings held:
+
+- *Node-as-recipe*: re-entrant writes don't break the framing — the recipe
+  is just JavaScript that happens to call a setter.
+- *Walks-first-class*: `read` and `writeSlot` are walks; their composition
+  during recompute is the policy question.
+- *Slim engine + thick library*: Position B's deferral is implementable
+  with one engine flag (`deferredFires`) and library-side scheduling. No
+  new engine machinery beyond what's already sketched.
+- *Scope/owner unification*: the re-entrant write inherits the scope from
+  the recompute it's nested in. The scope/tracker pair pushes and pops
+  together as a unit.
+
+**No falsifications.** But K1 is the first traced scenario where the
+architecture itself doesn't pick a winner between two real positions (A vs
+B). That's *signal* — it tells us the question is genuinely a *design call*
+the engine machinery can support either way, and pulse has to make it
+deliberately. Worth keeping the call open in the doc.
+
+---
+
 ## Open questions (the actual mapping work)
 
 Each is open. The goal is to *map the question space* before committing to any
