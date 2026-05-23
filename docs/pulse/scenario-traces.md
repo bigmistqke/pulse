@@ -375,20 +375,18 @@ because the body isn't going to re-run on dep change.
   the action body with `"alice"`. `name = "alice"`.
 
 **Engine handling of Promise resolution** (refined since C2 was first traced;
-see [Q4](./questions.md#q4--async-at-the-engine-level) for the current framing): the engine attaches a `.then` to the
-Promise stored in `slot_U_S.cached`. When `userPromise` resolves to
-`"alice"`, the handler **does NOT mutate `slot_U_S.cached`** — the slot's
-cached value remains the Promise indefinitely. Instead, the Promise itself
-is tweaked with `{ status: 'fulfilled', value: "alice" }` ([Q4](./questions.md#q4--async-at-the-engine-level)'s lean,
-matching React's `use()` convention; `WeakMap` fallback for frozen
-Promises), and the engine fires a slot-changed event with kind `'resolved'`.
-Walks query `promiseState(slot_U_S.cached)` to retrieve the
-synchronously-readable resolved value. Downstream consumers receive the
-slot-changed event identically to any other invalidation event. _This is
-strictly cleaner than mutating `cached`_: the slot is immutable for its
-lifetime; the tweaked Promise is shared across all walks reading it;
-read-vs-write distinction ([Q9](./questions.md#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally)) stays unambiguous (the Promise resolving
-is not a write).
+see [Q4](./questions.md#q4--async-at-the-engine-level) for the current framing): the engine does **nothing** on
+resolution. The driver above (which is the consumer for this action body)
+already held the Awaitable — it attached its own `.then` and is resuming
+the generator directly. The Awaitable's `status` flipped to `'fulfilled'`
+and `value: "alice"` populated as instance state on the Awaitable class
+(not as a side-table or tweak on a foreign Promise — pulse owns the
+wrapper, see the Awaitable framing). `slot_U_S.cached` still points at the
+same Awaitable; its identity didn't change, so there's no write event and
+no edge firing. Walks that later inspect the slot read `.status` and
+`.value` synchronously. Consumers that care about resolution (other than
+this driver) would have to hold the Awaitable themselves — there is no
+ambient "resolution fired" channel on the slot.
 
 **Step 4: body continues — `setUser(Promise.resolve("alice!"))`.**
 
@@ -639,13 +637,14 @@ sub-questions into the open:
    `gen.next`.** Driver responsibility.
 4. **Action bodies don't track.** No edges formed.
 5. **Discard-guard on resume.** `if (scope.status !== 'open') return`.
-6. **Engine fires slot-changed events on Promise resolution, without
-   mutating `slot.cached`.** Refined post-C2; see [Q4](./questions.md#q4--async-at-the-engine-level). The slot's cached
-   value stays as the Promise; the Promise itself is tweaked with `{
-status, value, reason }` (React's convention) for synchronous query
-   via `promiseState(promise)`. Engine attaches one `.then` per
-   Promise-valued slot to populate the metadata and fire the resolution
-   event.
+6. **Engine does nothing on Promise resolution.** Refined post-C2; see
+   [Q4](./questions.md#q4--async-at-the-engine-level). The slot's `cached`
+   is an Awaitable; its identity doesn't change when the underlying
+   Promise settles (only the instance's `status`/`value`/`reason` flips).
+   The consumer that received the Awaitable from `get(...)` — the action
+   body's driver in this trace — holds the reference and attaches its
+   own `.then` for resumption. No engine-level `'resolved'` event;
+   selectors fire on writes only.
 7. **`Slot` needs `wasWritten` (or equivalent).** Read-populated and
    write-populated slots have different commit semantics; the engine must
    distinguish. **New sub-question — added to [Q7](./questions.md#q7--the-defaultrecipe-mechanism) and [Q1](./questions.md#q1--fall-through-and-edge-policy) territory.**
@@ -2430,40 +2429,41 @@ intermediate.
   - `invoke(user, S)`:
     - Engine: `user.slots.get(S)` miss. Create `slot_U_S = { recipe:
 defaultRecipe, deps: [], subs: [] }`. Invoke recipe → `userPromise`.
-      `slot_U_S.cached = userPromise`.
-    - **Engine .then attach (per [Q4](./questions.md#q4--async-at-the-engine-level)):** since `slot_U_S.cached` is a
-      Promise, attach `.then(v => { promiseState writeback; fireEdges(user,
-S, { kind: 'resolved' }) })`. This `.then` is attached **first**
-      (during invoke).
-    - Return `userPromise`.
-  - `get` sees Promise → yields `{ kind: 'park', promise: userPromise }`.
-- Action driver receives park. **Driver .then attach:** attaches
-  `userPromise.then(name => step(name), …)`. This `.then` is attached
-  **second** (during the action driver's park handling).
+      Library wraps via `makeAwaitable`: `slot_U_S.cached =
+      Awaitable<U, pending>` (an Awaitable instance whose internal state is
+      currently `{ status: 'pending' }`). Per [Q4](./questions.md#q4--async-at-the-engine-level),
+      the engine attaches nothing — resolution is consumer-handled.
+    - Return the Awaitable.
+  - `get` sees a pending Awaitable → yields
+    `{ kind: 'park', promise: awaitable }`.
+- Action driver receives park. **Driver `.then` attach:** attaches
+  `awaitable.then(name => step(name), …)`. This is the **sole** `.then`
+  on this Awaitable — the consumer that received the Awaitable from `get`
+  is the only thing that needs to react to its resolution.
 - Driver returns. Sync portion done. Ambient popped.
 
 **State after Step 2:**
 
 ```
-user.slots = { S: { recipe: defaultRecipe, cached: userPromise, deps: [], subs: [] } }
-userPromise: pending
-  .then queue (in attach order): [engine-handler, driver-handler]
+user.slots = { S: { recipe: defaultRecipe, cached: Awaitable<U, pending>, deps: [], subs: [] } }
+Awaitable<U>.then queue: [driver-handler]
 no edges
 ```
 
 **Step 3: `resolveUser("Alice")`.**
 
-`userPromise` resolves. Microtask queue drains `.then` handlers **in attach
-order**:
+The underlying promise resolves. The Awaitable's instance state flips to
+`{ status: 'fulfilled', value: "Alice" }` (class-instance state, populated
+by the executor pulse owns — see the Awaitable framing). Microtask queue
+drains the Awaitable's `.then` handlers:
 
-- _Engine handler fires first:_
-  - Per [Q4](./questions.md#q4--async-at-the-engine-level): tweak `userPromise` with `{ status: 'fulfilled', value:
-"Alice" }`.
-  - `fireEdges(user, S, { kind: 'resolved' })`. Walk `user`'s outgoing
-    edges. **None exist** (the action body's `yield* get` didn't track;
-    `greeting` hasn't been read yet). No edges to fire.
-- _Driver handler fires second:_
+- _Driver handler runs:_
   - Driver `step("Alice")`. Push ambient = S. `gen.next("Alice")`.
+
+There is no separate engine-level event. The Awaitable's own resolution is
+the only signal; the consumer that held it (the driver) handles it. No
+edges fire — the action body's `yield* get` didn't track and `greeting`
+hasn't been read yet, so there are no subscribers regardless.
 
 **Step 4: generator resumes; `const g = yield* get(greeting)` runs.**
 
@@ -2473,44 +2473,40 @@ order**:
   - `getCurrentScope()` → `S`. `currentTracker` → null (action body).
   - `invoke(greeting, S)`:
     - Engine: `greeting.slots.get(S)` miss. Create `slot_G_S`. Push
-      `currentTracker = slot_G_S`, push scope = `S`. Drive greeting's
-      generator-form recipe (the engine drives generator-form recipes
-      similarly to how the action driver drives action bodies — see
-      main-doc D11):
-      - Recipe runs: `function*() { const u = yield* get(user); return
-\`Hello, ${u}!\` }`
-      - `yield* get(user)` sub-generator:
+      `currentTracker = slot_G_S`, push scope = `S`. Run greeting's
+      stage chain:
+      - Stage 0 (source): `get(user)`.
         - `link(user, chainSelector([S, ROOT_SCOPE]), slot_G_S)` → `edge1`.
-        - `invoke(user, S)` → hit, `cached = userPromise` (tweaked).
-        - `get` sees Promise → check `promiseState(userPromise)` →
-          `{ status: 'fulfilled', value: "Alice" }`. Returns `"Alice"`
-          **synchronously** (no park; the Promise is already resolved).
-      - `yield*` delegates `"Alice"` back to greeting's recipe. `u = "Alice"`.
-      - Recipe returns `"Hello, Alice!"`.
-    - Generator-form compute wraps the return in a resolved Promise:
-      `slot_G_S.cached = Promise.resolve("Hello, Alice!")` (tweaked
-      `{ status: 'fulfilled', value: "Hello, Alice!" }`). This preserves
-      type-level async-ness — `greeting` is `Computed<Promise<string>>`.
-    - Pop tracker, pop scope. Return the cached Promise.
-  - `get` sees `Promise` → check `promiseState` → fulfilled,
-    `"Hello, Alice!"`. Returns `"Hello, Alice!"` **synchronously**.
-- `yield*` delegates `"Hello, Alice!"` to the action body. `g =
-"Hello, Alice!"`. `console.log(g)` → prints `"Hello, Alice!"`. ✓
+        - `invoke(user, S)` → hit, `cached = Awaitable<U, fulfilled>`
+          (already resolved from Step 3).
+        - `get` sees Awaitable → checks `.status` → `'fulfilled'`. Returns
+          the Awaitable. Stage machinery unwraps to `.value` = `"Alice"`
+          before passing to stage 1 (since the Awaitable is already
+          fulfilled, no `.then` chaining is needed — synchronous unwrap).
+      - Stage 1: receives `"Alice"`, returns `"Hello, Alice!"`.
+    - Stage chain wraps the final value in a resolved Awaitable:
+      `slot_G_S.cached = Awaitable<G, fulfilled, "Hello, Alice!">`. This
+      preserves type-level async-ness — `greeting` is
+      `Computed<Promise<string>>`.
+    - Pop tracker, pop scope. Return the Awaitable.
+  - `get` sees Awaitable → `.status === 'fulfilled'` → returns the
+    Awaitable. `yield*` machinery unwraps to `.value` = `"Hello, Alice!"`
+    **synchronously** (no park).
+- `g = "Hello, Alice!"`. `console.log(g)` → prints `"Hello, Alice!"`. ✓
 
 **State after Step 4:**
 
 ```
-user.slots = { S: { recipe: defaultRecipe, cached: userPromise (tweaked: fulfilled, "Alice") } }
-greeting.slots = { S: { recipe: generator-recipe,
-                         cached: Promise<"Hello, Alice!"> (tweaked: fulfilled),
+user.slots = { S: { cached: Awaitable<U, fulfilled, "Alice"> } }
+greeting.slots = { S: { cached: Awaitable<G, fulfilled, "Hello, Alice!">,
                          deps: [edge1] } }
 edge1 = { source: user, selector: chainSelector([S, ROOT_SCOPE]), target: slot_G_S }
 ```
 
-Both slots' `cached` values are Promises tweaked with `{ status:
-'fulfilled', value }`. Reads of either node return Promises that
-`promiseState` recognises as resolved. Type-level async-ness preserved
-through the graph; sync access at the leaf via `yield* get`.
+Both slots' `cached` values are Awaitables with `status: 'fulfilled'`.
+Reads of either node return the Awaitable; consumers in generator contexts
+unwrap via `yield*`, sync consumers query `.value` directly. Type-level
+async-ness preserved through the graph.
 
 **Step 5: action body returns. `closeScope(S, 'commit')`.**
 
@@ -2533,31 +2529,26 @@ console output: "Hello, Alice!"
 The action prints `"Hello, Alice!"` — the resolved value. ✓ The
 architecture handles C2e correctly.
 
-### The timing dependency that made this work
+### Why there's no timing dependency in the main trace
 
-The trace relies on **`.then` attach order**: the engine attaches its
-resolution handler _before_ the driver attaches its resume handler. This
-order is preserved naturally because:
+The main trace has **one `.then` handler** on `user`'s Awaitable — the
+action driver's. When the underlying promise resolves, the Awaitable's
+instance state flips first (synchronously inside the executor), then the
+driver handler runs in the microtask. By the time the driver resumes the
+body and the body reaches `yield* get(greeting)`, `user`'s slot already
+holds a fulfilled Awaitable. Greeting's stage chain runs synchronously
+against it. No race, no ordering invariant.
 
-- The engine's `.then` is attached inside `invoke` (when the recipe returns
-  a Promise and the slot gets populated).
-- The driver's `.then` is attached _after_ `invoke` returns — when `get`
-  yields the park command and the driver handles it.
+The previous version of this trace had an "engine `.then` vs driver
+`.then`" ordering subtlety because it assumed the engine attached its own
+resolution handler to fire `'resolved'` edge events. Under the revised
+[Q4](./questions.md#q4--async-at-the-engine-level) framing, that engine
+handler doesn't exist — the Awaitable carries its own resolved state and
+the consumer that received the Awaitable handles its own resumption. The
+ordering question dissolves.
 
-So the engine's tweak always lands before the driver's resume in the
-microtask queue. Whew.
-
-**What if this order were reversed?** Then `use(user)` inside `greeting`'s
-recipe would see `promiseState = pending` and throw-to-suspend. `greeting`'s
-slot would be left in a suspended state. `get(greeting)` would return…
-the suspension Promise? Or undefined? **Open ergonomic question** — but the
-architecture _doesn't require this case to be handled_ because the natural
-attach order guarantees engine-first.
-
-If this ever became a real concern (e.g., if a library author attached
-their own `.then` between engine and driver), the engine could _enforce_
-ordering by making the engine handler always run synchronously inside the
-resolution detection — but that's a hypothetical for now.
+A different ordering question *does* appear in the pre-yield walkthrough
+below, but it's library-level (stage-chain vs driver), not engine-level.
 
 ### What if the action body had also read `greeting` _before_ the yield?
 
@@ -2571,23 +2562,36 @@ action(function* () {
 })
 ```
 
-Under the corrected setup (generator-form `greeting`):
+Under the corrected setup (stage-form `greeting`):
 
 - _At (A) — `const g0 = get(greeting)` while `user` is pending:_
-  `invoke(greeting, S)` runs the generator-form recipe. The recipe does
-  `yield* get(user)`, which finds `userPromise` pending → yields a park
-  command. The engine attaches `.then` and **the recipe parks mid-flight**.
-  `slot_G_S.cached` becomes the pending Promise representing greeting's
-  eventual value.
+  `invoke(greeting, S)` runs the stage chain. Stage 0's `get(user)` returns
+  a *pending* Awaitable. The stage machinery cannot continue synchronously,
+  so it constructs a new Awaitable for `slot_G_S.cached` and chains:
+  `userAwaitable.then(u => runStage1(u))`, where `runStage1` resolves the
+  new Awaitable with `'Hello, ${u}!'` once `user` settles.
 
-  `get(greeting)` returns the Promise. **`g0` is `Promise<string>`,
-  pending.** The user gets a Promise back. Sync read of an async slot is
-  type-honest: the slot's cached value is `Promise<string>`, and `get`
+  Now `user`'s Awaitable has **two** `.then` handlers in attach order:
+  1. The stage-chain handler (attached just now, during this `get(greeting)`).
+  2. (Not yet attached — the action driver hasn't yielded yet.)
+
+  `get(greeting)` returns the pending Awaitable. **`g0` is
+  `Awaitable<string>`, pending.** Sync read of an async slot is
+  type-honest: the slot's cached value is `Awaitable<string>`, and `get`
   returns exactly that.
 
-- _At (C) — `const g1 = yield_ get(greeting)`after the yield:*`userPromise`resolved → engine handler tweaked it → the parked`greeting`generator (registered via .then) resumes, completes, cached
-is now`Promise<"Hello, Alice!">`(tweaked fulfilled).`yield\*
-  get(greeting)`sees fulfilled, returns`"Hello, Alice!"`.
+- _At (B) — `yield* get(user)` parks:_ the driver attaches its own
+  `.then` to `user`'s Awaitable. Attach order is now
+  `[stage-chain-handler, driver-handler]`.
+
+- _At (C) — `const g1 = yield* get(greeting)` after the yield:_
+  `userPromise` resolves. Microtask drains handlers in attach order:
+  1. **Stage-chain handler runs first.** Runs stage 1 against `"Alice"`,
+     resolves `greeting`'s Awaitable to `"Hello, Alice!"`. `slot_G_S.cached`
+     is now `Awaitable<G, fulfilled, "Hello, Alice!">`.
+  2. **Driver handler runs second.** Resumes the action body with
+     `name = "Alice"`. Body proceeds to `yield* get(greeting)` → reads
+     greeting's slot → fulfilled → returns `"Hello, Alice!"` synchronously.
 
 So in this corrected setup:
 
@@ -2635,15 +2639,18 @@ With that rule honoured, C2e's coherence story is clean.
 
 C2e traced cleanly. No falsifications. The key findings:
 
-1. **Engine attaches `.then` before driver attaches `.then`.** Natural
-   ordering preserved by the call sequence (invoke first, then yield).
-   The engine's tweak always lands first.
-2. **`use(node)` inside a derived's recipe handles the Promise correctly
-   when it's been tweaked.** The recipe gets the resolved value
-   synchronously.
-3. **The action body's post-yield `get(greeting)` is unaware of any
-   complexity** — `greeting` just returns a string. The whole async dance
-   is hidden inside `greeting`'s recipe via `use`.
+1. **Engine does nothing on Promise resolution.** Consumers that hold an
+   Awaitable (the action body's driver, or a stage chain that parked)
+   attach their own `.then`. The main trace has a single handler; the
+   pre-yield variant has two, ordered naturally by library call sequence.
+2. **Stage chains park cleanly on pending upstream Awaitables** by
+   constructing a new Awaitable for their own slot and chaining via
+   `.then`. The slot's `cached` is always an Awaitable; its `status`
+   reflects whether the stage chain has completed.
+3. **The action body's post-yield `get(greeting)` is uneventful** —
+   greeting's slot is fulfilled by the time the body reads it, so the
+   `yield*` unwrap is synchronous. The async dance lives in the stage
+   chain, not at the read site.
 4. **Q9 is load-bearing.** Nothing promoted on commit because all slots
    were read-populated. This is correct — the action didn't _write_
    anything; it just performed reads with side effects (the
@@ -2656,22 +2663,30 @@ C2e traced cleanly. No falsifications. The key findings:
 
 - **What if the action body had reads-before-yield that fall through to
   unresolved Promises?** The "Before the yield" walkthrough above shows
-  ergonomic surprises (`g0` is a suspension Promise). Library could
-  provide a `use(node)` walk usable in action bodies too — not just
-  computed recipes — that yields a park command when pending. This makes
-  action-body imperative reads parking-aware. **Possibly worth adding to
-  [Q3](./questions.md#q3--consumer-patterns) or a new sub-question.**
-- **The hypothetical reversed `.then` order**: only concerning if pulse
-  exposes `promiseState` as a primitive and a library author attaches
-  handlers in unexpected orders. Probably never in practice. Worth noting.
+  the type-honest behaviour: `g0` is a pending `Awaitable<string>`. The
+  user can inspect `.status`, `.then` it manually, or pass it along. If
+  imperative parking-aware reads are desired, `yield* get(node)` already
+  provides that — the question is whether a non-yielding `awaitGet(node)`
+  helper is worth shipping. **Library ergonomics, not architecture.**
+- **Stage-chain `.then` attach order vs driver `.then` attach order.**
+  Only matters in the pre-yield-read variant. Natural call sequence
+  (stage chain attaches during `get(greeting)` at line 1, driver
+  attaches during `yield* get(user)` at line 2) gives the right order
+  for free. A library author who manually attaches handlers between
+  these calls could disrupt it; the architecture doesn't enforce
+  ordering, but no realistic code path violates it.
 
 ### Framings status after C2e
 
 All four framings still hold. C2e was a _successful coherence trace_: the
-architecture composes correctly across `yield* get` → `use` → recipe →
-`promiseState`. The audit's worry — "does the engine's `'resolved'` event
-have to fire before resume?" — turned out to have a clean answer based on
-microtask ordering of `.then` attaches.
+architecture composes correctly across `yield* get` → stages → Awaitable.
+The audit's worry — "does the engine's `'resolved'` event have to fire
+before resume?" — dissolved entirely under the revised
+[Q4](./questions.md#q4--async-at-the-engine-level) framing: there is no
+`'resolved'` engine event. Consumers that hold the Awaitable handle their
+own resumption; the main trace has a single handler with no race, and the
+pre-yield variant has a library-level attach order that's preserved by
+the natural call sequence.
 
 **Two framings the trace validated, the second new:**
 

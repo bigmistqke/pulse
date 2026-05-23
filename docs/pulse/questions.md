@@ -201,12 +201,13 @@ framing:
   dropped (e.g., scope discard happened between write and notification),
   engine has to detect and skip. Lazy-prune-on-iteration is the natural answer.
   Standard reactive bookkeeping.
-- *Async writes ([Q4](#q4--async-at-the-engine-level) interaction).* A slot's `cached` may be a Promise that
-  resolves later. Does the resolution count as a "write" that fires edges?
-  Probably yes (the slot's effective value changed); but the engine needs to
-  know to fire on resolution. The selector itself doesn't change — it still
-  fires on writes to the slot's scope — but the *engine's notion of "a write
-  happened"* has to include the Promise-resolution event.
+- *Async writes ([Q4](#q4--async-at-the-engine-level) interaction).* Resolved:
+  resolution is **not** an engine event. A slot's `cached` may be an Awaitable
+  whose internal `status` flips later, but the slot's *identity* hasn't
+  changed and there's no `writeScope` to feed a selector. Consumers that need
+  to react to resolution already hold the Awaitable reference (returned by
+  `get`); they attach their own `.then` / `yield*` / `use`. The selector
+  signature stays writes-only. See [Q4](#q4--async-at-the-engine-level).
 
 **Related:** [Q3](#q3--consumer-patterns) (consumers subscribe via the same selector mechanism; consumer
 notification IS a "fire an edge" event whose target is a side-effect handler
@@ -292,8 +293,9 @@ policy.*
   or is iterating subs in the consumer correct?
 
 **Related:** [Q1](#q1--fall-through-and-edge-policy) (selectors are the chain mechanism; [Q3](#q3--consumer-patterns) subscribes via
-them), [Q4](#q4--async-at-the-engine-level) (Promise-resolution-as-write fires consumers — confirmed in C2),
-[Q7](#q7--the-defaultrecipe-mechanism) (`defaultRecipe` interacts with consumer's initial run).
+them), [Q4](#q4--async-at-the-engine-level) (Promise resolution is *not* an engine event; consumers hold the
+Awaitable and handle their own resumption), [Q7](#q7--the-defaultrecipe-mechanism) (`defaultRecipe` interacts with
+consumer's initial run).
 
 ### Q4 — Async at the engine level
 
@@ -322,50 +324,50 @@ The engine doesn't need a separate `promiseState()` helper or
 `WeakMap<Promise, T>` side-table. Awaitable IS the Promise-with-state type;
 the user accesses the fields directly.
 
-**Engine's responsibility for firing on resolution.** When a Promise lands
-in a slot's `cached` (either via `writeSlot` or via `invoke` running an
-async recipe), the engine attaches a `.then` so that resolution emits a
-slot-changed event (`{ kind: 'resolved' }`) to subscribers. The slot's
-`cached` is NOT mutated when the Promise resolves — it stays as the
-Awaitable, which now has `status: 'fulfilled'` and `value: T` populated.
-Walks query via the field on next read.
+**The engine does *nothing* on resolution.** When a Promise lands in a
+slot's `cached`, the engine's work is done: it fired edges for the write
+that put the Awaitable there. Resolution is a state-flip *inside* the
+Awaitable instance — `status: 'pending'` becomes `'fulfilled'`/`'rejected'`
+and `value`/`reason` populates — but the slot's `cached` still points at
+the same Awaitable. No write, no `writeScope`, no edge event.
 
-Concretely (engine-side, ~10 lines):
+Consumers that need to react to resolution **already hold the Awaitable
+reference** — `get(asyncNode)` returned it to them. They attach their own
+resumption mechanism:
 
-```ts
-// Inside writeSlot / invoke, after caching a Promise:
-function trackPromiseResolution<T>(node: Node<T>, scope: Scope, slot: Slot<T>) {
-  const cached = slot.cached
-  if (cached && typeof (cached as any).then === 'function') {
-    ;(cached as Promise<unknown>).then(
-      () => fireEdges(node, scope, { kind: 'resolved' }),
-      () => fireEdges(node, scope, { kind: 'resolved' }),  // rejection also fires
-    )
-  }
-}
-```
+- *Generator stages and action bodies* — `yield* get(asyncNode)`. The
+  generator driver awaits the Awaitable and resumes the generator.
+- *`use(node)` (throw-to-suspend)* — the surrounding boundary catches and
+  re-tries when the Awaitable settles.
+- *`isPending(node)` for UI* — the walk reads `.status` on the Awaitable
+  and, for tracked subscribers, attaches a one-shot `.then` that
+  invalidates its *own* subscription channel (not a slot-write). The
+  engine doesn't generalize Promise resolution into a write event.
 
-Plus the library-side `makeAwaitable` helper that wraps incoming Promises
-in pulse's Awaitable class (so the state fields are populated structurally
-rather than via mutation). See the "Awaitable" framing section.
+This preserves [P2](./framings.md#p2--acknowledge-async-dont-hide-it):
+async re-trigger paths are *explicit per walk*, not ambient. It also
+keeps Q1's selector signature clean — selectors fire on writes only, never
+on resolutions.
 
 **Settled by Awaitable + the [C2 trace](./scenario-traces.md#c2--action-body-with-async-read):**
 
 - *Does the engine `await` internally?* No — walks handle suspension via
-  `yield* get` or `use`. Engine attaches a `.then` only to fire the
-  slot-changed event on resolution.
+  `yield* get` or `use`. Engine doesn't observe Promise resolution at all.
+- *Does the engine attach `.then` to slot Promises?* No. The consumer that
+  asked for the Awaitable holds it and attaches its own handlers.
 - *Does the engine track which slots are pending?* No — pending-ness is
   derived from `(get(node) as Awaitable<U>).status === 'pending'`. The
-  `isPending(node)` walk reads the status field.
+  `isPending(node)` walk reads the status field and (when invoked from a
+  tracking consumer) manages its own resolution-subscription channel.
 - *Where does Promise state live?* On the Awaitable class instance —
   pulse owns the wrapper. Foreign Promises (React, TanStack Query, etc.)
   are duck-typed for interop and their state copied into our Awaitable.
 - *Mutation of foreign Promises?* Avoided. Pulse never tweaks Promises it
   doesn't own; it wraps them in Awaitable instances.
 
-**Related:** [Q3](#q3--consumer-patterns) (consumer's re-run discipline for async deps; consumers
-receive `{ kind: 'resolved' }` events the same way they receive `{ kind:
-'invalidated' }`), `yield* get` vs `use` vs stages (see framings), [Q9](#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally)
+**Related:** [Q3](#q3--consumer-patterns) (consumers handle their own resumption — they hold the
+Awaitable from `get`), `yield* get` vs `use` vs stages (see framings),
+[Q9](#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally)
 (a Promise that resolves is "still the same slot," not a write, so doesn't
 trigger commit-promotion).
 
@@ -579,10 +581,11 @@ unaffected by whether fires are deferred.
   gets dropped (e.g., the consumer was tied to a different scope that
   closed during the commit's processing), the deferred fire would target a
   dead slot. Lazy-prune-on-iteration handles it.
-- *Promise resolution during commit.* If a promoted slot's `cached` is a
-  Promise that's still pending, the commit promotes the Promise. Later
-  resolution fires edges normally — same as any other Promise-resolution
-  write. No special handling.
+- *Promise resolution during commit.* If a promoted slot's `cached` is an
+  Awaitable that's still pending, the commit promotes the Awaitable as-is.
+  Later resolution is not an engine event (per [Q4](#q4--async-at-the-engine-level));
+  consumers that read the promoted slot already hold the Awaitable and
+  handle their own resumption. No special handling.
 
 **Lean: implement commit as a deferred-fires region**, generalizing K1's
 mechanism. The engine's invariant becomes "if `deferredFires` is non-null,
