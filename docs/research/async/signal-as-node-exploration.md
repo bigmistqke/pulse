@@ -167,6 +167,72 @@ that's correct but surprising.
 [`pulse-design-direction.md`](./pulse-design-direction.md) once the rest of
 the design-direction work stabilises. Tracked branch-locally for now.)
 
+### Unwrap async at the leaf, not in the middle of the graph
+
+A position rule that follows from main-doc P2 ("acknowledge async; don't
+hide it") and D9 (stages are pure transforms): **intermediate computeds
+must propagate async-ness through their type**; they must not collapse
+`Promise<T>` into `T` via `use()` mid-graph. `use()` is reserved for
+**leaf consumption** — action bodies, JSX expressions, effect bodies —
+where the consumer is explicitly committing to extract a sync value.
+
+Two leaf-preserving forms for intermediate computeds:
+
+```ts
+// Generator form — imperative-feeling; multi-step logic between awaits
+const greeting = compute(function* () {
+  const u = yield* read(user)
+  return `Hello, ${u}!`
+})
+
+// Stage form — declarative; .then-sugar where the stage callback sees the resolved value
+const greeting = compute(user, (u) => `Hello, ${u}!`)
+```
+
+Both produce `Computed<Promise<string>>` (async propagates through the
+type). The stage callback / generator body sees `u: string` because the
+engine threads the resolved value in; but the *output* of the whole
+computed is still `Promise<string>`.
+
+**Anti-pattern (code smell):**
+
+```ts
+const greeting = computed(() => `Hello, ${use(user)}!`)
+// greeting: Computed<string>  — async hidden, throw-to-suspend mid-graph
+```
+
+`use()` here collapses `Promise<string>` into `string` at the callsite,
+hiding the async-ness from downstream consumers. Whoever reads `greeting`
+gets a `string` type but with hidden suspense semantics — they can be
+"surprise-suspended" when reading what looks like a sync value. The
+ergonomic surprise in C2e's earlier trace was caused entirely by this
+anti-pattern in the setup.
+
+**Why the rule matters:**
+
+- *Type honesty.* `Computed<Promise<T>>` tells consumers they're dealing
+  with async. `Computed<T>` says it's sync. `use()` mid-graph lies in the
+  type.
+- *Suspension locality.* When `use()` lives only at leaves, suspension
+  points are visible — readers know "I committed to extract sync; I
+  might suspend." When `use()` lives mid-graph, every read of the
+  downstream becomes a potential suspension point with no syntactic
+  signal.
+- *Stage-form composability.* Stages chain naturally via `.then`-sugar.
+  Each stage is pure. Async-ness flows through the pipeline as a typed
+  property, not as a hidden control-flow modification.
+
+**Rule sharpened:** *Intermediate computeds use generator-form
+(`yield* read`) or stage-form (`compute(source, transform)`). `use()`
+is reserved for leaf consumption.*
+
+(Companion to the "Derivation kind matches reactivity scope" framing
+above. Also a candidate for promotion to a P-numbered principle in
+[`pulse-design-direction.md`](./pulse-design-direction.md). Both
+position rules describe where computation work happens in the graph —
+the former between computed and effect, the latter within computed
+shapes.)
+
 ---
 
 ## Falsified hypotheses
@@ -2596,12 +2662,17 @@ let resolveUser: (v: string) => void
 const userPromise = new Promise<string>(r => { resolveUser = r })
 const [user, setUser] = signal<string | Promise<string>>(userPromise)
 
-// Derived computed that unwraps the async via `use` (suspense-style)
-const greeting = computed(() => `Hello, ${use(user)}!`)
+// Derived computed — generator form, propagates async-ness through the type
+// (per the "Unwrap at the leaf" framing; `use()` mid-graph is an anti-pattern)
+const greeting = compute(function* () {
+  const u = yield* read(user)
+  return `Hello, ${u}!`
+})
+// greeting: Computed<Promise<string>>
 
 action(function* () {
   const name = yield* read(user)           // park until userPromise resolves
-  const g = read(greeting)                  // read derived AFTER resume
+  const g = yield* read(greeting)           // park until greeting resolves (leaf unwrap)
   console.log(g)                            // expect: "Hello, Alice!"
 })
 
@@ -2609,32 +2680,37 @@ action(function* () {
 ```
 
 **State at start:** `user.slots = {}`, `greeting.slots = {}`, edges = []. The
-Promise is pending.
+Promise is pending. Note: `greeting` could equivalently be written as a
+stage — `compute(user, (u) => \`Hello, ${u}!\`)` — with identical semantics.
 
-### What `use` does
+### What `yield* read` does for a Promise-valued slot
 
-`use(node)` is a walk for sync-unwrap of async slots:
+`read(node)` is sync — it returns whatever's cached, which may be `T` or
+`Promise<T>`. Inside a generator body (recipe or action body), `yield*
+read(node)` parks the generator if the slot's cached value is a Promise,
+resuming with the resolved value once it settles:
 
 ```ts
-function use<T>(node: Node<T | Promise<T>>): T {
+function* read<T>(node: Node<T>): Generator<ParkCommand, T, T> {
   const scope = getCurrentScope()
   if (currentTracker) link(node, chainSelector(chainFor(scope)), currentTracker)
-  const cached = invoke(node, scope)
+  const cached = invoke(node, scope) as T | Promise<T>
   if (cached instanceof Promise) {
-    const state = promiseState(cached)              // Q-D's sync-query primitive
-    if (state.status === 'fulfilled') return state.value!
+    const state = promiseState(cached)
+    if (state.status === 'fulfilled') return state.value as T
     if (state.status === 'rejected') throw state.reason
-    // pending → throw-to-suspend (restartable context like a computed body)
-    throw cached                                    // suspense-style suspend
+    return (yield { kind: 'park', promise: cached } as ParkCommand) as T
   }
-  return cached
+  return cached as T
 }
 ```
 
-In a restartable context (like a computed recipe), `use`'s throw-to-suspend
-gets caught by the consumer wrapper that re-runs the recipe when the
-Promise resolves. In a non-restartable context (action body), `use` would
-have to be guarded or replaced with `yield* read`.
+`use(node)` is the *leaf-only* sibling of this: it throws-to-suspend
+inside a restartable context (computed recipe — but per the "Unwrap at
+the leaf" framing, computed recipes should use `yield* read` or stage
+form instead), or peeks-and-throws-on-pending in non-restartable
+contexts. The trace below uses `yield* read` throughout, leaf and
+intermediate.
 
 ### Step-by-step trace
 
@@ -2682,33 +2758,51 @@ order**:
 - *Driver handler fires second:*
   - Driver `step("Alice")`. Push ambient = S. `gen.next("Alice")`.
 
-**Step 4: generator resumes; `const g = read(greeting)` runs.**
+**Step 4: generator resumes; `const g = yield* read(greeting)` runs.**
 
-- Body has `name = "Alice"`. Continues to `read(greeting)`.
-- Library `read(greeting)`:
+- `gen.next("Alice")` resumes the action body. `name = "Alice"`. Continues
+  to `yield* read(greeting)`.
+- Library `read(greeting)` (sub-generator):
   - `getCurrentScope()` → `S`. `currentTracker` → null (action body).
   - `invoke(greeting, S)`:
-    - Engine: `greeting.slots.get(S)` miss. Create `slot_G_S = { recipe:
-      defaultRecipe, deps: [], subs: [] }`.
-    - Push `currentTracker = slot_G_S`. Push scope = `S`.
-    - Invoke recipe: `` `Hello, ${use(user)}!` ``
-      - `use(user)`:
+    - Engine: `greeting.slots.get(S)` miss. Create `slot_G_S`. Push
+      `currentTracker = slot_G_S`, push scope = `S`. Drive greeting's
+      generator-form recipe (the engine drives generator-form recipes
+      similarly to how the action driver drives action bodies — see
+      main-doc D11):
+      - Recipe runs: `function*() { const u = yield* read(user); return
+        \`Hello, ${u}!\` }`
+      - `yield* read(user)` sub-generator:
         - `link(user, chainSelector([S, ROOT_SCOPE]), slot_G_S)` → `edge1`.
-        - `invoke(user, S)` → hit, `cached = userPromise`. Return.
-        - `cached instanceof Promise` → check `promiseState(userPromise)`.
-        - **Promise was tweaked by the engine handler in Step 3** →
-          returns `{ status: 'fulfilled', value: "Alice" }`. `use` returns
-          `"Alice"`.
-      - Template: `"Hello, Alice!"`.
-    - `slot_G_S.cached = "Hello, Alice!"`. Pop tracker, pop scope. Return.
-- `g = "Hello, Alice!"`. `console.log(g)` → prints `"Hello, Alice!"`. ✓
+        - `invoke(user, S)` → hit, `cached = userPromise` (tweaked).
+        - `read` sees Promise → check `promiseState(userPromise)` →
+          `{ status: 'fulfilled', value: "Alice" }`. Returns `"Alice"`
+          **synchronously** (no park; the Promise is already resolved).
+      - `yield*` delegates `"Alice"` back to greeting's recipe. `u = "Alice"`.
+      - Recipe returns `"Hello, Alice!"`.
+    - Generator-form compute wraps the return in a resolved Promise:
+      `slot_G_S.cached = Promise.resolve("Hello, Alice!")` (tweaked
+      `{ status: 'fulfilled', value: "Hello, Alice!" }`). This preserves
+      type-level async-ness — `greeting` is `Computed<Promise<string>>`.
+    - Pop tracker, pop scope. Return the cached Promise.
+  - `read` sees `Promise` → check `promiseState` → fulfilled,
+    `"Hello, Alice!"`. Returns `"Hello, Alice!"` **synchronously**.
+- `yield*` delegates `"Hello, Alice!"` to the action body. `g =
+  "Hello, Alice!"`. `console.log(g)` → prints `"Hello, Alice!"`. ✓
 
 **State after Step 4:**
 ```
 user.slots = { S: { recipe: defaultRecipe, cached: userPromise (tweaked: fulfilled, "Alice") } }
-greeting.slots = { S: { recipe: defaultRecipe, cached: "Hello, Alice!", deps: [edge1] } }
+greeting.slots = { S: { recipe: generator-recipe,
+                         cached: Promise<"Hello, Alice!"> (tweaked: fulfilled),
+                         deps: [edge1] } }
 edge1 = { source: user, selector: chainSelector([S, ROOT_SCOPE]), target: slot_G_S }
 ```
+
+Both slots' `cached` values are Promises tweaked with `{ status:
+'fulfilled', value }`. Reads of either node return Promises that
+`promiseState` recognises as resolved. Type-level async-ness preserved
+through the graph; sync access at the leaf via `yield* read`.
 
 **Step 5: action body returns. `closeScope(S, 'commit')`.**
 
@@ -2762,26 +2856,73 @@ A subtly different scenario worth noting. If:
 
 ```ts
 action(function* () {
-  const g0 = read(greeting)               // BEFORE the yield
+  const g0 = read(greeting)               // BEFORE the yield — sync read
   const name = yield* read(user)
-  const g1 = read(greeting)               // AFTER the yield
+  const g1 = yield* read(greeting)        // AFTER the yield — parking read
 })
 ```
 
-Then in Step 2 (before the yield):
-- `read(greeting)` populates `greeting.slot[S]`. Recipe runs `use(user)`.
-- At this point, `userPromise` is *pending*. `use` throws-to-suspend.
-- `greeting.slot[S].cached = <suspension promise>` or similar.
-- The action body sees `g0 = <suspension promise>`.
+Under the corrected setup (generator-form `greeting`):
 
-This is structurally OK but ergonomically weird — the action body got a
-Promise where it expected a value. The user would have to `yield* read`
-the greeting too (or wrap reads in `use` themselves with try/catch).
+- *At (A) — `const g0 = read(greeting)` while `user` is pending:*
+  `invoke(greeting, S)` runs the generator-form recipe. The recipe does
+  `yield* read(user)`, which finds `userPromise` pending → yields a park
+  command. The engine attaches `.then` and **the recipe parks mid-flight**.
+  `slot_G_S.cached` becomes the pending Promise representing greeting's
+  eventual value.
+  
+  `read(greeting)` returns the Promise. **`g0` is `Promise<string>`,
+  pending.** The user gets a Promise back. Sync read of an async slot is
+  type-honest: the slot's cached value is `Promise<string>`, and `read`
+  returns exactly that.
 
-**This is the same ergonomic concern flagged by H5**: derivations that
-depend on async signals don't compose cleanly inside imperative action
-bodies without explicit awaits. **The trace doesn't reveal a new
-architectural problem; it confirms an existing one.**
+- *At (C) — `const g1 = yield* read(greeting)` after the yield:*
+  `userPromise` resolved → engine handler tweaked it → the parked
+  `greeting` generator (registered via .then) resumes, completes, cached
+  is now `Promise<"Hello, Alice!">` (tweaked fulfilled). `yield*
+  read(greeting)` sees fulfilled, returns `"Hello, Alice!"`.
+
+So in this corrected setup:
+
+| Read site | Returns | Type |
+|---|---|---|
+| (A) `read(greeting)` before yield | `Promise<string>` (pending) | `Promise<string>` |
+| (C) `yield* read(greeting)` after yield | `"Hello, Alice!"` | `string` |
+
+The types are *different at each site by construction*, not by surprise.
+`read(greeting)` always returns `Promise<string>` (the static type tells
+you so); `yield* read(greeting)` always returns `string` after parking
+as needed. The user chooses sync-with-Promise vs park-with-unwrap
+explicitly.
+
+### The earlier (anti-pattern) ergonomic surprise — dissolved
+
+The original C2e trace setup used:
+
+```ts
+const greeting = computed(() => `Hello, ${use(user)}!`)   // ⚠ anti-pattern
+```
+
+`use()` mid-graph collapses `Promise<string>` into `string` at the
+callsite, hiding async-ness from greeting's type. Then `read(greeting)`
+in the action body had a *misleading* sync-looking type but could
+actually return a suspension Promise when `user` was pending. The same
+expression returned different types at different times — the surprise.
+
+**Under the corrected setup** (generator-form or stage-form for
+`greeting`):
+
+- `greeting` is honestly typed `Computed<Promise<string>>`.
+- `read(greeting)` always returns `Promise<string>`. Type is stable.
+- `yield* read(greeting)` always returns `string` (parking as needed).
+  Type is stable.
+- The user chooses by syntax. No surprise.
+
+The earlier surprise was an **artifact of the `use()` mid-graph
+anti-pattern**, not an architectural problem with C2e itself. Per the
+"Unwrap async at the leaf" framing: intermediate computeds propagate
+async-ness through the type; `use()` is reserved for leaf consumption.
+With that rule honoured, C2e's coherence story is clean.
 
 ### Architecture exposed
 
@@ -2825,11 +2966,17 @@ architecture composes correctly across `yield* read` → `use` → recipe →
 have to fire before resume?" — turned out to have a clean answer based on
 microtask ordering of `.then` attaches.
 
-**One catalog finding to back-port:** the H5 ergonomic concern (effect-
-mediated vs computed-mediated derivations) has an async cousin: derivations
-that depend on async signals don't compose cleanly inside imperative
-action bodies without explicit awaits. Worth noting in the H5 entry or
-adding to the principle.
+**Two framings the trace validated, the second new:**
+
+1. *Derivation kind matches reactivity scope (computed vs effect).* H5's
+   sibling: derivations that depend on async signals don't compose
+   cleanly inside imperative action bodies without explicit awaits.
+2. *Unwrap async at the leaf, not in the middle of the graph.* The
+   original C2e setup used `use()` mid-graph (an anti-pattern); the
+   corrected setup uses generator-form or stage-form for intermediate
+   computeds, with `use()` / `yield* read` reserved for leaf
+   consumption. This dissolves the ergonomic surprise into a clean
+   sync-vs-park-by-syntax choice.
 
 ---
 
