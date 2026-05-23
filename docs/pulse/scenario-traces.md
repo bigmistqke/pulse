@@ -17,6 +17,17 @@ forced deliberate design calls into the open (K1 → resolved to Position
 **Related pulse-repo docs:**
 - [`../research/async/CONTEXT.md`](../research/async/CONTEXT.md) — speculation lexicon, four dimensions, failure modes.
 
+## Contents
+
+- [`doubleName` under scope `S`](#doublename-under-scope-s) — exercises A2, B1, B2.
+- [C2 — action body with async read](#c2--action-body-with-async-read) — exercises C2a, C2b, C2c, C2d.
+- [H1a-c — effect under speculation](#h1a-c--effect-under-speculation) — exercises H1a, H1b, H1c.
+- [K1 — re-entrant setter mid-recompute](#k1--re-entrant-setter-mid-recompute) — exercises K1a, K1b.
+- [G2 — nested actions and commit promotion](#g2--nested-actions-and-commit-promotion) — exercises G1, G2, G3, G4.
+- [H3 — cleanup chains across speculative effect runs](#h3--cleanup-chains-across-speculative-effect-runs) — exercises H3 (a, b, b').
+- [C2e — post-yield derived read (async K1b analogue)](#c2e--post-yield-derived-read-async-k1b-analogue) — exercises C2e.
+- [H1d — effect-body coherence on commit](#h1d--effect-body-coherence-on-commit) — exercises H1d.
+
 ---
 
 ## `doubleName` under scope `S`

@@ -22,21 +22,51 @@ otherwise the first plausible trace becomes the route by default, which
 is exactly the premature commitment the explorative phase is meant to
 avoid.
 
+**Category organisation.** Categories A, C, D, E, F correspond directly
+to the four dimensions of speculation (see
+[`../research/async/CONTEXT.md`](../research/async/CONTEXT.md)):
+A = Dim 1 (internal structure); C = Dim 1 with async; D = Dim 2
+(concurrence); E = Dim 3 (supersession); F = Dim 4 (overlap). The
+remaining categories (B, G, H, I, J, K, L, M, R) are *cross-cutting
+concerns* that don't map to a single dimension — lifecycle, nesting,
+effects, JSX, edges, re-entrancy, boundary-bypass reads, resource
+ownership, scheduling.
+
 **Related pulse-repo docs:**
 - [`../research/async/CONTEXT.md`](../research/async/CONTEXT.md) — speculation lexicon, four dimensions, failure modes.
+
+## Contents
+
+- [Traces (in scenario-traces.md)](#traces-in-scenario-tracesmd)
+- [A. Single speculation, sync (Dim 1 — internal structure)](#a-single-speculation-sync-dim-1--internal-structure)
+- [B. Lifecycle & cleanup](#b-lifecycle--cleanup)
+- [C. Async (Dim 1 with async — Q4 territory)](#c-async-dim-1-with-async--q4-territory)
+- [D. Concurrence (Dim 2 — disjoint state)](#d-concurrence-dim-2--disjoint-state)
+- [E. Supersession (Dim 3) — *policy question*](#e-supersession-dim-3--policy-question)
+- [F. Overlap (Dim 4 — entanglement) — *policy question*](#f-overlap-dim-4--entanglement--policy-question)
+- [G. Nesting (scope hierarchy)](#g-nesting-scope-hierarchy)
+- [H. Effects under speculation — *Q3 open*](#h-effects-under-speculation--q3-open)
+- [I. Component / JSX integration](#i-component--jsx-integration)
+- [J. Edge cases / pressure points](#j-edge-cases--pressure-points)
+- [K. Re-entrancy & write-during-recompute](#k-re-entrancy--write-during-recompute)
+- [L. Boundary-bypass reads inside speculation](#l-boundary-bypass-reads-inside-speculation)
+- [M. Resource ownership across speculation](#m-resource-ownership-across-speculation)
+- [R. Scheduling & frame coordination](#r-scheduling--frame-coordination)
+- [Probably out of scope for the research phase](#probably-out-of-scope-for-the-research-phase)
+- [Architectural distribution](#architectural-distribution)
 
 ## Traces (in [scenario-traces.md](./scenario-traces.md))
 
 Each trace walks a scenario end-to-end through engine + library calls.
 
-- [**doubleName trace**](./scenario-traces.md#end-to-end-trace-doublename-under-scope-s) — exercises A2, B1, B2.
-- [**C2 trace**](./scenario-traces.md#end-to-end-trace-c2--action-body-with-async-read) — exercises C2a, C2b, C2c, C2d.
-- [**H1a-c trace**](./scenario-traces.md#end-to-end-trace-h1a-c--effect-under-speculation) — exercises H1a, H1b, H1c.
-- [**K1 trace**](./scenario-traces.md#end-to-end-trace-k1--re-entrant-setter-mid-recompute) — exercises K1a, K1b.
-- [**G2 trace**](./scenario-traces.md#end-to-end-trace-g2--nested-actions-and-commit-promotion) — exercises G1, G2, G3, G4.
-- [**H3 trace**](./scenario-traces.md#end-to-end-trace-h3--cleanup-chains-across-speculative-effect-runs) — exercises H3 (a, b, b').
-- [**C2e trace**](./scenario-traces.md#end-to-end-trace-c2e--post-yield-derived-read-async-k1b-analogue) — exercises C2e.
-- [**H1d trace**](./scenario-traces.md#end-to-end-trace-h1d--effect-body-coherence-on-commit) — exercises H1d.
+- [**doubleName trace**](./scenario-traces.md#doublename-under-scope-s) — exercises A2, B1, B2.
+- [**C2 trace**](./scenario-traces.md#c2--action-body-with-async-read) — exercises C2a, C2b, C2c, C2d.
+- [**H1a-c trace**](./scenario-traces.md#h1a-c--effect-under-speculation) — exercises H1a, H1b, H1c.
+- [**K1 trace**](./scenario-traces.md#k1--re-entrant-setter-mid-recompute) — exercises K1a, K1b.
+- [**G2 trace**](./scenario-traces.md#g2--nested-actions-and-commit-promotion) — exercises G1, G2, G3, G4.
+- [**H3 trace**](./scenario-traces.md#h3--cleanup-chains-across-speculative-effect-runs) — exercises H3 (a, b, b').
+- [**C2e trace**](./scenario-traces.md#c2e--post-yield-derived-read-async-k1b-analogue) — exercises C2e.
+- [**H1d trace**](./scenario-traces.md#h1d--effect-body-coherence-on-commit) — exercises H1d.
 
 ---
 

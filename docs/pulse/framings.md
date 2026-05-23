@@ -16,6 +16,40 @@ the principles), falsified hypotheses (dead ends to avoid), and engine
 - [`../research/async/CONTEXT.md`](../research/async/CONTEXT.md) — speculation lexicon, four dimensions, failure modes.
 - [`../research/async/deep-dives/solid-2x.md`](../research/async/deep-dives/solid-2x.md) — per-node multi-slot architecture reference.
 
+## Contents
+
+**[Principles](#principles)**
+- [P1 — Speculation is one concept with two faces](#p1--speculation-is-one-concept-with-two-faces)
+- [P2 — Acknowledge async; don't hide it](#p2--acknowledge-async-dont-hide-it)
+- [P3 — Plain reads are honest](#p3--plain-reads-are-honest)
+- [P4 — Explicit boundaries over implicit pervasiveness](#p4--explicit-boundaries-over-implicit-pervasiveness)
+- [P5 — Compose, don't proliferate (in either direction)](#p5--compose-dont-proliferate-in-either-direction)
+
+**[Framings (adopted provisionally)](#framings-adopted-provisionally)**
+- [Signals and computeds are graph relations, not values](#signals-and-computeds-are-graph-relations-not-values)
+- [Walks are first-class](#walks-are-first-class)
+- [Async is honest in the type](#async-is-honest-in-the-type)
+- [Signal / Computed / Effect / JSX-expression are all the same primitive](#signal--computed--effect--jsx-expression-are-all-the-same-primitive)
+- [Slim engine, thick library — engine resolution is open](#slim-engine-thick-library--engine-resolution-is-open)
+- [Slot writes and recomputes are the same operation](#slot-writes-and-recomputes-are-the-same-operation)
+- [Edges are slot-local, dynamic, and walk-policy-driven](#edges-are-slot-local-dynamic-and-walk-policy-driven)
+- [Scope and Owner share structure (unification under exploration)](#scope-and-owner-share-structure-unification-under-exploration)
+- [Derivation kind matches reactivity scope (computed vs. effect)](#derivation-kind-matches-reactivity-scope-computed-vs-effect)
+- [Computeds are stages, with plain or generator callbacks](#computeds-are-stages-with-plain-or-generator-callbacks)
+- [Action bodies are generator-based for different reasons](#action-bodies-are-generator-based-for-different-reasons)
+- [`use()` is React-style throw-to-suspend at the leaf](#use-is-react-style-throw-to-suspend-at-the-leaf)
+- [Anti-pattern (code smell)](#anti-pattern-code-smell)
+- [Why this rule matters](#why-this-rule-matters)
+- [`Awaitable<T>` — one type, three legitimate uses](#awaitablet--one-type-three-legitimate-uses)
+
+**[Falsified hypotheses](#falsified-hypotheses)**
+- [Speculation purely above unmodified r3 doesn't work](#speculation-purely-above-unmodified-r3-doesnt-work)
+- [`.value` / `.peek()` / `.latest()` as methods on the Node would survive without smuggling](#value--peek--latest-as-methods-on-the-node-would-survive-without-smuggling)
+
+**[Engine API sketch (illustrative)](#engine-api-sketch-illustrative)**
+
+**[Library shape (illustrative)](#library-shape-illustrative)**
+
 ---
 
 ## Principles

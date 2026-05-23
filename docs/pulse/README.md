@@ -4,6 +4,14 @@ Exploration of pulse's reactive substrate and speculation machinery.
 Framings are durable as exploration directions; implementation sketches
 are illustrative; design calls are deliberate.
 
+## Contents
+
+- [Documents](#documents)
+- [Reading order](#reading-order)
+- [What we're exploring](#what-were-exploring)
+- [Threads to continue](#threads-to-continue)
+- [Cross-references](#cross-references)
+
 ## Documents
 
 - **[prior-art.md](./prior-art.md)** — cross-framework analysis: comparison
