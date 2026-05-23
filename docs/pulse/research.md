@@ -401,110 +401,124 @@ persistence). Mixing them — using an effect to maintain a derived signal
 that gets read inside actions — produces stale-during-action behaviour
 that's correct but surprising.
 
-### Three authoring forms for computeds
+### Computeds are stages, with plain or generator callbacks
 
-Three valid forms with different trade-offs; user picks by what the
-computation looks like, not by what the engine forces:
+A `compute(...)` is a pipeline of one or more stages. Each stage is a
+memoized node. A stage's callback can be a plain function or a generator
+— both compose into the same pipeline; mixed pipelines are fine.
 
 ```ts
-// Plain body — sync deps only
+// Single-stage pipeline, plain callback (sync sugar)
 const upperName = compute(() => get(name).toUpperCase())
 
-// Stages — declarative pipeline; per-stage memoization; auto-unwrap
+// Multi-stage pipeline, plain callbacks (declarative)
 const greeting = compute(
-  () => get(asyncUser),                       // stage 0
-  (u) => `Hello, ${u}!`,                       // stage 1 (u: string, auto-unwrapped)
-  (s) => s + "!"                               // stage 2
+  () => get(asyncUser),                        // stage 0: source
+  (u) => `Hello, ${u}!`,                        // stage 1: u is unwrapped
+  (s) => s + "!"                                // stage 2
 )
 // greeting: Computed<Promise<string>>
 
-// Generator — imperative coroutine; dynamic deps; resume from yield (Awaitable)
+// Single-stage pipeline, generator callback (imperative; can park on async)
 const profile = compute(function* () {
-  const user = yield* get(asyncUser)           // user: User (via Awaitable's iterator)
-  if (user.role === 'admin') {
-    return yield* get(adminProfile)            // dynamic: which signal we read depends on data
-  } else {
-    return yield* get(memberProfile)
-  }
+  const user = yield* get(asyncUser)
+  if (user.role === 'admin') return yield* get(adminProfile)
+  else                       return yield* get(memberProfile)
 })
 // profile: Computed<Promise<Profile>>
+
+// Mixed pipeline — plain stages around a generator stage
+const summary = compute(
+  () => get(value),                             // stage 0: plain source
+  function* (value) {                           // stage 1: generator stage
+    const other = yield* get(somethingElse)
+    return value + other
+  },
+  (combined) => combined.toUpperCase()          // stage 2: plain transform
+)
 ```
 
-| Form | Memoization | Async | Dynamic deps | Best for |
-|---|---|---|---|---|
-| **Plain body** | Whole-body | Sync only | Yes | Simple sync derivations |
-| **Stages** | **Per-stage** (finest) | Auto-unwrap between stages | No (each stage is a pure transform; signal reads inside a stage track to *that* stage's node) | Declarative pipelines |
-| **Generator** | Whole-body, resume-from-yield via Awaitable | `yield* get(node)` parks | Yes (conditional reads, multi-step logic) | Imperative composition, data-driven dep selection |
+**The stage callback type drives what's possible inside that stage:**
 
-**Stages** are optimal for declarative pipelines — per-stage memoization
-beats whole-body re-execution if a signal read in stage N changes (only
-stage N and downstream re-run; earlier stages stay cached).
+| Stage callback | Async | Dynamic deps | Memoization |
+|---|---|---|---|
+| **Plain function** `(prev) => O` | Receives `Resolved<prev>` (auto-unwrap); returns `O` (sync) | Yes (signal reads inside track to this stage's node) | Per-stage |
+| **Generator** `function* (prev) {...}` | `yield* get(node)` parks; returns `Promise<O>` | Yes, including parking-then-conditional-read patterns | Per-stage |
 
-**Generators** are optimal for dynamic-deps or non-pipeline composition —
-when stage N's source depends on stage N-1's value, or the flow doesn't
-line up as a pipeline. The Awaitable type makes generator-form
-TypeScript inference clean: `yield* get(asyncNode)` returns the resolved
-type via Awaitable's `[Symbol.iterator]`; no special unwrap helper
-needed.
+**Per-stage memoization** is the load-bearing property: if a signal read
+in stage N changes, only stage N and downstream re-run; earlier stages
+stay cached. This makes pipelines finer-grained than a single
+whole-body recompute.
 
-**Plain body** is the sync-only sugar — visibly synchronous, no parking
-machinery.
+**When to make a stage a generator:** when that stage needs to park on
+async signal-reads to decide what to compute next (multi-step async,
+conditional async reads, etc.). Plain stages can read async signals
+too — they just receive them as `Promise<T>` and pass through, with
+auto-unwrap between stages.
 
-#### How stages work
+**TypeScript inference**: Awaitable's `[Symbol.iterator]` makes
+`yield* get(asyncNode)` return the resolved type cleanly; no special
+unwrap helper needed.
 
-A stage is a memoized computed node whose input-read auto-unwraps a
-Promise. No new engine primitive needed; stages compose from
-`createNode` + `get` + `promiseState` (Q-D):
+#### How stages compose
+
+A stage is a memoized node whose input-read auto-unwraps a Promise. No
+new engine primitive needed; stages compose from `createNode` + `get` +
+`promiseState` (Q-D):
 
 ```ts
 type Resolved<T> = T extends Promise<infer U> ? U : T
+type StageFn<I, O> = (v: Resolved<I>) => O | Generator<unknown, O, any>
 
-function stage<I, O>(input: Node<I>, transform: (v: Resolved<I>) => O): Node<O> {
+function stage<I, O>(input: Node<I>, transform: StageFn<I, O>): Node<O> {
   return createNode(() => {
     const v = get(input)
+    const run = (resolved: Resolved<I>) => {
+      const result = transform(resolved)
+      // If callback returned a generator, drive it (yield-and-park on Promises)
+      return isGenerator(result) ? driveGenerator(result) : result
+    }
     if (v instanceof Promise) {
-      const tracker = currentTracker                      // capture
+      const tracker = currentTracker
       return v.then(resolved => {
-        pushTracker(tracker)                              // restore around the callback
-        try { return transform(resolved as Resolved<I>) }
+        pushTracker(tracker)
+        try { return run(resolved as Resolved<I>) }
         finally { popTracker() }
       })
     }
-    return transform(v as Resolved<I>)
+    return run(v as Resolved<I>)
   })
 }
 
-function compute<T>(source: () => T, ...stages: Array<(v: any) => any>): Node<unknown> {
-  let current: Node<unknown> = createNode(source)
-  for (const fn of stages) current = stage(current, fn)
+function compute<T>(...stages: Array<(prev: any) => any>): Node<unknown> {
+  let current: Node<unknown> = createNode(stages[0])
+  for (let i = 1; i < stages.length; i++) current = stage(current, stages[i])
   return current
 }
 ```
 
-~15 lines of library code over engine primitives.
+~20 lines of library code over engine primitives. The `driveGenerator`
+helper handles `yield*` over Awaitable values (the same machinery the
+action driver uses).
 
 Semantics:
 
 - Each stage is **its own memoized node**. Tracker is restored around
-  the stage callback, so signal reads inside the callback track to that
-  stage's node.
-- The stage callback sees the **unwrapped** value (`Resolved<I>`, not
-  `I`); the engine threads the resolved value in.
-- The compute's **output type** is `Promise<U>` if any stage along the
-  chain returned a Promise; else just `U`. Same model as `async`/`await`:
-  any awaited Promise infects the output.
-- **Per-stage memoization** is what lets a downstream-only change avoid
-  re-running upstream stages.
+  the stage callback, so signal reads inside track to that stage's node.
+- Plain callbacks see the **unwrapped** value (`Resolved<I>`); generator
+  callbacks receive it too, and can additionally `yield* get(otherNode)`
+  to park mid-stage.
+- The compute's **output type** is `Promise<U>` if any stage's callback
+  is a generator or returns a Promise; else just `U`. Same model as
+  `async`/`await`: any awaited Promise infects the output.
 
-### Action bodies use the same generator form
+### Action bodies are generator-based for different reasons
 
-Action bodies are generators with `yield* get(...)` for async unwrap.
-Same machinery as generator-form computeds, with two differences:
-
-- Action bodies have commit/discard semantics at end (covered by
-  scope/owner unification framing).
-- Action bodies don't memoize (one-shot imperative bodies, not cached
-  derivations).
+Action bodies use generators, but they're not stages — they're imperative
+one-shot bodies with commit/discard semantics at end and side effects
+allowed. The generator machinery is shared (`yield* get(...)` works the
+same way via Awaitable's iterator), but action bodies aren't memoized
+derivations; they don't participate in the stage pipeline.
 
 ### `use()` is React-style throw-to-suspend at the leaf
 
@@ -515,10 +529,11 @@ semantics**, matching React's `use()` convention. Used in:
   fallback if pending.
 - **Action body error handling** — `use(node)` throws to a try/catch in
   the action body.
-- **NOT inside plain-body computed recipes** — `compute(() => use(node))`
-  would collapse `Promise<T>` into `T` at the computed's type level,
-  breaking async honesty. Use stages or generator form instead — both
-  preserve the Promise in the output type.
+- **NOT inside a single-stage plain-body computed** —
+  `compute(() => use(node))` would collapse `Promise<T>` into `T` at the
+  computed's type level, breaking async honesty. Use a multi-stage form
+  or a generator stage instead — both preserve the Promise in the output
+  type.
 
 This preserves the mental link with React: `use` means "throw if pending,
 return resolved." Pulse adopts the same convention.
@@ -531,8 +546,7 @@ const greeting = compute(() => `Hello, ${use(user)}!`)
 ```
 
 `use()` here collapses `Promise<string>` into `string` at the callsite,
-hiding async from downstream consumers. The stage form is the right
-shape:
+hiding async from downstream consumers. Move the unwrap into a stage:
 
 ```ts
 const greeting = compute(() => get(user), (u) => `Hello, ${u}!`)
@@ -542,25 +556,22 @@ const greeting = compute(() => get(user), (u) => `Hello, ${u}!`)
 ### Why this rule matters
 
 - *Type honesty.* `Computed<Promise<T>>` tells consumers they're dealing
-  with async; `Computed<T>` says it's sync. Stages preserve the type;
-  `use()` mid-graph lies.
+  with async; `Computed<T>` says it's sync. Multi-stage and
+  generator-stage forms preserve the type; `use()` mid-graph in a
+  single-stage plain body lies.
 - *Suspension locality.* `use()` only at leaves means suspension points
   are visible — readers know "I committed to extract sync; I might
   suspend." Mid-graph `use()` makes every downstream read potentially
   suspending with no syntactic signal.
-- *Per-stage memoization.* Stages give partial-recomputation that
-  generators can't express. Each stage is independently cached.
-- *Slim engine.* Stages are ~15 lines of library code over engine
-  primitives. No new engine concept; just `promiseState` + tracker
-  push/pop, both already needed.
+- *Per-stage memoization.* Multi-stage pipelines give
+  partial-recomputation that a single-body recompute can't.
 
-**Form set:**
+**Where each construct goes:**
 
-- *Computeds:* plain body, stages, or generator form (see "Three
-  authoring forms for computeds" above). `use()` mid-graph in a
-  plain-body recipe is an anti-pattern; stages and generators preserve
-  async in the output type.
-- *Action bodies:* generators with `yield* get(...)` for async unwrap.
+- *Computeds:* `compute(...stages)` — stages with plain or generator
+  callbacks. `use()` inside a single-stage plain body is an anti-pattern.
+- *Action bodies:* `action(function* () {...})` with `yield* get(...)`
+  for async unwrap.
 - *Leaves (JSX, action-body-try):* `use(node)` for React-style
   throw-to-suspend.
 
