@@ -24,7 +24,7 @@ Pulse's user-facing `Signal<T>` and `Computed<T>` are **graph relations, not
 values** — `Node<() => T | Promise<T>>`, an identity in the dep graph wrapping a
 recipe (a callback that produces the value). The value is not *in* the Node; it
 is what you get by handing the Node to a *walk* primitive. The library ships
-named patterns and named walks (`signal`, `computed`, `effect`, `read`, `peek`,
+named patterns and named walks (`signal`, `computed`, `effect`, `get`, `peek`,
 `latest`, `use`, `isPending`, `subscribe`) as approachable DX over a slim engine
 that knows only about graph, slots, recipes, edges, and notification. Users
 who want their own semantics over the graph can reach the engine; the default
@@ -52,7 +52,7 @@ outside via walks.*
 ### Walks are first-class
 
 Reads are not implicit "call the signal." They are explicit applications of a
-walk primitive (`read`, `peek`, `latest`, `use`, `isPending`, `subscribe`, …) to
+walk primitive (`get`, `peek`, `latest`, `use`, `isPending`, `subscribe`, …) to
 a relation. The walks *are* the user-visible surface of the engine's value-bag —
 the bag is observed only through walks, never by "the signal's value." This
 makes "how to read" a first-class verb the user composes, rather than a fixed
@@ -87,7 +87,7 @@ who-walks-whom*; edges form when a recipe walks another Node.
 
 The library ships an approachable surface — named patterns over a generic core.
 Users get familiar DX (`const [name, setName] = signal("foo")`,
-`computed(() => …)`, `read(node)`) without seeing engine internals. *But the
+`computed(() => …)`, `get(node)`) without seeing engine internals. *But the
 engine is reachable* — a user (or library author building on pulse) can drop
 down and define their own semantics over the graph. Custom walks, custom edge
 metadata, custom scope shapes — all expressible in user code without engine
@@ -143,12 +143,12 @@ The two are not interchangeable for the same "derive Y from X" need:
 
 ```ts
 // Effect-mediated derivation: STALE inside the action that wrote X
-effect(() => setValue(read(X) + read(X)))
-action(() => { setX('new'); read(value) })       // returns the OLD value
+effect(() => setValue(get(X) + get(X)))
+action(() => { setX('new'); get(value) })       // returns the OLD value
 
 // Computed-mediated derivation: FRESH inside the action that wrote X
-const value = computed(() => read(X) + read(X))
-action(() => { setX('new'); read(value) })       // returns the NEW value
+const value = computed(() => get(X) + get(X))
+action(() => { setX('new'); get(value) })       // returns the NEW value
 ```
 
 The mechanism: a *computed* has no consumer scheduler; its slot is populated
@@ -167,34 +167,128 @@ that's correct but surprising.
 [`pulse-design-direction.md`](./pulse-design-direction.md) once the rest of
 the design-direction work stabilises. Tracked branch-locally for now.)
 
-### Unwrap async at the leaf, not in the middle of the graph
+### Stages: a memoized node + a promise auto-unwrap
 
-A position rule that follows from main-doc P2 ("acknowledge async; don't
-hide it") and D9 (stages are pure transforms): **intermediate computeds
-must propagate async-ness through their type**; they must not collapse
-`Promise<T>` into `T` via `use()` mid-graph. `use()` is reserved for
-**leaf consumption** — action bodies, JSX expressions, effect bodies —
-where the consumer is explicitly committing to extract a sync value.
-
-Two leaf-preserving forms for intermediate computeds:
+A reduction discovered during this branch's exploration: **what we've been
+calling a "stage" is just a memoized computed node whose input-read
+auto-unwraps a Promise.** No new engine primitive needed; stages compose
+from `createNode` + `get` + `promiseState` (Q-D).
 
 ```ts
-// Generator form — imperative-feeling; multi-step logic between awaits
-const greeting = compute(function* () {
-  const u = yield* read(user)
-  return `Hello, ${u}!`
-})
+type Resolved<T> = T extends Promise<infer U> ? U : T
 
-// Stage form — declarative; .then-sugar where the stage callback sees the resolved value
-const greeting = compute(user, (u) => `Hello, ${u}!`)
+function stage<I, O>(input: Node<I>, transform: (v: Resolved<I>) => O): Node<O> {
+  return createNode(() => {
+    const v = get(input)
+    if (v instanceof Promise) {
+      const tracker = currentTracker                      // capture
+      return v.then(resolved => {
+        pushTracker(tracker)                              // restore around the callback
+        try { return transform(resolved as Resolved<I>) }
+        finally { popTracker() }
+      })
+    }
+    return transform(v as Resolved<I>)
+  })
+}
+
+function compute<T>(source: () => T, ...stages: Array<(v: any) => any>): Node<unknown> {
+  let current: Node<unknown> = createNode(source)
+  for (const fn of stages) current = stage(current, fn)
+  return current
+}
 ```
 
-Both produce `Computed<Promise<string>>` (async propagates through the
-type). The stage callback / generator body sees `u: string` because the
-engine threads the resolved value in; but the *output* of the whole
-computed is still `Promise<string>`.
+**~15 lines of library code over engine primitives.** This is the
+canonical declarative computed form for pulse.
 
-**Anti-pattern (code smell):**
+**The semantics:**
+
+- Each stage is **its own memoized node**. Tracker is restored around the
+  stage callback, so signal reads inside the callback track to that
+  stage's node (lifting D9's "no signal reads inside stages" restriction —
+  it was an implementation concern, not a conceptual one).
+- The stage callback sees the **unwrapped** value (`Resolved<I>`, not
+  `I`); the engine threads the resolved value in.
+- The compute's **output type** is `Promise<U>` if any stage along the
+  chain returned a Promise; else just `U`. Same model as `async`/`await`:
+  any awaited Promise infects the output.
+- **Per-stage memoization** gives finer-grained partial recomputation
+  than D11's generator form: if signal2 is read in stage 2 and changes,
+  stage 1 stays cached; only stage 2 (and downstream) re-runs. The
+  generator form would have to restart from the top in the equivalent
+  case.
+
+**Example:**
+
+```ts
+const result = compute(
+  () => get(signal1).toUpperCase(),       // stage 0: depends on signal1
+  (v) => v + get(signal2),                 // stage 1: depends on signal2 (tracked inside)
+  (v) => v + "!"                           // stage 2: pure
+)
+// signal1 changes → re-run stages 0, 1, 2
+// signal2 changes → stage 0 stays cached; re-run stages 1, 2
+```
+
+```ts
+const greeting = compute(
+  () => get(asyncUser),                   // stage 0: returns Promise<string>
+  (u /* string, unwrapped */) => `Hello, ${u}!`
+)
+// greeting: Computed<Promise<string>>
+// The callback sees u: string (auto-unwrapped); output is Promise<string>.
+```
+
+### Two forms, not three: stages for computeds, generators for actions
+
+The earlier D11 list had three forms (stages, plain body + `use`, generator
+with `yield* get`). Per-stage memoization + the `.then`-with-tracker-
+restore mechanism make stages capable of:
+
+- *Dynamic deps:* signal reads inside stage callbacks track properly
+  (per-stage tracker).
+- *Async propagation:* output type carries `Promise` if any stage was
+  async.
+- *Per-segment partial recomputation:* finer than generator's
+  resume-from-yield (which still restarts from top on signal change).
+
+So for **computeds**, stages cover everything. The other two D11 forms
+become unnecessary or anti-patterns:
+
+- **Plain body + `use`** — subsumed; a `compute(() => body)` is just a
+  one-stage form.
+- **Generator form (`yield* get`)** — dropped for computeds. Coarser
+  memoization (one suspension point per generator vs per-stage), more
+  complex TypeScript inference, more machinery.
+
+**Generators are retained only for action bodies**, where:
+
+- Action bodies are imperative one-shot bodies (commit/discard at end).
+- Multi-yield is needed for sequenced async work + writes.
+- The generator's resume semantics matches action driver semantics.
+
+For action-body unwrap of async values, the generator form uses a
+generator-helper like `yield* get(promiseOrNode)` (name TBD; see Q-N
+candidate below). TypeScript inference for `take` requires a conditional-
+type return; that complexity stays confined to action bodies.
+
+### `use()` is React-style throw-to-suspend at the leaf
+
+`use(node)` is reserved for **leaf consumption with throw-to-suspend
+semantics**, matching React's `use()` convention. Used in:
+
+- **JSX expressions** at the leaf — `{use(promise)}` triggers Suspense
+  fallback if pending.
+- **Action body error handling** — `use(node)` throws to a try/catch in
+  the action body.
+- **NOT inside computed bodies** — would collapse `Promise<T>` into `T`
+  at the type level, breaking async honesty. Use stages instead.
+
+This preserves the mental link with React: `use` means "throw if pending,
+return resolved." Pulse adopts the same convention.
+
+### Anti-pattern (code smell)
 
 ```ts
 const greeting = computed(() => `Hello, ${use(user)}!`)
@@ -202,36 +296,139 @@ const greeting = computed(() => `Hello, ${use(user)}!`)
 ```
 
 `use()` here collapses `Promise<string>` into `string` at the callsite,
-hiding the async-ness from downstream consumers. Whoever reads `greeting`
-gets a `string` type but with hidden suspense semantics — they can be
-"surprise-suspended" when reading what looks like a sync value. The
-ergonomic surprise in C2e's earlier trace was caused entirely by this
-anti-pattern in the setup.
+hiding async from downstream consumers. The stage form is the right
+shape:
 
-**Why the rule matters:**
+```ts
+const greeting = compute(() => get(user), (u) => `Hello, ${u}!`)
+// greeting: Computed<Promise<string>>  — async honest, per-stage memoized
+```
+
+### Why this rule matters
 
 - *Type honesty.* `Computed<Promise<T>>` tells consumers they're dealing
-  with async. `Computed<T>` says it's sync. `use()` mid-graph lies in the
-  type.
-- *Suspension locality.* When `use()` lives only at leaves, suspension
-  points are visible — readers know "I committed to extract sync; I
-  might suspend." When `use()` lives mid-graph, every read of the
-  downstream becomes a potential suspension point with no syntactic
-  signal.
-- *Stage-form composability.* Stages chain naturally via `.then`-sugar.
-  Each stage is pure. Async-ness flows through the pipeline as a typed
-  property, not as a hidden control-flow modification.
+  with async; `Computed<T>` says it's sync. Stages preserve the type;
+  `use()` mid-graph lies.
+- *Suspension locality.* `use()` only at leaves means suspension points
+  are visible — readers know "I committed to extract sync; I might
+  suspend." Mid-graph `use()` makes every downstream read potentially
+  suspending with no syntactic signal.
+- *Per-stage memoization.* Stages give partial-recomputation that
+  generators can't express. Each stage is independently cached.
+- *Slim engine.* Stages are ~15 lines of library code over engine
+  primitives. No new engine concept; just `promiseState` + tracker
+  push/pop, both already needed.
 
-**Rule sharpened:** *Intermediate computeds use generator-form
-(`yield* read`) or stage-form (`compute(source, transform)`). `use()`
-is reserved for leaf consumption.*
+**Form set sharpened:**
+
+- *Computeds:* stages (one-stage form for plain compute, multi-stage
+  form for pipelines). `use()` mid-graph is an anti-pattern.
+- *Action bodies:* generators with `yield* get(...)` for async unwrap.
+- *Leaves (JSX, action-body-try):* `use(node)` for React-style
+  throw-to-suspend.
 
 (Companion to the "Derivation kind matches reactivity scope" framing
-above. Also a candidate for promotion to a P-numbered principle in
-[`pulse-design-direction.md`](./pulse-design-direction.md). Both
-position rules describe where computation work happens in the graph —
-the former between computed and effect, the latter within computed
-shapes.)
+above. Both rules describe where computation work happens. Also a
+candidate for promotion to a P-numbered principle in
+[`pulse-design-direction.md`](./pulse-design-direction.md).)
+
+### `Awaitable<T>` — one type, three legitimate uses
+
+The library's `get(node)` returns `T` for sync nodes and **`Awaitable<U>`**
+for nodes typed `Node<Promise<U>>`. `Awaitable<U>` is a Promise subclass
+that adds (a) iterability so `yield*` works in generator contexts, and (b)
+React-convention state fields (`status`, `value`, `reason`) for sync query.
+**One value type covers three call-site shapes:**
+
+```ts
+class Awaitable<T> extends Promise<T> {
+  status: 'pending' | 'fulfilled' | 'rejected' = 'pending'
+  value?: T
+  reason?: unknown
+
+  constructor(executor: (resolve: (v: T) => void, reject: (e: unknown) => void) => void) {
+    super((resolve, reject) => {
+      executor(
+        v => { this.status = 'fulfilled'; this.value = v; resolve(v) },
+        e => { this.status = 'rejected';  this.reason = e; reject(e) },
+      )
+    })
+  }
+
+  *[Symbol.iterator](): Generator<this, T, T> {
+    return (yield this) as T   // yield self; driver awaits; resume with resolved
+  }
+}
+
+type Resolved<T> = T extends Promise<infer U> ? U : T
+type GetReturn<T> = T extends Promise<infer U> ? Awaitable<U> : T
+
+function get<T>(node: Node<T>): GetReturn<T> {
+  const cached = invoke(node, getCurrentScope()) as T
+  if (cached && typeof (cached as any).then === 'function') {
+    return makeAwaitable(cached as any) as GetReturn<T>
+  }
+  return cached as GetReturn<T>
+}
+
+function makeAwaitable<T>(p: Promise<T>): Awaitable<T> {
+  if (p instanceof Awaitable) return p
+  const a = new Awaitable<T>((resolve, reject) => p.then(resolve, reject))
+  // Duck-type: if the incoming Promise already has React-convention state
+  // fields, adopt them immediately (interop with React's use(), TanStack
+  // Query, anyone else using Promise.allSettled shape).
+  const tweaked = p as any
+  if (tweaked.status === 'fulfilled')      { a.status = 'fulfilled'; a.value = tweaked.value }
+  else if (tweaked.status === 'rejected')  { a.status = 'rejected';  a.reason = tweaked.reason }
+  return a
+}
+```
+
+**The three uses of the same `get` call:**
+
+```ts
+const u = get(asyncUser)                  // u: Awaitable<string>
+
+// (1) Sync query — honest about state
+if (u.status === 'fulfilled') console.log(u.value)
+if (u.status === 'pending')    showSpinner()
+if (u.status === 'rejected')   showError(u.reason)
+
+// (2) Async wait (Awaitable IS Promise)
+const v = await u                         // v: string
+u.then(v => console.log(v))               // works — standard Promise interface
+
+// (3) Generator wait (Awaitable IS iterable)
+function* body() {
+  const v = yield* u                      // v: string (via Iterator's TReturn)
+}
+
+// Sync nodes — bare value, no wrapping
+const n = get(syncCount)                  // n: number
+```
+
+**What this folds together:**
+
+- *Single verb (`get`)* for all access patterns — no separate `take` /
+  `wait` / `read` utility for the generator-form unwrap.
+- *Q-D's Promise-tweak vs WeakMap question collapses* — state lives on
+  the Awaitable class instance (we own it), not mutated onto foreign
+  Promises. A `promiseState()` helper is unnecessary; the fields are
+  directly on the value.
+- *React-convention interop preserved* via `makeAwaitable`'s duck-type
+  check — pulse adopts the state of any Promise that already carries
+  `status`/`value`/`reason` fields, no matter who tweaked them.
+- *Compatible with existing Promise utilities* (`Promise.all`,
+  `Promise.race`, `await`, `.then`) because Awaitable extends Promise.
+- *Action-body generator unwrap is `yield* get(...)`* — Awaitable's
+  `[Symbol.iterator]` makes this work; no separate `take`/`from`/`wait`
+  helper needed.
+
+This is the unifying type. Stages auto-unwrap to `Resolved<T>` via the
+Awaitable when needed; action bodies do `yield* get(node)` and the
+driver detects the yielded Awaitable (which is a Promise) and awaits;
+leaves call `get(node)` and either query `.status`, `await` it, or
+ignore the async (use `latest()` for committed-only).
 
 ---
 
@@ -250,18 +447,18 @@ through to r3 for committed.
 
 ```ts
 const [name, setName] = signal("foo")
-const doubleName = computed(() => read(name) + read(name))
+const doubleName = computed(() => get(name) + get(name))
 
 action(function* () {
   setName("name")
-  console.log(read(doubleName))   // expected: "namename"
+  console.log(get(doubleName))   // expected: "namename"
 })
 ```
 
 If `setName("name")` only writes pulse's bag entry tagged with `S` (without
 touching r3), then `doubleName`'s r3-level cached value remains `"foofoo"` from
 its last committed-context recompute. r3 has no idea `S` exists; it doesn't
-invalidate `doubleName`. `read(doubleName)` under `S` returns the stale cached
+invalidate `doubleName`. `get(doubleName)` under `S` returns the stale cached
 value. **Wrong.**
 
 **Why.** `doubleName`'s cache must be scope-aware. The cache is engine-level
@@ -346,7 +543,7 @@ function onCleanup(fn: Disposable): void          // attaches to current ambient
 function getCurrentScope(): Scope                 // always returns a scope (library convention; see ROOT_SCOPE below)
 ```
 
-No `signal`, `computed`, `effect`, `read`, `latest`, `action`, `transition`,
+No `signal`, `computed`, `effect`, `get`, `latest`, `action`, `transition`,
 `speculation`, "canonical," or "committed" in the engine vocabulary. The engine
 sees a map of opaque scope keys to slots, uniformly. Those concepts are all
 library code.
@@ -408,19 +605,19 @@ Usage retains familiar shape:
 
 ```ts
 const [name, setName] = signal("foo")
-const doubleName = computed(() => read(name) + read(name))
+const doubleName = computed(() => get(name) + get(name))
 
-read(name)         // "foo"
-read(doubleName)   // "foofoo"
+get(name)         // "foo"
+get(doubleName)   // "foofoo"
 setName("bar")
-read(name)         // "bar"
-read(doubleName)   // "barbar"
+get(name)         // "bar"
+get(doubleName)   // "barbar"
 
 action(function* () {
   setName("name")
-  console.log(read(doubleName))    // "namename" — slots resolve under the active scope
+  console.log(get(doubleName))    // "namename" — slots resolve under the active scope
 })
-read(name)         // "bar" — committed unchanged outside the scope
+get(name)         // "bar" — committed unchanged outside the scope
 ```
 
 ---
@@ -435,7 +632,7 @@ broke on. Walks every engine call and every state change.
 
 ```ts
 const [name, setName] = signal("foo")
-const doubleName = computed(() => read(name) + read(name))
+const doubleName = computed(() => get(name) + get(name))
 ```
 
 - `signal("foo")` → library calls `createNode<string>(() => "foo")` → engine
@@ -446,17 +643,17 @@ const doubleName = computed(() => read(name) + read(name))
 
 **State.** Both Nodes have empty `slots`. No edges. No reads have happened yet.
 
-### Step 1: `read(doubleName)` outside any action
+### Step 1: `get(doubleName)` outside any action
 
 - Library: `getCurrentScope()` → `ROOT_SCOPE` (library default). `currentTracker`
   is null. `invoke(doubleName, ROOT_SCOPE)`.
 - Engine: `doubleName.slots.get(ROOT_SCOPE)` → miss. Create slot `slot_DN_R`,
   push `currentTracker = slot_DN_R`, invoke `defaultRecipe`.
-  - Recipe body: `read(name) + read(name)`.
-  - First `read(name)`: library `link(name, chainSelector([ROOT_SCOPE]), slot_DN_R)`
+  - Recipe body: `get(name) + get(name)`.
+  - First `get(name)`: library `link(name, chainSelector([ROOT_SCOPE]), slot_DN_R)`
     → engine creates `edge1`. Then `invoke(name, ROOT_SCOPE)` → miss, create
     `slot_N_R` with recipe `() => "foo"`, cache `"foo"`, return.
-  - Second `read(name)`: cached hit, returns `"foo"`. `link` dedupes.
+  - Second `get(name)`: cached hit, returns `"foo"`. `link` dedupes.
   - Body returns `"foofoo"`. Cache. Pop currentTracker.
 - Returns `"foofoo"`. ✓
 
@@ -486,19 +683,19 @@ status: 'open' }`. Ambient scope is now `S`.
 cache → corrupting committed state. Under multi-slot + selectors: the edge
 correctly stays inert; committed state preserved.
 
-### Step 4: `read(doubleName)` inside the action
+### Step 4: `get(doubleName)` inside the action
 
 - Library: `getCurrentScope()` → `S`. `currentTracker` null (action-body reads
   are imperative — see [open question](#open-questions-from-the-trace) below).
   `invoke(doubleName, S)`.
 - Engine: `doubleName.slots.get(S)` → miss. Create `slot_DN_S`, push
   `currentTracker = slot_DN_S`, invoke `defaultRecipe`.
-  - Recipe body: `read(name) + read(name)`.
-  - First `read(name)`: library
+  - Recipe body: `get(name) + get(name)`.
+  - First `get(name)`: library
     `link(name, chainSelector([S, ROOT_SCOPE]), slot_DN_S)` →
     engine creates `edge2`. Then `invoke(name, S)` → `name.slots[S]` hit,
     return `"name"`.
-  - Second `read(name)`: cached hit, returns `"name"`. `link` dedupes.
+  - Second `get(name)`: cached hit, returns `"name"`. `link` dedupes.
   - Body returns `"namename"`. Cache. Pop.
 - Returns `"namename"`. ✓
 
@@ -553,7 +750,7 @@ doubleName.slots = { ROOT_SCOPE: cached "namename" }
 edge1 unchanged. edge2 unlinked.
 ```
 
-`read(doubleName)` after commit: cached `"namename"`. ✓
+`get(doubleName)` after commit: cached `"namename"`. ✓
 
 ### Step 5b: action throws → `closeScope(S, 'discard')`
 
@@ -566,7 +763,7 @@ Alternative: action body throws.
 **State after Step 5b:** identical to State after Step 1 (committed state never
 observed the speculation). ✓
 
-`read(doubleName)` after discard: cached `"foofoo"`. ✓
+`get(doubleName)` after discard: cached `"foofoo"`. ✓
 
 ### Open questions from the trace
 
@@ -648,15 +845,15 @@ edges = []
 
 Two library primitives are exercised in C2:
 
-- **`read(node)`** (the basic walk): returns whatever the recipe returns —
+- **`get(node)`** (the basic walk): returns whatever the recipe returns —
   `T` or `Promise<T>`. Forms a tracking edge if called inside a recompute
   context. Doesn't suspend; the caller chooses how to handle Promises.
-- **`yield* read(node)`** (the generator-form walk): inside a generator
-  (compute body or action body), `yield* read(node)` either returns
+- **`yield* get(node)`** (the generator-form walk): inside a generator
+  (compute body or action body), `yield* get(node)` either returns
   immediately with `T` (sync case) or yields a `park` command (async case)
   that the calling driver dispatches on.
 
-The action body runs as a generator; it can `yield* read(...)` to park.
+The action body runs as a generator; it can `yield* get(...)` to park.
 Sketched walk implementation:
 
 ```ts
@@ -703,7 +900,7 @@ code; engine knows nothing about generators or park commands.
 
 ```ts
 action(function* () {
-  const name = yield* read(user)       // parks until userPromise resolves
+  const name = yield* get(user)       // parks until userPromise resolves
   setUser(Promise.resolve(name + "!"))
 })
 // later: resolveUser("alice")
@@ -714,7 +911,7 @@ action(function* () {
 as ambient. Library calls `driveAction(S, gen)`.
 
 **Step 2: first `gen.next(undefined)`.** Generator runs until first yield.
-- Body calls `yield* read(user)`. The `read` sub-generator runs:
+- Body calls `yield* get(user)`. The `get` sub-generator runs:
   - `getCurrentScope()` → `S`. `currentTracker` → null (action-body reads
     aren't tracked — see H1a-c discussion). No `link()` call.
   - `invoke(user, S)`:
@@ -722,7 +919,7 @@ as ambient. Library calls `driveAction(S, gen)`.
       defaultRecipe, deps: [], subs: [] }`. Push `currentTracker = slot_U_S`.
       Invoke recipe → `userPromise`. `slot_U_S.cached = userPromise`. Pop
       tracker. Set `user.slots[S] = slot_U_S`. Return `userPromise`.
-  - `read` sees Promise → yields `{ kind: 'park', promise: userPromise }`.
+  - `get` sees Promise → yields `{ kind: 'park', promise: userPromise }`.
 - `yield*` propagates the park command up to the action body's iterator. The
   body's `gen.next(undefined)` returns `{ done: false, value: { kind: 'park',
   promise: userPromise } }`.
@@ -746,8 +943,8 @@ because the body isn't going to re-run on dep change.
 `userPromise` resolves to `"alice"`. The `.then` callback fires (microtask).
 - Driver `step("alice")` runs.
 - Check `scope.status === 'open'` → yes. `pushScope(S)`. Ambient back to `S`.
-- Call `gen.next("alice")`. The `yield*` machinery resumes the `read`
-  sub-generator with `"alice"`. `read` returns `"alice"`. `yield*` resumes
+- Call `gen.next("alice")`. The `yield*` machinery resumes the `get`
+  sub-generator with `"alice"`. `get` returns `"alice"`. `yield*` resumes
   the action body with `"alice"`. `name = "alice"`.
 
 **Engine handling of Promise resolution** (refined since C2 was first traced;
@@ -801,17 +998,17 @@ S.status = 'committed'
 ambient = ROOT_SCOPE
 ```
 
-Subsequent `read(user)` returns `Promise.resolve("alice!")` (or `"alice!"` if
+Subsequent `get(user)` returns `Promise.resolve("alice!")` (or `"alice!"` if
 the cache has settled). ✓
 
 ### Architecture exposed by C2a
 
 C2a tested cleanly. The decisions it forced into the open:
 
-1. **Async-honest walks.** `read(node)` returns `T | Promise<T>`. The walk
+1. **Async-honest walks.** `get(node)` returns `T | Promise<T>`. The walk
    doesn't hide the Promise; the caller chooses how to handle it. P2 holds.
 2. **Park commands separate walk intent from action machinery.** `yield*
-   read(node)` yields a `park` command; the action driver decides what to do
+   get(node)` yields a `park` command; the action driver decides what to do
    with it (`.then` here; could be `requestAnimationFrame` for an `raf`
    command; library convention, not engine concern). Slim engine + thick
    library (the third framing) holds.
@@ -859,7 +1056,7 @@ What's new:
 
 ```ts
 const handle = action(function* () {
-  yield* read(user)
+  yield* get(user)
   setUser(...)
 })
 // later, while handle is parked:
@@ -913,7 +1110,7 @@ What this trace exposes:
 
 ```ts
 action(function* () {
-  const name = yield* read(user)              // parks
+  const name = yield* get(user)              // parks
   console.log(name)
 })
 // while parked:
@@ -926,7 +1123,7 @@ The interesting subtlety: while the action is parked, *someone else* writes
 to `user` (in `ROOT_SCOPE` here, since the outside write has no ambient
 scope). What does the action body see when it resumes?
 
-**Step C2d-1: action parks at `yield* read(user)`.** Same as C2a Steps 1-2.
+**Step C2d-1: action parks at `yield* get(user)`.** Same as C2a Steps 1-2.
 After: `user.slots[S]` cached as `userPromise`; driver awaits.
 
 **Step C2d-2: outside `setUser(Promise.resolve("bob"))`.**
@@ -1001,7 +1198,7 @@ C2 was the highest-yield trace because it forced the following decisions /
 sub-questions into the open:
 
 1. **Walks return `T | Promise<T>` honestly.** (Confirms P2.)
-2. **`yield* read` yields `park` commands; the action driver dispatches.**
+2. **`yield* get` yields `park` commands; the action driver dispatches.**
    Library convention; engine knows nothing.
 3. **Ambient-scope restoration via `pushScope`/`popScope` around every
    `gen.next`.** Driver responsibility.
@@ -1032,7 +1229,7 @@ defensible too — it would mean an action that reads but never writes still
 snapshot-isolation semantics.
 
 The framings all held: Node-as-recipe survived (recipes can return Promises),
-walks-first-class survived (`read` and `yield* read` are walks), slim-engine
+walks-first-class survived (`get` and `yield* get` are walks), slim-engine
 + thick-library survived (driver is library; engine sees writes), scope/owner
 unification held (cleanups + scope-status + discard mechanism). No
 falsifications.
@@ -1104,7 +1301,7 @@ engine primitive used.
 const [count, setCount] = signal(0)
 let effectRuns = 0
 const handle = effect(() => {
-  const value = read(count)
+  const value = get(count)
   effectRuns += 1
   console.log(`Effect runs: ${effectRuns}, value: ${value}`)
 })
@@ -1119,7 +1316,7 @@ const handle = effect(() => {
   - `pushTracker(getOrCreateSlot(effectNode, ROOT_SCOPE))` → creates
     `slot_E_R` = { recipe: fn, deps: [], subs: [] }. Tracker now points at it.
   - Invoke `fn`:
-    - `read(count)`:
+    - `get(count)`:
       - `getCurrentScope()` → `ROOT_SCOPE`. `currentTracker` → `slot_E_R`.
       - `link(count, chainSelector([ROOT_SCOPE]), slot_E_R)`.
         - Engine: `edge1` = { source: count, sourceSelector:
@@ -1217,7 +1414,7 @@ The effect's `subscribe` handler received the invalidation event in Step
     `recompute`. Drop `edge1` from `slot_E_R.deps` and from `count`'s outgoing
     index. (`subs` on `count` side: `edge1` removed.)
   - Invoke `fn`:
-    - `read(count)`:
+    - `get(count)`:
       - `link(count, chainSelector([ROOT_SCOPE]), slot_E_R)` → creates
         `edge1'` (new identity, same shape). Add to `count`'s outgoing,
         add to `slot_E_R.deps`.
@@ -1285,7 +1482,7 @@ The trace established **Q-C (consumer pattern)** with a concrete shape:
    value but holds the cleanup).
 4. **Edge discipline on re-run.** Before re-invoking, the consumer unlinks
    stale `deps` (so they get rebuilt). Same as r3's existing pattern.
-5. **JSX-binding consumer mirrors Effect.** A JSX expression `{read(x)}`
+5. **JSX-binding consumer mirrors Effect.** A JSX expression `{get(x)}`
    is a Node whose consumer schedules a DOM update on invalidation. Same
    shape as `effect`; the scheduler hands off to the DOM updater instead
    of running a side-effecting body. **I1 falls out of H1.**
@@ -1330,7 +1527,7 @@ captured:
    per Node) or does it re-run multiple times? r3 batches via the dirty
    heap; the library equivalent here would be a per-Node "scheduled"
    flag. Cheap fix; doesn't change architecture.
-2. **Effect-during-recompute.** An effect's body calls `read(count)`; what
+2. **Effect-during-recompute.** An effect's body calls `get(count)`; what
    if `count`'s recipe (when invoked) itself triggers an effect (via some
    side path)? Re-entrancy — exactly **K1 territory.** Worth tracing K1
    next since it directly tests this.
@@ -1350,7 +1547,7 @@ All four framings held:
 
 - *Node-as-recipe*: an Effect is a Node whose recipe is the body. Same
   shape as Signal/Computed.
-- *Walks-first-class*: `read` inside the body forms edges with the right
+- *Walks-first-class*: `get` inside the body forms edges with the right
   chain; the chain *is* the consumer's subscription policy.
 - *Slim engine + thick library*: the entire effect mechanism is library
   code over `createNode` / `subscribe` / `invoke` / `link` / `writeSlot`.
@@ -1381,7 +1578,7 @@ subsequent findings dissolved K1's "design call" entirely:
 2. **(B) returns *stale* values** in the K1b scenario (write a signal
    then read a derived in the same recipe — see catalog K1b). The
    deferred fires mean the derived's slot isn't marked dirty until
-   after the recipe returns; the in-recipe `read` returns the stale
+   after the recipe returns; the in-recipe `get` returns the stale
    cached value.
 3. **(C) was ruled out on a confused premise.** "Synchronous fire mid-
    recompute creates re-entrant invocation" conflated *firing edges*
@@ -1405,11 +1602,11 @@ Concrete shape:
 const [count, setCount] = signal(0)
 const [shadow, setShadow] = signal(0)
 const derived = computed(() => {
-  const c = read(count)
+  const c = get(count)
   setShadow(c * 2)        // ← re-entrant write inside the recipe
   return c + 1
 })
-read(derived)
+get(derived)
 ```
 
 What happens when the recipe calls `setShadow(0)`? Three positions were
@@ -1424,11 +1621,11 @@ Concrete shape:
 const [count, setCount] = signal(0)
 const [shadow, setShadow] = signal(0)
 const derived = computed(() => {
-  const c = read(count)
+  const c = get(count)
   setShadow(c * 2)        // ← re-entrant write inside the recipe
   return c + 1
 })
-read(derived)
+get(derived)
 ```
 
 What happens when the recipe calls `setShadow(0)`? Three positions were
@@ -1506,11 +1703,11 @@ subsequent reads in the same body (slot is updated synchronously). **(2)**
 edge-firing is gated and queued. **(3)** nested invokes propagate deferred
 fires upward — fires only happen when the *outermost* invoke completes.
 
-#### Trace: `read(derived)` from a clean slate
+#### Trace: `get(derived)` from a clean slate
 
 Initial state: all slots empty.
 
-**Step 1.** `read(derived)`. Library: `getCurrentScope()` → `ROOT_SCOPE`.
+**Step 1.** `get(derived)`. Library: `getCurrentScope()` → `ROOT_SCOPE`.
 `currentTracker` → null. `invoke(derived, ROOT_SCOPE)`.
 
 **Step 2.** Engine `invoke(derived, ROOT_SCOPE)`:
@@ -1519,7 +1716,7 @@ Initial state: all slots empty.
 - `deferredFires` was null (top-level invoke); set to `[]`.
 - `pushTracker(slot_D_R)`, `pushScope(ROOT_SCOPE)`.
 - Invoke `deriveBody`:
-  - `read(count)`:
+  - `get(count)`:
     - `link(count, chainSelector([ROOT_SCOPE]), slot_D_R)` → creates
       `edge_C_D`. Add to `count`'s outgoing and `slot_D_R.deps`.
     - `invoke(count, ROOT_SCOPE)` → miss → create `slot_C_R` with
@@ -1550,7 +1747,7 @@ edge_C_D = { source: count, selector: chainSelector([ROOT_SCOPE]),
              target: derived.slots[ROOT_SCOPE] }
 ```
 
-`read(derived)` returned `1`; `shadow` is now `0`. ✓ The re-entrant write
+`get(derived)` returned `1`; `shadow` is now `0`. ✓ The re-entrant write
 happened; no loop, no error. If we read `shadow` later, we'd see `0`.
 
 #### Why the deferral matters
@@ -1565,15 +1762,15 @@ But add a downstream consumer of `shadow`:
 
 ```ts
 let observedShadow = -1
-effect(() => { observedShadow = read(shadow) })
+effect(() => { observedShadow = get(shadow) })
 ```
 
 The effect's initial run forms an edge `shadow → effectSlot`. Now when
-`read(derived)` runs and `setShadow(0)` fires *synchronously* during the
+`get(derived)` runs and `setShadow(0)` fires *synchronously* during the
 recipe, the effect's selector matches → effect's slot invalidates → effect
 scheduled. The effect *might* re-run before the recipe finishes (depending on
 microtask ordering), creating partial-update visibility. With deferral, the
-effect runs after `read(derived)` returns, observing the consistent
+effect runs after `get(derived)` returns, observing the consistent
 post-state.
 
 Even subtler: if the effect itself reads `derived`, we get
@@ -1587,29 +1784,29 @@ satisfy.
 ```ts
 const [count, setCount] = signal(0)
 const incrementer = computed(() => {
-  const c = read(count)
+  const c = get(count)
   setCount(c + 1)             // writes to its own dep
   return c
 })
-read(incrementer)
+get(incrementer)
 ```
 
 Trace under Position B:
 - Invoke `incrementer`. Push tracker.
-- `read(count)` → 0; form edge `count → incrementer.slot`.
+- `get(count)` → 0; form edge `count → incrementer.slot`.
 - `setCount(1)`: writeSlot writes count.slot. Defer fire.
 - Return 0. Pop tracker.
 - Drain: fire `count → incrementer.slot`. Selector matches; invalidate
   `incrementer.slot`. Mark dirty.
 
-After the initial `read(incrementer)`:
+After the initial `get(incrementer)`:
 - `incrementer.slots[ROOT_SCOPE].cached = 0` (returned value) but
   immediately invalidated by the drain.
 - `count.slots[ROOT_SCOPE].cached = 1`.
 
 If a consumer demands `incrementer` again (e.g., a downstream effect fires
 the consumer), it recomputes:
-- `read(count)` → 1. `setCount(2)`. Defer.
+- `get(count)` → 1. `setCount(2)`. Defer.
 - Return 1. Pop. Drain → invalidate `incrementer`. Mark dirty.
 
 Each demand-driven read recomputes one step. **No infinite loop *during* a
@@ -1643,7 +1840,7 @@ function writeSlot(node, scope, slot) {
 ```
 
 For the `derived` example above: `setShadow(0)` throws. The recipe throws.
-`invoke(derived, ROOT_SCOPE)` propagates the throw. `read(derived)` throws.
+`invoke(derived, ROOT_SCOPE)` propagates the throw. `get(derived)` throws.
 
 Trade-offs vs Position B:
 - **Pros (A):** simpler invariant, prevents the cycle case at the source,
@@ -1693,7 +1890,7 @@ visible work:
    via promotion, etc.). The recompute discipline is uniform.
 
 5. **A new question about read coherence.** Inside a recipe body that
-   does `setShadow(...)` then `read(shadow)`, does the second read see
+   does `setShadow(...)` then `get(shadow)`, does the second read see
    the new shadow value? Under Position B's "write synchronously, fire
    later" — yes, because the slot is updated synchronously. Worth
    making explicit: **writes are visible within the recipe body that
@@ -1758,7 +1955,7 @@ All four framings held:
 
 - *Node-as-recipe*: re-entrant writes don't break the framing — the recipe
   is just JavaScript that happens to call a setter.
-- *Walks-first-class*: `read` and `writeSlot` are walks; their composition
+- *Walks-first-class*: `get` and `writeSlot` are walks; their composition
   during recompute is the policy question.
 - *Slim engine + thick library*: Position B's deferral is implementable
   with one engine flag (`deferredFires`) and library-side scheduling. No
@@ -1780,11 +1977,11 @@ user question:
 
 ```ts
 const [name, setName] = signal("foo")
-const doubleName = computed(() => read(name) + read(name))
+const doubleName = computed(() => get(name) + get(name))
 
 const weird = computed(() => {
   setName("name")                         // write
-  return read(doubleName).capitalize()    // read of downstream derived
+  return get(doubleName).capitalize()    // read of downstream derived
 })
 ```
 
@@ -1797,17 +1994,17 @@ read).
 - `setName("name")`: `writeSlot(name, ROOT_SCOPE, …)`. `name.slot[ROOT_SCOPE]
   .cached = "name"` (synchronous). Fire deferred → queue
   `{ name, ROOT_SCOPE }`.
-- `read(doubleName)`: `invoke(doubleName, ROOT_SCOPE)`. Slot exists, cached
+- `get(doubleName)`: `invoke(doubleName, ROOT_SCOPE)`. Slot exists, cached
   `"foofoo"`. **Is the slot dirty?** No — the fire was deferred, so the
   dirty flag was never set. Returns `"foofoo"`.
 - Recipe: `"foofoo".capitalize() = "Foofoo"`. Cache `weird.slot = "Foofoo"`.
 - Pop tracker, drain queue. Fire `name → doubleName` edge. Mark
   `doubleName.slot` dirty. (Too late.)
 
-**Result under (B): `read(weird) = "Foofoo"`. Stale.** ✗
+**Result under (B): `get(weird) = "Foofoo"`. Stale.** ✗
 
 The reason: deferred fires mean *the dirty flag on `doubleName.slot` isn't
-set until after the recipe returns*. The in-recipe `read(doubleName)`
+set until after the recipe returns*. The in-recipe `get(doubleName)`
 finds the slot clean and returns the stale cached value.
 
 **Under Position C (fire synchronously):**
@@ -1815,12 +2012,12 @@ finds the slot clean and returns the stale cached value.
 - Recipe runs. No deferral.
 - `setName("name")`: `writeSlot(name, ROOT_SCOPE, …)`. Walk edges
   immediately. Fire `name → doubleName`. Mark `doubleName.slot` dirty.
-- `read(doubleName)`: `invoke(doubleName, ROOT_SCOPE)`. Slot is dirty.
+- `get(doubleName)`: `invoke(doubleName, ROOT_SCOPE)`. Slot is dirty.
   **Recompute**: reads `name` (now `"name"`), returns `"namename"`. Cache,
   clear dirty.
 - Recipe: `"namename".capitalize() = "Namename"`. Cache.
 
-**Result under (C): `read(weird) = "Namename"`. Fresh.** ✓
+**Result under (C): `get(weird) = "Namename"`. Fresh.** ✓
 
 ### Why the original K1 trace missed this
 
@@ -1860,13 +2057,13 @@ slots, which the current recompute may then encounter via its own reads
 
 ```ts
 const incrementer = computed(() => {
-  const c = read(count)
+  const c = get(count)
   setCount(c + 1)
   return c
 })
 ```
 
-- `read(count)`: edge formed `count → incrementer.slot`.
+- `get(count)`: edge formed `count → incrementer.slot`.
 - `setCount(c+1)`: `writeSlot(count, …)`. Walk edges. Fire `count →
   incrementer.slot`. Mark `incrementer.slot` dirty.
 - But `incrementer.slot` is currently being recomputed. Marking it dirty
@@ -1957,23 +2154,23 @@ const innerReads: any[] = []
 
 action(function* () {                       // outer scope S1
   setCount(10)
-  outerReads.push(read(count))              // expect: 10
+  outerReads.push(get(count))              // expect: 10
 
   action(function* () {                     // inner scope S2, child of S1
     setCount(20)
     setName("bar")
-    innerReads.push(read(count))            // expect: 20
-    innerReads.push(read(name))             // expect: "bar"
+    innerReads.push(get(count))            // expect: 20
+    innerReads.push(get(name))             // expect: "bar"
   })
 
   // After inner commits — what does outer see?
-  outerReads.push(read(count))              // expect under (i): 20
-  outerReads.push(read(name))               // expect under (i): "bar"
+  outerReads.push(get(count))              // expect under (i): 20
+  outerReads.push(get(name))               // expect under (i): "bar"
 })
 
 // After outer commits
-read(count)                                 // expect: 20
-read(name)                                  // expect: "bar"
+get(count)                                 // expect: 20
+get(name)                                  // expect: "bar"
 ```
 
 Initial state: `count.slots = {}`, `name.slots = {}`. The signals have only
@@ -1990,7 +2187,7 @@ cleanups: [], status: 'open' }`. Push `S1` as ambient.
 - Engine walks `count`'s outgoing edges with `(count.slots, S1)`. None (no
   prior reads). Set `count.slots[S1]`.
 
-**Step 3: `read(count)` inside outer body.**
+**Step 3: `get(count)` inside outer body.**
 - `getCurrentScope()` → `S1`. `currentTracker` → null (action body
   imperative, no tracking).
 - `invoke(count, S1)`. Engine: `count.slots.get(S1)` hit, cached 10.
@@ -2016,11 +2213,11 @@ S1.status = 'open', ambient = S1
 **Step 6: `setName("bar")` under `S2`.**
 - Same shape. `name.slots[S2] = "bar"`.
 
-**Step 7: `read(count)` inside inner body.**
+**Step 7: `get(count)` inside inner body.**
 - `getCurrentScope()` → `S2`. `invoke(count, S2)`. Hit. 20.
 - `innerReads.push(20)`. ✓
 
-**Step 8: `read(name)` inside inner body.**
+**Step 8: `get(name)` inside inner body.**
 - `invoke(name, S2)`. Hit. "bar".
 - `innerReads.push("bar")`. ✓
 
@@ -2060,10 +2257,10 @@ The inner's writes have been "lifted" into the outer's scope. From the
 outer's perspective, it's as if the inner had been inlined into the outer
 body's flow.
 
-**Step 10: `read(count)` after inner commits (still in outer body).**
+**Step 10: `get(count)` after inner commits (still in outer body).**
 - `invoke(count, S1)` → hit, 20. `outerReads.push(20)`. ✓
 
-**Step 11: `read(name)` after inner commits.**
+**Step 11: `get(name)` after inner commits.**
 - `invoke(name, S1)` → hit, "bar". `outerReads.push("bar")`. ✓
 
 **Step 12: outer returns. `closeScope(S1, 'commit')`.**
@@ -2084,7 +2281,7 @@ count.slots = { ROOT_SCOPE: cached 20 }
 name.slots = { ROOT_SCOPE: cached "bar" }
 ```
 
-`read(count)` outside → 20. `read(name)` → "bar". ✓
+`get(count)` outside → 20. `get(name)` → "bar". ✓
 
 ### Why Position (ii) doesn't work under the framing
 
@@ -2102,7 +2299,7 @@ name.slots = { ROOT_SCOPE: cached "bar" }
 ambient = S1
 ```
 
-**Step 10 (alternate):** `read(count)` in outer body. `getCurrentScope()` →
+**Step 10 (alternate):** `get(count)` in outer body. `getCurrentScope()` →
 `S1`. `invoke(count, S1)` → hit, **cached 10**. `outerReads.push(10)`. ✗
 
 The outer's read returns *the outer's earlier write*, not the inner's
@@ -2130,7 +2327,7 @@ separately.
 - `closeScope(S2, 'discard')`: drop `count.slots[S2]`, drop `name.slots[S2]`.
   Fire `S2.cleanups` (none). `S2.status = 'discarded'`.
 - State: `count.slots = { S1: 10 }`, `name.slots = {}`.
-- Outer continues. `read(count)` under `S1` → 10. `read(name)` under `S1` →
+- Outer continues. `get(count)` under `S1` → 10. `get(name)` under `S1` →
   chain `[S1, ROOT_SCOPE]` miss-miss → `name.defaultRecipe()` → "foo".
 - Outer-commit later: `count.slots[ROOT_SCOPE] = 10`, `name.slots` stays empty
   (no `S1` slot to promote).
@@ -2156,7 +2353,7 @@ What about external consumers that subscribed to `count` or `name`?
 Consider an Effect outside both actions:
 ```ts
 let observed = -1
-effect(() => { observed = read(count) })   // chain [ROOT_SCOPE]
+effect(() => { observed = get(count) })   // chain [ROOT_SCOPE]
 ```
 
 Initial run: `observed = 0` (from `count.defaultRecipe`). Edge formed:
@@ -2315,7 +2512,7 @@ const log: string[] = []
 
 const handle = action(function* () {                 // outer scope S
   effect(() => {
-    const c = read(count)
+    const c = get(count)
     log.push(`Effect ran with count=${c}`)
     onCleanup(() => teardowns.push(`cleanup at count=${c}`))
   })
@@ -2336,7 +2533,7 @@ cleanups: [], status: 'open' }`. Push ambient.
   `effectNode` (fires its `bodyCleanups`, unlinks remaining edges).
 - Initial body run:
   - `pushTracker(effectNode.slots[S])`, `pushScope(S)`.
-  - `read(count)`:
+  - `get(count)`:
     - `link(count, chainSelector([S, ROOT_SCOPE]), effectNode.slots[S])` →
       `edge1`.
     - `invoke(count, S)` → miss → `count.slots[S]` created (read-populated;
@@ -2489,7 +2686,7 @@ const log: string[] = []
 const teardowns: string[] = []
 
 effect(() => {                                       // created outside any action; owner = ROOT_SCOPE
-  const c = read(count)
+  const c = get(count)
   log.push(`Effect ran with count=${c}`)
   onCleanup(() => teardowns.push(`cleanup at count=${c}`))
 })
@@ -2530,7 +2727,7 @@ selector `chainSelector([ROOT_SCOPE])`. After initial run:
   Unlink each — remove `edge1` from `count.slots[ROOT_SCOPE].subs` and
   from `effectNode.slots[ROOT_SCOPE].deps`.
 - *Push tracker, push scope. Invoke body.*
-  - `read(count)`: `link(count, chainSelector([ROOT_SCOPE]),
+  - `get(count)`: `link(count, chainSelector([ROOT_SCOPE]),
     effectNode.slots[ROOT_SCOPE])` → `edge1'`. `invoke(count, ROOT_SCOPE)`
     → hit, return 5.
   - Body: `c = 5`. `log.push("Effect ran with count=5")`. `onCleanup(...)`
@@ -2627,7 +2824,7 @@ naming explicitly:
 All four framings held:
 
 - *Node-as-recipe*: effects are Nodes with bodies-as-recipes. Same shape.
-- *Walks-first-class*: `read` inside the body forms edges with the right
+- *Walks-first-class*: `get` inside the body forms edges with the right
   chain (per Policy α, the chain is the effect's owner's chain).
 - *Slim engine + thick library*: all the cleanup-chain composition is
   library code. The engine just fires `scope.cleanups` on discard; the
@@ -2651,7 +2848,7 @@ mechanism doesn't pick a winner.
 ## End-to-end trace: C2e — post-yield derived read (async K1b analogue)
 
 The canonical async coherence probe. An action body awaits a Promise via
-`yield* read`, then synchronously reads a downstream derived whose recipe
+`yield* get`, then synchronously reads a downstream derived whose recipe
 depends on the awaited signal. Tests whether the derived sees the resolved
 value or the still-Promise-cached value when the action body resumes.
 
@@ -2662,32 +2859,38 @@ let resolveUser: (v: string) => void
 const userPromise = new Promise<string>(r => { resolveUser = r })
 const [user, setUser] = signal<string | Promise<string>>(userPromise)
 
-// Derived computed — generator form, propagates async-ness through the type
-// (per the "Unwrap at the leaf" framing; `use()` mid-graph is an anti-pattern)
-const greeting = compute(function* () {
-  const u = yield* read(user)
-  return `Hello, ${u}!`
-})
+// Derived computed — stage form (canonical for pulse computeds).
+// The stage callback sees the unwrapped value (string); output is Promise<string>.
+const greeting = compute(
+  () => get(user),                         // stage 0: source — returns Promise<string>
+  (u) => `Hello, ${u}!`                    // stage 1: u is string (auto-unwrapped)
+)
 // greeting: Computed<Promise<string>>
 
 action(function* () {
-  const name = yield* read(user)           // park until userPromise resolves
-  const g = yield* read(greeting)           // park until greeting resolves (leaf unwrap)
-  console.log(g)                            // expect: "Hello, Alice!"
+  const name = yield* get(user)            // park until userPromise resolves
+  const g = yield* get(greeting)            // park until greeting resolves
+  console.log(g)                             // expect: "Hello, Alice!"
 })
 
 // later: resolveUser("Alice")
 ```
 
-**State at start:** `user.slots = {}`, `greeting.slots = {}`, edges = []. The
-Promise is pending. Note: `greeting` could equivalently be written as a
-stage — `compute(user, (u) => \`Hello, ${u}!\`)` — with identical semantics.
+**State at start:** `user.slots = {}`, `greeting.slots = {}` (internally, the
+two stage nodes also empty), edges = []. The Promise is pending.
 
-### What `yield* read` does for a Promise-valued slot
+Note: previous iterations of this trace used a generator-form `greeting`
+(`compute(function*() { const u = yield* get(user); return ... })`) —
+that form is now superseded by stages for computeds (see the "Stages: a
+memoized node + a promise auto-unwrap" framing). Generators are retained
+for action bodies only, where multi-yield + commit/discard semantics are
+needed.
 
-`read(node)` is sync — it returns whatever's cached, which may be `T` or
+### What `yield* get` does for a Promise-valued slot
+
+`get(node)` is sync — it returns whatever's cached, which may be `T` or
 `Promise<T>`. Inside a generator body (recipe or action body), `yield*
-read(node)` parks the generator if the slot's cached value is a Promise,
+get(node)` parks the generator if the slot's cached value is a Promise,
 resuming with the resolved value once it settles:
 
 ```ts
@@ -2707,9 +2910,9 @@ function* read<T>(node: Node<T>): Generator<ParkCommand, T, T> {
 
 `use(node)` is the *leaf-only* sibling of this: it throws-to-suspend
 inside a restartable context (computed recipe — but per the "Unwrap at
-the leaf" framing, computed recipes should use `yield* read` or stage
+the leaf" framing, computed recipes should use `yield* get` or stage
 form instead), or peeks-and-throws-on-pending in non-restartable
-contexts. The trace below uses `yield* read` throughout, leaf and
+contexts. The trace below uses `yield* get` throughout, leaf and
 intermediate.
 
 ### Step-by-step trace
@@ -2717,9 +2920,9 @@ intermediate.
 **Step 1: open scope.** `openScope()` → `S = { parent: ROOT_SCOPE, cleanups:
 [], status: 'open' }`. Push ambient.
 
-**Step 2: `yield* read(user)` parks.**
+**Step 2: `yield* get(user)` parks.**
 
-- Library `read(user)`:
+- Library `get(user)`:
   - `getCurrentScope()` → `S`. `currentTracker` → null (action body).
   - `invoke(user, S)`:
     - Engine: `user.slots.get(S)` miss. Create `slot_U_S = { recipe:
@@ -2730,7 +2933,7 @@ intermediate.
       S, { kind: 'resolved' }) })`. This `.then` is attached **first**
       (during invoke).
     - Return `userPromise`.
-  - `read` sees Promise → yields `{ kind: 'park', promise: userPromise }`.
+  - `get` sees Promise → yields `{ kind: 'park', promise: userPromise }`.
 - Action driver receives park. **Driver .then attach:** attaches
   `userPromise.then(name => step(name), …)`. This `.then` is attached
   **second** (during the action driver's park handling).
@@ -2753,16 +2956,16 @@ order**:
   - Per Q-D: tweak `userPromise` with `{ status: 'fulfilled', value:
     "Alice" }`.
   - `fireEdges(user, S, { kind: 'resolved' })`. Walk `user`'s outgoing
-    edges. **None exist** (the action body's `yield* read` didn't track;
+    edges. **None exist** (the action body's `yield* get` didn't track;
     `greeting` hasn't been read yet). No edges to fire.
 - *Driver handler fires second:*
   - Driver `step("Alice")`. Push ambient = S. `gen.next("Alice")`.
 
-**Step 4: generator resumes; `const g = yield* read(greeting)` runs.**
+**Step 4: generator resumes; `const g = yield* get(greeting)` runs.**
 
 - `gen.next("Alice")` resumes the action body. `name = "Alice"`. Continues
-  to `yield* read(greeting)`.
-- Library `read(greeting)` (sub-generator):
+  to `yield* get(greeting)`.
+- Library `get(greeting)` (sub-generator):
   - `getCurrentScope()` → `S`. `currentTracker` → null (action body).
   - `invoke(greeting, S)`:
     - Engine: `greeting.slots.get(S)` miss. Create `slot_G_S`. Push
@@ -2770,12 +2973,12 @@ order**:
       generator-form recipe (the engine drives generator-form recipes
       similarly to how the action driver drives action bodies — see
       main-doc D11):
-      - Recipe runs: `function*() { const u = yield* read(user); return
+      - Recipe runs: `function*() { const u = yield* get(user); return
         \`Hello, ${u}!\` }`
-      - `yield* read(user)` sub-generator:
+      - `yield* get(user)` sub-generator:
         - `link(user, chainSelector([S, ROOT_SCOPE]), slot_G_S)` → `edge1`.
         - `invoke(user, S)` → hit, `cached = userPromise` (tweaked).
-        - `read` sees Promise → check `promiseState(userPromise)` →
+        - `get` sees Promise → check `promiseState(userPromise)` →
           `{ status: 'fulfilled', value: "Alice" }`. Returns `"Alice"`
           **synchronously** (no park; the Promise is already resolved).
       - `yield*` delegates `"Alice"` back to greeting's recipe. `u = "Alice"`.
@@ -2785,7 +2988,7 @@ order**:
       `{ status: 'fulfilled', value: "Hello, Alice!" }`). This preserves
       type-level async-ness — `greeting` is `Computed<Promise<string>>`.
     - Pop tracker, pop scope. Return the cached Promise.
-  - `read` sees `Promise` → check `promiseState` → fulfilled,
+  - `get` sees `Promise` → check `promiseState` → fulfilled,
     `"Hello, Alice!"`. Returns `"Hello, Alice!"` **synchronously**.
 - `yield*` delegates `"Hello, Alice!"` to the action body. `g =
   "Hello, Alice!"`. `console.log(g)` → prints `"Hello, Alice!"`. ✓
@@ -2802,7 +3005,7 @@ edge1 = { source: user, selector: chainSelector([S, ROOT_SCOPE]), target: slot_G
 Both slots' `cached` values are Promises tweaked with `{ status:
 'fulfilled', value }`. Reads of either node return Promises that
 `promiseState` recognises as resolved. Type-level async-ness preserved
-through the graph; sync access at the leaf via `yield* read`.
+through the graph; sync access at the leaf via `yield* get`.
 
 **Step 5: action body returns. `closeScope(S, 'commit')`.**
 
@@ -2832,7 +3035,7 @@ order is preserved naturally because:
 
 - The engine's `.then` is attached inside `invoke` (when the recipe returns
   a Promise and the slot gets populated).
-- The driver's `.then` is attached *after* `invoke` returns — when `read`
+- The driver's `.then` is attached *after* `invoke` returns — when `get`
   yields the park command and the driver handles it.
 
 So the engine's tweak always lands before the driver's resume in the
@@ -2840,7 +3043,7 @@ microtask queue. Whew.
 
 **What if this order were reversed?** Then `use(user)` inside `greeting`'s
 recipe would see `promiseState = pending` and throw-to-suspend. `greeting`'s
-slot would be left in a suspended state. `read(greeting)` would return…
+slot would be left in a suspended state. `get(greeting)` would return…
 the suspension Promise? Or undefined? **Open ergonomic question** — but the
 architecture *doesn't require this case to be handled* because the natural
 attach order guarantees engine-first.
@@ -2856,42 +3059,42 @@ A subtly different scenario worth noting. If:
 
 ```ts
 action(function* () {
-  const g0 = read(greeting)               // BEFORE the yield — sync read
-  const name = yield* read(user)
-  const g1 = yield* read(greeting)        // AFTER the yield — parking read
+  const g0 = get(greeting)               // BEFORE the yield — sync read
+  const name = yield* get(user)
+  const g1 = yield* get(greeting)        // AFTER the yield — parking read
 })
 ```
 
 Under the corrected setup (generator-form `greeting`):
 
-- *At (A) — `const g0 = read(greeting)` while `user` is pending:*
+- *At (A) — `const g0 = get(greeting)` while `user` is pending:*
   `invoke(greeting, S)` runs the generator-form recipe. The recipe does
-  `yield* read(user)`, which finds `userPromise` pending → yields a park
+  `yield* get(user)`, which finds `userPromise` pending → yields a park
   command. The engine attaches `.then` and **the recipe parks mid-flight**.
   `slot_G_S.cached` becomes the pending Promise representing greeting's
   eventual value.
   
-  `read(greeting)` returns the Promise. **`g0` is `Promise<string>`,
+  `get(greeting)` returns the Promise. **`g0` is `Promise<string>`,
   pending.** The user gets a Promise back. Sync read of an async slot is
-  type-honest: the slot's cached value is `Promise<string>`, and `read`
+  type-honest: the slot's cached value is `Promise<string>`, and `get`
   returns exactly that.
 
-- *At (C) — `const g1 = yield* read(greeting)` after the yield:*
+- *At (C) — `const g1 = yield* get(greeting)` after the yield:*
   `userPromise` resolved → engine handler tweaked it → the parked
   `greeting` generator (registered via .then) resumes, completes, cached
   is now `Promise<"Hello, Alice!">` (tweaked fulfilled). `yield*
-  read(greeting)` sees fulfilled, returns `"Hello, Alice!"`.
+  get(greeting)` sees fulfilled, returns `"Hello, Alice!"`.
 
 So in this corrected setup:
 
 | Read site | Returns | Type |
 |---|---|---|
-| (A) `read(greeting)` before yield | `Promise<string>` (pending) | `Promise<string>` |
-| (C) `yield* read(greeting)` after yield | `"Hello, Alice!"` | `string` |
+| (A) `get(greeting)` before yield | `Promise<string>` (pending) | `Promise<string>` |
+| (C) `yield* get(greeting)` after yield | `"Hello, Alice!"` | `string` |
 
 The types are *different at each site by construction*, not by surprise.
-`read(greeting)` always returns `Promise<string>` (the static type tells
-you so); `yield* read(greeting)` always returns `string` after parking
+`get(greeting)` always returns `Promise<string>` (the static type tells
+you so); `yield* get(greeting)` always returns `string` after parking
 as needed. The user chooses sync-with-Promise vs park-with-unwrap
 explicitly.
 
@@ -2904,7 +3107,7 @@ const greeting = computed(() => `Hello, ${use(user)}!`)   // ⚠ anti-pattern
 ```
 
 `use()` mid-graph collapses `Promise<string>` into `string` at the
-callsite, hiding async-ness from greeting's type. Then `read(greeting)`
+callsite, hiding async-ness from greeting's type. Then `get(greeting)`
 in the action body had a *misleading* sync-looking type but could
 actually return a suspension Promise when `user` was pending. The same
 expression returned different types at different times — the surprise.
@@ -2913,8 +3116,8 @@ expression returned different types at different times — the surprise.
 `greeting`):
 
 - `greeting` is honestly typed `Computed<Promise<string>>`.
-- `read(greeting)` always returns `Promise<string>`. Type is stable.
-- `yield* read(greeting)` always returns `string` (parking as needed).
+- `get(greeting)` always returns `Promise<string>`. Type is stable.
+- `yield* get(greeting)` always returns `string` (parking as needed).
   Type is stable.
 - The user chooses by syntax. No surprise.
 
@@ -2934,7 +3137,7 @@ C2e traced cleanly. No falsifications. The key findings:
 2. **`use(node)` inside a derived's recipe handles the Promise correctly
    when it's been tweaked.** The recipe gets the resolved value
    synchronously.
-3. **The action body's post-yield `read(greeting)` is unaware of any
+3. **The action body's post-yield `get(greeting)` is unaware of any
    complexity** — `greeting` just returns a string. The whole async dance
    is hidden inside `greeting`'s recipe via `use`.
 4. **Q-I is load-bearing.** Nothing promoted on commit because all slots
@@ -2961,7 +3164,7 @@ C2e traced cleanly. No falsifications. The key findings:
 ### Framings status after C2e
 
 All four framings still hold. C2e was a *successful coherence trace*: the
-architecture composes correctly across `yield* read` → `use` → recipe →
+architecture composes correctly across `yield* get` → `use` → recipe →
 `promiseState`. The audit's worry — "does the engine's `'resolved'` event
 have to fire before resume?" — turned out to have a clean answer based on
 microtask ordering of `.then` attaches.
@@ -2974,7 +3177,7 @@ microtask ordering of `.then` attaches.
 2. *Unwrap async at the leaf, not in the middle of the graph.* The
    original C2e setup used `use()` mid-graph (an anti-pattern); the
    corrected setup uses generator-form or stage-form for intermediate
-   computeds, with `use()` / `yield* read` reserved for leaf
+   computeds, with `use()` / `yield* get` reserved for leaf
    consumption. This dissolves the ergonomic surprise into a clean
    sync-vs-park-by-syntax choice.
 
@@ -2991,12 +3194,12 @@ the (X, f(X)) pair coherently?
 
 ```ts
 const [count, setCount] = signal(0)
-const doubled = computed(() => read(count) * 2)
+const doubled = computed(() => get(count) * 2)
 const observations: Array<{ c: number, d: number }> = []
 
 effect(() => {
-  const c = read(count)
-  const d = read(doubled)
+  const c = get(count)
+  const d = get(doubled)
   observations.push({ c, d })
 })
 // Initial: observations = [{ c: 0, d: 0 }]
@@ -3013,7 +3216,7 @@ The effect's body ran once at registration, forming edges:
 
 ```
 count.slots = { ROOT: { cached: 0, subs: [edge_C_D, edge_C_E] } }
-doubled.slots = { ROOT: { recipe: () => read(count)*2, cached: 0,
+doubled.slots = { ROOT: { recipe: () => get(count)*2, cached: 0,
                           deps: [edge_C_D], subs: [edge_D_E] } }
 effect.slots = { ROOT: { recipe: body, cached: undefined,
                          deps: [edge_C_E, edge_D_E] } }
@@ -3100,18 +3303,18 @@ portion) completes.
   `doubled.slots[ROOT].subs`. Set `deps = []`.
 - Push tracker = `effect.slot[ROOT]`. Push scope = `ROOT_SCOPE`.
 - Invoke body:
-  - `read(count)`:
+  - `get(count)`:
     - `link(count, chainSelector([ROOT_SCOPE]), effect.slot[ROOT])` →
       `edge_C_E'` (fresh identity).
     - `invoke(count, ROOT_SCOPE)`: cached 5. Return.
   - `c = 5`.
-  - `read(doubled)`:
+  - `get(doubled)`:
     - `link(doubled, chainSelector([ROOT_SCOPE]), effect.slot[ROOT])` →
       `edge_D_E'`.
     - `invoke(doubled, ROOT_SCOPE)`: **slot is dirty**. Recompute.
       - Push tracker = `doubled.slot[ROOT]`. Push scope. Unlink doubled's
         stale deps. Run recipe.
-      - Recipe: `read(count) * 2`. Inside: `link(count, …, doubled.slot[ROOT])`
+      - Recipe: `get(count) * 2`. Inside: `link(count, …, doubled.slot[ROOT])`
         → `edge_C_D'`. `invoke(count, ROOT)` → 5. Return.
       - Recipe returns `5 * 2 = 10`. Cache `doubled.slot[ROOT].cached = 10`.
         Pop tracker.
@@ -3196,8 +3399,8 @@ H1d traced cleanly with no new design calls. The trace validates that:
   times after a commit." Probably absorbed into Q-J's existing scope.
 - *What if `doubled`'s recipe were async?* Then the recompute inside
   `invoke(doubled, ROOT)` would yield a park command. The effect body's
-  `read(doubled)` would return a Promise; the effect would have to
-  `yield* read(doubled)` instead. Crosses into H5 + C2e territory; not
+  `get(doubled)` would return a Promise; the effect would have to
+  `yield* get(doubled)` instead. Crosses into H5 + C2e territory; not
   a new issue.
 
 ### Framings status after H1d
@@ -3231,7 +3434,7 @@ Status: working candidate framing identified (Model 2 — selector-on-edge). Not
 locked in; sub-questions remain open at the next level down.
 
 **The break, traced concretely.** With `name`, `doubleName = computed(() =>
-read(name) + read(name))`, and the initial outside-action `read(doubleName)`
+get(name) + get(name))`, and the initial outside-action `get(doubleName)`
 populating `doubleName.slots[ROOT_SCOPE] = "foofoo"` plus an edge
 `name.slots[ROOT_SCOPE] → doubleName.slots[ROOT_SCOPE]` (using the library's
 convention that "outside any action" uses `ROOT_SCOPE` as the scope key):
@@ -3239,9 +3442,9 @@ convention that "outside any action" uses `ROOT_SCOPE` as the scope key):
 ```ts
 action(function* () {
   // Inside scope S. name.slots[S] doesn't exist; doubleName.slots[S] doesn't exist.
-  read(doubleName)
+  get(doubleName)
   //   - doubleName.slots[S] miss → populate: invoke defaultRecipe under S.
-  //   - Recipe runs. read(name) under S → name.slots[S] miss → walk falls
+  //   - Recipe runs. get(name) under S → name.slots[S] miss → walk falls
   //     through to name.slots[ROOT_SCOPE] → "foo". Twice → "foofoo".
   //   - Cache in doubleName.slots[S]. Register edge — ↓ THE QUESTION ↓:
   //       (Model 1) source slot: name.slots[ROOT_SCOPE] → target: doubleName.slots[S]
@@ -3487,116 +3690,77 @@ Q-G (`defaultRecipe` interacts with consumer's initial run).
 
 ### Q-D — Async at the engine level
 
-The recipe is `() => T | Promise<T>`. The engine sees Promises in `cached`. Per
-P2 (acknowledge async), walks decide how to handle them. The engine has two
-genuinely distinct concerns, separated by a recent refinement:
+The recipe is `() => T` where `T` may itself be `Promise<U>`. The engine sees
+Promises in `cached`. Per P2 (acknowledge async), walks decide how to handle
+them.
 
-**Concern 1 — Synchronous query of Promise state.** A walk (or downstream
-computed) needs to ask, *without awaiting again*: "is this Promise resolved?
-what's the value?" Two implementations:
+**Resolved by the `Awaitable<T>` framing** (see the "Awaitable" framing
+section above): when the engine encounters a Promise in `slot.cached`, the
+library's `get(node)` walk wraps it in an `Awaitable<U>` — a Promise
+subclass that carries `status` / `value` / `reason` fields *as class
+instance state* (not as tweaked side-properties on foreign Promises).
 
-- *Promise-tweak* — augment the Promise object with `.status`, `.value`,
-  `.reason` fields (the `Promise.allSettled` shape, also React's `use()`
-  convention). Pros: zero allocation, direct property access (JIT-inlinable;
-  faster than `WeakMap.get` in tight read loops), *de facto interop* with
-  React-resolved Promises and TanStack-Query / Apollo / other libraries
-  using the same convention. Cons: mutates objects we don't own; the
-  convention is non-standard but de facto stable.
-- *`WeakMap<Promise, ResolvedT>`* — the engine maintains a side-table.
-  Pros: no mutation of foreign objects. Cons: per-call lookup overhead;
-  another structure; no interop with React's convention.
+This collapses the earlier Promise-tweak-vs-WeakMap question. The state
+lives on the Awaitable instance:
 
-**Lean: Promise-tweak with React's `{ status, value, reason }` convention.**
-Reasons: (a) per-read perf is real for tight loops (a computed reading an
-async signal does this on every recompute); (b) ecosystem alignment with
-React's `use()` makes mixed-library interop free; (c) the collision risk is
-theoretical — React's convention is dominant enough that it's the de facto
-standard for "thenable status." Pulse adopts the same shape:
+- *Status query* — `awaitable.status` (synchronous, no side-table lookup).
+- *Async wait* — `await awaitable` (Awaitable extends Promise).
+- *Generator wait* — `yield* awaitable` (Awaitable implements
+  `[Symbol.iterator]`).
+- *React-convention interop* — `makeAwaitable(foreign)` duck-types the
+  incoming Promise for `status`/`value`/`reason` and adopts the state if
+  present.
+
+The engine doesn't need a separate `promiseState()` helper or
+`WeakMap<Promise, T>` side-table. Awaitable IS the Promise-with-state type;
+the user accesses the fields directly.
+
+**Engine's responsibility for firing on resolution.** When a Promise lands
+in a slot's `cached` (either via `writeSlot` or via `invoke` running an
+async recipe), the engine attaches a `.then` so that resolution emits a
+slot-changed event (`{ kind: 'resolved' }`) to subscribers. The slot's
+`cached` is NOT mutated when the Promise resolves — it stays as the
+Awaitable, which now has `status: 'fulfilled'` and `value: T` populated.
+Walks query via the field on next read.
+
+Concretely (engine-side, ~10 lines):
 
 ```ts
-type ThenableStatus = 'pending' | 'fulfilled' | 'rejected'
-type TaggedPromise<T> = Promise<T> & {
-  status?: ThenableStatus
-  value?: T
-  reason?: unknown
-}
-
-function promiseState<T>(p: Promise<T>): TaggedPromise<T> {
-  if ((p as TaggedPromise<T>).status === undefined) {
-    ;(p as TaggedPromise<T>).status = 'pending'
-    p.then(
-      v => { (p as TaggedPromise<T>).status = 'fulfilled'; (p as TaggedPromise<T>).value = v },
-      e => { (p as TaggedPromise<T>).status = 'rejected'; (p as TaggedPromise<T>).reason = e },
+// Inside writeSlot / invoke, after caching a Promise:
+function trackPromiseResolution<T>(node: Node<T>, scope: Scope, slot: Slot<T>) {
+  const cached = slot.cached
+  if (cached && typeof (cached as any).then === 'function') {
+    ;(cached as Promise<unknown>).then(
+      () => fireEdges(node, scope, { kind: 'resolved' }),
+      () => fireEdges(node, scope, { kind: 'resolved' }),  // rejection also fires
     )
   }
-  return p as TaggedPromise<T>
 }
 ```
 
-**Edge case: frozen Promises.** If a Promise is `Object.freeze`d (rare but
-possible in defensively-frozen libraries), the tweak fails. Fallback: detect
-the frozen case and use a `WeakMap` for those specific Promises. The
-`promiseState` API doesn't change; only its implementation has the fallback
-path. Both backing stores are accessed through the same primitive.
+Plus the library-side `makeAwaitable` helper that wraps incoming Promises
+in pulse's Awaitable class (so the state fields are populated structurally
+rather than via mutation). See the "Awaitable" framing section.
 
-Either way, the engine grows one small primitive:
-
-```ts
-function promiseState<T>(p: Promise<T>): { status: 'pending' | 'fulfilled' | 'rejected', value?: T, error?: unknown }
-```
-
-Walks call it. First call attaches a `.then` that updates the WeakMap (or
-the Promise's tweaked fields) when the Promise settles. Subsequent calls
-are sync.
-
-**Concern 2 — Firing on resolution.** When a Promise stored in `slot.cached`
-resolves, downstream consumers need to be notified. *Refinement of the C2
-trace's earlier finding:* the slot's `cached` does NOT transmute from
-`Promise<T>` to `T`. Instead, `cached` stays as the Promise indefinitely; the
-resolved value lives on the Promise (or in the WeakMap). What changes is
-that **the engine fires `slot.subs` with a synthetic resolution event** when
-the Promise resolves.
-
-Concretely, the engine's machinery on `writeSlot(node, scope, slot)`:
-
-1. Write the slot as usual.
-2. If `slot.cached instanceof Promise`, attach `.then` to the Promise that
-   does two things: (a) update the WeakMap / Promise-tweak with the
-   resolved value; (b) call `fireEdges(node, scope, { kind: 'resolved' })`.
-3. Edges fire normally; walks query `promiseState` to get the value.
-
-About ~15 lines of engine code total for both concerns. Small but
-meaningful concession to async-awareness — narrower than "engine
-internally awaits and updates cache."
-
-**Why this is cleaner than the previous framing:**
-
-- The slot's `cached` is immutable for its lifetime — easier to reason about.
-- Multiple walks reading the same Promise share one `.then` subscription
-  (deduped via the WeakMap entry / tweaked Promise).
-- The resolution event is a proper slot-changed event, fired through the
-  same `fireEdges` path. Consumers don't need a special "did-the-promise-
-  resolve" code path; they just receive an invalidation and re-read.
-- Promise-tweak version offers interop with React's `use()` convention if
-  pulse later wants it.
-
-**Sub-question now leaned, was previously open:** Promise-tweak over
-WeakMap, with WeakMap as the frozen-Promise fallback. Settled.
-
-**Settled by combination of C2 trace + Promise-tweak/WeakMap refinement:**
+**Settled by Awaitable + the C2 trace:**
 
 - *Does the engine `await` internally?* No — walks handle suspension via
-  `yield* read` or `use`. Engine attaches a `.then` only to update the
-  sync-query metadata and fire edges.
+  `yield* get` or `use`. Engine attaches a `.then` only to fire the
+  slot-changed event on resolution.
 - *Does the engine track which slots are pending?* No — pending-ness is
-  derived from `promiseState(slot.cached as Promise<T>)`. The `isPending(node)`
-  walk calls `promiseState` and returns the status.
+  derived from `(get(node) as Awaitable<U>).status === 'pending'`. The
+  `isPending(node)` walk reads the status field.
+- *Where does Promise state live?* On the Awaitable class instance —
+  pulse owns the wrapper. Foreign Promises (React, TanStack Query, etc.)
+  are duck-typed for interop and their state copied into our Awaitable.
+- *Mutation of foreign Promises?* Avoided. Pulse never tweaks Promises it
+  doesn't own; it wraps them in Awaitable instances.
 
 **Related:** Q-C (consumer's re-run discipline for async deps; consumers
 receive `{ kind: 'resolved' }` events the same way they receive `{ kind:
-'invalidated' }`), main-doc D8 (`yield* read` vs `use` vs stages), Q-I
-(read-vs-write slots — a Promise that resolves is "still the same slot,"
-not a write, so doesn't trigger commit-promotion).
+'invalidated' }`), main-doc D8 (`yield* get` vs `use` vs stages), Q-I
+(a Promise that resolves is "still the same slot," not a write, so doesn't
+trigger commit-promotion).
 
 ### Q-E — Recipe / cache asymmetry between Signal and Computed slots
 
@@ -3678,7 +3842,7 @@ forward. Related to Q-A (selector identity across scope transitions).
 ### Q-H — Tracker vs Scope: separate or unified?
 
 The sketch has a separate `currentTracker` (the slot currently being
-recomputed, used by `read` to register `deps`) and a `getCurrentScope`
+recomputed, used by `get` to register `deps`) and a `getCurrentScope`
 (speculation/owner context). Are these the same primitive?
 
 Argument for unification: both are ambient context handles. Argument against:
@@ -3913,7 +4077,7 @@ commitment the explorative phase is meant to avoid.
   whether a write sees itself on subsequent read inside the scope. *Expected:
   yes — the slot at `S` is what reads see.*
 - **A1b.** Same as A1 but interleaved with derived reads:
-  `setX(1); read(f(X)); read(X); read(f(X)); setX(2); read(f(X))`. Tests
+  `setX(1); get(f(X)); get(X); get(f(X)); setX(2); get(f(X))`. Tests
   that all reads — primitive *and* derived — see fresh values in the same
   scope tick, not just the self-read. (A1 alone could "pass" on a
   single-slot bag without ever invalidating derivative caches.)
@@ -3924,7 +4088,7 @@ commitment the explorative phase is meant to avoid.
   each under `S`. Conditional on Q-H (tracker-as-scope) and Q-A selector
   dedup behaving correctly under multi-source reads.*
 - **A3b.** Order-sensitive intermediate coherence:
-  `setX(...); read(f(X, Y)); setY(...); read(f(X, Y))`. Tests whether the
+  `setX(...); get(f(X, Y)); setY(...); get(f(X, Y))`. Tests whether the
   intermediate read sees `f(newX, oldY)` (Position C synchronous fires
   propagate dirty mid-action) or `f(oldX, oldY)` (Position B
   derived cache only invalidated at action end). Action-body analogue of
@@ -3943,7 +4107,7 @@ commitment the explorative phase is meant to avoid.
   value land? Tests that the write goes to the speculative slot at `S`,
   consistently with sync `setX(v)`. *Expected: yes.*
 - **A5c.** Functional setter callback reading a downstream derived:
-  `setX(x => { const d = read(f(X)); return d + 1 })`. Tests what the
+  `setX(x => { const d = get(f(X)); return d + 1 })`. Tests what the
   derived `f(X)` seen inside the callback reflects — the pre-setter
   committed `X`, the speculative `X` (if outer action ongoing), or some
   half-state. K1b's mirror inside a setter callback rather than a
@@ -3977,13 +4141,13 @@ commitment the explorative phase is meant to avoid.
 ### C. Async (Dim 1 with async — Q-D territory)
 
 - **C1.** `setX(Promise.resolve("v"))` inside action — the new recipe returns
-  a Promise. Tests: how does a derived `read(X)` see this? Walks decide.
+  a Promise. Tests: how does a derived `get(X)` see this? Walks decide.
 - **C1b.** After `setX(promise)`, in the same scope, read a derived `f(X)`
-  whose recipe does `read(X).then(...)` or `yield* read(X)`. Tests: does
+  whose recipe does `get(X).then(...)` or `yield* get(X)`. Tests: does
   the derived's slot capture the *same Promise identity* the setter
   wrote, or a different one (e.g., re-wrapped)? Promise identity =
   supersession signal per main-doc D8.
-- **C2a.** Action body `yield* read(asyncSignal)` — body parks until promise
+- **C2a.** Action body `yield* get(asyncSignal)` — body parks until promise
   resolves *before any other event*. Tests: does the scope stay open across
   the await? Does the ambient scope restore correctly on resume?
 - **C2b.** Same, but the awaited promise resolves *after* the action would
@@ -3996,7 +4160,7 @@ commitment the explorative phase is meant to avoid.
   ROOT_SCOPE) during the await window. Tests: when the action body resumes,
   what does its read see? Did the chain re-evaluate?
 - **C2e.** Post-yield derived read: action body does
-  `yield* read(asyncSignal); const d = read(downstreamDerived)`. The
+  `yield* get(asyncSignal); const d = get(downstreamDerived)`. The
   derived's recipe reads `asyncSignal`. Tests: after resume, does the
   derived see the *resolved* value of `asyncSignal`, or the still-
   Promise-cached value in `slot[S]`? Must the engine's slot-changed
@@ -4005,7 +4169,7 @@ commitment the explorative phase is meant to avoid.
   the canonical post-async-coherence probe. Cuts at least two ways
   depending on microtask ordering vs engine's synchronous `.then`
   handling.
-- **C2f.** Two sequential `yield* read`s of *different* async signals in
+- **C2f.** Two sequential `yield* get`s of *different* async signals in
   the same body, with a downstream derived depending on both. Probe:
   between yields, does the derived see (resolved-A, pending-B)
   coherently? Probes per-step in-recipe coherence across multiple
@@ -4103,7 +4267,7 @@ commitment the explorative phase is meant to avoid.
 - **H1c.** Same setup; action discards. Tests: effect never fired
   (no speculative trigger leaked). *Lean: yes.* (H1a/b/c together
   establish the defer-until-commit position from Q-C.)
-- **H1d.** Effect body reads `read(X)` *and* `read(f(X))`. Action writes
+- **H1d.** Effect body reads `get(X)` *and* `get(f(X))`. Action writes
   `setX(5)`, commits. Effect schedules and runs. Tests: does the effect
   see (X=5, f=10) coherently, or could it see (X=5, f=stale) because the
   derived's slot at `ROOT_SCOPE` wasn't invalidated in dep-order during
@@ -4116,7 +4280,7 @@ commitment the explorative phase is meant to avoid.
 - **H2b.** Effect created inside action `S`, registered against chain
   `[S, ROOT]`. Action body then writes `setX`, then reads downstream
   `f(X)` directly. Then more writes. Tests: when the effect re-fires (if
-  it does), what scope chain is active in its body? Does its `read(X)`
+  it does), what scope chain is active in its body? Does its `get(X)`
   see the latest in-action value, and if it reads a derived, does the
   derived see the same? Separates "did it fire" (H2) from "did it see
   coherent state" (H2b). Q-K (effect chain policy α/β) is upstream.
@@ -4130,7 +4294,7 @@ commitment the explorative phase is meant to avoid.
   Cycles? Bans? Worth knowing the policy.
 - **H5.** Effect-mediated derivation coherence during action. An effect
   maintains a signal `value` derived from `name` (e.g.,
-  `effect(() => setValue(read(name) + read(name)))`). An action writes
+  `effect(() => setValue(get(name) + get(name)))`). An action writes
   `name`, then reads `value`. Tests: does `value` reflect the action's
   `name` overlay (would require eager effect runs, which contradicts
   H1a-c), or the pre-action committed `value` (stale during the action,
@@ -4144,11 +4308,11 @@ commitment the explorative phase is meant to avoid.
 
 ### I. Component / JSX integration
 
-- **I1.** JSX expression `{read(name)}` rendered inside a component that's
+- **I1.** JSX expression `{get(name)}` rendered inside a component that's
   *inside* an active action. JSX-binding consumer treated like Effect —
   re-renders on speculative writes? Defers to commit? Q-C territory.
   *Downstream of H1a-c's resolution.*
-- **I1b.** JSX expression `{read(f(X))}` where the component is
+- **I1b.** JSX expression `{get(f(X))}` where the component is
   mid-render at the moment of an action commit. Tests: does the
   resulting DOM reflect coherent (X, f(X)) values, or could it tear
   (render uses old X but new f(X) because two reads bracket the commit
@@ -4198,7 +4362,7 @@ commitment the explorative phase is meant to avoid.
   hard-ban is incompatible with effects).*
 - **K1b.** *Same as K1a, but the recipe reads a downstream derived after
   the write.* E.g., `computed(() => { setName("name"); return
-  read(doubleName).capitalize() })`. Tests **in-recipe coherence**: does
+  get(doubleName).capitalize() })`. Tests **in-recipe coherence**: does
   the post-write read see the *fresh* derived value, or the stale
   cached one? This is the case that exposes (B) deferred-fires vs (C)
   synchronous-fires. *Resolved: (C) synchronous-fires gives fresh; (B)
@@ -4206,8 +4370,8 @@ commitment the explorative phase is meant to avoid.
 - **K2.** `setX` called from inside `onCleanup` of a slot being dropped
   during commit (cleanup chain triggers further writes). Tests: re-entrant
   write during commit; commit-ordering subtlety (trace open question #1).
-- **K2b.** `onCleanup(() => { setOther(read(derivedFromX)) })`. Inside
-  the cleanup, after the write to `Other`, is `read(derivedFromX)`
+- **K2b.** `onCleanup(() => { setOther(get(derivedFromX)) })`. Inside
+  the cleanup, after the write to `Other`, is `get(derivedFromX)`
   reading a slot in a half-promoted state? Does the cleanup observe
   `X`'s pre-promotion or post-promotion value? Does the write to
   `Other` land in a still-open scope, in `ROOT`, or trigger commit-time
@@ -4227,7 +4391,7 @@ commitment the explorative phase is meant to avoid.
 
 ### L. Boundary-bypass reads inside speculation
 
-- **L1.** `untrack(() => read(node))` inside an action body. Tests: read
+- **L1.** `untrack(() => get(node))` inside an action body. Tests: read
   forms no tracking edge; do writes performed inside the `untrack` block
   still tag with the action's scope? *Tracker and scope are decoupled per
   Q-H, so the answer is plausibly "yes for writes, no for tracking edges"
