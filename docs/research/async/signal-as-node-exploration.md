@@ -2582,6 +2582,257 @@ mechanism doesn't pick a winner.
 
 ---
 
+## End-to-end trace: C2e — post-yield derived read (async K1b analogue)
+
+The canonical async coherence probe. An action body awaits a Promise via
+`yield* read`, then synchronously reads a downstream derived whose recipe
+depends on the awaited signal. Tests whether the derived sees the resolved
+value or the still-Promise-cached value when the action body resumes.
+
+### Setup
+
+```ts
+let resolveUser: (v: string) => void
+const userPromise = new Promise<string>(r => { resolveUser = r })
+const [user, setUser] = signal<string | Promise<string>>(userPromise)
+
+// Derived computed that unwraps the async via `use` (suspense-style)
+const greeting = computed(() => `Hello, ${use(user)}!`)
+
+action(function* () {
+  const name = yield* read(user)           // park until userPromise resolves
+  const g = read(greeting)                  // read derived AFTER resume
+  console.log(g)                            // expect: "Hello, Alice!"
+})
+
+// later: resolveUser("Alice")
+```
+
+**State at start:** `user.slots = {}`, `greeting.slots = {}`, edges = []. The
+Promise is pending.
+
+### What `use` does
+
+`use(node)` is a walk for sync-unwrap of async slots:
+
+```ts
+function use<T>(node: Node<T | Promise<T>>): T {
+  const scope = getCurrentScope()
+  if (currentTracker) link(node, chainSelector(chainFor(scope)), currentTracker)
+  const cached = invoke(node, scope)
+  if (cached instanceof Promise) {
+    const state = promiseState(cached)              // Q-D's sync-query primitive
+    if (state.status === 'fulfilled') return state.value!
+    if (state.status === 'rejected') throw state.reason
+    // pending → throw-to-suspend (restartable context like a computed body)
+    throw cached                                    // suspense-style suspend
+  }
+  return cached
+}
+```
+
+In a restartable context (like a computed recipe), `use`'s throw-to-suspend
+gets caught by the consumer wrapper that re-runs the recipe when the
+Promise resolves. In a non-restartable context (action body), `use` would
+have to be guarded or replaced with `yield* read`.
+
+### Step-by-step trace
+
+**Step 1: open scope.** `openScope()` → `S = { parent: ROOT_SCOPE, cleanups:
+[], status: 'open' }`. Push ambient.
+
+**Step 2: `yield* read(user)` parks.**
+
+- Library `read(user)`:
+  - `getCurrentScope()` → `S`. `currentTracker` → null (action body).
+  - `invoke(user, S)`:
+    - Engine: `user.slots.get(S)` miss. Create `slot_U_S = { recipe:
+      defaultRecipe, deps: [], subs: [] }`. Invoke recipe → `userPromise`.
+      `slot_U_S.cached = userPromise`.
+    - **Engine .then attach (per Q-D):** since `slot_U_S.cached` is a
+      Promise, attach `.then(v => { promiseState writeback; fireEdges(user,
+      S, { kind: 'resolved' }) })`. This `.then` is attached **first**
+      (during invoke).
+    - Return `userPromise`.
+  - `read` sees Promise → yields `{ kind: 'park', promise: userPromise }`.
+- Action driver receives park. **Driver .then attach:** attaches
+  `userPromise.then(name => step(name), …)`. This `.then` is attached
+  **second** (during the action driver's park handling).
+- Driver returns. Sync portion done. Ambient popped.
+
+**State after Step 2:**
+```
+user.slots = { S: { recipe: defaultRecipe, cached: userPromise, deps: [], subs: [] } }
+userPromise: pending
+  .then queue (in attach order): [engine-handler, driver-handler]
+no edges
+```
+
+**Step 3: `resolveUser("Alice")`.**
+
+`userPromise` resolves. Microtask queue drains `.then` handlers **in attach
+order**:
+
+- *Engine handler fires first:*
+  - Per Q-D: tweak `userPromise` with `{ status: 'fulfilled', value:
+    "Alice" }`.
+  - `fireEdges(user, S, { kind: 'resolved' })`. Walk `user`'s outgoing
+    edges. **None exist** (the action body's `yield* read` didn't track;
+    `greeting` hasn't been read yet). No edges to fire.
+- *Driver handler fires second:*
+  - Driver `step("Alice")`. Push ambient = S. `gen.next("Alice")`.
+
+**Step 4: generator resumes; `const g = read(greeting)` runs.**
+
+- Body has `name = "Alice"`. Continues to `read(greeting)`.
+- Library `read(greeting)`:
+  - `getCurrentScope()` → `S`. `currentTracker` → null (action body).
+  - `invoke(greeting, S)`:
+    - Engine: `greeting.slots.get(S)` miss. Create `slot_G_S = { recipe:
+      defaultRecipe, deps: [], subs: [] }`.
+    - Push `currentTracker = slot_G_S`. Push scope = `S`.
+    - Invoke recipe: `` `Hello, ${use(user)}!` ``
+      - `use(user)`:
+        - `link(user, chainSelector([S, ROOT_SCOPE]), slot_G_S)` → `edge1`.
+        - `invoke(user, S)` → hit, `cached = userPromise`. Return.
+        - `cached instanceof Promise` → check `promiseState(userPromise)`.
+        - **Promise was tweaked by the engine handler in Step 3** →
+          returns `{ status: 'fulfilled', value: "Alice" }`. `use` returns
+          `"Alice"`.
+      - Template: `"Hello, Alice!"`.
+    - `slot_G_S.cached = "Hello, Alice!"`. Pop tracker, pop scope. Return.
+- `g = "Hello, Alice!"`. `console.log(g)` → prints `"Hello, Alice!"`. ✓
+
+**State after Step 4:**
+```
+user.slots = { S: { recipe: defaultRecipe, cached: userPromise (tweaked: fulfilled, "Alice") } }
+greeting.slots = { S: { recipe: defaultRecipe, cached: "Hello, Alice!", deps: [edge1] } }
+edge1 = { source: user, selector: chainSelector([S, ROOT_SCOPE]), target: slot_G_S }
+```
+
+**Step 5: action body returns. `closeScope(S, 'commit')`.**
+
+- Per Q-I: only write-populated slots promote. **Both `user.slot[S]` and
+  `greeting.slot[S]` were read-populated** (no `writeSlot` was called
+  during the action). So nothing promotes.
+- Drop `user.slot[S]` and `greeting.slot[S]`. Walk subs, unlink edges
+  (`edge1`).
+- `S.status = 'committed'`. Pop ambient.
+
+**Final state:**
+```
+user.slots = {}
+greeting.slots = {}
+edges: []
+console output: "Hello, Alice!"
+```
+
+The action prints `"Hello, Alice!"` — the resolved value. ✓ The
+architecture handles C2e correctly.
+
+### The timing dependency that made this work
+
+The trace relies on **`.then` attach order**: the engine attaches its
+resolution handler *before* the driver attaches its resume handler. This
+order is preserved naturally because:
+
+- The engine's `.then` is attached inside `invoke` (when the recipe returns
+  a Promise and the slot gets populated).
+- The driver's `.then` is attached *after* `invoke` returns — when `read`
+  yields the park command and the driver handles it.
+
+So the engine's tweak always lands before the driver's resume in the
+microtask queue. Whew.
+
+**What if this order were reversed?** Then `use(user)` inside `greeting`'s
+recipe would see `promiseState = pending` and throw-to-suspend. `greeting`'s
+slot would be left in a suspended state. `read(greeting)` would return…
+the suspension Promise? Or undefined? **Open ergonomic question** — but the
+architecture *doesn't require this case to be handled* because the natural
+attach order guarantees engine-first.
+
+If this ever became a real concern (e.g., if a library author attached
+their own `.then` between engine and driver), the engine could *enforce*
+ordering by making the engine handler always run synchronously inside the
+resolution detection — but that's a hypothetical for now.
+
+### What if the action body had also read `greeting` *before* the yield?
+
+A subtly different scenario worth noting. If:
+
+```ts
+action(function* () {
+  const g0 = read(greeting)               // BEFORE the yield
+  const name = yield* read(user)
+  const g1 = read(greeting)               // AFTER the yield
+})
+```
+
+Then in Step 2 (before the yield):
+- `read(greeting)` populates `greeting.slot[S]`. Recipe runs `use(user)`.
+- At this point, `userPromise` is *pending*. `use` throws-to-suspend.
+- `greeting.slot[S].cached = <suspension promise>` or similar.
+- The action body sees `g0 = <suspension promise>`.
+
+This is structurally OK but ergonomically weird — the action body got a
+Promise where it expected a value. The user would have to `yield* read`
+the greeting too (or wrap reads in `use` themselves with try/catch).
+
+**This is the same ergonomic concern flagged by H5**: derivations that
+depend on async signals don't compose cleanly inside imperative action
+bodies without explicit awaits. **The trace doesn't reveal a new
+architectural problem; it confirms an existing one.**
+
+### Architecture exposed
+
+C2e traced cleanly. No falsifications. The key findings:
+
+1. **Engine attaches `.then` before driver attaches `.then`.** Natural
+   ordering preserved by the call sequence (invoke first, then yield).
+   The engine's tweak always lands first.
+2. **`use(node)` inside a derived's recipe handles the Promise correctly
+   when it's been tweaked.** The recipe gets the resolved value
+   synchronously.
+3. **The action body's post-yield `read(greeting)` is unaware of any
+   complexity** — `greeting` just returns a string. The whole async dance
+   is hidden inside `greeting`'s recipe via `use`.
+4. **Q-I is load-bearing.** Nothing promoted on commit because all slots
+   were read-populated. This is correct — the action didn't *write*
+   anything; it just performed reads with side effects (the
+   `console.log`). The action's only purpose was awaiting + observing.
+   Q-I distinguishes this from a write-and-commit action cleanly.
+5. **Q-J commit-as-transaction is uneventful** here. Nothing to promote;
+   the deferred-fires region opens and closes with no fires.
+
+### Sub-questions surfaced (small)
+
+- **What if the action body had reads-before-yield that fall through to
+  unresolved Promises?** The "Before the yield" walkthrough above shows
+  ergonomic surprises (`g0` is a suspension Promise). Library could
+  provide a `use(node)` walk usable in action bodies too — not just
+  computed recipes — that yields a park command when pending. This makes
+  action-body imperative reads parking-aware. **Possibly worth adding to
+  Q-C or a new sub-question.**
+- **The hypothetical reversed `.then` order**: only concerning if pulse
+  exposes `promiseState` as a primitive and a library author attaches
+  handlers in unexpected orders. Probably never in practice. Worth noting.
+
+### Framings status after C2e
+
+All four framings still hold. C2e was a *successful coherence trace*: the
+architecture composes correctly across `yield* read` → `use` → recipe →
+`promiseState`. The audit's worry — "does the engine's `'resolved'` event
+have to fire before resume?" — turned out to have a clean answer based on
+microtask ordering of `.then` attaches.
+
+**One catalog finding to back-port:** the H5 ergonomic concern (effect-
+mediated vs computed-mediated derivations) has an async cousin: derivations
+that depend on async signals don't compose cleanly inside imperative
+action bodies without explicit awaits. Worth noting in the H5 entry or
+adding to the principle.
+
+---
+
 ## Open questions (the actual mapping work)
 
 Each is open. The goal is to *map the question space* before committing to any
