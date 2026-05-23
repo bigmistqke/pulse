@@ -19,8 +19,7 @@ forced deliberate design calls into the open (K1 → resolved to Position
 
 ---
 
-<a id="trace-doublename"></a>
-## `doubleName` under scope `S`
+## <a id="trace-doublename"></a>`doubleName` under scope `S`
 
 A worked trace verifying that **multi-slot + Model 2 (selector-on-edge)**
 handles the case the [falsified hypothesis](#speculation-purely-above-unmodified-r3-doesnt-work)
@@ -211,8 +210,7 @@ resolution.
 
 ---
 
-<a id="trace-c2"></a>
-## C2 — action body with async read
+## <a id="trace-c2"></a>C2 — action body with async read
 
 A worked trace through the four C2 sub-scenarios (await-and-resume, long-lived
 scope, supersession-during-await, writes-during-await). C2 was identified as
@@ -635,8 +633,7 @@ falsifications.
 
 ---
 
-<a id="trace-h1a-c"></a>
-## H1a-c — effect under speculation
+## <a id="trace-h1a-c"></a>H1a-c — effect under speculation
 
 A worked trace of the three H1 sub-scenarios verifying the **defer-until-commit**
 position for effects-under-speculation: speculative writes inside an action
@@ -964,8 +961,7 @@ selectors. Both came out cleanly.
 
 ---
 
-<a id="trace-k1"></a>
-## K1 — re-entrant setter mid-recompute
+## <a id="trace-k1"></a>K1 — re-entrant setter mid-recompute
 
 **Note (post-revision):** the original [K1 trace](#trace-k1) below identified three
 positions (A: ban, B: permit + defer fires, C: permit + fire synchronously)
@@ -1521,8 +1517,7 @@ C). With the right scenario (K1b), the answer falls out.
 
 ---
 
-<a id="trace-g2"></a>
-## G2 — nested actions and commit promotion
+## <a id="trace-g2"></a>G2 — nested actions and commit promotion
 
 A worked trace verifying that the chain-selector mechanism handles nested
 actions cleanly, and surfacing the inner-promotes-to-outer-vs-direct-to-ROOT
@@ -1842,8 +1837,7 @@ Position (ii) was tested and ruled out by the trace.
 
 ---
 
-<a id="trace-h3"></a>
-## H3 — cleanup chains across speculative effect runs
+## <a id="trace-h3"></a>H3 — cleanup chains across speculative effect runs
 
 A worked trace of two related cleanup-discipline scenarios:
 
@@ -2248,8 +2242,7 @@ mechanism doesn't pick a winner.
 
 ---
 
-<a id="trace-c2e"></a>
-## C2e — post-yield derived read (async K1b analogue)
+## <a id="trace-c2e"></a>C2e — post-yield derived read (async K1b analogue)
 
 The canonical async coherence probe. An action body awaits a Promise via
 `yield* get`, then synchronously reads a downstream derived whose recipe
@@ -2587,8 +2580,7 @@ microtask ordering of `.then` attaches.
 
 ---
 
-<a id="trace-h1d"></a>
-## H1d — effect-body coherence on commit
+## <a id="trace-h1d"></a>H1d — effect-body coherence on commit
 
 Probes commit-promotion ordering through the effect's lens: when an effect's
 body reads both a primitive signal *and* a derived computed that depends on

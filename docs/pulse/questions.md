@@ -18,8 +18,7 @@ either:
 
 ---
 
-<a id="q1"></a>
-### Q1 — Fall-through and edge policy
+### <a id="q1"></a>Q1 — Fall-through and edge policy
 
 Status: working candidate framing identified (Model 2 — selector-on-edge). Not
 locked in; sub-questions remain open at the next level down.
@@ -197,8 +196,7 @@ notification IS a "fire an edge" event whose target is a side-effect handler
 instead of a cache invalidation), [Q7](#q7) (`defaultRecipe` is a similar engine-vs-
 walk question at a different level), [Q4](#q4) (async resolution as a "write" event).
 
-<a id="q2"></a>
-### Q2 — Scope/Owner unification
+### <a id="q2"></a>Q2 — Scope/Owner unification
 
 Working hypothesis: one ambient context primitive with `cleanups` + a `mode` at
 close time (`'commit' | 'discard'`). Owner = scope used without slot-tagging;
@@ -225,8 +223,7 @@ Open sub-questions:
 different lifecycle from a scope-with-just-state), [Q2](#q2) in main doc (cancellation
 discipline — likely falls out of scope-discard).
 
-<a id="q3"></a>
-### Q3 — Consumer patterns
+### <a id="q3"></a>Q3 — Consumer patterns
 
 Status: working candidate framing identified via the [H1a-c trace](./scenario-traces.md#trace-h1a-c). Not locked
 in; sub-questions remain at the next level down.
@@ -281,8 +278,7 @@ policy.*
 them), [Q4](#q4) (Promise-resolution-as-write fires consumers — confirmed in C2),
 [Q7](#q7) (`defaultRecipe` interacts with consumer's initial run).
 
-<a id="q4"></a>
-### Q4 — Async at the engine level
+### <a id="q4"></a>Q4 — Async at the engine level
 
 The recipe is `() => T` where `T` may itself be `Promise<U>`. The engine sees
 Promises in `cached`. Per [P2](./framings.md#p2) (acknowledge async), walks decide how to handle
@@ -356,8 +352,7 @@ receive `{ kind: 'resolved' }` events the same way they receive `{ kind:
 (a Promise that resolves is "still the same slot," not a write, so doesn't
 trigger commit-promotion).
 
-<a id="q5"></a>
-### Q5 — Recipe / cache asymmetry between Signal and Computed slots
+### <a id="q5"></a>Q5 — Recipe / cache asymmetry between Signal and Computed slots
 
 For a Signal slot, the *recipe is the value* — `() => 42`. The cache is
 trivially `42`.
@@ -381,8 +376,7 @@ distinction*. Slot lifecycle is engine-level (because the cache is). Worth
 working out whether this is a real distinction or whether it dissolves under a
 careful framing.
 
-<a id="q6"></a>
-### Q6 — What is a Scope as a value?
+### <a id="q6"></a>Q6 — What is a Scope as a value?
 
 Currently typed `unknown` in the sketch. Practically, scopes need:
 
@@ -411,8 +405,7 @@ concern or whether the engine needs to know about it.
 **Related:** [Q2](#q2) (the unification question), [Q1](#q1) (selectors quote scope
 identities; scope value-shape constrains how selectors can match).
 
-<a id="q7"></a>
-### Q7 — The `defaultRecipe` mechanism
+### <a id="q7"></a>Q7 — The `defaultRecipe` mechanism
 
 The Node has an optional `defaultRecipe` used by `invoke` when no slot exists
 for the requested scope. Is this:
@@ -436,8 +429,7 @@ rebuild; (c) drop `cached`, force recompute on next read. *Lean (b)*:
 preserves the work done in the scope without carrying selector mismatches
 forward. Related to [Q1](#q1) (selector identity across scope transitions).
 
-<a id="q8"></a>
-### Q8 — Tracker vs Scope: separate or unified?
+### <a id="q8"></a>Q8 — Tracker vs Scope: separate or unified?
 
 The sketch has a separate `currentTracker` (the slot currently being
 recomputed, used by `get` to register `deps`) and a `getCurrentScope`
@@ -466,8 +458,7 @@ during a recompute. That's plausible (the user explicitly opted out of
 tracking) but worth confirming as the policy. Connects to L1 in the
 scenario catalog.
 
-<a id="q9"></a>
-### Q9 — Read-populated vs write-populated slots: do they differ structurally?
+### <a id="q9"></a>Q9 — Read-populated vs write-populated slots: do they differ structurally?
 
 Surfaced by the C2d trace. When a slot is created lazily during a read (because
 no slot existed for the requested scope yet, so `invoke` populated one with the
@@ -506,8 +497,7 @@ intent into the library's scope handling. But (i) wins if performance
 measurements show that walking the scope's write-set is slower than checking
 flags during commit. Currently mostly cosmetic.
 
-<a id="q10"></a>
-### Q10 — Commit as transaction: ordering, atomicity, deferred fires
+### <a id="q10"></a>Q10 — Commit as transaction: ordering, atomicity, deferred fires
 
 When an action commits, how exactly does the engine sequence the multiple
 slot promotions and edge fires so that consumers see a consistent
@@ -582,8 +572,7 @@ mechanism. The engine's invariant becomes "if `deferredFires` is non-null,
 fires queue; outermost layer drains." Recomputes set up one such region;
 commits set up another. They compose by nesting.
 
-<a id="q11"></a>
-### Q11 — Effect chain policy: chain follows owner, or always [ROOT_SCOPE]?
+### <a id="q11"></a>Q11 — Effect chain policy: chain follows owner, or always [ROOT_SCOPE]?
 
 Surfaced by the [H3 trace](./scenario-traces.md#trace-h3). When an effect is created inside an action body
 (or inside any scope other than `ROOT_SCOPE`), what's the chain its
@@ -617,8 +606,7 @@ Probably out-of-scope.
 unification — the chain question is "does subscription follow owner or
 not").
 
-<a id="q12"></a>
-### Q12 — Body cleanups vs scope cleanups: composition and re-entrancy
+### <a id="q12"></a>Q12 — Body cleanups vs scope cleanups: composition and re-entrancy
 
 Surfaced by [H3 trace](./scenario-traces.md#trace-h3). Two distinct cleanup mechanisms exist:
 
@@ -649,8 +637,7 @@ Open sub-questions:
 **Related:** [Q2](#q2) (the scope/owner unification carries this composition),
 [Q10](#q10) (re-entrant cleanups land in the commit's deferred-fires region).
 
-<a id="q13"></a>
-### Q13 — Optimistic surface ergonomics (sugar over speculation)
+### <a id="q13"></a>Q13 — Optimistic surface ergonomics (sugar over speculation)
 
 Mechanism: an optimistic write is one use of speculation (a predicted
 `setX(...)` inside an action body is held in that action's write-set;
@@ -665,8 +652,7 @@ single-predicted-write case (the most common one — predict, await,
 either promote or roll back). The API surface is genuinely undecided
 beyond that.
 
-<a id="q14"></a>
-### Q14 — Action prereqs / standing-state handle
+### <a id="q14"></a>Q14 — Action prereqs / standing-state handle
 
 An action's readiness to run is information that should be queryable
 *before* the action runs (a button needs `ready` and `pending` to avoid

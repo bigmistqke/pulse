@@ -24,8 +24,7 @@ The durable, abstract commitments. Framings (next section) are concrete
 operational positions that play out these principles in pulse-specific
 terms.
 
-<a id="p1"></a>
-### P1 — Speculation is one concept with two faces
+### <a id="p1"></a>P1 — Speculation is one concept with two faces
 
 What pulse delimits is a **speculative scope**: a tentatively-applied
 write-set held over committed state, observable to reads, eventually
@@ -50,8 +49,7 @@ analogically.
 Rejects: bespoke per-use-case primitives that hide the underlying unity,
 and naming that presupposes success.
 
-<a id="p2"></a>
-### P2 — Acknowledge async; don't hide it
+### <a id="p2"></a>P2 — Acknowledge async; don't hide it
 
 A `Promise` in the type is honest information: it indicates the value
 has (or had) a future. Pulse provides tools to *incorporate* the future,
@@ -63,8 +61,7 @@ the async-handling discipline lives.
 Rejects: Solid 2.x's `Accessor<T>` collapse + `NotReadyError`, where
 hidden async resurfaces as a thrown error in unrelated read sites.
 
-<a id="p3"></a>
-### P3 — Plain reads are honest
+### <a id="p3"></a>P3 — Plain reads are honest
 
 A plain `get(node)` returns whatever's cached (committed or speculative
 overlay) and never throws. Pending-ness, error-state, and async
@@ -73,8 +70,7 @@ non-readiness are separate queries — not exceptions raised from a read.
 Rejects: any design where reading a value is a discipline you must learn
 to do safely.
 
-<a id="p4"></a>
-### P4 — Explicit boundaries over implicit pervasiveness
+### <a id="p4"></a>P4 — Explicit boundaries over implicit pervasiveness
 
 A speculative scope is *opt-in*. Outside a scope, writes commit
 immediately and reads are honest. Inside a scope, write-level speculation
@@ -87,8 +83,7 @@ a refetch flashes unless wrapped.
 Rejects: Solid 2.x's per-write transition semantics that turn every
 async-feeding write into an implicit held speculation.
 
-<a id="p5"></a>
-### P5 — Compose, don't proliferate (in either direction)
+### <a id="p5"></a>P5 — Compose, don't proliferate (in either direction)
 
 A small primitive set should cover the use cases. Specialised ergonomic
 sugar over the primitives is *allowed* when it earns its keep — added
