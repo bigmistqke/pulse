@@ -19,7 +19,7 @@ Pulse's user-facing `Signal<T>` and `Computed<T>` are **graph relations, not
 values** — `Node<() => T | Promise<T>>`, an identity in the dep graph wrapping a
 recipe (a callback that produces the value). The value is not *in* the Node; it
 is what you get by handing the Node to a *walk* primitive. The library ships
-named patterns and named walks (`signal`, `compute`, `effect`, `get`, `peek`,
+named patterns and named walks (`signal`, `compute`, `effect`, `get`,
 `latest`, `use`, `isPending`, `subscribe`) as approachable DX over a slim engine
 that knows only about graph, slots, recipes, edges, and notification. Users
 who want their own semantics over the graph can reach the engine; the default
@@ -292,7 +292,7 @@ outside via walks.*
 ### Walks are first-class
 
 Reads are not implicit "call the signal." They are explicit applications of a
-walk primitive (`get`, `peek`, `latest`, `use`, `isPending`, `subscribe`, …) to
+walk primitive (`get`, `latest`, `use`, `isPending`, `subscribe`, …) to
 a relation. The walks *are* the user-visible surface of the engine's value-bag —
 the bag is observed only through walks, never by "the signal's value." This
 makes "how to read" a first-class verb the user composes, rather than a fixed
@@ -401,77 +401,6 @@ persistence). Mixing them — using an effect to maintain a derived signal
 that gets read inside actions — produces stale-during-action behaviour
 that's correct but surprising.
 
-### Stages: a memoized node + a promise auto-unwrap
-
-A stage is a memoized computed node whose input-read auto-unwraps a
-Promise. No new engine primitive needed; stages compose from `createNode`
-+ `get` + `promiseState` (Q-D).
-
-```ts
-type Resolved<T> = T extends Promise<infer U> ? U : T
-
-function stage<I, O>(input: Node<I>, transform: (v: Resolved<I>) => O): Node<O> {
-  return createNode(() => {
-    const v = get(input)
-    if (v instanceof Promise) {
-      const tracker = currentTracker                      // capture
-      return v.then(resolved => {
-        pushTracker(tracker)                              // restore around the callback
-        try { return transform(resolved as Resolved<I>) }
-        finally { popTracker() }
-      })
-    }
-    return transform(v as Resolved<I>)
-  })
-}
-
-function compute<T>(source: () => T, ...stages: Array<(v: any) => any>): Node<unknown> {
-  let current: Node<unknown> = createNode(source)
-  for (const fn of stages) current = stage(current, fn)
-  return current
-}
-```
-
-**~15 lines of library code over engine primitives.** This is the
-canonical declarative computed form for pulse.
-
-**The semantics:**
-
-- Each stage is **its own memoized node**. Tracker is restored around the
-  stage callback, so signal reads inside the callback track to that
-  stage's node.
-- The stage callback sees the **unwrapped** value (`Resolved<I>`, not
-  `I`); the engine threads the resolved value in.
-- The compute's **output type** is `Promise<U>` if any stage along the
-  chain returned a Promise; else just `U`. Same model as `async`/`await`:
-  any awaited Promise infects the output.
-- **Per-stage memoization** gives finer-grained partial recomputation
-  than the generator form: if signal2 is read in stage 2 and changes,
-  stage 1 stays cached; only stage 2 (and downstream) re-runs. The
-  generator form would have to restart from the top in the equivalent
-  case.
-
-**Example:**
-
-```ts
-const result = compute(
-  () => get(signal1).toUpperCase(),       // stage 0: depends on signal1
-  (v) => v + get(signal2),                 // stage 1: depends on signal2 (tracked inside)
-  (v) => v + "!"                           // stage 2: pure
-)
-// signal1 changes → re-run stages 0, 1, 2
-// signal2 changes → stage 0 stays cached; re-run stages 1, 2
-```
-
-```ts
-const greeting = compute(
-  () => get(asyncUser),                   // stage 0: returns Promise<string>
-  (u /* string, unwrapped */) => `Hello, ${u}!`
-)
-// greeting: Computed<Promise<string>>
-// The callback sees u: string (auto-unwrapped); output is Promise<string>.
-```
-
 ### Three authoring forms for computeds
 
 Three valid forms with different trade-offs; user picks by what the
@@ -507,19 +436,65 @@ const profile = compute(function* () {
 | **Stages** | **Per-stage** (finest) | Auto-unwrap between stages | No (each stage is a pure transform; signal reads inside a stage track to *that* stage's node) | Declarative pipelines |
 | **Generator** | Whole-body, resume-from-yield via Awaitable | `yield* get(node)` parks | Yes (conditional reads, multi-step logic) | Imperative composition, data-driven dep selection |
 
-**Stages are optimal for declarative pipelines** — per-stage memoization
-beats whole-body re-execution if signal2 changes (only the stages reading
-signal2 re-run; earlier stages stay cached).
+**Stages** are optimal for declarative pipelines — per-stage memoization
+beats whole-body re-execution if a signal read in stage N changes (only
+stage N and downstream re-run; earlier stages stay cached).
 
-**Generators are optimal for dynamic-deps or non-pipeline composition** —
+**Generators** are optimal for dynamic-deps or non-pipeline composition —
 when stage N's source depends on stage N-1's value, or the flow doesn't
-line up as a pipeline.
+line up as a pipeline. The Awaitable type makes generator-form
+TypeScript inference clean: `yield* get(asyncNode)` returns the resolved
+type via Awaitable's `[Symbol.iterator]`; no special unwrap helper
+needed.
 
-**Plain body is the sync-only sugar.**
+**Plain body** is the sync-only sugar — visibly synchronous, no parking
+machinery.
 
-The Awaitable type makes generator-form TypeScript inference clean (no
-special unwrap helper needed; `yield* get(asyncNode)` returns the resolved
-type via Awaitable's `[Symbol.iterator]`).
+#### How stages work
+
+A stage is a memoized computed node whose input-read auto-unwraps a
+Promise. No new engine primitive needed; stages compose from
+`createNode` + `get` + `promiseState` (Q-D):
+
+```ts
+type Resolved<T> = T extends Promise<infer U> ? U : T
+
+function stage<I, O>(input: Node<I>, transform: (v: Resolved<I>) => O): Node<O> {
+  return createNode(() => {
+    const v = get(input)
+    if (v instanceof Promise) {
+      const tracker = currentTracker                      // capture
+      return v.then(resolved => {
+        pushTracker(tracker)                              // restore around the callback
+        try { return transform(resolved as Resolved<I>) }
+        finally { popTracker() }
+      })
+    }
+    return transform(v as Resolved<I>)
+  })
+}
+
+function compute<T>(source: () => T, ...stages: Array<(v: any) => any>): Node<unknown> {
+  let current: Node<unknown> = createNode(source)
+  for (const fn of stages) current = stage(current, fn)
+  return current
+}
+```
+
+~15 lines of library code over engine primitives.
+
+Semantics:
+
+- Each stage is **its own memoized node**. Tracker is restored around
+  the stage callback, so signal reads inside the callback track to that
+  stage's node.
+- The stage callback sees the **unwrapped** value (`Resolved<I>`, not
+  `I`); the engine threads the resolved value in.
+- The compute's **output type** is `Promise<U>` if any stage along the
+  chain returned a Promise; else just `U`. Same model as `async`/`await`:
+  any awaited Promise infects the output.
+- **Per-stage memoization** is what lets a downstream-only change avoid
+  re-running upstream stages.
 
 ### Action bodies use the same generator form
 
