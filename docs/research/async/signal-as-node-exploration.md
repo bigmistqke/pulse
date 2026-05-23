@@ -641,13 +641,20 @@ because the body isn't going to re-run on dep change.
   sub-generator with `"alice"`. `read` returns `"alice"`. `yield*` resumes
   the action body with `"alice"`. `name = "alice"`.
 
-**Optional engine optimisation:** when `userPromise` resolves, the engine
-*could* attach its own `.then` to update `slot_U_S.cached` from `userPromise`
-to `"alice"`, and fire a synthetic "slot changed" event so downstream
-consumers notice. This is open (Q-D): does the engine eagerly update slot
-caches on Promise resolution, or does it leave `cached: Promise<T>` forever
-and walks unwrap on read? *Lean: engine eagerly updates, because Q-C's
-consumer pattern needs slot-changed events to fire when async deps resolve.*
+**Engine handling of Promise resolution** (refined since C2 was first traced;
+see Q-D for the current framing): the engine attaches a `.then` to the
+Promise stored in `slot_U_S.cached`. When `userPromise` resolves to
+`"alice"`, the handler **does NOT mutate `slot_U_S.cached`** — the slot's
+cached value remains the Promise indefinitely. Instead, the resolved value
+is stored elsewhere (Q-D's lean: `WeakMap<Promise, T>`, with Promise-tweak
+as alternative), and the engine fires a slot-changed event with kind
+`'resolved'`. Walks query `promiseState(slot_U_S.cached)` to retrieve the
+synchronously-readable resolved value. Downstream consumers receive the
+slot-changed event identically to any other invalidation event. *This is
+strictly cleaner than mutating `cached`*: the slot is immutable for its
+lifetime; multiple walks share one subscription via the WeakMap;
+read-vs-write distinction (Q-I) stays unambiguous (the Promise resolving
+is not a write).
 
 **Step 4: body continues — `setUser(Promise.resolve("alice!"))`.**
 
@@ -890,8 +897,12 @@ sub-questions into the open:
    `gen.next`.** Driver responsibility.
 4. **Action bodies don't track.** No edges formed.
 5. **Discard-guard on resume.** `if (scope.status !== 'open') return`.
-6. **Engine eagerly updates slot.cached on Promise resolve.** Lean yes
-   (Q-D); not strictly required for C2a but needed for Q-C consumer pattern.
+6. **Engine fires slot-changed events on Promise resolution, without
+   mutating `slot.cached`.** Refined post-C2; see Q-D. The slot's cached
+   value stays as the Promise; resolved value lives in a `WeakMap<Promise,
+   T>` (or via Promise-tweak); walks query `promiseState(promise)` for
+   synchronous access. Engine attaches one `.then` per Promise-valued slot
+   to fire the resolution event and populate the metadata.
 7. **`Slot` needs `wasWritten` (or equivalent).** Read-populated and
    write-populated slots have different commit semantics; the engine must
    distinguish. **New sub-question — added to Q-G and Q-A territory.**
@@ -2611,25 +2622,86 @@ Q-G (`defaultRecipe` interacts with consumer's initial run).
 ### Q-D — Async at the engine level
 
 The recipe is `() => T | Promise<T>`. The engine sees Promises in `cached`. Per
-P2 (acknowledge async), walks decide how to handle them. But the engine has
-choices:
+P2 (acknowledge async), walks decide how to handle them. The engine has two
+genuinely distinct concerns, separated by a recent refinement:
 
-- *Does the engine `await` internally, or just hand the Promise to walks?*
-  Likely the latter — engine treats the Promise as an opaque value flowing
-  through the cache; walks know what to do (return it, suspend on it, throw
-  to restart).
-- *When a Promise resolves, what happens?* If a slot's cached value is a Promise
-  that resolves to `T`, does the slot's `cached` get updated to `T`? Does that
-  count as a "slot change" that fires subs? Probably yes — and that's how a
-  computed-with-async-dep transitions from pending to ready. **C2 trace
-  confirmed the lean: yes, the engine eagerly updates `slot.cached` on Promise
-  resolve and emits a slot-changed event. Q-C's consumer pattern needs this
-  to fire when async deps resolve.**
-- *Does the engine track which slots are pending?* Or is that a walk's question
-  (`isPending(node)` walks the slot, checks if `cached` is a Promise)?
+**Concern 1 — Synchronous query of Promise state.** A walk (or downstream
+computed) needs to ask, *without awaiting again*: "is this Promise resolved?
+what's the value?" Two implementations:
 
-**Related:** Q-C (consumer's re-run discipline for async deps), main-doc D8
-(yield* read vs use vs stages).
+- *Promise-tweak* — mutate the Promise object with `.status` and `.value`
+  fields. React's `use()` hook does this (calls them `_payload` / `_result`
+  internally; surfaces `.status` for `use`). Pros: zero allocation, familiar
+  precedent, *potential interop* with React's convention so a Promise
+  resolved by React is sync-queryable by pulse without re-attaching `.then`.
+  Cons: mutates objects we don't own; convention is non-standard; collision
+  risk.
+- *`WeakMap<Promise, ResolvedT>`* — the engine maintains a side-table.
+  Pros: no mutation of foreign objects; clean abstraction; no collision.
+  Cons: lookup overhead; another structure; less interop.
+
+Isomorphic at the architectural level. **Lean: start with `WeakMap` for
+safety**, adopt the Promise-tweak convention later if interop with React
+or other libraries matters in practice.
+
+Either way, the engine grows one small primitive:
+
+```ts
+function promiseState<T>(p: Promise<T>): { status: 'pending' | 'fulfilled' | 'rejected', value?: T, error?: unknown }
+```
+
+Walks call it. First call attaches a `.then` that updates the WeakMap (or
+the Promise's tweaked fields) when the Promise settles. Subsequent calls
+are sync.
+
+**Concern 2 — Firing on resolution.** When a Promise stored in `slot.cached`
+resolves, downstream consumers need to be notified. *Refinement of the C2
+trace's earlier finding:* the slot's `cached` does NOT transmute from
+`Promise<T>` to `T`. Instead, `cached` stays as the Promise indefinitely; the
+resolved value lives on the Promise (or in the WeakMap). What changes is
+that **the engine fires `slot.subs` with a synthetic resolution event** when
+the Promise resolves.
+
+Concretely, the engine's machinery on `writeSlot(node, scope, slot)`:
+
+1. Write the slot as usual.
+2. If `slot.cached instanceof Promise`, attach `.then` to the Promise that
+   does two things: (a) update the WeakMap / Promise-tweak with the
+   resolved value; (b) call `fireEdges(node, scope, { kind: 'resolved' })`.
+3. Edges fire normally; walks query `promiseState` to get the value.
+
+About ~15 lines of engine code total for both concerns. Small but
+meaningful concession to async-awareness — narrower than "engine
+internally awaits and updates cache."
+
+**Why this is cleaner than the previous framing:**
+
+- The slot's `cached` is immutable for its lifetime — easier to reason about.
+- Multiple walks reading the same Promise share one `.then` subscription
+  (deduped via the WeakMap entry / tweaked Promise).
+- The resolution event is a proper slot-changed event, fired through the
+  same `fireEdges` path. Consumers don't need a special "did-the-promise-
+  resolve" code path; they just receive an invalidation and re-read.
+- Promise-tweak version offers interop with React's `use()` convention if
+  pulse later wants it.
+
+**Sub-question remaining open:** the WeakMap vs Promise-tweak choice itself
+is a deferred design call. The architecture supports either.
+
+**Settled by combination of C2 trace + Promise-tweak/WeakMap refinement:**
+
+- *Does the engine `await` internally?* No — walks handle suspension via
+  `yield* read` or `use`. Engine attaches a `.then` only to update the
+  sync-query metadata and fire edges.
+- *Does the engine track which slots are pending?* No — pending-ness is
+  derived from `promiseState(slot.cached as Promise<T>)`. The `isPending(node)`
+  walk calls `promiseState` and returns the status.
+
+**Related:** Q-C (consumer's re-run discipline for async deps; consumers
+receive `{ kind: 'resolved' }` events the same way they receive `{ kind:
+'invalidated' }`), main-doc D8 (`yield* read` vs `use` vs stages), Q-I
+(read-vs-write slots — a Promise that resolves is "still the same slot,"
+not a write, so doesn't trigger commit-promotion).
 
 ### Q-E — Recipe / cache asymmetry between Signal and Computed slots
 
