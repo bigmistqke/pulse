@@ -7,7 +7,7 @@ falsifying them when they break).
 
 **Companion documents:**
 - [scenarios.md](./scenarios.md) — the catalog itself (TDD basis).
-- [research.md](./research.md) — framings, falsified hypotheses, engine /
+- [README.md](./README.md) — framings, falsified hypotheses, engine /
   library sketches, open questions, threads.
 
 **All eight traces below pass.** No framings falsified. Two scenarios
@@ -15,7 +15,6 @@ forced deliberate design calls into the open (K1 → resolved to Position
 (C); H3 → Policy α for effect chains, lean).
 
 **Related pulse-repo docs:**
-- [`../research/async/pulse-design-direction.md`](../research/async/pulse-design-direction.md) — main-doc principles, dimensions, questions.
 - [`../research/async/CONTEXT.md`](../research/async/CONTEXT.md) — speculation lexicon, four dimensions, failure modes.
 
 ---

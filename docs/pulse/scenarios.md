@@ -7,7 +7,7 @@ cases stay distinct even when they look similar, because each will be its
 own test.
 
 **Companion documents:**
-- [research.md](./research.md) — framings, falsified hypotheses,
+- [README.md](./README.md) — framings, falsified hypotheses,
   engine/library sketches, open questions (Q-A through Q-L), threads.
 - [scenario-traces.md](./scenario-traces.md) — end-to-end traces of the
   ✓-marked scenarios below.
@@ -23,7 +23,6 @@ is exactly the premature commitment the explorative phase is meant to
 avoid.
 
 **Related pulse-repo docs:**
-- [`../research/async/pulse-design-direction.md`](../research/async/pulse-design-direction.md) — main-doc principles, dimensions, questions.
 - [`../research/async/CONTEXT.md`](../research/async/CONTEXT.md) — speculation lexicon, four dimensions, failure modes.
 
 ## Traces (in [scenario-traces.md](./scenario-traces.md))
