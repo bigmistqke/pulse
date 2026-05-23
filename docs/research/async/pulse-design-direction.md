@@ -8,7 +8,7 @@
 
 ## What the research arc has shown
 
-Compressed to one paragraph for context. Transitions are coordination machinery for **continuous-observation + concurrent-intent** workloads (UI is the canonical instance; also GGPO rollback, sync engines with optimistic+rebase, realtime collab). They branch in four distinct dimensions — Dim 1 internal (tree of dependent async in one transition), Dim 2 concurrent (multiple in flight), Dim 3 input-arrival (new input during transition), Dim 4 state-overlap (transitions touching shared state); canonical definitions in the lexicon, [CONTEXT.md](./CONTEXT.md), framing originated in the [LOG.md](./LOG.md#cross-cutting-thread--transitions-branch-in-four-dimensions) thread "Transitions branch in four dimensions". Production frameworks differ in which dimensions they handle and how, AND in whether their user-facing API surface is minimal (Svelte) or proliferating (React). Pulse's articulated design philosophy (sessions 11–12 conversations) is **user-visible primitives composed in userland** — distinct from React's "low-level API + library-authors compose ergonomics" and Solid's "framework-provided higher-level primitives" — but Svelte's evidence (sessions 12) showed that "minimum API" does NOT entail "minimum engine"; concurrent transitions cost engine surface regardless of how small the user API is.
+Compressed to one paragraph for context. Speculations (the field calls them *transitions*; see P1 below) are coordination machinery for **continuous-observation + concurrent-intent** workloads (UI is the canonical instance; also GGPO rollback, sync engines with optimistic+rebase, realtime collab). They branch along four structural dimensions — **Dim 1** internal structure of one speculation, **Dim 2** concurrence (multiple alive, disjoint state), **Dim 3** supersession (newer invalidates older), **Dim 4** overlap/entanglement (multiple alive, shared state) — the non-trivial corners of `{one, many} × {disjoint, overlapping} × {concurrent, sequential}`; canonical definitions in the lexicon, [CONTEXT.md](./CONTEXT.md), framing originated in the [LOG.md](./LOG.md#cross-cutting-thread--transitions-branch-in-four-dimensions) thread "Transitions branch in four dimensions" (when "transition" was still the working term). Production frameworks differ in which dimensions they handle and how, AND in whether their user-facing API surface is minimal (Svelte) or proliferating (React). Pulse's articulated design philosophy (sessions 11–12 conversations) is **user-visible primitives composed in userland** — distinct from React's "low-level API + library-authors compose ergonomics" and Solid's "framework-provided higher-level primitives" — but Svelte's evidence (sessions 12) showed that "minimum API" does NOT entail "minimum engine"; concurrent speculations cost engine surface regardless of how small the user API is.
 
 ---
 
@@ -21,10 +21,10 @@ The current mechanical landscape for the three production frameworks pulse has t
 | **Substrate** | Fiber tree + lane-scheduled work queue (31-bit bitmask) | Signals + linked-list of `Batch` objects + `<svelte:boundary>` queue | Reactive graph + per-write `OptimisticLane` + `Transition` object |
 | **User-facing primitives** | `useTransition`, `useDeferredValue`, `useOptimistic`, `Suspense`, `use(promise)`, `useActionState`, Actions, Server Functions | `<svelte:boundary>` + `pending` snippet, `$effect.pending()`, `settled()`, `fork()` | `<Loading>`, `<Errored>`, `<Reveal>`, `action()`, `createOptimistic`, `latest()`, `isPending()`, `refresh()` |
 | **Suspension mechanism** | `use(promise)` throws cached promise; caught at Suspense boundary | `await` inside `$derived` lowered to `async_derived`; gated by `boundary.#pending_count` | `NotReadyError(source)` thrown; caught by `CollectionQueue.notify` |
-| **Dim 1 — internal branching** | WIP fiber tree gathers all pending Suspense in scope; commits atomically when all resolve | `boundary.#pending_count` for first render; `batch.#blocking_pending` for subsequent updates | `Transition._asyncReporters: Map<Computed, Set<Computed>>` tracks each pending source → its reporters; per-source decidability |
-| **Dim 2 — concurrent transitions** | 31-lane bitmask; multi-low-priority currently batched (acknowledged limit) | Linked-list of `Batch` objects; each with `batch_values` time-travel snapshot; independent commit if non-overlapping | Per-write `OptimisticLane`; independent lanes flush independently; not batched |
-| **Dim 3 — input-arrival priority** | High-priority lanes pre-empt low-priority; WIP discarded and rebuilt; cooperative 5ms yield to browser | **None** (no priority/lanes); only `OBSOLETE` per-derived cancel + `STALE_REACTION` per-effect abort; `fork()` is user-controlled speculation | **None** (no priority/lanes); newer writes supersede via `_inFlight !== result` identity check |
-| **Dim 4 — state-overlap** | **Not handled**; multi-transition batching conflates with this | Whole-batch merge on source-set intersection (`#find_earlier_batch` + `#merge`) | Union-find lane merge on dep-graph overlap (`assignOrMergeLane`); parent-child lanes stay independent |
+| **Dim 1 — internal structure** | WIP fiber tree gathers all pending Suspense in scope; commits atomically when all resolve | `boundary.#pending_count` for first render; `batch.#blocking_pending` for subsequent updates | `Transition._asyncReporters: Map<Computed, Set<Computed>>` tracks each pending source → its reporters; per-source decidability |
+| **Dim 2 — concurrence (disjoint)** | 31-lane bitmask; multi-low-priority currently batched (acknowledged limit) | Linked-list of `Batch` objects; each with `batch_values` time-travel snapshot; independent commit if non-overlapping | Per-write `OptimisticLane`; independent lanes flush independently; not batched |
+| **Dim 3 — supersession** | High-priority lanes pre-empt low-priority; WIP discarded and rebuilt; cooperative 5ms yield to browser | **None** as priority; per-derived `OBSOLETE` cancel + per-effect `STALE_REACTION` abort handle structural supersession; `fork()` is user-controlled | **None** as priority; newer writes supersede via `_inFlight !== result` identity check |
+| **Dim 4 — overlap (entanglement)** | **Not handled**; multi-transition batching conflates with this | Whole-batch merge on source-set intersection (`#find_earlier_batch` + `#merge`) | Union-find lane merge on dep-graph overlap (`assignOrMergeLane`); parent-child lanes stay independent |
 | **Speculative-state isolation** | Per-transition tree (WIP fiber) + per-action overlay (`useOptimistic`) | Versioned engine, unbounded observable batches (linked list); `fork()` as flagged subtype with deeper isolation | Per-write-lane overlay with overlap-merge; `_overrideValue` overlay + separate `_pendingValue` slot |
 | **Optimistic state** | `useOptimistic(state, reducer)` returns `[optimisticState, setOptimistic]`; converges in same render as Action commit | No first-class API; user mutates state in `fork()` body or in async-derived (auto-reverts on `OBSOLETE` reject) | `createOptimistic(value)` returns reactive signal; auto-reverts on action failure via `resolveOptimisticNodes` |
 | **Cancellation discipline** | Structural via WIP discard for rendering; convention-only `AbortController` for I/O effects | Two channels: `OBSOLETE` (per-derived) + `STALE_REACTION` (per-effect); `getAbortSignal` for cooperative I/O abort | Identity-based stale-result discard via `_inFlight !== result`; structural for async iterables (cleanup w/ `.return()`); no auto fetch abort |
@@ -107,7 +107,7 @@ Before adopting this decomposition as the design basis, three things need to be 
 - **(ii)** Is (3) — in-flight identity — distinct enough from owner-disposal to deserve being its own primitive, or is it just "the current state of an owner"? Solid's `_inFlight` identity check and React's lane identity are both finer-grained than pulse's owner-scope.
 - ~~**(iii)** Are there mechanics in the table that *don't* compose from these four? `<Reveal>` is the suspicious one — it's coordination between *sibling* boundaries, which feels like it might need a fifth primitive about "boundary composition" rather than being expressible from the four.~~ **Resolved (session 13, see "Validation against `<Reveal>`" section below):** Reveal composes from the existing primitives without a fifth. What it requires is a *library-level design discipline*: boundaries are **cooperative by design** — they expose state as signals and accept external control via signals. Not a framework primitive.
 
-The next sub-decision in this document should probably be: validate or falsify this decomposition before committing to any of the Q1–Q9 specific positions. If the decomposition is right, several of the Qs collapse into "pick a library API for this composition pattern." If it's wrong, the Qs need to be answered each on their own terms.
+The next sub-decision in this document should probably be: validate or falsify this decomposition before committing to any of the Q1–Q5 specific positions. If the decomposition is right, several of the Qs collapse into "pick a library API for this composition pattern." If it's wrong, the Qs need to be answered each on their own terms.
 
 ### A sharper recasting: signal = node + value-bag
 
@@ -503,35 +503,75 @@ Rejects (in both directions): React-style proliferation of specialised hooks for
 
 ---
 
-## Design questions to address
+## Open research questions
 
-Open questions the research arc has surfaced. Each is a decision point. Marked as **open** until addressed concretely below.
+Each dimension already carries a mechanism question (see
+[`CONTEXT.md`](./CONTEXT.md#the-four-dimensions-of-speculation) for Dim 1–4); the
+per-dim "where does pulse land" answers are sketched against those questions
+inline (D1–D12). What follows are the **cross-cutting** questions that
+aren't tied to a single dimension — and pulse's current leanings against them.
+All are **open** unless marked otherwise.
 
-### Per-dimension questions
+- **Q1 — Locus of speculative state.** Is the speculation machinery deeply
+  integrated in the core engine (Solid 2.x: per-node `_pendingValue` /
+  `_overrideValue` slots), bolted on as a layer above a sync core (Bonsai-style:
+  separate effect layer over a pure-incremental substrate), or expressed in
+  *userland* over a small set of core primitives that the engine exposes? The
+  node/value-bag framing leans toward the third — *"a signal/computed is the
+  node in the graph, not necessarily the sync value; the value-bag (entries
+  tagged by scope) is a separate, possibly userland-visible structure"* — but
+  the locus is genuinely open. Sub-questions:
+  - What is the *minimum* core-engine surface that lets userland implement
+    speculation, optimistic UI, and read-side zones without re-implementing the
+    reactive graph?
+  - Does exposing (node, value-bag, scope) as user-visible primitives violate
+    P5 (proliferation) or honour it (smaller core, composable surface)?
+  - Is there a layering where the *write-side* speculative scope is
+    engine-integrated (writes must hit some structural slot somewhere) while
+    the *read-side* zone is userland-composable (purely about gating
+    publication)?
+  - How does this interact with Q2 (cancellation): if speculation is in
+    userland, what does scope-discard *do* to the in-flight async work the
+    scope started?
 
-- **Q1 — Dim 1 (internal):** pulse already has `<Loading>` gather. Settled, or does it need refinement? Particularly: should there be a `latest()`-like opt-out for *initialization* async that should settle to sync once resolved (vs *loading* async that's recurring)? **Open.**
-- **Q2 — Dim 2 (concurrent transitions):** pulse currently has no machinery. Three positions: (a) don't support, (b) explicit user-named transitions, (c) implicit per-write lanes. Articulated stance leans (b). **Open.**
-- **Q3 — Dim 3 (input-arrival priority):** pulse currently has no machinery. Three positions: (a) don't support, (b) explicit priority markers at dispatch site, (c) auto-inferred from event source. Articulated stance leans (b). **Open.**
-- **Q4 — Dim 4 (state-overlap):** pulse's pipeline-OR walking is a weaker form. Two positions: (a) keep pipeline-OR — rely on dep-graph visibility, (b) adopt Solid-style auto-merge. Articulated stance leans (a). **Open.**
+- **Q2 — Cancellation discipline.** When a speculation is discarded — by throw,
+  by supersession, by owner disposal — what happens to the in-flight async work
+  it started? Three production-observed positions: identity-based stale-discard
+  (Solid's `_inFlight !== result` check), explicit `AbortController` plumbing
+  (React convention; Svelte `getAbortSignal`), or structural cancellation via
+  owner-disposal (Xilem-Druid's Drop discipline). Likely interaction with Q1:
+  whatever the locus, the cancellation primitive must be reachable from
+  userland code that opens / discards speculative scopes.
 
-### Cross-cutting questions
+- **Q3 — Authoring form for the speculation body.** D1 settles the *shape*
+  (one body-style write-side primitive); the open part is *what kind of body*.
+  Generator (`function*` + `yield* read` — re-entrant, restoration of ambient
+  context, the form D11 sketches), async function (familiar but loses the
+  ambient-context restoration that generators give cheaply), or some other
+  coroutine. The generator form fits D11's "three resumption behaviours"
+  framing, but the ergonomic tax of `yield* read` is real.
 
-- **Q5 — Optimistic state primitive:** dedicated primitive (Solid `createOptimistic`), no API + auto-revert (Svelte), or fused into action-shaped wrapper (React Actions)? **Open.**
-- **Q6 — Cancellation discipline:** identity-based stale-discard, explicit `AbortController` plumbing, or structural-by-owner-disposal? **Open.**
-- **Q7 — The "settle once, never re-pending" pattern** (the friction with Solid 2.x for initialization async): first-class primitive or composed via `latest()`-equivalent? **Open.**
-- **Q8 — Transitions as primitives or `<Loading>` companion:** are `transition()`, `optimistic()` standalone primitives that compose with `<Loading>`, or is `<Loading>` itself a thin wrapper over deeper primitives that userland could re-compose? **Open.**
-- **Q9 — Action / mutator-shaped abstraction:** does pulse want anything action-shaped (Solid `action(function*)`, React Actions, Replicache mutator), or stay closer to "async functions that touch signals"? **Open.**
-- **Q10 — Where does speculative state live?** Is the speculation machinery deeply integrated in the core engine (as in Solid 2.x's per-node `_pendingValue` / `_overrideValue` slots), bolted on as a layer above a sync core (as in Bonsai's separate effect layer over a pure-incremental substrate), or expressed in *userland* over a small set of core primitives that the engine exposes? The node/value-bag framing sketched above leans toward the third — "a signal/computed is the node in the graph, not necessarily the sync value; the value-bag (entries tagged by scope) is a separate, possibly userland-visible structure" — but the locus question is genuinely open. **Open.** Sub-questions:
-  - What is the *minimum* core-engine surface that lets userland implement speculation, optimistic UI, and read-side zones without re-implementing the reactive graph?
-  - Does exposing (node, value-bag, scope) as user-visible primitives violate P5 (proliferation) or honour it (smaller core, composable surface)?
-  - Is there a layering where the *write-side* speculative scope is engine-integrated (because writes must hit some structural slot somewhere) while the *read-side* zone is userland-composable (because it's purely about gating publication)?
-  - How does this interact with Q6 (cancellation): if speculation is in userland, what does scope-discard *do* to the in-flight async work the scope started?
+- **Q4 — Initialization vs loading distinction.** A "settle once, never
+  re-pending" mode is a real use-case (a value loaded at startup that, once
+  resolved, should never report pending again — vs a value that recurringly
+  refetches and is legitimately pending each time). Is this a *first-class*
+  distinction (e.g. an explicit "permanent on first commit" tag on the
+  value-bag entry), or composed via a `latest()`-equivalent that opts out of
+  pending observation post-first-commit? Sharpened from old Q7: this is about
+  whether the value-bag carries the distinction at the primitive level.
+
+- **Q5 — Optimistic surface ergonomics.** Mechanism settled by D3 (optimistic
+  is a use of speculation, P1). Open: does pulse ship a named sugar
+  (`optimistic(...)` / `createOptimistic`) over the speculation primitive, and
+  in what shape? Likely "yes" for the single-predicted-write case per P5
+  (common-enough use, awkward enough bare-action shape), but the API surface
+  is genuinely undecided.
 
 ---
 
 ## Sketches against the principles (current best-guesses)
 
-The items below (D1–D12) are **working sketches**, not locked-in decisions. Each is a current best-guess at how to honour the principles (P1–P5) given the questions (Q1–Q10) and the concrete pressures from `examples/transitions` edge cases (E1–E4) and scenarios S1–S8. They are durable as *reasoned positions against the principles*; they are negotiable as *implementation surfaces*.
+The items below (D1–D12) are **working sketches**, not locked-in decisions. Each is a current best-guess at how to honour the principles (P1–P5) given the dimension-questions (Dim 1–4) and cross-cutting questions (Q1–Q5) above, plus the concrete pressures from `examples/transitions` edge cases (E1–E4) and scenarios S1–S8. They are durable as *reasoned positions against the principles*; they are negotiable as *implementation surfaces*.
 
 Two reading rules:
 
@@ -545,7 +585,7 @@ transitions-solid porting exercise (2026-05-21+) that surfaced D4–D12.
 
 ### D1 — Commit-grouping primitive: body-style `action`, not handle-style `scope()`
 
-*Addresses Q8, Q9.* Async speculations group their writes via a body-style
+*Addresses Q1 (locus), Q3 (authoring form).* Async speculations group their writes via a body-style
 `action(function*)` — a generator-driven async body whose signal writes auto-group
 into one atomic commit. The handle-style `scope()` sketch (open writes with a
 threaded `tx`) is dropped. Sync grouping stays implicit: one scheduler batch of
@@ -563,7 +603,7 @@ action-shaped abstraction).
 
 ### D2 — Action lifecycle: auto-commit on return, auto-discard on throw
 
-*Addresses Q9.* An `action` commits all its writes when the generator returns and
+*Addresses Q3 (authoring form).* An `action` commits all its writes when the generator returns and
 discards them all if it throws. There is no explicit `commit()`/`discard()`.
 
 Rationale: the body's completion is the commit signal; a thrown step discards the
@@ -573,17 +613,17 @@ no change to `action` and is deferred to a later decision.
 
 ### D3 — An optimistic write is one use of speculation; whether sugar is exposed is open
 
-*Addresses Q5, and concurrent-flows Q2.* The underlying mechanism (durable, P1): the predict → settle → revert lifecycle of an optimistic UI is what a speculative scope already does. A predicted `setX(...)` inside an action body is held in that action's write-set; the base signal cell is untouched until commit; auto-discard (D2) reverts on failure with no manual rollback. A plain read resolves to the committed base with any in-flight speculative overlay applied on top — so a prediction is visible with no ceremony, and a multi-step action's intermediate writes are visible mid-flight as pending state. `latest(() => x())` opts out to committed-only.
+*Addresses Q5 (optimistic surface ergonomics); read-path implications for Dim 2 (concurrence).* The underlying mechanism (durable, P1): the predict → settle → revert lifecycle of an optimistic UI is what a speculative scope already does. A predicted `setX(...)` inside an action body is held in that action's write-set; the base signal cell is untouched until commit; auto-discard (D2) reverts on failure with no manual rollback. A plain read resolves to the committed base with any in-flight speculative overlay applied on top — so a prediction is visible with no ceremony, and a multi-step action's intermediate writes are visible mid-flight as pending state. `latest(() => x())` opts out to committed-only.
 
 So "optimistic" is a *use-label* for speculation, not a separate mechanism (per P1). Holding the write in the speculative scope rather than the shared base cell is what fixes E3 (a concurrent refetch of the base cell cannot collide with the prediction) and S1 (discard needs no remembered prior value, so interleaved rollbacks cannot corrupt state).
 
 **Open (the API question, not the mechanism question):** whether to ship an ergonomic primitive *named* `optimistic` (or `createOptimistic`, or a similar sugar) as a thin wrapper over a speculative scope. Per P5, this is decided on whether the bare action shape is awkward enough for the optimistic case to warrant a named wrapper — *not* by a principle-level refusal to expose sugar. Likely yes for the single-predicted-write case (the most common one); the negative-shape "no optimistic primitive" framing of an earlier draft was a premature lock-in and is withdrawn.
 
-Trade-off (durable): a plain read is no longer "just the cell" — it resolves through in-flight held writes. This is benign (a no-op when no action is in flight; it is value resolution, not implicit suspension) but it is a real change to the read path in `signal.ts`. The read-path direction this implies for Q2 is "(b) latest active overlay."
+Trade-off (durable): a plain read is no longer "just the cell" — it resolves through in-flight held writes. This is benign (a no-op when no action is in flight; it is value resolution, not implicit suspension) but it is a real change to the read path in `signal.ts`. The read-path direction this implies for Dim 2 (concurrence) is "latest active overlay."
 
 ### D4–D11 — Design direction from the transitions-solid porting exercise (2026-05-21)
 
-*Addresses Q1, Q5, Q7–Q9, and several questions not previously enumerated.* Carried over from the porting exercise as concrete things Solid does that pulse should not. These extend D1–D3 with positions on the read model, async surfacing, and the read-side commit boundary.
+*Addresses Q1 (locus), Q3 (authoring form), Q4 (initialization), Q5 (optimistic surface), plus several questions not previously enumerated.* Carried over from the porting exercise as concrete things Solid does that pulse should not. These extend D1–D3 with positions on the read model, async surfacing, and the read-side commit boundary.
 
 **D4 — No `flush()` in the surface.** Pulse should not need `flush()` or similar ceremony. Solid's staged-write + `flush()` is a push-batching artifact; a lazy pull-based read model removes the need — `setX(1); x()` returns `1` immediately. Batching still matters for *effects* (coalesce N writes → 1 run), but that should be automatic (microtask-scheduled), invisible. An await-for-async mechanism is still inherent and acceptable; a synchronous flush is not.
 
@@ -608,7 +648,7 @@ Trade-off (durable): a plain read is no longer "just the cell" — it resolves t
 
 **D12 — Atomic commit of incoming async data is a speculative-zone concern, not a per-read option.** A per-`use` flag (`use(sig, { lockstep: true })`) is structurally wrong: lockstep is a *group* property and a single `use` cannot name what it is in lockstep *with*. Also, a single `compute` reading multiple async sources is *already* internally lockstep (its body yields no value until every `use` resolves) — tearing only happens *across* sibling computeds / JSX holes, i.e. across a set of sibling nodes, i.e. a tree region. So the coordination unit is a **speculative zone** (today's `<Loading>` boundary is one motivation; Solid calls this `<Transition>`/`<Loading>`) — the read-side **dual of `action`**: `action` = write-side speculative scope (commit boundary for outgoing *writes*); a speculative zone = read-side speculative scope (commit boundary for incoming *resolution*). Both are boundaries, not per-element flags. "Lockstep or not" falls out of nesting with zero flags: no zone → independent/streaming commit; a zone → its contents commit in lockstep; a nested zone → that sub-group commits independently of its parent. A zone never controls upstream — it coordinates the commit of its own subtree only (DOM + published values), strictly downstream; sources are untouched. A per-read `{ eager: true }` opt-*out* could exist but is just sugar for a nested singleton zone, never the primary mechanism. This is the fix for the transitions example's E2 ("torn across boundaries"), red because the boundary is currently per-`<Loading>` and one logical change spans two.
 
-**Connecting back to the principles.** D4–D12 are consistent with the node/value-bag framing above and with P1 (speculation is one concept with two faces): a plain read (P3) returns the *latest entry* in the bag (committed or speculative overlay); `use` is the explicit unwrap (P2) of a future-valued entry with throw-to-suspend semantics inside restartable contexts; an `action` is the write-side speculative scope (P1, P4) that tags entries with itself; a speculative zone is the read-side dual (P1) that gates downstream publication of a region's entries until the speculations it depends on settle. The two faces share one mechanism: a held entry-set that either commits as a unit or is discarded as a unit. Whether any of this is engine-integrated, layer-above, or userland-composable over a smaller core is Q10 — unresolved.
+**Connecting back to the principles.** D4–D12 are consistent with the node/value-bag framing above and with P1 (speculation is one concept with two faces): a plain read (P3) returns the *latest entry* in the bag (committed or speculative overlay); `use` is the explicit unwrap (P2) of a future-valued entry with throw-to-suspend semantics inside restartable contexts; an `action` is the write-side speculative scope (P1, P4) that tags entries with itself; a speculative zone is the read-side dual (P1) that gates downstream publication of a region's entries until the speculations it depends on settle. The two faces share one mechanism: a held entry-set that either commits as a unit or is discarded as a unit. Whether any of this is engine-integrated, layer-above, or userland-composable over a smaller core is Q1 — unresolved.
 
 ---
 
@@ -618,7 +658,7 @@ Trade-off (durable): a plain read is no longer "just the cell" — it resolves t
 - **Lexicon:** [`CONTEXT.md`](./CONTEXT.md) — canonical definitions of the four dimensions, the failure modes, and research vocabulary
 - **Problem space:** [`transitions-problem-space.md`](./transitions-problem-space.md) — the four failure modes worked through with concrete examples
 - **Cross-cutting threads in LOG:**
-  - "Transitions branch in four dimensions" — the framing that motivates Q2–Q4
+  - "Transitions branch in four dimensions" — the framing that motivates Dim 2–4 (the cases that exist only when more than one speculation is permitted at once)
   - "Message-send to receivers of various existence-states" — broader receiver-existence framing
   - "Ricky Hanlon on React's API complexity" — the React-team's own admission that the low-level-API bet didn't pay off, informing pulse's stance on whether to follow React's model
 - **Dives most directly informing this document:**

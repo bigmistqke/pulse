@@ -16,36 +16,64 @@ source so definitions do not drift.
 
 ---
 
-## The four dimensions of transitions
+## The four dimensions of speculation
 
-A *transition* (see below) is coordination machinery for committing an async
-state change atomically. Transitions branch along four structural dimensions —
-the axes a transition mechanism must each decide how to handle. The framing
+A *speculation* (see below; pulse's term for what the field calls a *transition*)
+is coordination machinery for committing an async state change atomically: a
+tentatively-applied write-set held over committed state, observable to reads,
+eventually committed or discarded as a unit. Speculations branch along four
+structural dimensions — the axes a speculation mechanism must each decide how to
+handle. The four are the non-trivial corners of the partition
+`{one, many} × {disjoint, overlapping} × {concurrent, sequential}`. The framing
 originated in the [`LOG.md`](./LOG.md#cross-cutting-thread--transitions-branch-in-four-dimensions) cross-cutting thread "Transitions branch
-in four dimensions" (sessions 11–13); it is the organizing axis of
+in four dimensions" (sessions 11–13, when "transition" was still the working
+term); it is the organizing axis of
 [`pulse-design-direction.md`](./pulse-design-direction.md)'s comparison table and
-of [`transitions-problem-space.md`](./transitions-problem-space.md).
+of [`transitions-problem-space.md`](./transitions-problem-space.md). Each
+dimension carries the question its mechanism must answer.
 
-- **Dim 1 — internal branching.** A single transition contains a *tree* of
-  dependent async work — one logical change fans out into several fetches, some
-  of which may depend on others' results. The mechanism gathers all of it and
-  commits the whole tree together.
-- **Dim 2 — concurrent transitions.** More than one transition is in flight at
-  the same time — two independent logical changes, each with its own internal
-  tree.
-- **Dim 3 — input-arrival priority.** New input arrives *while* a transition is
-  still in flight. The newer intent should pre-empt, supersede, or be sequenced
-  against the older one.
-- **Dim 4 — state-overlap (entanglement).** Two concurrent transitions touch the
-  same state. Their commit order — or their mutual discard — must be decided.
+- **Dim 1 — Internal structure of one speculation.** What lives *inside* a single
+  scope: dependent async work (a → b → c — one logical change fans out into
+  several fetches, some depending on others), intermediate writes visible
+  mid-flight, multi-step composition, partial failure. *Mechanism question:* what
+  coherence guarantee does the scope make about its own contents?
+- **Dim 2 — Concurrence (disjoint).** N speculations alive at once, touching
+  *disjoint* state. *Mechanism question:* can N genuinely-independent concurrent
+  speculations run without serialization or mutual interference?
+- **Dim 3 — Supersession.** A newer intent arrives while a prior speculation is
+  in-flight; the newer invalidates the older. *Mechanism question:* pre-empt the
+  old, serialize the new, or race their commits? (React's priority lanes are one
+  implementation of supersession, not the dim itself — newer-wins-on-identity
+  and cancel-via-Drop are equally valid structural answers.)
+- **Dim 4 — Overlap (entanglement).** N concurrent speculations touch *shared*
+  state. *Mechanism question:* at commit time, auto-merge (Solid-style dep-graph
+  union-find), batch-merge on source-set intersection (Svelte), isolate /
+  last-commit-wins, or user-specified?
 
-**Dim 1 is the irreducible core.** A transition exists to gather one logical
-change's async work and commit it atomically; that is Dim 1 alone. Dims 2–4 exist
-only because a system may permit more than one transition at once: Dim 2 is two
-at once, Dim 3 is one pre-empting another, Dim 4 is two touching shared state. A
-mechanism that allows only one transition at a time needs only Dim 1. See
+**Why these four.** The partition `{one, many} × {disjoint, overlapping} ×
+{concurrent, sequential}` has four non-trivial corners:
+
+- *one* alive → Dim 1 (everything internal collapses into a single scope).
+- *many, disjoint, concurrent* → Dim 2 (the easy engineering case: keep them
+  truly independent).
+- *many, sequential* → Dim 3 (supersession is the only non-trivial way
+  "sequential" matters — coexistence requires concurrence).
+- *many, overlapping, concurrent* → Dim 4 (the hard case).
+
+Dim 1 is the irreducible core. A speculation exists to gather one logical
+change's async work and commit it atomically; that is Dim 1 alone. A mechanism
+that allows only one speculation at a time needs only Dim 1. See
 [`transitions-problem-space.md`](./transitions-problem-space.md) for worked
 examples and the full argument.
+
+**Note on terminology.** "Speculation" is pulse's term (per
+[`pulse-design-direction.md`'s P1](./pulse-design-direction.md)); the field
+generally uses "transition." Symmetric naming was chosen to make the
+discard-on-failure case as legible as the commit-on-success case — CPU branch
+speculation imports the mental model load-bearingly, not analogically. Where
+this doc still says "transition" (failure-mode references, the LOG thread title,
+historical filenames), it is the cross-reference to the field term, not a
+different concept.
 
 ## The four failure modes
 
@@ -62,18 +90,24 @@ forms below exist for cross-doc reference.
   pending, even when the work resolves almost immediately. (Exercises Dim 1.)
 - **FM3 — lost interactivity.** The committed-but-stale UI freezes, strobes, or
   loses input focus while async work is in flight, instead of staying live and
-  responsive. (Exercises Dim 1 + Dim 3, and Dim 2 if stale work is not
-  cancelled.)
-- **FM4 — uncommittable speculation.** A transition's in-progress state cannot be
-  abandoned without corrupting committed state, so a superseded change or a
-  cancelled preview leaves the UI inconsistent. (Exercises Dim 2 + Dim 4.)
+  responsive. (Exercises Dim 1 + Dim 3, and Dim 2 if stale work continues
+  uncancelled alongside the newer speculation.)
+- **FM4 — uncommittable speculation.** A speculation's in-progress state cannot
+  be abandoned without corrupting committed state, so a superseded change or a
+  cancelled preview leaves the UI inconsistent. (Exercises Dim 3 + Dim 4.)
 
-## Core transition terms
+## Core speculation terms
 
-- **Transition.** Coordination machinery that makes a state change involving
-  async work commit atomically — the UI moves from one coherent state to another,
-  never showing an incoherent in-between — while staying responsive during the
-  wait.
+- **Speculation** (formerly *transition*; the field's word). Coordination
+  machinery that makes a state change involving async work commit atomically —
+  the UI moves from one coherent state to another, never showing an incoherent
+  in-between — while staying responsive during the wait. Symmetric in
+  success/failure: a speculation either commits (becomes the new committed state)
+  or is discarded; "transition" presupposes the commit, "speculation" is neutral.
+  Pulse uses "speculation" for the concept; "transition" survives only as the
+  cross-reference to React/Solid/Svelte vocabulary. See
+  [`pulse-design-direction.md`'s P1](./pulse-design-direction.md) for the full
+  framing.
 - **Gather.** Collecting all the pending async work in a transition's scope and
   holding every resulting commit until the whole set is ready, so the commits
   land together. Pulse's `<Loading>` boundary is a gather.
