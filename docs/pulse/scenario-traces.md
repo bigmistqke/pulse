@@ -16,6 +16,18 @@ End-to-end traces of architecturally-distinct cases through pulse's engine
 forced deliberate design calls into the open (K1 → resolved to Position
 (C); H3 → Policy α for effect chains, lean).
 
+> **Note on selector notation.** The traces below were written under
+> [Q1](./questions.md#q1--fall-through-and-edge-policy)'s earlier
+> selector-on-edge framing (Model 2). Q1 has since resolved to **Model 1
+> (engine-managed chains)** — edges are plain `(source, target)` pairs
+> and the chain-match predicate lives engine-side rather than in a
+> closure on the edge. The two are *behaviourally equivalent* (same
+> chain-match logic, same fire/skip decisions); only the implementation
+> locus differs. Where a trace step reads `edge1.sourceSelector(name.slots,
+> S)` or `chainSelector([S, ROOT_SCOPE])`, mentally substitute "engine
+> evaluates chain-match for `edge1.target` against writeScope `S`." The
+> traces are kept as-is for the reasoning record.
+
 **Related pulse-repo docs:**
 
 - [`../async/CONTEXT.md`](../async/CONTEXT.md) — speculation lexicon, four dimensions, failure modes.

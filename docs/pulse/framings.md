@@ -206,14 +206,17 @@ engine doesn't need separate `setSignal` and `recompute` primitives — just
 `writeSlot`. The library calls it from user setters; the scheduler calls it from
 its recompute logic. The privileged status of user-initiated writes dissolves.
 
-### Edges are slot-local, dynamic, and walk-policy-driven
+### Edges are slot-local, dynamic, and engine-chain-aware
 
-Edges live on _slots_, not Nodes. Each (Node, Scope) slot has its own incoming
+Edges are plain `(source: Node, target: Slot)` references held by the source
+Node's `subs` list (r3-shape). Each (Node, Scope) slot has its own incoming
 and outgoing edge lists; a recompute rebuilds the slot's `deps` from scratch;
-discarding a slot cascades its edges away. The selector for "which source slots
-fire which target slots" is _walk-defined_ (engine routes notifications through
-the selector), so fall-through semantics, scope-aware subscription, latest-only
-subscription, and other policies are library code over a uniform edge mechanism.
+discarding a slot cascades its edges away. The "which source slot fires which
+target slot" policy is **engine-side** ([Q1](./questions.md#q1--fall-through-and-edge-policy)
+Model 1): on a write, the engine consults `chainFor(edge.target.scope)`,
+checks whether `writeScope` is in the chain and not shadowed by a more-specific
+slot, and fires if so. Fall-through semantics live in that one predicate;
+the edge structure carries no scope refs and no closures.
 
 ### Scope and Owner share structure (unification under exploration)
 
@@ -235,11 +238,12 @@ A pulse-relevant distinction surfaced by the H5 scenario:
   walking the chain `[S, …, ROOT_SCOPE]`. The returned value is coherent
   with `S`'s overlays.
 - **Effect** = _committed-state subscription._ An effect's body runs in
-  response to _commits_ (chain selector matches `ROOT_SCOPE` writes), not
-  speculative writes. Downstream signals that an effect maintains reflect
-  committed state. The effect's body re-runs _after_ commit; inside an
-  in-flight action that wrote one of the effect's deps, those downstream
-  signals are stale.
+  response to _commits_ (its target slot lives in `ROOT_SCOPE`, so the
+  engine's chain-match only fires on `ROOT_SCOPE` writes), not speculative
+  writes. Downstream signals that an effect maintains reflect committed
+  state. The effect's body re-runs _after_ commit; inside an in-flight
+  action that wrote one of the effect's deps, those downstream signals are
+  stale.
 
 The two are not interchangeable for the same "derive Y from X" need:
 
@@ -261,7 +265,8 @@ action(() => {
 
 The mechanism: a _computed_ has no consumer scheduler; its slot is populated
 on demand via `invoke` under whatever scope is reading. An _effect_ IS a
-consumer whose scheduling is gated by selector chain, and (per H1a-c)
+consumer whose scheduling is gated by the engine's chain-match predicate
+([Q1](./questions.md#q1--fall-through-and-edge-policy)), and (per H1a-c)
 defer-until-commit naturally excludes in-action visibility.
 
 **Guidance:** choose by whether downstream consumers need _synchronously
@@ -652,11 +657,14 @@ interface Node<T> {
 
 interface Edge {
 	source: Node<unknown>
-	sourceSelector: SlotSelector // walk-defined: which source slots fire me?
 	target: Slot<unknown>
 }
 
-type SlotSelector = (slots: Map<Scope, Slot<unknown>>, writeScope: Scope) => boolean
+// Engine's fire predicate (Q1 Model 1):
+//   On writeSlot(node, writeScope, ...), for each edge in node.subs:
+//     chain = chainFor(edge.target.scope)
+//     if writeScope is in chain AND no more-specific scope has a slot
+//       → invalidate(edge.target)
 
 // ── Engine: primitives ────────────────────────────────────────
 
@@ -664,7 +672,7 @@ function createNode<T>(defaultRecipe?: () => T | Promise<T>): Node<T>
 function writeSlot<T>(node: Node<T>, scope: Scope, slot: Slot<T>): void
 function readSlot<T>(node: Node<T>, scope: Scope): Slot<T> | undefined
 function invoke<T>(node: Node<T>, scope: Scope): T | Promise<T>
-function link(source: Node<unknown>, selector: SlotSelector, target: Slot<unknown>): Edge
+function link(source: Node<unknown>, target: Slot<unknown>): Edge
 function unlink(edge: Edge): void
 function subscribe(node: Node<unknown>, handler: (e: SlotChangeEvent) => void): () => void
 
@@ -700,7 +708,7 @@ function compute<T>(fn: () => T): Node<T> {
 
 function get<T>(node: Node<T>): GetReturn<T> {
 	const scope = getCurrentScope()
-	if (currentTracker) link(node, chainSelector(chainFor(scope)), currentTracker)
+	if (currentTracker) link(node, currentTracker)
 	const cached = invoke(node, scope) as T
 	if (cached && typeof (cached as any).then === 'function') {
 		return makeAwaitable(cached as any) as GetReturn<T>

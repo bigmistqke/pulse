@@ -64,14 +64,16 @@ from here rather than re-defined.
   [`framings.md`'s falsified hypotheses](./framings.md#speculation-purely-above-unmodified-r3-doesnt-work).
 - **Value-bag.** The per-scope collection of slots. Each scope owns a bag;
   walks consult the active scope's bag first.
-- **Edge.** A slot-local subscription. Carries a _selector_ (a chain-matching
-  predicate) so a single Node can fan out to consumers with different
-  walk-policy needs. Edges are dynamic and walk-policy-driven; see
-  [`framings.md`'s edges framing](./framings.md#edges-are-slot-local-dynamic-and-walk-policy-driven)
-  and [`questions.md`'s Q1](./questions.md#q1--fall-through-and-edge-policy).
-- **Selector.** The predicate on an edge that decides whether a given walk
-  matches. The Model 2 "selectors on edges" framing for the fall-through
-  problem.
+- **Edge.** A plain `(source: Node, target: Slot)` dependency reference on
+  `node.subs`. Per [Q1](./questions.md#q1--fall-through-and-edge-policy)'s
+  resolution (Model 1 — engine-managed chains), edges carry no scope refs
+  and no closures; the engine resolves chain-match at fire time using the
+  target slot's scope. See [`framings.md`'s edges framing](./framings.md#edges-are-slot-local-dynamic-and-walk-policy-driven).
+- **Chain-match.** The engine-side predicate that decides whether a write
+  to `(node, writeScope)` should fire an edge whose target lives in some
+  scope `S`. True iff `writeScope` is in `chainFor(S)` and no
+  more-specific scope in the chain currently has a slot for `node`. This
+  is the entire delta from r3's fire mechanism.
 
 ## Walks
 

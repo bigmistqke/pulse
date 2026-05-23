@@ -37,8 +37,40 @@ either:
 
 ### Q1 — Fall-through and edge policy
 
-Status: working candidate framing identified (Model 2 — selector-on-edge). Not
-locked in; sub-questions remain open at the next level down.
+Status: **resolved — Model 1 (engine-managed chains).** Selected on the
+"lean on r3" criterion: Model 1 is the minimal-possible-delta from r3's
+existing fire mechanism. The exercise of comparing alternatives is preserved
+below as historical exploration — Models 2/3/4 and Options 6/7 were each
+considered and found to be bigger departures than the problem warrants.
+
+**Decision rationale.** R3 already gives us the tracker mechanism, the
+propagation machinery, push-pull-push scheduling, dirty-bit logic — none
+of which Q1 questions. The single structural delta speculation forces is
+multi-slot per Node (the falsified-hypothesis result). Once multi-slot
+exists, r3's write fire-loop needs exactly one new predicate:
+
+```ts
+function writeSlot(node, scope, value) {
+  node.slots[scope] = { cached: value, subs: [...] }
+  for (const sub of node.subs) {
+    if (chainMatch(sub, scope)) invalidate(sub)   // ← only delta from r3
+  }
+}
+```
+
+Where `chainMatch(sub, writeScope)` walks `chainFor(sub.targetSlot.scope)`,
+finds `writeScope` in it, and returns true iff no more-specific scope in
+the chain has its own slot. The chain is derived from the target slot's
+scope (a structural property); nothing is captured in a closure; nothing
+is tagged on the edge. Edges stay r3-shaped: plain `(source, target)`
+references on `node.subs`.
+
+This means: scope identity stays inside scope-owned data structures (slots,
+action handles, parent pointers); the engine is introspectable ("why did
+this fire" is data, not a closure call); custom non-chain policies would
+require engine extension (not free, but the demonstrated policy space is
+small — chain plus root-only — and adding kinds is straightforward if
+needed later).
 
 **The break, traced concretely.** With `name`, `doubleName = compute(() =>
 get(name) + get(name))`, and the initial outside-action `get(doubleName)`
@@ -53,47 +85,63 @@ action(function* () {
   //   - doubleName.slots[S] miss → populate: invoke defaultRecipe under S.
   //   - Recipe runs. get(name) under S → name.slots[S] miss → walk falls
   //     through to name.slots[ROOT_SCOPE] → "foo". Twice → "foofoo".
-  //   - Cache in doubleName.slots[S]. Register edge — ↓ THE QUESTION ↓:
-  //       (Model 1) source slot: name.slots[ROOT_SCOPE] → target: doubleName.slots[S]
-  //       (Model 2) source Node: name with SELECTOR over chain [S, ROOT_SCOPE]
-  //                 target: doubleName.slots[S]
+  //   - Cache in doubleName.slots[S]. Register an edge from name → this slot.
+  //     ↓ THE QUESTION: what does that edge look like, and how does the
+  //     engine know to fire it when name.slots[S] is later created? ↓
   setName("name")
   //   - writeSlot(name, S, …) — creates name.slots[S].
-  //   - Model 1: the edge points at slots[ROOT_SCOPE]; the write was to
-  //     slots[S]; no match. doubleName.slots[S] stays cached "foofoo". WRONG.
-  //   - Model 2: the edge's selector matches writes to S in its chain.
-  //     Fires. doubleName.slots[S] invalidates. RIGHT.
+  //   - Naive slot-to-slot edge (source = name.slots[ROOT_SCOPE]) doesn't
+  //     match the write to name.slots[S]. doubleName.slots[S] stays cached
+  //     "foofoo". WRONG. The engine has to know more than "source slot".
 })
 ```
 
-Simple slot-to-slot edges (Model 1 as-stated) cannot handle the fall-through
-case. Either the engine has to do something at slot-creation time (re-link), or
-edges have to be richer than direct slot pointers (selectors). Note: neither
-"ROOT_SCOPE" nor "fall-through" is an engine concept — both live in walks. The
-chain is just a list of scope keys the walk traversed; the engine sees opaque
-keys uniformly.
+Simple slot-to-slot edges cannot handle fall-through *by themselves*. The
+engine has to know something extra — chain semantics, a per-edge predicate,
+or a re-link discipline. Models 1–4 below explore the design space of
+"edges on the source node," differing in *where* and *when* chain
+knowledge is applied. Options 6–7 step outside that frame entirely and
+question commitments (push-based reactivity, edge-on-node storage,
+cross-scope edges at all) that were inherited from r3 without explicit
+defense.
 
-**Two candidate models.**
+**Historical: alternatives considered.** Each was evaluated and rejected
+relative to Model 1; preserved for the reasoning trace.
 
-*Model 1 — Re-link on slot creation.* Edges are simple slot-to-slot pointers.
-When `writeSlot(node, S, slot)` creates a new slot, the engine walks an index of
-edges from `node` whose target scope is `S` or a descendant, and re-links any
-whose current source slot is at a less-specific position than `S` in the
-target's chain. Then invalidates affected targets.
+**Four edge-on-node models.**
+
+*Model 1 — Engine-managed chains.* Edges hold plain `(source, target)`
+pairs; no scope identities, no closures. On a write, the engine computes
+`chainFor(edge.target.scope)`, locates `writeScope` in it, checks for
+shadowing slots in more-specific positions, fires if not shadowed. The
+engine knows about chains; the policy is data, not a callback. (Strictly
+speaking this is a refinement of the original "re-link on slot creation"
+sketch — same engine-side chain semantics, computed at fire-time rather
+than maintained as a re-link.)
 
 ```ts
-interface Edge { source: Slot; target: Slot }
-// On writeSlot(node, S, ...):
-//   walk an index (source Node, target scope) → edges
-//   re-link edges whose source is now superseded by the new slot
-//   invalidate targets
+interface Edge { source: Node; target: Slot }
+
+// On writeSlot(node, writeScope, ...):
+for (const edge of node.subs) {
+  const chain = chainFor(edge.target.scope)   // derived; not captured
+  const idx = chain.indexOf(writeScope)
+  if (idx === -1) continue
+  let shadowed = false
+  for (let i = 0; i < idx; i++) {
+    if (node.slots.has(chain[i])) { shadowed = true; break }
+  }
+  if (!shadowed) invalidate(edge.target)
+}
 ```
 
-Trade-offs: simple edge structure; *engine has to know about chains* to do the
-re-link correctly (or accept a callback from the walk for "is this scope more
-specific than that one for this edge's purposes?"); cost amortised on slot
-creation (rarer than slot writes); no clean extension path for non-fall-through
-policies (latest, scope-only, custom) without engine changes or more callbacks.
+Trade-offs: *no scope refs in edges* — scope identity stays inside scope-owned
+data structures (slots, action handles, parent pointers); engine is
+**introspectable** — "what does this edge fire on" is structured data, not a
+closure call; natural indexing path (bucket edges by target scope); but the
+*engine knows about chains* — fall-through semantics are baked in, and
+non-chain policies (latest-bypass, scope-only, snapshot-at-T) need engine
+extension to support.
 
 *Model 2 — Selector-on-edge.* Edges store a *selector function* — a walk-defined
 predicate that decides whether a write matches. The engine queries selectors on
@@ -146,73 +194,183 @@ predicates; extensible to arbitrary new walks without engine changes; cost is
 per-write per-edge function call (same big-O as today's "walk subs," with a
 constant-factor bump); edges stay valid across slot creation/destruction
 (selectors re-evaluate against current state every time, so no slot-lifecycle
-bookkeeping pressure on the edge structure).
+bookkeeping pressure on the edge structure). *Cost surfaced on review:*
+selectors close over scope chains (`chainSelector([S, ROOT_SCOPE])`), so
+edges in long-lived `node.subs` arrays hold scope references inside closures.
+Cascade cleanup on discard/commit releases them — the lifetime is correct —
+but the engine becomes **un-introspectable** (debugging "why did this fire"
+means calling opaque predicates), and scope identity quietly leaks into a
+long-lived data structure conceptually.
 
-**Lean: Model 2.** Reasons:
+*Model 3 — Edge with structured kind-tag.* Hybrid. Edges carry a small
+enumerated policy tag plus the minimal data that policy needs; the engine
+handles each kind with known logic.
 
-1. *In the spirit of "engine resolution is open"* — policies live in walks, not
-   in engine.
-2. *Slot lifecycle and edge correctness decouple* — slots come and go without
-   needing the engine to rebuild edges.
-3. *Custom walks compose without engine extension* — `latest`, scope-only,
-   "snapshot-at-time-T," "subscribe-to-root-only," "fire-on-any-change"
-   are all selectors; new walks ship their own selector.
-4. *The cost is acceptable* — same big-O as r3's existing sub-walking, with a
-   constant-factor bump for the function call. r3 was already paying O(subs) on
-   every set; Model 2 keeps the bound.
+```ts
+type EdgePolicy =
+  | { kind: 'chain' }                          // chain derived from target.scope
+  | { kind: 'root-only' }                      // only fire on writes to ROOT_SCOPE
+  | { kind: 'scope-only'; scope: Scope }       // exact-scope match
+  // ... small enumerated set, growable by engine update
+interface Edge { source: Node; target: Slot; policy: EdgePolicy }
+```
 
-**Commit / discard paths trace cleanly under Model 2.**
+Trade-offs: most of Model 1's introspectability (policy is data, debuggable,
+indexable) plus more of Model 2's extensibility (new policies = new tag
+values + engine handlers, a small surface change rather than zero). The
+`'scope-only'` variant does hold a scope ref in the edge — so the
+scope-leak concern returns, but only when explicitly used. Adds engine
+surface area per policy kind; bets that the space of *useful* policies is
+small enough (~5) that an enumeration is fine.
+
+*Model 4 — Slot-to-slot edges with re-link on slot creation.* Edges are
+direct `(sourceSlot, targetSlot)` pointers. When a new slot is created at
+a more-specific scope — `writeSlot(node, S, ...)` — the engine walks
+edges into the *old* source slot whose target's chain now resolves
+through `S`, and re-points them to the new slot. Writes then fire only
+the actually-written slot's direct subs (no chain-walk at fire time).
+
+```ts
+interface Edge { source: Slot; target: Slot }
+
+// On writeSlot(node, S, ...) when this creates a new slot:
+//   for each existing edge into a less-specific slot of `node` whose
+//   target.scope's chain now passes through S — re-point edge.source
+//   to the new slot. Then invalidate. Subsequent writes fire the new
+//   slot's direct subs only.
+```
+
+Trade-offs: writes are cheap (linear in *direct* subs, not all subs of
+the node); slot creation pays the chain-walk cost, but creation is rarer
+than writes. Engine still has to know about chains (for the re-link),
+so introspectability is preserved. Adds slot-lifecycle bookkeeping (the
+re-link step on every slot creation), which is the main reason the doc
+originally rejected it. Trade-off shifts: amortizes work toward slot
+creation, away from the hot write path.
+
+**Trade-off rebalance (edge-on-node models).**
+
+| Concern | Model 1 (engine chains) | Model 2 (selectors) | Model 3 (kind-tags) | Model 4 (re-link) |
+| --- | --- | --- | --- | --- |
+| Engine size / minimality | larger (chain semantics) | smallest | medium | medium-large |
+| Walk extensibility w/o engine change | low | full | medium | low |
+| Edges hold scope refs | no | yes (in closures) | only for `'scope-only'` | no |
+| Introspectable "why did this fire" | yes | no | yes | yes |
+| Write hot-path cost | O(subs) + chain-walk | O(subs) + closure call | O(subs) + tag dispatch | O(direct subs only) |
+| Slot-creation cost | trivial | trivial | trivial | O(affected edges) re-link |
+| Honest about "fall-through IS the policy" | yes | hides it behind closures | yes, with named variants | yes |
+
+**Why Model 1 won the rebalance.** The decision criterion is "minimal
+delta from r3" (see the resolved status above). On that criterion: Model 1
+is one predicate added to r3's existing fire loop; Models 2/3/4 each
+require new edge shapes, dispatch layers, or slot-creation-time
+bookkeeping. The space of demonstrated policies is also small (chain
+plus root-only), so Model 2's extensibility argument never paid rent.
+
+**Axis-level alternatives — questioning inherited commitments.**
+
+Models 1–4 all sit inside the same frame: push-based reactivity, edges
+stored on the source Node, cross-scope edges exist. Those commitments came
+from r3 and were never explicitly defended. Two options outside the frame:
+
+*Option 6 — Scope-owns-edges (storage inversion).* Subscriptions live on
+the scope at which the read happened, not on the source Node:
+`scope.subscriptions: Map<Node, Consumer[]>`. On `writeSlot(node,
+writeScope, ...)`, the engine iterates `writeScope.subscriptions[node]`
+plus the same for every descendant scope (chain semantics live in
+scope-tree downward-traversal). When a scope is committed/discarded, its
+subscription map drops with it; no node ever holds a scope ref, no edges
+ever close over scopes. Trade-offs: pristine scope-isolation story (the
+scope-leak concern dissolves entirely — Nodes know nothing about scopes);
+writes traverse the scope tree, so cost depends on tree shape (cheap for
+shallow, potentially expensive for deeply-nested speculations); Node is
+no longer the primary invalidation entry point, which is a real shift
+from the r3 lineage but not necessarily wrong.
+
+*Option 7 — Read-locality (per-scope snapshot mini-graphs).* Reads
+inside a scope snapshot whatever the chain would resolve to into
+scope-local state on first touch. The scope becomes a self-contained
+reactivity world — no cross-scope edges exist by construction. Commit
+replays the scope's writes against root and rebuilds invalidations on
+the outer graph. Discard drops the mini-graph; nothing outside ever
+saw it. Trade-offs: the fall-through problem *dissolves* (no chain
+semantics needed; reads see scope-local state period); pays read-side
+snapshot cost on first touch per node; commit pays replay cost; the
+mental model changes — speculations are *forks* of state, not
+overlays on it. Especially clean fit if pulse's primary use case is
+bounded short-lived speculations (most UI optimistic-update flows).
+
+These differ from Models 1–4 along *different axes* and aren't directly
+table-comparable. The relevant question isn't "Option 6 vs Model 3"; it's
+"do the inherited commitments still earn their keep?"
+
+- Push-based reactivity inherited from r3 → pull/version-based
+  alternatives (Adapton-style) weren't seriously considered.
+- Edges-on-source-Node inherited from r3 → scope-owns-edges (Option 6)
+  inverts this.
+- Cross-scope edges inherited as obvious → read-locality (Option 7)
+  questions whether they should exist.
+
+Worth weighing each commitment on its own before picking a Model. If
+Option 7's snapshot cost is acceptable, it may genuinely dominate Models
+1–4 on simplicity (no fall-through machinery, no scope leakage, scope
+disposal is trivial). The question becomes whether the snapshot cost is
+acceptable for pulse's expected workload.
+
+**Decision (recap):** the "lean on r3" criterion settled it for Model 1 —
+multi-slot is the irreducible delta; Option 7's fork model would discard
+r3's per-node sub-list entirely and re-build the reactivity layer per
+scope. Too big a departure for the benefits available. Kept as a
+plausible future pivot if the per-scope snapshot model ever becomes
+attractive for other reasons.
+
+**Commit / discard paths trace cleanly under all three models** — the
+chain-walk semantics are the same; only *where the logic lives* differs.
 
 - *Commit `S`.* Slots tagged `S` get promoted (the library does
-  `writeSlot(node, ROOT_SCOPE, ...)` for each, then drops the slot at `S`).
-  Each promotion is a write to `ROOT_SCOPE`, which fires selectors that care
-  about `ROOT_SCOPE` (e.g. the chain selector `[S, ROOT_SCOPE]` after the
-  scope-`S` slot is dropped: writeScope is `ROOT_SCOPE`, chain index is 1, no
-  more-specific slot exists → fire). Downstream computeds invalidate, recompute
-  on next read against the now-current state.
-- *Discard `S`.* Drop slots tagged `S`. Edges into those dropped slots also drop
-  (slots own their incoming edges; cascade-removed). Downstream readers outside
-  `S` are untouched — their selectors don't match writes-to-`S`. No spurious
-  invalidation. ✓
-- *Supersession.* Discard old scope; open new scope. Above logic handles it.
+  `writeSlot(node, parentScope, ...)` for each, then drops the slot at `S`).
+  Each promotion is a write to `parentScope`. Under Model 1/3 the engine
+  computes shadow-checks; under Model 2 the chainSelectors evaluate. Either
+  way: downstream consumers in `parentScope`'s chain invalidate and recompute.
+- *Discard `S`.* Drop slots tagged `S`. Edges into those dropped slots also
+  drop (slots own their incoming edges; cascade-removed). Downstream readers
+  outside `S` are untouched. ✓
+- *Supersession.* Discard old scope; open new scope.
 
 **Sub-questions still open at the next level down.**
 
-These don't gate the architecture; they're what's left after picking the
-framing:
+Independent of which model wins:
 
-- *Indexing.* Naive Model 2 calls every edge's selector on every write to the
-  source. For a hot Node with many subscribers, this is expensive. An index
-  (e.g., bucket edges by "what scopes does my selector care about") could cut
-  the work. But indexing pushes some knowledge back into the engine — either
-  selectors expose a "what scopes do I care about" hint that the engine indexes
-  by, or selectors are opaque and the engine pays the linear cost. Both are
-  viable; perf measurements would decide.
-- *Selector parameter shape.* The sketch above is `(sourceSlots, writeScope) =>
-  boolean`. Should it also carry: the specific slot being written (not just
-  the scope), the previous slot value (for change-detection), the target slot
-  (so the selector can branch on target context)? Each addition is
-  power-vs-complexity. Likely minimal start.
-- *Edge identity across recomputes.* Each recompute rebuilds `deps`, so new
-  edges are formed. Are selector *functions* re-created or cached? Memoising
-  selectors (`chainSelector([S, ROOT_SCOPE])`) is library-side optimisation if
-  it matters. Engine doesn't care.
+- *Indexing.* For a hot Node with many subscribers, fire-on-write should
+  not be linear in `node.subs`. Under Model 1/3 the engine has structural
+  data (target scope, policy tag) to bucket by; under Model 2 selectors
+  must expose a hint (`whichScopesDoICareAbout`) for the engine to index.
+  Indexing wants Model 1 or 3.
+- *Selector parameter shape (Model 2 only).* If Model 2 wins, the predicate
+  signature is `(sourceSlots, writeScope) => boolean` — minimal. Should it
+  also carry the specific slot, previous value, or target context? Each
+  addition trades power for complexity. Minimal start is the safe default.
+- *Edge identity across recomputes.* Each recompute rebuilds `deps`. New
+  edges are formed each time. Under Model 2, selector functions are
+  re-allocated; library-side memoisation if it matters. Under Model 1/3,
+  the edge is plain data and cheap to recreate.
 - *Dropped-slot races.* If a write fires an edge whose target slot has been
-  dropped (e.g., scope discard happened between write and notification),
-  engine has to detect and skip. Lazy-prune-on-iteration is the natural answer.
-  Standard reactive bookkeeping.
+  dropped (scope discard between write and notification), the engine
+  detects and skips. Lazy-prune-on-iteration. Same answer under all three.
 - *Async writes ([Q4](#q4--async-at-the-engine-level) interaction).* Resolved:
   resolution is **not** an engine event. A slot's `cached` may be an Awaitable
   whose internal `status` flips later, but the slot's *identity* hasn't
-  changed and there's no `writeScope` to feed a selector. Consumers that need
-  to react to resolution already hold the Awaitable reference (returned by
-  `get`); they attach their own `.then` / `yield*` / `use`. The selector
-  signature stays writes-only. See [Q4](#q4--async-at-the-engine-level).
+  changed and there's no `writeScope` to feed any policy mechanism. Consumers
+  that need to react to resolution already hold the Awaitable reference
+  (returned by `get`); they attach their own `.then` / `yield*` / `use`. The
+  fire mechanism (under whichever model) stays writes-only. See
+  [Q4](#q4--async-at-the-engine-level).
 
-**Related:** [Q3](#q3--consumer-patterns) (consumers subscribe via the same selector mechanism; consumer
+**Related:** [Q3](#q3--consumer-patterns) (consumers subscribe via the same edge mechanism; consumer
 notification IS a "fire an edge" event whose target is a side-effect handler
 instead of a cache invalidation), [Q7](#q7--the-defaultrecipe-mechanism) (`defaultRecipe` is a similar engine-vs-
-walk question at a different level), [Q4](#q4--async-at-the-engine-level) (async resolution as a "write" event).
+walk question at a different level), [Q4](#q4--async-at-the-engine-level) (async resolution is *not* a write event;
+see Q4).
 
 ### Q2 — Scope/Owner unification
 
@@ -263,11 +421,13 @@ DOM update, mark cache dirty + propagate). No engine primitive distinguishes
 them.
 
 **Deferred-until-commit semantics** for effects-under-speculation fall out of
-**selector composition**, not engine logic: an effect created in `ROOT_SCOPE`
-has its tracking edges formed with `chainSelector([ROOT_SCOPE])`; writes to a
-speculative scope don't match the chain → don't fire. Writes to `ROOT_SCOPE`
-(commit promotion) match → fire. *No defer logic anywhere; the chain is the
-policy.*
+**chain-match composition**, not engine logic: an effect created in
+`ROOT_SCOPE` has its tracking edges targeting a consumer slot in
+`ROOT_SCOPE`. Per [Q1](#q1--fall-through-and-edge-policy) Model 1, the
+engine's chain-match predicate at fire time uses `chainFor(ROOT_SCOPE) =
+[ROOT_SCOPE]` — writes to a speculative scope are not in the chain →
+don't fire. Writes to `ROOT_SCOPE` (commit promotion) are in the chain →
+fire. *No defer logic anywhere; the chain is the policy.*
 
 **Verified by [H1a-c trace](./scenario-traces.md#h1a-c--effect-under-speculation).** H1a (write under S → effect doesn't fire), H1b
 (commit → effect fires once), H1c (discard → effect never fires).
@@ -292,10 +452,10 @@ policy.*
   fire-and-invalidate something the engine should expose more directly,
   or is iterating subs in the consumer correct?
 
-**Related:** [Q1](#q1--fall-through-and-edge-policy) (selectors are the chain mechanism; [Q3](#q3--consumer-patterns) subscribes via
-them), [Q4](#q4--async-at-the-engine-level) (Promise resolution is *not* an engine event; consumers hold the
-Awaitable and handle their own resumption), [Q7](#q7--the-defaultrecipe-mechanism) (`defaultRecipe` interacts with
-consumer's initial run).
+**Related:** [Q1](#q1--fall-through-and-edge-policy) (engine-side chain-match is the policy; [Q3](#q3--consumer-patterns) subscribes via
+the same edge mechanism), [Q4](#q4--async-at-the-engine-level) (Promise resolution is *not* an engine event;
+consumers hold the Awaitable and handle their own resumption),
+[Q7](#q7--the-defaultrecipe-mechanism) (`defaultRecipe` interacts with consumer's initial run).
 
 ### Q4 — Async at the engine level
 
@@ -346,8 +506,8 @@ resumption mechanism:
 
 This preserves [P2](./framings.md#p2--acknowledge-async-dont-hide-it):
 async re-trigger paths are *explicit per walk*, not ambient. It also
-keeps Q1's selector signature clean — selectors fire on writes only, never
-on resolutions.
+keeps Q1's chain-match predicate clean — the engine fires on writes only,
+never on resolutions.
 
 **Settled by Awaitable + the [C2 trace](./scenario-traces.md#c2--action-body-with-async-read):**
 
@@ -421,8 +581,9 @@ probably expose `chainFor` as user-overridable, or expose `terminalScope`
 as a configurable per-tree property. Open whether this is a library
 concern or whether the engine needs to know about it.
 
-**Related:** [Q2](#q2--scopeowner-unification) (the unification question), [Q1](#q1--fall-through-and-edge-policy) (selectors quote scope
-identities; scope value-shape constrains how selectors can match).
+**Related:** [Q2](#q2--scopeowner-unification) (the unification question), [Q1](#q1--fall-through-and-edge-policy) (the chain-match
+predicate consults scope identities; scope value-shape constrains how
+matching works).
 
 ### Q7 — The `defaultRecipe` mechanism
 
@@ -433,7 +594,7 @@ for the requested scope. Is this:
 - *(ii) Folded into the root-scope slot.* The slot the library tags with
   `ROOT_SCOPE` *is* the default; `invoke` with no slot for `S` falls through
   along the walk's chain and creates a slot for `S` using that slot's recipe.
-- *(iii) Walk-defined.* `invoke` takes a selector that says what to do when no
+- *(iii) Walk-defined.* `invoke` takes a callback that says what to do when no
   slot matches — return undefined, fall through, invoke a fallback recipe.
 
 (ii) is most parsimonious but loses the explicit "this is the default recipe"
@@ -442,11 +603,12 @@ Probably a cosmetic question, but worth deciding.
 
 **Sub-question (surfaced by [doubleName trace](./scenario-traces.md#doublename-under-scope-s)):** what `cached` does a *promoted*
 slot carry? Three sub-positions: (a) preserve `cached` + carry over old deps
-(but old deps had chain selectors keyed to the old scope, which doesn't match
-the new scope's chain); (b) preserve `cached`, drop deps, let next recompute
-rebuild; (c) drop `cached`, force recompute on next read. *Lean (b)*:
-preserves the work done in the scope without carrying selector mismatches
-forward. Related to [Q1](#q1--fall-through-and-edge-policy) (selector identity across scope transitions).
+(but old deps were registered with edges into a slot at the old scope; the
+chain-match logic at the new scope would re-resolve from scratch anyway);
+(b) preserve `cached`, drop deps, let next recompute rebuild; (c) drop
+`cached`, force recompute on next read. *Lean (b)*: preserves the work
+done in the scope without carrying stale edge structure forward. Related
+to [Q1](#q1--fall-through-and-edge-policy) (edge re-formation across scope transitions).
 
 ### Q8 — Tracker vs Scope: separate or unified?
 
@@ -572,11 +734,12 @@ unaffected by whether fires are deferred.
   external consumers, or are they also deferred until outer finishes? Lean:
   inner-commit fires immediately *within the outer's body*, because the
   outer's body might read the post-inner state and the body is imperative.
-  But for *external* consumers (chain matches `ROOT_SCOPE`), they shouldn't
-  fire until outer commits — which falls out of the chain selector anyway
-  (the chain selector for an external consumer doesn't match writes to the
-  outer's scope). So this might be a non-issue under the chain mechanism.
-  Worth verifying with a deliberate trace.
+  But for *external* consumers (whose target slots live in `ROOT_SCOPE`),
+  they shouldn't fire until outer commits — which falls out of the
+  chain-match predicate anyway (`chainFor(ROOT_SCOPE)` doesn't contain
+  the outer's scope, so writes-to-outer's-scope don't fire ROOT-targeted
+  edges). So this might be a non-issue. Worth verifying with a
+  deliberate trace.
 - *Edge-target-dropped races.* If during a commit, an edge's target slot
   gets dropped (e.g., the consumer was tied to a different scope that
   closed during the commit's processing), the deferred fire would target a
@@ -613,8 +776,8 @@ diverge for effects inside actions.
 **Lean: Policy α** — composition is natural; the user creating an effect
 inside an action is opting into reactivity at the action's scope. Policy
 β is defensible (effects-always-committed-only as an invariant) but
-narrower. The mechanism (selector chains) supports both; this is a real
-design call.
+narrower. The mechanism (engine-side chain-match per [Q1](#q1--fall-through-and-edge-policy))
+supports both; this is a real design call.
 
 **Related sub-question:** *Effect re-parenting on commit.* Could an
 in-action effect *survive* commit by re-parenting its owner to `S.parent`

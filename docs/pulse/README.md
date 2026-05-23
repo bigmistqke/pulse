@@ -54,15 +54,17 @@ that consult them — not a built-in engine concept.
 
 Roughly priority-ordered:
 
-- _Working candidate for [Q1](./questions.md#q1--fall-through-and-edge-policy) (selectors-on-edges)._ Architecture has a
-  plausible framing now. Next: verify by tracing more cases — supersession,
-  nested scopes, late-bound subscribers — and push on [Q1](./questions.md#q1--fall-through-and-edge-policy)'s sub-questions
-  (indexing, dropped-slot races, async resolution as a write event) when they
-  start mattering.
+- _[Q1](./questions.md#q1--fall-through-and-edge-policy) resolved — Model 1 (engine-managed chains)._ Selected on the
+  "lean on r3" criterion: minimal-possible delta from r3's fire loop (one
+  chain-match predicate). Next: verify by tracing more cases —
+  supersession, nested scopes, late-bound subscribers — and push on
+  remaining sub-questions (indexing, dropped-slot races) when they start
+  mattering.
 - _Trace `doubleName`-under-scope-S end-to-end through this stack._ Verifies
-  the falsified hypothesis is genuinely fixed by multi-slot + Model 2 edges;
-  exercises [Q1](./questions.md#q1--fall-through-and-edge-policy) and [Q5](./questions.md#q5--recipe--cache-asymmetry-between-signal-and-computed-slots) along the way. (Partial trace already in [Q1](./questions.md#q1--fall-through-and-edge-policy); a full
-  end-to-end with engine and library calls would catch remaining holes.)
+  the falsified hypothesis is genuinely fixed by multi-slot + the
+  engine-side chain-match predicate; exercises [Q1](./questions.md#q1--fall-through-and-edge-policy) and [Q5](./questions.md#q5--recipe--cache-asymmetry-between-signal-and-computed-slots) along the
+  way. (Partial trace already in [Q1](./questions.md#q1--fall-through-and-edge-policy); a full end-to-end with engine and
+  library calls would catch remaining holes.)
 - _Consumer abstraction ([Q3](./questions.md#q3--consumer-patterns))._ Once edges and slots are clear, the consumer
   shape determines how Effect/JSX-binding/Computed-cache compose.
 - _Scope/Owner unification ([Q2](./questions.md#q2--scopeowner-unification))._ Likely the cleanest answer; needs verifying
