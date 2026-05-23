@@ -3237,20 +3237,42 @@ commitment the explorative phase is meant to avoid.
 - **A1.** `setX` inside action, read `X` back inside the same action. Tests
   whether a write sees itself on subsequent read inside the scope. *Expected:
   yes — the slot at `S` is what reads see.*
+- **A1b.** Same as A1 but interleaved with derived reads:
+  `setX(1); read(f(X)); read(X); read(f(X)); setX(2); read(f(X))`. Tests
+  that all reads — primitive *and* derived — see fresh values in the same
+  scope tick, not just the self-read. (A1 alone could "pass" on a
+  single-slot bag without ever invalidating derivative caches.)
 - **A2.** ✓ `setX`, read derived `f(X)` — the `doubleName` case. Traced.
 - **A3.** Action writes multiple signals (`setX`, `setY`); read derived
   `f(X, Y)`. Tests whether multiple scope-tagged slots compose into one
   derived under the same scope. *Expected: yes — recipe runs once, reads
   each under `S`. Conditional on Q-H (tracker-as-scope) and Q-A selector
   dedup behaving correctly under multi-source reads.*
+- **A3b.** Order-sensitive intermediate coherence:
+  `setX(...); read(f(X, Y)); setY(...); read(f(X, Y))`. Tests whether the
+  intermediate read sees `f(newX, oldY)` (Position C synchronous fires
+  propagate dirty mid-action) or `f(oldX, oldY)` (Position B
+  derived cache only invalidated at action end). Action-body analogue of
+  K1b. *Expected under (C): fresh on each read.*
 - **A4.** Action writes one signal; two distinct deriveds depend on it. Tests
   that both deriveds invalidate independently and re-read under `S`.
+- **A4b.** Sibling-derived coherence: after `setX`, read derived `d1`, then
+  derived `d2`. Are both fresh? Does reading `d1` first somehow pin a
+  stale cache for `d2`? Probes whether mid-action recompute of one
+  derived leaks staleness to its sibling. Cuts multiple ways depending
+  on Q-A selector dispatch ordering.
 - **A5a.** Functional setter: `setX(x => x + 1)` inside action. Tests *what
   the setter callback's `x` parameter is*: committed value or speculative-
   slot value. Library-API design question.
 - **A5b.** Functional setter, write side: where does the setter's returned
   value land? Tests that the write goes to the speculative slot at `S`,
   consistently with sync `setX(v)`. *Expected: yes.*
+- **A5c.** Functional setter callback reading a downstream derived:
+  `setX(x => { const d = read(f(X)); return d + 1 })`. Tests what the
+  derived `f(X)` seen inside the callback reflects — the pre-setter
+  committed `X`, the speculative `X` (if outer action ongoing), or some
+  half-state. K1b's mirror inside a setter callback rather than a
+  computed recipe.
 - **A6a.** Conditional read in a recipe under `ROOT_SCOPE`: branches change
   on input. Tests dynamic deps (drop edge for not-taken branch, form edge
   for taken). *r3 baseline; no new behavior.*
@@ -3258,6 +3280,11 @@ commitment the explorative phase is meant to avoid.
   `S`. Tests dynamic deps *under scope*: scope-tagged edges drop / form as
   branches change. This is where Model 2 is exercised; A6a is a smoke
   prerequisite.
+- **A6c.** Conditional read under `S` where the condition's input was just
+  written, then the same conditional derived is read twice in succession.
+  Tests coherence of *graph shape changes mid-recompute*: does the second
+  read see the new branch's value (fresh dep-graph + fresh cache) or a
+  hybrid (new branch chosen but evaluated against stale upstream slot)?
 - **A7.** Action reads only — never writes. Tests whether slots get created
   under `S` for memoisation purposes, or whether read-only access is a no-op
   at the bag level.
@@ -3276,6 +3303,11 @@ commitment the explorative phase is meant to avoid.
 
 - **C1.** `setX(Promise.resolve("v"))` inside action — the new recipe returns
   a Promise. Tests: how does a derived `read(X)` see this? Walks decide.
+- **C1b.** After `setX(promise)`, in the same scope, read a derived `f(X)`
+  whose recipe does `read(X).then(...)` or `yield* read(X)`. Tests: does
+  the derived's slot capture the *same Promise identity* the setter
+  wrote, or a different one (e.g., re-wrapped)? Promise identity =
+  supersession signal per main-doc D8.
 - **C2a.** Action body `yield* read(asyncSignal)` — body parks until promise
   resolves *before any other event*. Tests: does the scope stay open across
   the await? Does the ambient scope restore correctly on resume?
@@ -3288,6 +3320,21 @@ commitment the explorative phase is meant to avoid.
 - **C2d.** Same, but writes occur (from a different scope, or from
   ROOT_SCOPE) during the await window. Tests: when the action body resumes,
   what does its read see? Did the chain re-evaluate?
+- **C2e.** Post-yield derived read: action body does
+  `yield* read(asyncSignal); const d = read(downstreamDerived)`. The
+  derived's recipe reads `asyncSignal`. Tests: after resume, does the
+  derived see the *resolved* value of `asyncSignal`, or the still-
+  Promise-cached value in `slot[S]`? Must the engine's slot-changed
+  `'resolved'` event have fired (and been observed by the derived's
+  slot) *before* the body's resume runs? **Async analogue of K1b** —
+  the canonical post-async-coherence probe. Cuts at least two ways
+  depending on microtask ordering vs engine's synchronous `.then`
+  handling.
+- **C2f.** Two sequential `yield* read`s of *different* async signals in
+  the same body, with a downstream derived depending on both. Probe:
+  between yields, does the derived see (resolved-A, pending-B)
+  coherently? Probes per-step in-recipe coherence across multiple
+  awaits.
 - **C3.** Async signal resolves *after* the action commits — what value lands
   in canonical? The action committed a Promise; resolution happens later
   under no scope. Library policy.
@@ -3305,6 +3352,13 @@ commitment the explorative phase is meant to avoid.
   edges register against the writing scope's chain; should fire correctly on
   writer commit. *Conditional on commit-ordering open question (trace step 5
   open question #1).*
+- **D2b.** After writer commits, but inside reader's still-open scope,
+  reader reads a derived that depends on the writer's signal. Probe: does
+  the derived see the just-committed value (`ROOT_SCOPE` chain entry
+  updated, reader's chain `[S_reader, ROOT]` walks to ROOT), or did the
+  reader's scope already memoize a slot from before the commit?
+  Coherence across the chain when a *more-canonical* entry updates
+  underneath an open scope.
 - **D3.** Late subscriber: component mounts mid-action and reads under that
   action's scope. Edge formed with the right chain at subscription time.
   Should fall out of Model 2.
@@ -3341,6 +3395,13 @@ commitment the explorative phase is meant to avoid.
 - **G1.** Action inside an action. Inner scope is child of outer. Writes
   tagged with inner scope; reads inside inner walk chain `[inner, outer,
   ROOT]`. Falls out of the chain framing.
+- **G1b.** Outer wrote `setX('outer')`; inner opens, writes
+  `setX('inner')`. Inside inner, read `X` and derived `f(X)`. Then —
+  *hypothetical interleave* — control returns to outer mid-inner and
+  outer reads `X`. Does outer see `'outer'` (chain skips inner) or
+  `'inner'` (chain inherits)? Whether this scenario is even reachable
+  depends on whether actions can interleave; if not, mark as
+  out-of-scope or conditional.
 - **G2.** Inner commits → its slots promote to outer's scope (not ROOT).
   Outer commits → outer's slots promote to ROOT. Two-stage promotion. *Open:
   does inner-commit promote to outer or directly to ROOT? Lean: to outer,
@@ -3350,6 +3411,12 @@ commitment the explorative phase is meant to avoid.
   discarded with outer. Nesting respects parent lifecycle.
 - **G4.** Inner discards; outer continues. Inner's writes drop; outer's
   state unchanged.
+- **G4b.** Outer wrote `setX('outer')`. Inner opens, writes
+  `setX('inner')`, discards. Outer then reads `f(X)`. Tests: does the
+  discard cleanly detach inner's slot from outer's chain such that
+  outer's derived `f(X)` recomputes against `'outer'`, not against a
+  half-cleaned `'inner'` cache? Coherence-of-discard probe for the
+  outer body's subsequent reads.
 
 ### H. Effects under speculation — *Q-C open*
 
@@ -3361,12 +3428,29 @@ commitment the explorative phase is meant to avoid.
 - **H1c.** Same setup; action discards. Tests: effect never fired
   (no speculative trigger leaked). *Lean: yes.* (H1a/b/c together
   establish the defer-until-commit position from Q-C.)
+- **H1d.** Effect body reads `read(X)` *and* `read(f(X))`. Action writes
+  `setX(5)`, commits. Effect schedules and runs. Tests: does the effect
+  see (X=5, f=10) coherently, or could it see (X=5, f=stale) because the
+  derived's slot at `ROOT_SCOPE` wasn't invalidated in dep-order during
+  commit promotion? **Effect-body coherence on commit** — probes
+  commit-promotion ordering (doubleName trace open #1) through the
+  effect's lens.
 - **H2.** Effect created inside an action body. Effect's owner is the
   action's scope; effect's body executes once at registration. Does it
   re-fire on writes inside the same action?
+- **H2b.** Effect created inside action `S`, registered against chain
+  `[S, ROOT]`. Action body then writes `setX`, then reads downstream
+  `f(X)` directly. Then more writes. Tests: when the effect re-fires (if
+  it does), what scope chain is active in its body? Does its `read(X)`
+  see the latest in-action value, and if it reads a derived, does the
+  derived see the same? Separates "did it fire" (H2) from "did it see
+  coherent state" (H2b). Q-K (effect chain policy α/β) is upstream.
 - **H3.** Effect with `onCleanup`; speculative write triggers the effect →
   effect's body runs → registers cleanup. If discard, do those cleanups
   fire? Cleanup chains across scopes; tricky.
+- **H3c.** After cleanup fires and the body re-runs, does the new body
+  see derived-coherent state w.r.t. whatever caused the re-run?
+  Post-cleanup body re-run coherence probe.
 - **H4.** Effect that itself calls `action(…)` (effect-triggers-action).
   Cycles? Bans? Worth knowing the policy.
 
@@ -3376,6 +3460,12 @@ commitment the explorative phase is meant to avoid.
   *inside* an active action. JSX-binding consumer treated like Effect —
   re-renders on speculative writes? Defers to commit? Q-C territory.
   *Downstream of H1a-c's resolution.*
+- **I1b.** JSX expression `{read(f(X))}` where the component is
+  mid-render at the moment of an action commit. Tests: does the
+  resulting DOM reflect coherent (X, f(X)) values, or could it tear
+  (render uses old X but new f(X) because two reads bracket the commit
+  point)? **Tearing/coherence probe for the renderer consumer.** Cuts
+  multiple ways depending on whether JSX walks are batched.
 - **I2.** Component mounts inside an action. Its computeds and effects
   belong to a child owner of the action's scope. On action discard, all
   the mounted components dispose. Falls out of scope/owner unification.
@@ -3403,6 +3493,11 @@ commitment the explorative phase is meant to avoid.
   disappears on discard (probably right). If with ROOT: signal survives
   discard but its values were never written outside the scope (probably
   wrong).
+- **J4b.** Action creates signal `Y` via `signal(0)`, then writes
+  `setY(1)`, then reads a derived `g(Y)`. Tests: does the derived see
+  `1`? Does its scope chain include `S`, or did it form against `ROOT`
+  because the signal's initial slot landed there? Coherence test
+  downstream of J4's policy decision.
 - **J5.** Action body sets a value, then somewhere else (a different scope
   or no scope) reads it. Other scope/no-scope doesn't see the speculative
   value. Falls out — selectors handle.
@@ -3423,9 +3518,24 @@ commitment the explorative phase is meant to avoid.
 - **K2.** `setX` called from inside `onCleanup` of a slot being dropped
   during commit (cleanup chain triggers further writes). Tests: re-entrant
   write during commit; commit-ordering subtlety (trace open question #1).
+- **K2b.** `onCleanup(() => { setOther(read(derivedFromX)) })`. Inside
+  the cleanup, after the write to `Other`, is `read(derivedFromX)`
+  reading a slot in a half-promoted state? Does the cleanup observe
+  `X`'s pre-promotion or post-promotion value? Does the write to
+  `Other` land in a still-open scope, in `ROOT`, or trigger commit-time
+  re-entrancy? **Cleanup-time re-entrancy + coherence probe.** Cuts
+  multiple ways: (i) commit is atomic, cleanups see post-promotion
+  state; (ii) cleanups fire mid-promotion, half-state; (iii) cleanups
+  fire pre-promotion, scope-still-open chain. Q-J (commit-as-
+  transaction) is upstream.
 - **K3.** Action body calls `setX` where `X` is updated by an effect that
   was itself triggered by that write (would-be cycle). Tests: cycle
   detection under scope; policy bans or runs.
+- **K3b.** *Conditional on K3 permitting the second write.* If the policy
+  permits, does the effect body's read of a derived `f(X)` see fresh-
+  fresh (both writes propagated), fresh-stale (first write's derived
+  cached, second pending), or some other coherence break? May be moot
+  if K3 resolves to "ban."
 
 ### L. Boundary-bypass reads inside speculation
 
@@ -3463,6 +3573,11 @@ commitment the explorative phase is meant to avoid.
   of scope?
 - **R2.** Two speculations want to commit in the same frame: coalesce or
   independent? Touches Dim 4 with a *timing* dimension that F2 lacks.
+- **R2b.** Both speculations wrote `X`; both commit in the same frame.
+  What does a derived `f(X)` see *between* the two commit promotions if
+  the scheduler runs them sequentially? **Inter-commit-window
+  coherence** probe. Cuts multiple ways depending on whether the
+  scheduler emits invalidations per-commit or coalesces.
 - **R3.** A long-lived action whose body yields control via
   `requestAnimationFrame` between writes. Tests: scope persists across
   frame boundary; ambient restoration works for raf-style awaits the way
