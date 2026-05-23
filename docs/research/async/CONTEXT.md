@@ -2,50 +2,53 @@
 
 The lexicon for the async-coordination research: canonical definitions of the
 terms used across [`README.md`](./README.md), [`LOG.md`](./LOG.md), the
-[`deep-dives/`](./deep-dives/), and the synthesis docs. When a term is defined
-here, other docs reference it rather than re-glossing — this file is the single
-source so definitions do not drift.
+[`deep-dives/`](./deep-dives/), and [`transitions-problem-space.md`](./transitions-problem-space.md).
+When a term is defined here, other docs reference it rather than re-glossing —
+this file is the single source so definitions do not drift.
 
 > **Note on the name.** `CONTEXT.md` was previously the research *process* doc.
 > That content now lives in [`PROCESS.md`](./PROCESS.md). `CONTEXT.md` is now the
 > lexicon — consistent with the project convention where `CONTEXT.md` holds
-> domain language (cf. the root [`../../CONTEXT.md`](../../CONTEXT.md)).
+> domain language (cf. the root [`CONTEXT.md`](../../../CONTEXT.md)).
 > References to "CONTEXT.md" in older `LOG.md` entries and deep-dives that
 > concern sourcing discipline, status indicators, or anti-patterns mean
 > `PROCESS.md`.
 
+This lexicon is scoped to the *research arc*: cross-framework async-coordination
+vocabulary, the transitions sub-thread that emerged from the research, and the
+process vocabulary the deep-dives use. Pulse's own naming and primitives —
+including pulse's adopted term *speculation* for what this doc calls
+*transition* — live in [`../../pulse/CONTEXT.md`](../../pulse/CONTEXT.md).
+
 ---
 
-## The four dimensions of speculation
+## The four dimensions of transition
 
-A *speculation* (see below; pulse's term for what the field calls a *transition*)
-is coordination machinery for committing an async state change atomically: a
-tentatively-applied write-set held over committed state, observable to reads,
-eventually committed or discarded as a unit. Speculations branch along four
-structural dimensions — the axes a speculation mechanism must each decide how to
-handle. The four are the non-trivial corners of the partition
-`{one, many} × {disjoint, overlapping} × {concurrent, sequential}`. The framing
-originated in the [`LOG.md`](./LOG.md#cross-cutting-thread--transitions-branch-in-four-dimensions) cross-cutting thread "Transitions branch
-in four dimensions" (sessions 11–13, when "transition" was still the working
-term); it is the organizing axis of
-[`pulse-design-direction.md`](./pulse-design-direction.md)'s comparison table and
-of [`transitions-problem-space.md`](./transitions-problem-space.md). Each
-dimension carries the question its mechanism must answer.
+A *transition* (see below) is coordination machinery for committing an async
+state change atomically: a tentatively-applied write-set held over committed
+state, observable to reads, eventually committed or discarded as a unit.
+Transitions branch along four structural dimensions — the axes a transition
+mechanism must each decide how to handle. The four are the non-trivial corners
+of the partition `{one, many} × {disjoint, overlapping} × {concurrent,
+sequential}`. The framing originated in the [`LOG.md`](./LOG.md#cross-cutting-thread--transitions-branch-in-four-dimensions)
+cross-cutting thread "Transitions branch in four dimensions" (sessions 11–13);
+it is the organizing axis of [`transitions-problem-space.md`](./transitions-problem-space.md).
+Each dimension carries the question its mechanism must answer.
 
-- **Dim 1 — Internal structure of one speculation.** What lives *inside* a single
+- **Dim 1 — Internal structure of one transition.** What lives *inside* a single
   scope: dependent async work (a → b → c — one logical change fans out into
   several fetches, some depending on others), intermediate writes visible
   mid-flight, multi-step composition, partial failure. *Mechanism question:* what
   coherence guarantee does the scope make about its own contents?
-- **Dim 2 — Concurrence (disjoint).** N speculations alive at once, touching
+- **Dim 2 — Concurrence (disjoint).** N transitions alive at once, touching
   *disjoint* state. *Mechanism question:* can N genuinely-independent concurrent
-  speculations run without serialization or mutual interference?
-- **Dim 3 — Supersession.** A newer intent arrives while a prior speculation is
+  transitions run without serialization or mutual interference?
+- **Dim 3 — Supersession.** A newer intent arrives while a prior transition is
   in-flight; the newer invalidates the older. *Mechanism question:* pre-empt the
   old, serialize the new, or race their commits? (React's priority lanes are one
   implementation of supersession, not the dim itself — newer-wins-on-identity
   and cancel-via-Drop are equally valid structural answers.)
-- **Dim 4 — Overlap (entanglement).** N concurrent speculations touch *shared*
+- **Dim 4 — Overlap (entanglement).** N concurrent transitions touch *shared*
   state. *Mechanism question:* at commit time, auto-merge (Solid-style dep-graph
   union-find), batch-merge on source-set intersection (Svelte), isolate /
   last-commit-wins, or user-specified?
@@ -60,20 +63,11 @@ dimension carries the question its mechanism must answer.
   "sequential" matters — coexistence requires concurrence).
 - *many, overlapping, concurrent* → Dim 4 (the hard case).
 
-Dim 1 is the irreducible core. A speculation exists to gather one logical
+Dim 1 is the irreducible core. A transition exists to gather one logical
 change's async work and commit it atomically; that is Dim 1 alone. A mechanism
-that allows only one speculation at a time needs only Dim 1. See
+that allows only one transition at a time needs only Dim 1. See
 [`transitions-problem-space.md`](./transitions-problem-space.md) for worked
 examples and the full argument.
-
-**Note on terminology.** "Speculation" is pulse's term (per
-[`pulse-design-direction.md`'s P1](./pulse-design-direction.md)); the field
-generally uses "transition." Symmetric naming was chosen to make the
-discard-on-failure case as legible as the commit-on-success case — CPU branch
-speculation imports the mental model load-bearingly, not analogically. Where
-this doc still says "transition" (failure-mode references, the LOG thread title,
-historical filenames), it is the cross-reference to the field term, not a
-different concept.
 
 ## The four failure modes
 
@@ -91,26 +85,22 @@ forms below exist for cross-doc reference.
 - **FM3 — lost interactivity.** The committed-but-stale UI freezes, strobes, or
   loses input focus while async work is in flight, instead of staying live and
   responsive. (Exercises Dim 1 + Dim 3, and Dim 2 if stale work continues
-  uncancelled alongside the newer speculation.)
-- **FM4 — uncommittable speculation.** A speculation's in-progress state cannot
+  uncancelled alongside the newer transition.)
+- **FM4 — uncommittable transition.** A transition's in-progress state cannot
   be abandoned without corrupting committed state, so a superseded change or a
   cancelled preview leaves the UI inconsistent. (Exercises Dim 3 + Dim 4.)
 
-## Core speculation terms
+## Core transition terms
 
-- **Speculation** (formerly *transition*; the field's word). Coordination
-  machinery that makes a state change involving async work commit atomically —
-  the UI moves from one coherent state to another, never showing an incoherent
-  in-between — while staying responsive during the wait. Symmetric in
-  success/failure: a speculation either commits (becomes the new committed state)
-  or is discarded; "transition" presupposes the commit, "speculation" is neutral.
-  Pulse uses "speculation" for the concept; "transition" survives only as the
-  cross-reference to React/Solid/Svelte vocabulary. See
-  [`pulse-design-direction.md`'s P1](./pulse-design-direction.md) for the full
-  framing.
+- **Transition.** Coordination machinery that makes a state change involving
+  async work commit atomically — the UI moves from one coherent state to
+  another, never showing an incoherent in-between — while staying responsive
+  during the wait. The field's term across React, Solid, Svelte. Pulse renames
+  this concept *speculation* (see [`../../pulse/CONTEXT.md`](../../pulse/CONTEXT.md))
+  for symmetric success/failure framing; this lexicon uses the field's term.
 - **Gather.** Collecting all the pending async work in a transition's scope and
   holding every resulting commit until the whole set is ready, so the commits
-  land together. Pulse's `<Loading>` boundary is a gather.
+  land together.
 - **Commit / atomic commit.** The moment a gathered set of changes becomes
   globally visible, all at once. Nothing inside the transition is observable
   until the commit.
@@ -122,8 +112,7 @@ forms below exist for cross-doc reference.
 
 ## Research vocabulary
 
-Terms used precisely across the research; their use elsewhere in pulse may be
-looser.
+Terms used precisely across the research.
 
 - **Encoding** — a JS implementation that approximates a primitive from another
   language/system. Always lossy. The set of "encodings of model X into JS" is
@@ -168,7 +157,6 @@ looser.
   four-dimensions framing.
 - [`transitions-problem-space.md`](./transitions-problem-space.md) — the four
   failure modes worked through with concrete examples.
-- [`pulse-design-direction.md`](./pulse-design-direction.md) — synthesis of the
-  research into pulse design positions.
-- [`../../CONTEXT.md`](../../CONTEXT.md) — pulse's root domain-language doc; this
-  lexicon is the async-research counterpart.
+- [`../../pulse/CONTEXT.md`](../../pulse/CONTEXT.md) — pulse-specific jargon
+  (speculation, walks, slots, recipes, scopes, the named library primitives).
+- [`../../../CONTEXT.md`](../../../CONTEXT.md) — pulse's repo-root domain-language doc.
