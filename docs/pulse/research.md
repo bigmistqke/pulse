@@ -30,6 +30,252 @@ slots, walk policies that consult them — not a built-in engine concept.
 
 ---
 
+## Research arc context
+
+Background framings that motivated this exploration: the research arc, the
+comparison-table reference, the seven-concerns decomposition, and the
+node/value-bag recasting (where the "signals as graph relations" framing
+originated).
+
+### What the research arc has shown
+
+Speculations (the field calls them *transitions*; see Principles below) are
+coordination machinery for **continuous-observation + concurrent-intent**
+workloads (UI is the canonical instance; also GGPO rollback, sync engines
+with optimistic+rebase, realtime collab). They branch along four structural
+dimensions — **Dim 1** internal structure of one speculation, **Dim 2**
+concurrence (multiple alive, disjoint state), **Dim 3** supersession (newer
+invalidates older), **Dim 4** overlap/entanglement (multiple alive, shared
+state) — the non-trivial corners of `{one, many} × {disjoint, overlapping}
+× {concurrent, sequential}`. Canonical definitions in the lexicon
+[`../research/async/CONTEXT.md`](../research/async/CONTEXT.md). Production
+frameworks differ in which dimensions they handle and how, AND in whether
+their user-facing API surface is minimal (Svelte) or proliferating (React).
+Pulse's articulated design philosophy is **user-visible primitives composed
+in userland** — distinct from React's "low-level API + library-authors
+compose ergonomics" and Solid's "framework-provided higher-level
+primitives" — though Svelte's evidence showed that "minimum API" does NOT
+entail "minimum engine"; concurrent speculations cost engine surface
+regardless of how small the user API is.
+
+### Comparison: React modern / Svelte 5 / Solid 2.x
+
+The mechanical landscape for the three production frameworks pulse has the
+most-developed dives on. Each cell is what the framework actually does.
+
+| | **React modern** | **Svelte 5 (`experimental.async`)** | **Solid 2.x** |
+|---|---|---|---|
+| **Substrate** | Fiber tree + lane-scheduled work queue (31-bit bitmask) | Signals + linked-list of `Batch` objects + `<svelte:boundary>` queue | Reactive graph + per-write `OptimisticLane` + `Transition` object |
+| **User-facing primitives** | `useTransition`, `useDeferredValue`, `useOptimistic`, `Suspense`, `use(promise)`, `useActionState`, Actions, Server Functions | `<svelte:boundary>` + `pending` snippet, `$effect.pending()`, `settled()`, `fork()` | `<Loading>`, `<Errored>`, `<Reveal>`, `action()`, `createOptimistic`, `latest()`, `isPending()`, `refresh()` |
+| **Suspension mechanism** | `use(promise)` throws cached promise; caught at Suspense boundary | `await` inside `$derived` lowered to `async_derived`; gated by `boundary.#pending_count` | `NotReadyError(source)` thrown; caught by `CollectionQueue.notify` |
+| **Dim 1 — internal structure** | WIP fiber tree gathers all pending Suspense in scope; commits atomically when all resolve | `boundary.#pending_count` for first render; `batch.#blocking_pending` for subsequent updates | `Transition._asyncReporters: Map<Computed, Set<Computed>>` tracks each pending source → its reporters; per-source decidability |
+| **Dim 2 — concurrence (disjoint)** | 31-lane bitmask; multi-low-priority currently batched (acknowledged limit) | Linked-list of `Batch` objects; each with `batch_values` time-travel snapshot; independent commit if non-overlapping | Per-write `OptimisticLane`; independent lanes flush independently; not batched |
+| **Dim 3 — supersession** | High-priority lanes pre-empt low-priority; WIP discarded and rebuilt; cooperative 5ms yield to browser | **None** as priority; per-derived `OBSOLETE` cancel + per-effect `STALE_REACTION` abort handle structural supersession; `fork()` is user-controlled | **None** as priority; newer writes supersede via `_inFlight !== result` identity check |
+| **Dim 4 — overlap (entanglement)** | **Not handled**; multi-transition batching conflates with this | Whole-batch merge on source-set intersection (`#find_earlier_batch` + `#merge`) | Union-find lane merge on dep-graph overlap (`assignOrMergeLane`); parent-child lanes stay independent |
+| **Speculative-state isolation** | Per-transition tree (WIP fiber) + per-action overlay (`useOptimistic`) | Versioned engine, unbounded observable batches (linked list); `fork()` as flagged subtype with deeper isolation | Per-write-lane overlay with overlap-merge; `_overrideValue` overlay + separate `_pendingValue` slot |
+| **Optimistic state** | `useOptimistic(state, reducer)` returns `[optimisticState, setOptimistic]`; converges in same render as Action commit | No first-class API; user mutates state in `fork()` body or in async-derived (auto-reverts on `OBSOLETE` reject) | `createOptimistic(value)` returns reactive signal; auto-reverts on action failure via `resolveOptimisticNodes` |
+| **Cancellation discipline** | Structural via WIP discard for rendering; convention-only `AbortController` for I/O effects | Two channels: `OBSOLETE` (per-derived) + `STALE_REACTION` (per-effect); `getAbortSignal` for cooperative I/O abort | Identity-based stale-result discard via `_inFlight !== result`; structural for async iterables (cleanup w/ `.return()`); no auto fetch abort |
+| **Pending observability** | `isPending` from `useTransition` (internally implemented as `useOptimistic`); also `useDeferredValue` for "show old value during prep" | Only via `<svelte:boundary>` + `$effect.pending()`; **no per-value `.loading` on async-derived** | `isPending(() => x())` opt-in at read site; pipeline-OR walks dep graph; also `latest()` for boundary-bypass reads |
+| **Fallback display** | Throttled at ≥300ms before showing; doesn't hide already-revealed content during transitions | Offscreen `DocumentFragment` until `#pending_count == 0`; then swap | Per-`<Loading>` boundary; gather-on-commit |
+| **Multi-step async composition** | `await` inside Action body; multi-transition batched together (limit) | `await` inside `$derived`; compiler tracks deps across await via `capture`/`save` (`await a + b` → `(await $.save(a))() + b`) | `action(function*) { yield … }` — the whole generator is one transition; plain writes commit once at completion, transition stays alive across `await`s |
+| **Dependent dispatch capability** | Await-only (`use(promise)` requires resolution; re-executes component on resolve) | Await-only with implicit ordering (sequential `$derived(await)` decls serialize; framework warns via `await_waterfall`) | Await-only with generator batching |
+| **Entanglement detection** | None (application models conflicts in user code, e.g. via `useOptimistic` revert-on-failure) | Whole-batch granularity (per-microtask-of-writes); coarser than Solid | Per-write granularity (union-find merge of dep graphs); automatic detection by structural overlap |
+| **Compiler involvement** | None (runtime-only) | Heavy: `experimental.async` flag; lowers `await` to `async_derived`/`flatten`/`save`; tracks deps across await | None for reactivity (runtime-only); compiler-style binding for JSX only |
+| **Engine surface (rough)** | Thousands of LOC: fiber reconciler + scheduler + Suspense machinery + Actions | ~800 lines for `batch.js` alone + boundary.js + async.js + deriveds.js | ~1300 lines: core.ts + scheduler.ts + lanes.ts + async.ts + boundaries.ts |
+| **User-facing API count** | ~7+ hooks | 4 primitives | ~8 primitives |
+| **Specific oddities worth knowing** | `useTransition`'s `isPending` is internally `useOptimistic`; Suspense fallback throttling | `{#await}` blocks are anomalous re: runes machinery (may be retired); async-derived value lives in a normal `Source` cell — no `.loading` accessor by design | `<Reveal>` with `sequential`/`together`/`natural` modes; `_gatedSubs` replay-at-commit for cross-transaction reads; atomicity layers — per-transition (an action is one transition) / per-lane optimistic |
+
+Three observations worth carrying forward:
+
+1. **All three have radically different *user-facing* surfaces** (7+ vs 4 vs 8 primitives), but the *engine* sizes are within an order of magnitude. User-facing minimum is genuinely a choice independent of engine cost.
+2. **Dim 3 is uniquely React's.** Both Svelte and Solid punt on input-priority entirely. If pulse wants to handle Dim 3, React is the only existing production reference point.
+3. **Optimistic state is genuinely different across all three** — dedicated hook (React), no API + auto-revert via reject (Svelte), typed primitive tied to action lifecycle (Solid). None are the same shape; each is a position pulse could lean toward.
+
+### Decomposition — seven underlying concerns
+
+Looking at every mechanic in the comparison and asking *what problem is it
+actually solving*, the mechanics cluster into seven underlying concerns:
+
+- **A. Versioned reads** — read X as it currently is, OR as it was committed, OR as it appears under this in-flight scope. (WIP fiber tree, `batch_values`, `_overrideValue`, `latest()`, `useDeferredValue`, snapshot-isolation in MVCC.)
+- **B. Pending propagation** — downstream computations learn that an upstream is in-flight. (`_pendingSource(s)`, `_asyncReporters`, `boundary.#pending_count`, pipeline-OR `isPending`.)
+- **C. Atomic commit boundary** — these changes land together; nothing inside is visible until everything is ready. (`<Suspense>`, `<svelte:boundary>`, `<Loading>`, `Batch` commit, `Transition._actions`.)
+- **D. Scoped writes** — writes belong to a named scope (action, fork, transition); the scope can be committed or discarded as a unit. (`OptimisticLane`, `useOptimistic`, `fork()`, `action(function*)`, Replicache mutators.)
+- **E. In-flight identity** — when multiple runs of the same work exist, framework knows which is current. (`_inFlight !== result`, `OBSOLETE`, generation counters.)
+- **F. Lifecycle / cleanup** — async work that's no longer relevant gets cleaned up. (Drop, `AbortController`, `cleanup()`, owner disposal.)
+- **G. Priority** — some updates pre-empt others mid-flight. (React's 31-lane bitmask, uniquely.)
+
+The high-level abstractions in the table are combinations of subsets of
+{A, B, C, D, E, F, G}:
+
+- `<Loading>` / `<Suspense>` / `<svelte:boundary>` = **B** + **C**
+- `useOptimistic` / `createOptimistic` = **A** + **D** + **C**
+- `useTransition` = **D** + **C** + **G**
+- `action(function*)` = **D** + **C** + **E**
+- `fork()` = **D** + **A** + **C**
+- `<Reveal>` = composes multiple **C**s (coordination layer ABOVE boundaries)
+
+None of these abstractions is a primitive in this decomposition. Each is
+library code over a small subset of the seven concerns.
+
+### Signal = node + value-bag (the sharper recasting)
+
+The seven-concerns decomposition is roughly right but bundles two distinct
+concerns under "scoped versioned state." A cleaner factoring: **a signal
+isn't a single primitive — it's a (node identity, value-bag) pair.**
+Currently every reactive framework conflates these into "a signal *is* its
+current value." Decoupling them is the underlying simplicity.
+
+- **Node** = the stable identity in the reactive dep graph. Other nodes /
+  subscribers depend on this identity. Owners hold it. Equality and
+  reference-tracking are based on it.
+- **Value-bag** = the multi-valued state the node currently has. Entries
+  are tagged with (scope, version, status). The "current committed value"
+  is one entry; the "in-flight pending value" is another; the
+  "optimistic-scope overlay" is a third; the "snapshot-as-of-time-T" is a
+  fourth.
+
+Under this framing, the seven concerns recast as:
+
+- **A (versioned reads)** = read a specific entry from the value-bag
+- **B (pending propagation)** = entries carry pending-status; the dep graph propagates status across nodes
+- **C (atomic commit boundary)** = the value-bag collapses from N entries to 1
+- **D (scoped writes)** = writes contribute an entry to the value-bag, tagged with scope
+- **E (in-flight identity)** = entries carry identity (or the scope that produced them does)
+- **F (cleanup)** = entries can be removed from the bag
+- **G (priority)** = about the *work producing entries*, not about entries themselves — the only outlier (work scheduling, not value-bag operation)
+
+So **A–F are all operations on the value-bag of a node**. G is the one
+genuine outlier. The deeper decomposition shrinks from "7 concerns + 4
+primitives" to **three primitives**: (node identity) + (value-bag) +
+(work scheduling).
+
+### Empirical pattern — every studied framework does node/value-bag internally
+
+Every framework implements the node/value-bag separation internally, but
+none exposes it as the user-facing primitive:
+
+- **Solid 2.x** — explicit per-node slots `_value` / `_pendingValue` /
+  `_overrideValue` / `_snapshotValue`. Internally exposed; user-facing
+  surface is `createOptimistic` / `createSignal` / `createMemo` as
+  separate hooks.
+- **Svelte 5** — `batch_values: Map<Value, [any, boolean]>` per batch.
+  Internally; user-facing is `<svelte:boundary>` / `$derived` / `fork()`.
+- **React modern** — WIP fiber vs current fiber. Same component identity,
+  different value-states. Internally; user-facing is `useOptimistic` /
+  `useTransition` / `useState`.
+- **Replicache** — B-tree DAG with `main` / `sync` heads. Closest to
+  exposing it (named heads are semi-public; most user code doesn't see
+  them).
+- **Postgres MVCC** — row identity stable; multiple tuple-versions per
+  row, indexed by transaction. Internally exposed via `xmin`/`xmax`; not
+  user-API.
+
+The pattern is universal. None lets the user say "give me node N's
+value-bag entry tagged with scope S" as a primitive. Instead they each
+invent bespoke compositions (`useOptimistic`, `_overrideValue`,
+`Batch.current.get(node)`) that are internally just value-bag-entry-with-
+scope-S.
+
+**Solid's transition-machinery trajectory** (verified against the git
+history of `@solidjs/signals`): Solid moved from per-node `tValue` slot
+(1.x) → external scheduler holding cloned subgraph (2.x early) → cloning
+for transitions, overlay for optimistic (2.x mid) → per-node multi-slot
+with no cloning anywhere (current). Strong empirical evidence: the
+cloning approach was tried in production-grade 2.x development for ~2+
+years and was abandoned commit-by-commit. The direction of Solid's
+design — across both 1.x and 2.x — has been *toward making the value-bag
+larger and more structured*, **and away from external-scheduler-managed
+parallel structures**. Carniato's stated principle ("handle the
+transition at the computed node level instead of as a scheduler from
+outside") *is* the move from a parallel cloned subgraph to per-node
+value-bag.
+
+If pulse adopts the node/value-bag framing as the user-facing primitive,
+it would be *exposing what Solid arrived at internally* as the API
+surface — making explicit what Solid has been keeping implicit.
+
+---
+
+## Principles
+
+The durable, abstract commitments. Framings (next section) are concrete
+operational positions that play out these principles in pulse-specific
+terms.
+
+### P1 — Speculation is one concept with two faces
+
+What pulse delimits is a **speculative scope**: a tentatively-applied
+write-set held over committed state, observable to reads, eventually
+committed or discarded. The same scope has two faces — a **write side**
+(`action`-shaped: writes flowing toward commit) and a **read side** (a
+"speculative zone": gating downstream publication until upstream
+speculations settle).
+
+"Optimistic", "transition" (in the React/Solid sense), "loading",
+"entanglement", "preview" are *use-labels* for speculation, not separate
+mechanisms. The mechanism is one; what differs is what the speculation is
+*about*.
+
+Why "speculation" over "transition": "transition" presupposes the commit
+(A → B implies B happens), so every framework using it bolts on a
+separate vocabulary for the failure mode (revert, rollback, supersede).
+"Speculation" is symmetric — *speculate / commit / discard* — and imports
+the CPU-speculation mental model (work done against a predicted outcome,
+ready to be thrown away if reality disagrees) load-bearingly, not
+analogically.
+
+Rejects: bespoke per-use-case primitives that hide the underlying unity,
+and naming that presupposes success.
+
+### P2 — Acknowledge async; don't hide it
+
+A `Promise` in the type is honest information: it indicates the value
+has (or had) a future. Pulse provides tools to *incorporate* the future,
+not erasures that pretend it isn't there. The type stays `Node<Promise<T>>`,
+not silently collapsed to `Node<T>`. Unwrapping is explicit (`use`,
+`yield* get`, or stage-form's auto-unwrap), and the unwrap-site is where
+the async-handling discipline lives.
+
+Rejects: Solid 2.x's `Accessor<T>` collapse + `NotReadyError`, where
+hidden async resurfaces as a thrown error in unrelated read sites.
+
+### P3 — Plain reads are honest
+
+A plain `get(node)` returns whatever's cached (committed or speculative
+overlay) and never throws. Pending-ness, error-state, and async
+non-readiness are separate queries — not exceptions raised from a read.
+
+Rejects: any design where reading a value is a discipline you must learn
+to do safely.
+
+### P4 — Explicit boundaries over implicit pervasiveness
+
+A speculative scope is *opt-in*. Outside a scope, writes commit
+immediately and reads are honest. Inside a scope, write-level speculation
+semantics apply. There is no implicit ambient speculation that every
+write must reckon with.
+
+Trade accepted: no-flash behaviour is opt-in — a bare write that triggers
+a refetch flashes unless wrapped.
+
+Rejects: Solid 2.x's per-write transition semantics that turn every
+async-feeding write into an implicit held speculation.
+
+### P5 — Compose, don't proliferate (in either direction)
+
+A small primitive set should cover the use cases. Specialised ergonomic
+sugar over the primitives is *allowed* when it earns its keep — added
+because the bare shape is awkward enough for a common case to warrant a
+name. It is also not *forbidden* on principle: negative-shape commitments
+("no `optimistic` primitive") lock out design space without serving any
+value the doc has named.
+
+Rejects (in both directions): React-style proliferation of specialised
+hooks for cases that compose cleanly; and pre-emptive refusal of
+ergonomic sugar when it would clarify a common use.
+
+---
+
 ## Framings (adopted provisionally)
 
 These are durable as *directions to push on*, not as locked-in design positions.
@@ -237,38 +483,64 @@ const greeting = compute(
 // The callback sees u: string (auto-unwrapped); output is Promise<string>.
 ```
 
-### Two forms, not three: stages for computeds, generators for actions
+### Three authoring forms for computeds
 
-The earlier D11 list had three forms (stages, plain body + `use`, generator
-with `yield* get`). Per-stage memoization + the `.then`-with-tracker-
-restore mechanism make stages capable of:
+Three valid forms with different trade-offs; user picks by what the
+computation looks like, not by what the engine forces:
 
-- *Dynamic deps:* signal reads inside stage callbacks track properly
-  (per-stage tracker).
-- *Async propagation:* output type carries `Promise` if any stage was
-  async.
-- *Per-segment partial recomputation:* finer than generator's
-  resume-from-yield (which still restarts from top on signal change).
+```ts
+// Plain body — sync deps only
+const upperName = compute(() => get(name).toUpperCase())
 
-So for **computeds**, stages cover everything. The other two D11 forms
-become unnecessary or anti-patterns:
+// Stages — declarative pipeline; per-stage memoization; auto-unwrap
+const greeting = compute(
+  () => get(asyncUser),                       // stage 0
+  (u) => `Hello, ${u}!`,                       // stage 1 (u: string, auto-unwrapped)
+  (s) => s + "!"                               // stage 2
+)
+// greeting: Computed<Promise<string>>
 
-- **Plain body + `use`** — subsumed; a `compute(() => body)` is just a
-  one-stage form.
-- **Generator form (`yield* get`)** — dropped for computeds. Coarser
-  memoization (one suspension point per generator vs per-stage), more
-  complex TypeScript inference, more machinery.
+// Generator — imperative coroutine; dynamic deps; resume from yield (Awaitable)
+const profile = compute(function* () {
+  const user = yield* get(asyncUser)           // user: string (via Awaitable's iterator)
+  if (user.role === 'admin') {
+    return yield* get(adminProfile)            // dynamic: which signal we read depends on data
+  } else {
+    return yield* get(memberProfile)
+  }
+})
+// profile: Computed<Promise<Profile>>
+```
 
-**Generators are retained only for action bodies**, where:
+| Form | Memoization | Async | Dynamic deps | Best for |
+|---|---|---|---|---|
+| **Plain body** | Whole-body | Sync only | Yes | Simple sync derivations |
+| **Stages** | **Per-stage** (finest) | Auto-unwrap between stages | No (each stage is a pure transform; signal reads inside a stage track to *that* stage's node) | Declarative pipelines |
+| **Generator** | Whole-body, resume-from-yield via Awaitable | `yield* get(node)` parks | Yes (conditional reads, multi-step logic) | Imperative composition, data-driven dep selection |
 
-- Action bodies are imperative one-shot bodies (commit/discard at end).
-- Multi-yield is needed for sequenced async work + writes.
-- The generator's resume semantics matches action driver semantics.
+**Stages are optimal for declarative pipelines** — per-stage memoization
+beats whole-body re-execution if signal2 changes (only the stages reading
+signal2 re-run; earlier stages stay cached).
 
-For action-body unwrap of async values, the generator form uses a
-generator-helper like `yield* get(promiseOrNode)` (name TBD; see Q-N
-candidate below). TypeScript inference for `take` requires a conditional-
-type return; that complexity stays confined to action bodies.
+**Generators are optimal for dynamic-deps or non-pipeline composition** —
+when stage N's source depends on stage N-1's value, or the flow doesn't
+line up as a pipeline.
+
+**Plain body is the sync-only sugar.**
+
+The Awaitable type makes generator-form TypeScript inference clean (no
+special unwrap helper needed; `yield* get(asyncNode)` returns the resolved
+type via Awaitable's `[Symbol.iterator]`).
+
+### Action bodies use the same generator form
+
+Action bodies are generators with `yield* get(...)` for async unwrap.
+Same machinery as generator-form computeds, with two differences:
+
+- Action bodies have commit/discard semantics at end (covered by
+  scope/owner unification framing).
+- Action bodies don't memoize (one-shot imperative bodies, not cached
+  derivations).
 
 ### `use()` is React-style throw-to-suspend at the leaf
 
@@ -279,8 +551,10 @@ semantics**, matching React's `use()` convention. Used in:
   fallback if pending.
 - **Action body error handling** — `use(node)` throws to a try/catch in
   the action body.
-- **NOT inside computed bodies** — would collapse `Promise<T>` into `T`
-  at the type level, breaking async honesty. Use stages instead.
+- **NOT inside plain-body computed recipes** — `compute(() => use(node))`
+  would collapse `Promise<T>` into `T` at the computed's type level,
+  breaking async honesty. Use stages or generator form instead — both
+  preserve the Promise in the output type.
 
 This preserves the mental link with React: `use` means "throw if pending,
 return resolved." Pulse adopts the same convention.
@@ -1271,6 +1545,43 @@ Open sub-questions:
 **Related:** Q-B (the scope/owner unification carries this composition),
 Q-J (re-entrant cleanups land in the commit's deferred-fires region).
 
+### Q-M — Optimistic surface ergonomics (sugar over speculation)
+
+Mechanism: an optimistic write is one use of speculation (a predicted
+`setX(...)` inside an action body is held in that action's write-set;
+auto-discard reverts on failure; commit promotes). No new primitive at
+the engine level.
+
+**Open:** does pulse ship a named ergonomic sugar — `optimistic(...)` /
+`createOptimistic` — as a thin wrapper over `action`? Per P5, this is
+decided on whether the bare action shape is awkward enough for the
+optimistic case to warrant a named wrapper. Lean: yes for the
+single-predicted-write case (the most common one — predict, await,
+either promote or roll back). The API surface is genuinely undecided
+beyond that.
+
+### Q-N — Action prereqs / standing-state handle
+
+An action's readiness to run is information that should be queryable
+*before* the action runs (a button needs `ready` and `pending` to avoid
+double-submit). The body itself can't supply this — it hasn't run yet.
+
+**Open:** does the action expose a small family of standing reactive
+states — `ready` (prereqs met), `pending` (body in flight), `error`
+(last run failed)? If yes, are the prereqs declared inline (`action(
+depsFn, body)`) or via a separate prereq-computed that the action
+consumes? Either shape preserves the "gather-up-front /
+snapshot-consistent / skew-free input handling" property.
+
+The principle is structurally forced: a standing `ready()` cannot come
+from an imperative body that hasn't executed. The prereqs must be
+hoisted into a *declared, continuously-evaluated* expression. That
+expression is a `compute`/stage. So the structural pattern is **an
+action = a reactive prerequisite `compute` → an imperative body invoked
+on demand**, with the body receiving the *resolved* prereq values.
+
+Not yet traced; this is a future trace target.
+
 ---
 
 
@@ -1305,13 +1616,14 @@ Roughly priority-ordered:
 
 ## Cross-references
 
-- [`pulse-design-direction.md`](../research/async/pulse-design-direction.md): Q1 (locus of
-  speculative state) is what motivated this exploration; P1–P5 hold; D1–D12
-  need re-pressure-testing against this stack.
-- [`CONTEXT.md`](../research/async/CONTEXT.md): "Speculation" terminology; four dimensions.
-- [`deep-dives/solid-2x.md`](../research/async/deep-dives/solid-2x.md): the per-node multi-slot
-  architecture pulse is structurally converging on (with a different user-facing
-  surface).
-- r3 source (`node_modules/r3/src/index.ts`): the substrate this exploration is
-  rooted in; the topological scheduling + push-pull-push fallback machinery
-  carries forward into the pulse-forked engine.
+- **Research arc:** [`../research/async/README.md`](../research/async/README.md) taxonomy + [`../research/async/LOG.md`](../research/async/LOG.md) chronology + [`../research/async/deep-dives/`](../research/async/deep-dives/) per-system analyses.
+- **Lexicon:** [`../research/async/CONTEXT.md`](../research/async/CONTEXT.md) — canonical definitions of the four dimensions, the failure modes, and research vocabulary.
+- **Problem space:** [`../research/async/transitions-problem-space.md`](../research/async/transitions-problem-space.md) — the four failure modes worked through with concrete examples.
+- **Dives most directly informing this document:**
+  - [`../research/async/deep-dives/react-modern.md`](../research/async/deep-dives/react-modern.md)
+  - [`../research/async/deep-dives/solid-2x.md`](../research/async/deep-dives/solid-2x.md) — the per-node multi-slot architecture pulse is structurally converging on (with a different user-facing surface).
+  - [`../research/async/deep-dives/svelte-5.md`](../research/async/deep-dives/svelte-5.md)
+  - [`../research/async/deep-dives/bonsai-incremental.md`](../research/async/deep-dives/bonsai-incremental.md) — the "separate effect layer over reactive substrate" reference point.
+  - [`../research/async/deep-dives/xilem-druid.md`](../research/async/deep-dives/xilem-druid.md) — "structural cancellation via Drop" + "Loading-primitive-is-more-valuable-in-JS" findings.
+  - [`../research/async/deep-dives/replicache.md`](../research/async/deep-dives/replicache.md) — the "sidestep branching via server-linearized replay" alternative.
+- **r3 source** (`node_modules/r3/src/index.ts`) — the substrate this exploration is rooted in; the topological scheduling + push-pull-push fallback machinery carries forward into the pulse-forked engine.
