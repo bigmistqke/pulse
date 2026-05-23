@@ -917,6 +917,334 @@ falsifications.
 
 ---
 
+## End-to-end trace: H1a-c — effect under speculation
+
+A worked trace of the three H1 sub-scenarios verifying the **defer-until-commit**
+position for effects-under-speculation: speculative writes inside an action
+*do not* fire effects registered outside; commit fires them once; discard
+never fires them. The trace also establishes a consumer-pattern abstraction
+(Q-C) that's load-bearing for the next-pressing piece of the architecture.
+
+### What's an Effect, structurally?
+
+Under the [framings](#signal--computed--jsx-expression--effect-are-all-the-same-primitive),
+Effect is one of the four connection patterns over `Node<() => T>`:
+
+- The Node's recipe is the *body* (which contains reads and side effects).
+- The recipe is *fixed at creation* (like Computed).
+- The **consumer** is a *scheduler* that re-invokes the recipe whenever any
+  of the recipe's tracked deps changes.
+- If the recipe returns a function, that's a *cleanup* run before the next
+  invocation (or on disposal).
+- The effect's *ambient scope* at creation time determines what chain its
+  tracking edges form against.
+
+Library shape:
+
+```ts
+function effect(fn: () => void | (() => void)): EffectHandle {
+  const scope = getCurrentScope()                 // ambient scope = ownership + dep-chain
+  const node = createNode<void>(fn)               // Effect is a Node whose recipe is fn
+
+  let lastCleanup: (() => void) | undefined
+
+  const runBody = () => {
+    lastCleanup?.()
+    pushScope(scope)
+    pushTracker(getOrCreateSlot(node, scope))
+    try { lastCleanup = fn() as (() => void) | undefined }
+    finally { popTracker(); popScope() }
+  }
+
+  // Initial invocation forms tracking edges
+  runBody()
+
+  // Register as a consumer: when this Node's slot is invalidated, re-run on
+  // next microtask (batched).
+  subscribe(node, e => {
+    if (e.kind === 'invalidated') scheduleMicrotask(runBody)
+  })
+
+  return { dispose: () => { lastCleanup?.(); disposeNode(node) } }
+}
+```
+
+Three things to notice: **(1)** the effect's ambient scope at creation is
+captured in `scope` — its edges form against `chainFor(scope)`. **(2)** the
+consumer is just a `subscribe` call on the Effect Node itself; the engine
+fires "slot invalidated" events; library batches via `scheduleMicrotask`.
+**(3)** the engine knows nothing about effects — `subscribe` is the only
+engine primitive used.
+
+### Setup
+
+```ts
+const [count, setCount] = signal(0)
+let effectRuns = 0
+const handle = effect(() => {
+  const value = read(count)
+  effectRuns += 1
+  console.log(`Effect runs: ${effectRuns}, value: ${value}`)
+})
+```
+
+**Step 0: effect creation, initial run.**
+
+- `effect(fn)` runs. `getCurrentScope()` → `ROOT_SCOPE` (top-level).
+- `createNode<void>(fn)` → engine creates `effectNode`.
+- `runBody()`:
+  - `pushScope(ROOT_SCOPE)` (no-op; already there).
+  - `pushTracker(getOrCreateSlot(effectNode, ROOT_SCOPE))` → creates
+    `slot_E_R` = { recipe: fn, deps: [], subs: [] }. Tracker now points at it.
+  - Invoke `fn`:
+    - `read(count)`:
+      - `getCurrentScope()` → `ROOT_SCOPE`. `currentTracker` → `slot_E_R`.
+      - `link(count, chainSelector([ROOT_SCOPE]), slot_E_R)`.
+        - Engine: `edge1` = { source: count, sourceSelector:
+          `chainSelector([ROOT_SCOPE])`, target: `slot_E_R` }. Add to
+          `count`'s outgoing edges; add to `slot_E_R.deps`.
+      - `invoke(count, ROOT_SCOPE)`:
+        - Engine: `count.slots.get(ROOT_SCOPE)` miss. Create `slot_C_R`
+          = { recipe: () => 0, deps: [], subs: [edge1] }. Invoke → 0.
+          `slot_C_R.cached = 0`. Return 0.
+    - Body: `value = 0`. `effectRuns = 1`. `console.log("Effect runs: 1,
+      value: 0")`. Returns undefined.
+  - `lastCleanup = undefined`. Pop tracker. Pop scope.
+- `subscribe(effectNode, handler)`. Engine registers handler.
+
+**State after Step 0:**
+```
+count.slots = { ROOT_SCOPE: { recipe: () => 0, cached: 0, deps: [], subs: [edge1] } }
+effectNode.slots = { ROOT_SCOPE: { recipe: fn, cached: undefined,
+                                    deps: [edge1], subs: [] } }
+edge1 = { source: count, selector: chainSelector([ROOT_SCOPE]),
+          target: effectNode.slots[ROOT_SCOPE] }
+effectRuns = 1
+```
+
+### H1a: speculative write inside an action — effect does NOT fire
+
+```ts
+action(function* () {
+  setCount(5)
+})
+// expectation: effect does NOT run inside the action
+```
+
+**Step 1a-1: open scope.** `openScope()` → `S`. Push ambient. Begin driving
+generator.
+
+**Step 1a-2: `setCount(5)` inside the action.**
+
+- Library: setter runs. `getCurrentScope()` → `S`. `writeSlot(count, S,
+  { recipe: () => 5, cached: 5, deps: [], subs: [] })`.
+- Engine: walk `count`'s outgoing edges with `(count.slots, S)`:
+  - `edge1.sourceSelector` = `chainSelector([ROOT_SCOPE])`. Check:
+    `chain.indexOf(S)` → `-1`. **Don't fire.** ✓
+- Set `count.slots[S]` = new slot.
+
+**State after Step 1a-2:**
+```
+count.slots = {
+  ROOT_SCOPE: cached 0,    subs: [edge1],
+  S:          cached 5,    subs: [],
+}
+effectNode.slots[ROOT_SCOPE] unchanged. effectRuns = 1.
+```
+
+**Step 1a-3: generator returns.** *(we'll cover commit in H1b.)*
+
+The key observation: **the effect's edge selector (`chainSelector([ROOT_SCOPE])`)
+naturally rejects writes to `S`.** No special "defer-until-commit" logic in
+the engine; the defer behaviour falls out of selector composition. The effect
+doesn't fire during the action because *its subscription chain doesn't
+include `S`*.
+
+This is the cleanest possible answer to H1a: the chain-selector machinery
+already enforces it. **Confirming the lean: defer-until-commit.**
+
+### H1b: action commits — effect fires exactly once
+
+Continuing from the H1a state, with the generator returning normally:
+
+**Step 1b-1: `closeScope(S, 'commit')`.**
+
+Library promotes `count.slots[S]` to `count.slots[ROOT_SCOPE]`:
+- `writeSlot(count, ROOT_SCOPE, { recipe: () => 5, cached: 5, … })`.
+- Engine: walk `count`'s outgoing edges with `(count.slots, ROOT_SCOPE)`:
+  - `edge1.sourceSelector` = `chainSelector([ROOT_SCOPE])`. Check:
+    `chain.indexOf(ROOT_SCOPE)` → `0`. No more-specific in chain. **Fire.**
+  - Engine: invalidate `slot_E_R` (clear `cached`, mark "dirty" — set a
+    flag or use `cached === undefined` as the signal).
+  - Engine: emit `SlotChangeEvent { kind: 'invalidated', node: effectNode,
+    scope: ROOT_SCOPE }` to subscribers of `effectNode`.
+- Library: drop `count.slots[S]`. (No edges had it as source; nothing to
+  unlink on the S side.)
+- `S.status = 'committed'`. Pop ambient back to `ROOT_SCOPE`.
+
+**Step 1b-2: microtask runs scheduler.**
+
+The effect's `subscribe` handler received the invalidation event in Step
+1b-1; it called `scheduleMicrotask(runBody)`. Microtask now fires.
+
+- `runBody()`:
+  - `lastCleanup?.()` — none yet.
+  - `pushScope(ROOT_SCOPE)`. `pushTracker(slot_E_R)`.
+  - **Important:** before re-invoking, the library should *unlink* `slot_E_R`'s
+    old `deps` (so they get rebuilt from scratch). Same discipline as r3's
+    `recompute`. Drop `edge1` from `slot_E_R.deps` and from `count`'s outgoing
+    index. (`subs` on `count` side: `edge1` removed.)
+  - Invoke `fn`:
+    - `read(count)`:
+      - `link(count, chainSelector([ROOT_SCOPE]), slot_E_R)` → creates
+        `edge1'` (new identity, same shape). Add to `count`'s outgoing,
+        add to `slot_E_R.deps`.
+      - `invoke(count, ROOT_SCOPE)`:
+        - Engine: `count.slots[ROOT_SCOPE]` exists with `cached: 5`. Return 5.
+    - Body: `value = 5`. `effectRuns = 2`. `console.log("Effect runs: 2,
+      value: 5")`. Returns undefined.
+  - `lastCleanup = undefined`. Pop tracker. Pop scope.
+
+**State after Step 1b-2:**
+```
+count.slots = { ROOT_SCOPE: cached 5, subs: [edge1'] }
+effectNode.slots = { ROOT_SCOPE: cached undefined, deps: [edge1'] }
+edge1' = { ... (same shape as edge1, fresh identity) }
+effectRuns = 2
+```
+
+✓ The effect fired *exactly once* on commit, with the committed value `5`.
+
+### H1c: action discards — effect never fires
+
+Same setup as H1a (post Step 0 state). The action body throws (or
+`handle.discard()` is called externally).
+
+**Step 1c-1: `closeScope(S, 'discard')`.**
+
+- Engine: drop slots tagged `S`. Walk `count.slots[S].subs` (empty); delete
+  `count.slots[S]`. No edges to unlink on the S side.
+- Engine: fire `S.cleanups` (none).
+- `S.status = 'discarded'`. Pop ambient.
+- **No write to `count.slots[ROOT_SCOPE]` happens.** The effect's selector
+  is never tested against a fire-worthy write.
+- Subscribers receive no events. The microtask scheduler queues nothing.
+
+**State after Step 1c-1:**
+```
+count.slots = { ROOT_SCOPE: cached 0, subs: [edge1] }      // unchanged from initial
+effectNode.slots[ROOT_SCOPE] cached undefined (or 0 — never re-invoked)
+edge1 still alive (unchanged)
+effectRuns = 1                                              // never advanced
+```
+
+✓ The effect *never* fired during or after the action. The discard cleanly
+unwinds the speculation with no side-effect leakage.
+
+### Architecture exposed by H1a-c
+
+The trace established **Q-C (consumer pattern)** with a concrete shape:
+
+1. **A consumer is just a `subscribe` + a scheduler.** No new engine
+   primitive needed. The library composes existing pieces: `subscribe(node,
+   handler)` for the engine-side notification, `scheduleMicrotask(...)` for
+   batching/timing.
+2. **The deferred-until-commit semantics fall out of selector composition.**
+   An effect at `ROOT_SCOPE` has chain `[ROOT_SCOPE]` on its tracking edges.
+   Writes to a speculative scope `S` don't match the chain → don't fire.
+   Writes to `ROOT_SCOPE` (commit promotion) match → fire. **No engine
+   logic; pure walk policy.** This is the cleanest possible answer to H1
+   and arguably the strongest validation of the (β) "open walks over a
+   smaller core" lean we've seen so far.
+3. **Effect re-invocation is recipe re-invocation.** Same `pushTracker` /
+   `pushScope` / `invoke` discipline as Computed re-runs. Effects and
+   Computeds share machinery; what differs is *what the consumer does
+   with the result* (Computed caches in the slot; Effect throws away the
+   value but holds the cleanup).
+4. **Edge discipline on re-run.** Before re-invoking, the consumer unlinks
+   stale `deps` (so they get rebuilt). Same as r3's existing pattern.
+5. **JSX-binding consumer mirrors Effect.** A JSX expression `{read(x)}`
+   is a Node whose consumer schedules a DOM update on invalidation. Same
+   shape as `effect`; the scheduler hands off to the DOM updater instead
+   of running a side-effecting body. **I1 falls out of H1.**
+6. **Scope/owner unification holds.** The effect's ambient scope at
+   creation = its owner. Disposing the scope disposes the effect
+   (cleanup fires, edges unlink). H2 (effect inside action body) would
+   work the same way: the effect's scope is the action's scope, chain
+   is `[action, ROOT_SCOPE]`, so writes to the action's scope DO fire
+   the effect — which is what you want for effects inside actions.
+
+### Consumer-pattern abstraction (Q-C answered)
+
+The library has a uniform consumer shape:
+
+```ts
+type ConsumerKind =
+  | { run: () => void }          // re-invoke a body (Effect)
+  | { render: () => void }       // re-render a JSX subtree
+  | { invalidate: () => void }   // mark dependent Computed dirty
+  // …
+
+function consumer(node, onSlotChange: () => void) {
+  return subscribe(node, e => {
+    if (e.kind === 'invalidated') scheduleMicrotask(onSlotChange)
+  })
+}
+```
+
+Effect / JSX-binding / Computed-cache-dependent are all `consumer(node, …)`
+calls with different `onSlotChange` bodies. The engine doesn't see the
+difference. **Q-C lands at: "consumers are library code over the engine's
+`subscribe` primitive; no new engine primitive needed."**
+
+### New sub-questions surfaced
+
+The trace was clean — no falsifications — but a few details deserve being
+captured:
+
+1. **Microtask batching policy.** If multiple writes happen in quick
+   succession, multiple invalidations fire, multiple `scheduleMicrotask`
+   calls happen. Does the library de-dupe (one re-run per microtask cycle
+   per Node) or does it re-run multiple times? r3 batches via the dirty
+   heap; the library equivalent here would be a per-Node "scheduled"
+   flag. Cheap fix; doesn't change architecture.
+2. **Effect-during-recompute.** An effect's body calls `read(count)`; what
+   if `count`'s recipe (when invoked) itself triggers an effect (via some
+   side path)? Re-entrancy — exactly **K1 territory.** Worth tracing K1
+   next since it directly tests this.
+3. **Effect priority.** If 100 effects all depend on the same signal, and
+   that signal commits, the scheduler runs them all in some order. Does
+   order matter? Does pulse expose a priority hint? **Adjacent to R
+   (scheduling).**
+4. **Effects under a chain longer than 1.** A component-owned effect has
+   chain `[component_scope, ROOT_SCOPE]`; an effect inside an action
+   inside a component has chain `[action_scope, component_scope,
+   ROOT_SCOPE]`. The chain composition is implicit in `chainFor(scope)`.
+   The trace didn't exercise this; H2 would.
+
+### Framings status after H1a-c
+
+All four framings held:
+
+- *Node-as-recipe*: an Effect is a Node whose recipe is the body. Same
+  shape as Signal/Computed.
+- *Walks-first-class*: `read` inside the body forms edges with the right
+  chain; the chain *is* the consumer's subscription policy.
+- *Slim engine + thick library*: the entire effect mechanism is library
+  code over `createNode` / `subscribe` / `invoke` / `link` / `writeSlot`.
+  Engine knows nothing about effects.
+- *Scope/owner unification*: the effect's ambient scope at creation is
+  its owner; disposing the scope disposes the effect via the cleanup
+  chain.
+
+**Q-C is essentially resolved** at the architectural level (mechanism +
+policy via selectors). H2/H3/H4 would test specific compositions but don't
+require a new framing. **Two big upstream pieces are now in place:** C2
+established async-walk discipline; H1a-c established consumer-pattern via
+selectors. Both came out cleanly.
+
+---
+
 ## Open questions (the actual mapping work)
 
 Each is open. The goal is to *map the question space* before committing to any
@@ -1129,28 +1457,58 @@ discipline — likely falls out of scope-discard).
 
 ### Q-C — Consumer patterns
 
-`Computed` (cache invalidation), `Effect` (re-run scheduling), `JSX-binding`
-(DOM update scheduling) are all *consumers* — they subscribe to slot changes and
-react. The library expresses each over the engine's `subscribe` primitive, but:
+Status: working candidate framing identified via the H1a-c trace. Not locked
+in; sub-questions remain at the next level down.
 
-- *Common shape vs separate code?* Is there a single "consumer pattern"
-  abstraction (`createConsumer({ onSlotChange })`) that all three build on, or
-  is each its own bespoke library code with shared utilities?
-- *Where does dirty propagation live?* Computeds propagate dirty downstream so
-  that *their* subs invalidate too. That's a behavior of the consumer pattern
-  for Computed, not a fixed engine feature. But it's load-bearing — without it,
-  invalidation doesn't transitively reach further-downstream subs.
-- *Effects under speculation.* Should a speculative scope's writes trigger
-  effects during the action, or defer until commit/discard? Three positions:
-  (a) defer all triggered effects until commit (and drop on discard);
-  (b) run under the scope's read-policy and roll back on discard;
-  (c) refuse to trigger speculative effects; require explicit opt-in.
-- *Is the JSX-binding consumer the same shape as Effect, just with a different
-  body?* Probably; worth confirming.
+**Candidate framing.** Consumers are *library code* over the engine's
+`subscribe` primitive plus a scheduler. Uniform shape:
 
-**Related:** Q-A (consumers subscribe via edges or via `subscribe`; the
-selector question recurs), Q-E (async recipes interact with consumer's re-run
-discipline).
+```ts
+function consumer(node, onSlotChange) {
+  return subscribe(node, e => {
+    if (e.kind === 'invalidated') scheduleMicrotask(onSlotChange)
+  })
+}
+```
+
+`Effect`, `JSX-binding`, and `Computed-cache-dependent` are all `consumer(…)`
+calls with different `onSlotChange` bodies (re-run side-effect body, schedule
+DOM update, mark cache dirty + propagate). No engine primitive distinguishes
+them.
+
+**Deferred-until-commit semantics** for effects-under-speculation fall out of
+**selector composition**, not engine logic: an effect created in `ROOT_SCOPE`
+has its tracking edges formed with `chainSelector([ROOT_SCOPE])`; writes to a
+speculative scope don't match the chain → don't fire. Writes to `ROOT_SCOPE`
+(commit promotion) match → fire. *No defer logic anywhere; the chain is the
+policy.*
+
+**Verified by H1a-c trace.** H1a (write under S → effect doesn't fire), H1b
+(commit → effect fires once), H1c (discard → effect never fires).
+
+**Sub-questions still open:**
+
+- *Microtask batching.* Multiple invalidations in quick succession should
+  produce one re-run per microtask cycle per Node. Library-side "scheduled"
+  flag per Node handles it. Mechanical.
+- *Effect-during-recompute (re-entrancy).* If an effect's body triggers
+  another effect that writes to a signal the first effect reads… exactly
+  **K1 territory.** Worth tracing K1 next.
+- *Effect priority and ordering.* Multiple effects depending on the same
+  signal — order? Pulse hasn't articulated against Dim 3 (priority).
+- *Effects at chains longer than 1.* Component-owned effect chain
+  `[component_scope, ROOT_SCOPE]`; action-inside-component effect chain
+  `[action_scope, component_scope, ROOT_SCOPE]`. Trace H2 would exercise.
+- *Dirty propagation.* Computeds propagate dirty downstream — their subs
+  also need to invalidate transitively. Library-side: the Computed
+  consumer's `onSlotChange` doesn't just invalidate its own cache; it
+  also fires its own subs (via the engine). Open: is this transitive
+  fire-and-invalidate something the engine should expose more directly,
+  or is iterating subs in the consumer correct?
+
+**Related:** Q-A (selectors are the chain mechanism; Q-C subscribes via
+them), Q-D (Promise-resolution-as-write fires consumers — confirmed in C2),
+Q-G (`defaultRecipe` interacts with consumer's initial run).
 
 ### Q-D — Async at the engine level
 
