@@ -374,30 +374,25 @@ see Q4).
 
 ### Q2 — Scope/Owner unification
 
-Working hypothesis: one ambient context primitive with `cleanups` + a `mode` at
-close time (`'commit' | 'discard'`). Owner = scope used without slot-tagging;
-speculation = scope used with slot-tagging.
+Status: **resolved.** One ambient context primitive (the [Q6](#q6--what-is-a-scope-as-a-value)
+`Scope` shape) supports both uses. An "owner scope" is just a `Scope`
+whose `writeSet` stays empty — only cleanups and child scopes get
+registered. A "speculation scope" is a `Scope` that has `writeSlot`
+calls populating its `writeSet`. Same primitive, different usage
+pattern.
 
-Open sub-questions:
+**Sub-questions resolved:**
 
-- *Are scope identities first-class?* Can users grab a scope handle and pass it
-  around, or are scopes only manipulable through library helpers (`action`,
-  `createRoot`)?
-- *What is a scope as a value?* Symbol, plain object with identity, frame
-  object that holds nesting + cleanups, extensible "kind" (per-application
-  custom scopes)?
-- *How does `commit` interact with cleanups?* Working assumption: cleanups fire
-  on discard, not on commit (a successful action's long-lived resources keep
-  living after commit). Is there a separate `onCommit(fn)` hook, or is
-  post-commit work always expressed through the body's return value?
-- *Does a computed's tracker need to be a separate ambient context, or is it the
-  same context-handle as the scope?* (Tracker = "currently-recomputing slot,
-  register reads to me." Currently sketched as a separate `currentTracker`
-  variable.)
+- *Are scope identities first-class?* No — opaque, library-mediated.
+  Users get an action handle (per [Q6](#q6--what-is-a-scope-as-a-value)) exposing `.status`,
+  `.commit()`, `.discard()`, `.onCleanup()`. Scope identity is engine state.
+- *What is a scope as a value?* See [Q6](#q6--what-is-a-scope-as-a-value)'s shape.
+- *How does commit interact with cleanups?* Discard only (per [Q12](#q12--body-cleanups-vs-scope-cleanups-composition-and-re-entrancy)).
+- *Tracker vs scope:* separate ambients, parallel-coupled (per [Q8](#q8--tracker-vs-scope-separate-or-unified)
+  and confirmed by K1 trace).
 
-**Related:** [Q3](#q3--consumer-patterns) (effects register cleanups; whether a scope-with-effects has
-different lifecycle from a scope-with-just-state), [Q2](#q2--scopeowner-unification) in main doc (cancellation
-discipline — likely falls out of scope-discard).
+**Related:** [Q6](#q6--what-is-a-scope-as-a-value) (shape), [Q8](#q8--tracker-vs-scope-separate-or-unified) (tracker), [Q12](#q12--body-cleanups-vs-scope-cleanups-composition-and-re-entrancy) (cleanup
+semantics), [Q11](#q11--effect-chain-policy-chain-follows-owner-or-always-root_scope) (owner-chain reactivity).
 
 ### Q3 — Consumer patterns
 
@@ -533,27 +528,27 @@ trigger commit-promotion).
 
 ### Q5 — Recipe / cache asymmetry between Signal and Computed slots
 
-For a Signal slot, the *recipe is the value* — `() => 42`. The cache is
-trivially `42`.
+Status: **dissolved by [Q9](#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally)
++ [Q6](#q6--what-is-a-scope-as-a-value).**
 
-For a Computed slot, the recipe walks deps to compute. The cache is the result
-of invocation under the slot's scope.
+The slot shape stays uniform — `{ recipe, cached, deps }`. There's no
+"signal slot kind" vs "computed slot kind" at the engine level. The
+distinction was an artifact of conflating two things:
 
-The engine doesn't currently distinguish — both are slots with `recipe` and
-`cached`. But practically:
+- *Which set the scope files the slot under.* Signal-style writes land
+  the slot in `scope.writeSet` (via setter → `writeSlot`); computed
+  reads land it in `scope.readSet` (via `invoke`-populated cache). This
+  is the Q9 distinction — and it's a *scope-side* distinction, not a
+  slot-side one. The slot doesn't know which set it's in.
+- *Invalidation semantics.* Signal slots get *overwritten* by setters,
+  not invalidated. Computed slots get *invalidated*, recomputed on
+  next read. But this is just a fact about which library primitive
+  wrote the slot, not about the slot's shape. The engine's
+  `writeSlot(node, scope, slot)` is the same call either way.
 
-- *Signal slot invalidation is meaningless* — the recipe is a constant, so
-  invalidating the cache and re-invoking the recipe just returns the same value.
-  Signal slots don't *get* invalidated; they get *overwritten* by a new
-  `writeSlot` call from a setter.
-- *Computed slot invalidation triggers recompute* — clear `cached`, mark
-  through subs (so downstream sees this slot is dirty); next `invoke` re-runs
-  the recipe.
-
-So Signal vs Computed isn't a Node-level distinction, it's a *slot-lifecycle
-distinction*. Slot lifecycle is engine-level (because the cache is). Worth
-working out whether this is a real distinction or whether it dissolves under a
-careful framing.
+So there's no engine-level asymmetry to resolve. The slot shape is
+uniform; the *usage pattern* (set vs invoke + invalidate-then-recompute)
+is what differs, and that lives in the library / scope.
 
 ### Q6 — What is a Scope as a value?
 
@@ -679,32 +674,26 @@ to [Q1](#q1--fall-through-and-edge-policy) (edge re-formation across scope trans
 
 ### Q8 — Tracker vs Scope: separate or unified?
 
-The sketch has a separate `currentTracker` (the slot currently being
-recomputed, used by `get` to register `deps`) and a `getCurrentScope`
-(speculation/owner context). Are these the same primitive?
+Status: **resolved — separate ambients, parallel-coupled.** Confirmed by
+the [K1 trace](./scenario-traces.md#k1--re-entrant-setter-mid-recompute).
+When a recompute enters, both `currentTracker` (the slot being recomputed)
+and `currentScope` push together; both pop together. They live at
+different granularities (tracker is per-recompute, scope is per-action
+or owner) so unifying them into one primitive would lose information.
+Re-entrant writes inside a recompute correctly inherit the recompute's
+scope because both ambients are synchronized.
 
-Argument for unification: both are ambient context handles. Argument against:
-the tracker is *the slot being recomputed*; the scope is a *broader context*
-that may contain many tracker-events. They're at different granularity.
+**Sub-question still open (surfaced by K1 + relates to catalog L1):**
+*`untrack` interaction.* `untrack(() => ...)` clears `currentTracker`
+but not `currentScope`. So a `writeSlot` inside `untrack` writes to the
+current scope normally, but its firing isn't gated by `deferredFires`
+(which is keyed on tracker). Writes inside `untrack` would fire
+synchronously even during a recompute. That's plausible (the user
+explicitly opted out of tracking) but worth confirming as the policy.
+Connects to L1 in the scenario catalog.
 
-Likely answer: tracker is a sub-ambient. A slot recomputes under a scope (its
-slot's scope); reads inside the recompute know both. Either two separate
-ambients, or one ambient with a "current slot recomputing" sub-field. Open.
-
-**K1 confirmed the parallel-and-coupled framing.** When a recompute enters,
-both `currentTracker` and `currentScope` push together (the slot being
-recomputed *and* its scope); both pop together. Re-entrant writes inside the
-recompute correctly inherit the recompute's scope. So they're separate
-ambients with synchronized lifecycles.
-
-**Sub-question (surfaced by K1 + relates to catalog L1):** *`untrack`
-interaction.* `untrack(() => ...)` clears `currentTracker` but not
-`currentScope`. So a `writeSlot` inside `untrack` writes to the current
-scope normally, but its firing isn't gated by `deferredFires` (which is
-keyed on tracker). Writes inside `untrack` would fire synchronously even
-during a recompute. That's plausible (the user explicitly opted out of
-tracking) but worth confirming as the policy. Connects to L1 in the
-scenario catalog.
+**Related:** [Q2](#q2--scopeowner-unification) (scope/owner unification — tracker is the third
+ambient, parallel to scope), [Q10](#q10--commit-as-transaction-ordering-atomicity-deferred-fires) (`deferredFires` is keyed on tracker).
 
 ### Q9 — Read-populated vs write-populated slots: do they differ structurally?
 
@@ -746,80 +735,75 @@ files them under*, not a property of the slot itself.
 
 ### Q10 — Commit as transaction: ordering, atomicity, deferred fires
 
-When an action commits, how exactly does the engine sequence the multiple
-slot promotions and edge fires so that consumers see a consistent
-post-commit state, not a sequence of partial updates?
+Status: **resolved — commit is a deferred-fires region.** Generalizes
+K1's recompute mechanism: the engine's invariant is "if `deferredFires`
+is non-null, fires queue; outermost layer drains." Recomputes set up one
+such region; commits set up another. They compose by nesting.
 
-**Deferred-fires is commit-mode only**, not tracker-mode. Recomputes fire
-synchronously; consumers schedule async via microtasks (see [K1b trace](./scenario-traces.md#k1--re-entrant-setter-mid-recompute)).
-The deferred-fires mechanism is triggered only by opening a commit
-operation.
+**The procedure.** Given `closeScope(S, 'commit')` (per
+[Q6](#q6--what-is-a-scope-as-a-value)'s shape):
 
-Three concerns under one umbrella:
+1. Open a deferred-fires region. Subsequent `writeSlot` fires queue
+   into the region instead of firing synchronously.
+2. For each `node` in `S.writeSet` (per [Q9](#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally)),
+   in dep-order leaves-first: `writeSlot(node, S.parent, S.slots.get(node))`.
+   Queued fires accumulate.
+3. Walk `S.edges` and remove each from `node.subs` (per
+   [Q6](#q6--what-is-a-scope-as-a-value)'s explicit disposal).
+4. Drop `S.slots` entries for every node in `S.readSet ∪ S.writeSet`.
+5. Recursively close `S.children` (children-first per
+   [Q12](#q12--body-cleanups-vs-scope-cleanups-composition-and-re-entrancy);
+   typically empty at this point — children must have closed before
+   their parent).
+6. Close the region: deduplicate fires by `(node, targetSlot)`, then
+   call the real `fireEdges` for each. Consumers see one invalidation
+   per affected slot regardless of how many writes contributed.
+7. `S.status = 'committed'`. Pop ambient.
 
-- *Multi-write ordering.* If an action wrote to N signals, commit promotes
-  N slots to the parent scope. Each promotion calls `writeSlot`, which fires
-  edges. If a derived consumer's edges target a slot that depends on
-  multiple of these N signals, the order of promotions can fire the consumer
-  multiple times with partial states (after promoting `signal_1` but before
-  `signal_2`). *Working hypothesis: dep-order leaves-first.* Sources promote
-  before their dependents; intermediate fires invalidate but don't re-run
-  until all promotions are done.
-- *Deferred fires during commit.* Without deferral, consumers might re-run
-  mid-commit and observe partial states. Better: collect *deferred fires*
-  during the entire commit operation, drain them after all promotions
-  complete.
-- *Atomicity from the consumer's perspective.* External consumers (effects,
-  JSX-bindings) should see *the commit as a single event* — one invalidation
-  per affected consumer, regardless of how many slots got promoted.
+**Why dep-order leaves-first.** Sources (the leaves of the dep graph)
+promote before their dependents. Intermediate fires invalidate but don't
+re-run until step 6 drains the region, so a derived consumer that
+depends on multiple promoted signals never observes a partial state.
 
-Likely resolution: **commit is a deferred-fires region.** When
-`closeScope(S, 'commit')` runs:
-
-1. Open a deferred-fires region.
-2. For each `S`-tagged write-populated slot ([Q9](#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally)), perform `writeSlot(node,
-   parentScope, slot_content)`. Edge fires are *queued* into the deferred
-   region.
-3. Drop the `S`-tagged slots, unlinking edges.
-4. Close the deferred-fires region: deduplicate by `(node, scope)`, then
-   actually call `fireEdges` for each. Consumers see one invalidation per
-   affected slot, regardless of how many writes contributed.
-
-**Recipes** (computed/effect bodies) **do not open a deferred-fires
-region.** Writes inside recipes fire synchronously per K1+K1b's resolution
-to (C). This is necessary for in-recipe state coherence (K1b: write a
-signal, then read a downstream derived → derived must recompute fresh).
-Cycle protection is consumer-level (max N re-runs per microtask),
+**Recipes do not open a deferred-fires region.** Writes inside recipes
+(K1+K1b) fire *synchronously* per K1's resolution to Position (C). This
+is necessary for in-recipe state coherence: write a signal, read a
+downstream derived → the derived must recompute fresh against the new
+value. Cycle protection is consumer-level (max N re-runs per microtask),
 unaffected by whether fires are deferred.
 
-**Open sub-questions:**
+**Resolved sub-questions:**
 
-- *Nested-commit ordering.* G2 traced inner-commit-promotes-to-outer. If
-  inner commit happens inside a deferred-fires region (because outer is
-  still executing its body), do the inner's promotions fire immediately to
-  external consumers, or are they also deferred until outer finishes? Lean:
-  inner-commit fires immediately *within the outer's body*, because the
-  outer's body might read the post-inner state and the body is imperative.
-  But for *external* consumers (whose target slots live in `ROOT_SCOPE`),
-  they shouldn't fire until outer commits — which falls out of the
-  chain-match predicate anyway (`chainFor(ROOT_SCOPE)` doesn't contain
-  the outer's scope, so writes-to-outer's-scope don't fire ROOT-targeted
-  edges). So this might be a non-issue. Worth verifying with a
-  deliberate trace.
-- *Edge-target-dropped races.* If during a commit, an edge's target slot
-  gets dropped (e.g., the consumer was tied to a different scope that
-  closed during the commit's processing), the deferred fire would target a
-  dead slot. Lazy-prune-on-iteration handles it.
-- *Promise resolution during commit.* If a promoted slot's `cached` is an
-  Awaitable that's still pending, the commit promotes the Awaitable as-is.
-  Later resolution is not an engine event (per [Q4](#q4--async-at-the-engine-level));
-  consumers that read the promoted slot already hold the Awaitable and
-  handle their own resumption. No special handling.
+- *Nested-commit ordering.* G2's inner-commit-promotes-to-outer case:
+  inner commit fires immediately *within the outer's body* because the
+  body is imperative and may read post-inner state. External consumers
+  (whose target slots live in `ROOT_SCOPE`) are not affected — the
+  chain-match predicate doesn't match writes to the outer's scope
+  against `chainFor(ROOT_SCOPE) = [ROOT_SCOPE]`. So no special nested-
+  region handling is needed; the chain-match already firewalls
+  external consumers.
+- *Edge-target-dropped races.* Lazy-prune-on-iteration. When draining
+  fires, skip any whose target slot has been dropped. Standard reactive
+  bookkeeping; not new.
+- *Promise resolution during commit.* Per [Q4](#q4--async-at-the-engine-level),
+  resolution is not an engine event. A promoted slot whose `cached` is
+  a pending Awaitable promotes as-is; consumers that read the slot
+  already hold the Awaitable and handle their own resumption. No
+  special-case in commit.
 
-**Lean: implement commit as a deferred-fires region**, generalizing K1's
-mechanism. The engine's invariant becomes "if `deferredFires` is non-null,
-fires queue; outermost layer drains." Recomputes set up one such region;
-commits set up another. They compose by nesting.
+**Open sub-question:** *deferred-fires region semantics for `discard`.*
+Discard doesn't promote, but does drop scope-tagged slots and unlink
+edges. That cascade-removal can itself fire (edges removed from
+`node.subs` should not invalidate any consumer that still depends on
+them — they're being removed *because* the consumer is going away).
+Probably uneventful, but worth a trace if a discard-during-recompute
+case comes up.
+
+**Related:** [Q6](#q6--what-is-a-scope-as-a-value) (the writeSet / readSet / edges that drive the
+procedure), [Q9](#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally) (writeSet for promotion, readSet for drop),
+[K1 trace](./scenario-traces.md#k1--re-entrant-setter-mid-recompute) (the deferred-fires
+mechanism this generalizes), [Q4](#q4--async-at-the-engine-level)
+(promotion of pending Awaitables).
 
 ### Q11 — Effect chain policy: chain follows owner, or always [ROOT_SCOPE]?
 
