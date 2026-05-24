@@ -322,9 +322,9 @@ principles.
 Four shapes considered during the exploration:
 
 ```ts
-// Shape A — Wrapper signal (separate optimistic pair)
+// Shape A — Wrapper signal (separate optimistic triple)
 const [value, setValue] = signal(initial)
-const [optimisticValue, setOptimisticValue] = optimistic(value)
+const [optimisticValue, setOptimisticValue, isOptimistic] = optimistic(value)
 action(function* () {
 	setOptimisticValue(predicted)
 	yield* postToServer(predicted)
@@ -448,10 +448,10 @@ optimistic view.
 
 ```ts
 const [value, setValue] = signal(initial)
-const [optimisticValue, setOptimisticValue] = optimistic(value)
+const [optimisticValue, setOptimisticValue, isOptimistic] = optimistic(value)
 ```
 
-The `optimistic(...)` library helper sets up:
+The `optimistic(...)` library helper returns a triple:
 
 - A *reader* (`optimisticValue`) that returns the most-recent
   in-flight overlay value if present, otherwise the canonical
@@ -459,9 +459,16 @@ The `optimistic(...)` library helper sets up:
 - A *setter* (`setOptimisticValue`) that, when called inside a
   speculative scope, writes an overlay layer keyed to the
   enclosing action's handle.
-- A *cleanup* registered on the enclosing action's scope: when the
-  action closes (commit or discard), the overlay layer for that
-  action is removed.
+- A *query* (`isOptimistic`) — a closure-bound, reactive boolean
+  that's true while any action's overlay is active on this
+  optimistic signal, false when only the canonical value is being
+  read. Closure-bound on the wrapper rather than a walk on the node
+  because the query is wrapper-scoped — it only meaningfully
+  reports something for nodes that came from `optimistic(...)`.
+
+Internally, the wrapper also registers a *cleanup* on each writing
+action's scope: when the action closes (commit or discard), the
+overlay layer for that action is removed.
 
 The overlay is a side-channel separate from the underlying signal's
 slot machinery — it doesn't go through the speculation's writeSet
@@ -483,34 +490,58 @@ canonical signal's write was in the action's writeSet, discarded
 with the action. Consumers binding to `optimisticValue` see the
 pre-action value again.
 
-### The query primitive
+### The query at the consumer site
 
 In addition to reading the value, consumers often need to know "is
 this currently provisional?" — to render the opacity, badge, or
-spinner.
-
-```ts
-hasOptimistic(optimisticValue)   // boolean: is there an active overlay?
-```
-
-This is a standalone query, parallel to pulse's existing
-`isPending(node)`. It returns true while any action's overlay is
-active on this optimistic signal; false when only the canonical
-value is being read.
-
-UI consumption looks like:
+spinner. The third tuple slot is exactly this:
 
 ```tsx
-<div
-	style:opacity={() => (hasOptimistic(optimisticValue) ? 0.5 : 1)}
->
+<div style:opacity={() => (isOptimistic() ? 0.5 : 1)}>
 	{get(optimisticValue)}
 </div>
 ```
 
-The opacity binding is itself reactive — when the overlay activates
-or clears, `hasOptimistic` re-evaluates and opacity updates. No
-manual subscription management.
+The opacity binding is reactive — when an overlay activates or
+clears, `isOptimistic` re-evaluates and opacity updates. No manual
+subscription management.
+
+Naming flexibility falls out of destructuring: each call site can
+rename the query for its local domain.
+
+```ts
+const [comment, setComment, isSaving] = optimistic(savedComment)
+const [tasks, setTasksOptimistic, hasPendingTask] = optimistic(tasks)
+```
+
+This is honest about the *meaning* of the query at each site (it's
+"saving" for the comment editor; "has pending task" for the task
+list) without forcing a single name on the library.
+
+### Why not a `hasOptimistic(node)` walk?
+
+Pulse's existing pattern is "walks operate on nodes; the
+destructured tuple has the node + closure-bound setter." A walk-style
+query (`hasOptimistic(node)`) would parallel `isPending(node)`,
+`latest(node)`, etc. So why depart from that here?
+
+Two reasons:
+
+- *Scoping honesty.* `hasOptimistic(node)` would be a global walk
+  that's only meaningful for nodes returned by `optimistic(...)`. A
+  plain signal passed in would return false vacuously — misleading
+  shape. Closure-binding the query on the wrapper makes its scope
+  explicit: this exists *because* you wrapped this signal, and only
+  makes sense in that context.
+- *Ergonomics + naming.* The closure form drops the node argument
+  at every call site and lets the user pick a meaningful local name.
+  Walk-style would force a single library-chosen name and require
+  the node reference everywhere.
+
+The trade is slightly weaker consistency with `isPending` /
+`latest` (which *are* general walks because they're meaningful for
+many kinds of signals). For optimistic specifically, the
+wrapper-scoping argument wins.
 
 ### The canonical action pattern
 
@@ -525,8 +556,8 @@ action(function* () {
 Inside the action body, two writes happen:
 
 - `setOptimisticValue(predicted)` — writes the overlay. Visible to
-  outside readers of `optimisticValue` immediately, tagged via
-  `hasOptimistic`.
+  outside readers of `optimisticValue` immediately, queryable via
+  `isOptimistic()`.
 - `setValue(predicted)` — writes the canonical signal. Lives in the
   action's writeSet; commits to the parent scope on action success.
 
@@ -635,11 +666,10 @@ function optimistic(committedSignal) {
 		return last
 	})
 
-	return [reader, setOptimisticValue]
-}
+	// closure-bound reactive query — reads overlays.size as a tracked dep
+	const isOptimistic = compute(() => overlays.size > 0)
 
-function hasOptimistic(reader): boolean {
-	// (implementation detail: introspect the reader's underlying overlays Map)
+	return [reader, setOptimisticValue, () => get(isOptimistic)]
 }
 ```
 
@@ -673,10 +703,13 @@ can be settled when implementation forces them:
   Default: explicit dual-setter (Solid-style discipline). Sugar
   layer: `setOptimisticValue(v, { autoCommit: true })` or a
   separate variant for the auto-commit case.
-- **Reader API richness.** Should the reader return bare value plus
-  separate `hasOptimistic` query, or a tagged value
-  `{value, status}`? Lean: bare + separate query (matches pulse's
-  `get` + `isPending` pattern).
+- **Reader API richness.** Should the reader return bare value, with
+  the wrapper's third tuple slot (`isOptimistic`) carrying the status
+  query? Or should the reader return a tagged value
+  `{value, status}`? Lean: bare reader + closure-bound query in the
+  tuple (matches pulse's existing pattern of "destructured tuple has
+  the node + closure-bound things" and keeps the reader's value type
+  unwrapped for binding).
 - **Naming.** `optimistic` / `preview` / `tentative` / `speculative`
   / `pending`? Cosmetic; defer until ergonomic feedback.
 - **Cleanup-on-commit-and-discard.** The wrapper needs its cleanup
@@ -704,18 +737,24 @@ can be settled when implementation forces them:
 
 ## Tentative recommendations
 
-**1. Adopt the wrapper shape (A).** `optimistic(committedSignal)`
-returns `[optimisticValue, setOptimisticValue]`. The optimistic
+**1. Adopt the wrapper shape (A) — 3-tuple destructure.**
+`optimistic(committedSignal)` returns
+`[optimisticValue, setOptimisticValue, isOptimistic]`. The optimistic
 dimension lives at the wrapper-creation site; consumers bind to
 either `value` (canonical) or `optimisticValue` (overlay-aware)
-depending on their use case.
+depending on their use case, and use the closure-bound `isOptimistic`
+when they need the pending status.
 
 **2. Stack-based overlay for concurrent actions.** A per-node
 overlay map keyed by action handle; reader returns the most-recent
 live layer; each action's cleanup removes only its layer.
 
-**3. Separate query primitive.** `hasOptimistic(optimisticValue)`
-returns boolean; consumers wire reactive UI bindings against it.
+**3. Closure-bound query in the tuple, not a walk.**
+`isOptimistic()` rather than `hasOptimistic(node)`. The scoping
+argument is the deciding one — the query is only meaningful for
+nodes returned by `optimistic(...)`; binding it to the wrapper
+makes that scoping explicit (and lets callers rename at destructure
+for local domain names: `isSaving`, `hasPendingTask`, etc.).
 
 **4. Explicit dual-setter pattern by default.** Action author writes
 both `setOptimisticValue` (overlay) and `setValue` (canonical).
