@@ -1766,92 +1766,113 @@ get(count) // expect: 20
 get(name) // expect: "bar"
 ```
 
-Initial state: `count.slots = {}`, `name.slots = {}`. The signals have only
-their `defaultRecipe`s.
+Initial state: `count.subs = ∅`, `name.subs = ∅`, `ROOT.slots = ∅`. The
+signals have only their `defaultRecipe`s.
 
 ### Step-by-step trace under Position (i)
 
-**Step 1: outer opens.** `openScope()` → `S1 = { parent: ROOT_SCOPE,
-cleanups: [], status: 'open' }`. Push `S1` as ambient.
+**Step 1: outer opens.** `openScope()` → `S1 = { parent: ROOT, children:
+∅, slots: ∅, edges: ∅, writeSet: ∅, readSet: ∅, cleanups: [], status:
+'open' }`. `ROOT.children.add(S1)`. Push `S1` as ambient.
 
 **Step 2: `setCount(10)` under `S1`.**
 
 - `getCurrentScope()` → `S1`. `writeSlot(count, S1, { recipe: () => 10,
-cached: 10, deps: [], subs: [] })`.
-- Engine walks `count`'s outgoing edges with `(count.slots, S1)`. None (no
-  prior reads). Set `count.slots[S1]`.
+  cached: 10, deps: [] })`. `S1.writeSet.add(count)`. `S1.slots.set(count,
+  slot_C_S1)`.
+- Engine fires chain-match for each `edge ∈ count.subs`. `count.subs = ∅`.
+  Nothing to fire.
 
 **Step 3: `get(count)` inside outer body.**
 
-- `getCurrentScope()` → `S1`. `currentTracker` → null (action body
-  imperative, no tracking).
-- `invoke(count, S1)`. Engine: `count.slots.get(S1)` hit, cached 10.
-  Return 10.
+- `getCurrentScope()` → `S1`. `currentTracker = null` (action body
+  imperative; per [Q8](./questions.md#q8--tracker-vs-scope-separate-or-unified)).
+- `S1.readSet.add(count)`. `invoke(count, S1)`. `S1.slots.get(count)` hit,
+  cached `10`. Return `10`.
 - `outerReads.push(10)`.
 
 State after Step 3:
 
 ```
-count.slots = { S1: cached 10, subs: [] }
-S1.status = 'open', ambient = S1
+count.subs    = ∅
+S1.slots      = { count → slot_C_S1(cached: 10) }
+S1.writeSet   = { count }
+S1.readSet    = { count }
+S1.edges      = ∅
+ambient = S1
 ```
 
 **Step 4: inner opens.** Nested `action(...)` call. `openScope()` →
-`S2 = { parent: S1, cleanups: [], status: 'open' }`. Push `S2` as ambient
-(the current-scope stack is now `[ROOT_SCOPE, S1, S2]`).
+`S2 = { parent: S1, children: ∅, slots: ∅, edges: ∅, writeSet: ∅,
+readSet: ∅, cleanups: [], status: 'open' }`. `S1.children.add(S2)`. Push
+`S2` as ambient. The scope chain via parent pointers is now
+`S2 → S1 → ROOT`, so `chainFor(S2) = [S2, S1, ROOT]`.
 
 **Step 5: `setCount(20)` under `S2`.**
 
-- `getCurrentScope()` → `S2`. `writeSlot(count, S2, { recipe: () => 20,
-cached: 20, … })`.
-- Engine walks `count`'s outgoing edges with `(count.slots, S2)`. None.
-  Set `count.slots[S2]`.
+- `writeSlot(count, S2, { recipe: () => 20, cached: 20, deps: [] })`.
+  `S2.writeSet.add(count)`. `S2.slots.set(count, slot_C_S2)`.
+- Engine fires chain-match for each `edge ∈ count.subs = ∅`. Nothing.
 
 **Step 6: `setName("bar")` under `S2`.**
 
-- Same shape. `name.slots[S2] = "bar"`.
+- `writeSlot(name, S2, …)`. `S2.writeSet.add(name)`. `S2.slots.set(name,
+  slot_N_S2(cached: "bar"))`. `name.subs = ∅` → nothing fires.
 
 **Step 7: `get(count)` inside inner body.**
 
-- `getCurrentScope()` → `S2`. `invoke(count, S2)`. Hit. 20.
+- `S2.readSet.add(count)`. `invoke(count, S2)`. `S2.slots[count]` hit
+  (most-specific). Return `20`.
 - `innerReads.push(20)`. ✓
 
 **Step 8: `get(name)` inside inner body.**
 
-- `invoke(name, S2)`. Hit. "bar".
+- `S2.readSet.add(name)`. `invoke(name, S2)`. Hit. Return `"bar"`.
 - `innerReads.push("bar")`. ✓
 
 State after Step 8:
 
 ```
-count.slots = { S1: cached 10, S2: cached 20 }
-name.slots = { S2: cached "bar" }
+count.subs    = ∅,    name.subs     = ∅
+
+S1.slots      = { count → cached 10 }
+S1.writeSet   = { count },        S1.readSet  = { count }
+
+S2.slots      = { count → cached 20, name → cached "bar" }
+S2.writeSet   = { count, name },  S2.readSet  = { count, name }
 ```
 
-(Note: `name.slots` has no `S1` entry — the outer never wrote to `name`. The
-inner created `S2` directly.)
+(Note: `S1.slots` has no `name` entry — the outer never read or wrote
+`name`. The inner created its slots directly.)
 
 **Step 9: inner returns. `closeScope(S2, 'commit')`.**
 
-Library promotes each `S2`-tagged slot to the _parent_ scope, `S1`:
+Per [Q10](./questions.md#q10--commit-as-transaction-ordering-atomicity-deferred-fires):
 
-- _Promote `count`:_ `writeSlot(count, S1, { recipe: () => 20, cached:
-20, … })`.
-  - Engine walks `count`'s outgoing edges with `(count.slots, S1)`. None.
-  - Overwrite `count.slots[S1]` (was 10; now 20).
-- _Drop `count.slots[S2]`:_ walk `slot.subs` (empty); delete.
-- _Promote `name`:_ `writeSlot(name, S1, { recipe: () => "bar", cached:
-"bar", … })`.
-  - Walk `name`'s edges. None. Create `name.slots[S1]`.
-- _Drop `name.slots[S2]`:_ empty subs; delete.
-- `S2.status = 'committed'`. Pop ambient back to `S1`.
+1. Open deferred-fires region.
+2. Promote `S2.writeSet = { count, name }` to `S2.parent = S1`:
+   - `writeSlot(count, S1, { recipe: () => 20, cached: 20, deps: [] })`.
+     `S1.slots.set(count, slot_C_S1_new)` (overwrites the existing entry).
+     `S1.writeSet.add(count)` (already present). Fire chain-match for
+     each `edge ∈ count.subs = ∅`. Nothing.
+   - `writeSlot(name, S1, …)`. `S1.slots.set(name, slot_N_S1)`.
+     `S1.writeSet.add(name)`. `name.subs = ∅`. Nothing fires.
+3. Walk `S2.edges = ∅`. Nothing.
+4. Drop `S2.slots` for `S2.readSet ∪ S2.writeSet = { count, name }`.
+   `S2.slots = ∅`.
+5. Close children (none).
+6. Drain region (empty).
+7. `S2.status = 'committed'`. `S1.children.delete(S2)`. Pop ambient to `S1`.
 
 State after Step 9:
 
 ```
-count.slots = { S1: cached 20, subs: [] }              # was 10, now 20
-name.slots = { S1: cached "bar", subs: [] }
-S2: committed
+count.subs    = ∅,    name.subs    = ∅
+
+S1.slots      = { count → cached 20, name → cached "bar" }
+S1.writeSet   = { count, name }
+S1.readSet    = { count }                  # name was never read at S1
+S2            : committed (fully disposed)
 ambient = S1
 ```
 
@@ -1861,29 +1882,36 @@ body's flow.
 
 **Step 10: `get(count)` after inner commits (still in outer body).**
 
-- `invoke(count, S1)` → hit, 20. `outerReads.push(20)`. ✓
+- `S1.readSet.add(count)` (already present). `invoke(count, S1)` → hit,
+  `20`. `outerReads.push(20)`. ✓
 
 **Step 11: `get(name)` after inner commits.**
 
-- `invoke(name, S1)` → hit, "bar". `outerReads.push("bar")`. ✓
+- `S1.readSet.add(name)`. `invoke(name, S1)` → hit, `"bar"`.
+  `outerReads.push("bar")`. ✓
 
 **Step 12: outer returns. `closeScope(S1, 'commit')`.**
 
-Library promotes each `S1`-tagged slot to `ROOT_SCOPE`:
+Same Q10 procedure, promoting `S1.writeSet = { count, name }` to
+`ROOT`:
 
-- `writeSlot(count, ROOT_SCOPE, { recipe: () => 20, cached: 20, … })`.
-  - Walk `count`'s outgoing edges with `(count.slots, ROOT_SCOPE)`. None.
-  - Create `count.slots[ROOT_SCOPE]`.
-- Drop `count.slots[S1]`.
-- `writeSlot(name, ROOT_SCOPE, { recipe: () => "bar", cached: "bar", … })`.
-- Drop `name.slots[S1]`.
-- `S1.status = 'committed'`. Pop ambient to `ROOT_SCOPE`.
+1. Open deferred-fires region.
+2. `writeSlot(count, ROOT, …)`. `ROOT.slots.set(count, …)`.
+   `ROOT.writeSet.add(count)`. Fire chain-match for each
+   `edge ∈ count.subs = ∅`. Nothing.
+   `writeSlot(name, ROOT, …)`. Same.
+3. Walk `S1.edges = ∅`. Nothing.
+4. Drop `S1.slots` for `S1.readSet ∪ S1.writeSet = { count, name }`.
+5. Close children (none — S2 already gone).
+6. Drain region (empty).
+7. `S1.status = 'committed'`. `ROOT.children.delete(S1)`. Pop ambient.
 
 Final state:
 
 ```
-count.slots = { ROOT_SCOPE: cached 20 }
-name.slots = { ROOT_SCOPE: cached "bar" }
+count.subs   = ∅,    name.subs    = ∅
+ROOT.slots   = { count → cached 20, name → cached "bar" }
+ROOT.writeSet = { count, name }
 ```
 
 `get(count)` outside → 20. `get(name)` → "bar". ✓
@@ -1894,29 +1922,29 @@ Suppose instead the inner promoted _directly to ROOT_SCOPE_:
 
 **Step 9 (alternate):** `closeScope(S2, 'commit')` promotes to ROOT:
 
-- `writeSlot(count, ROOT_SCOPE, { cached: 20, … })`.
-- `writeSlot(name, ROOT_SCOPE, { cached: "bar", … })`.
-- Drop `S2` slots.
+- `writeSlot(count, ROOT, { cached: 20, … })`. `ROOT.slots.set(count, …)`.
+- `writeSlot(name, ROOT, { cached: "bar", … })`.
+- Drop `S2.slots`.
 
 State after Step 9 alt:
 
 ```
-count.slots = { S1: cached 10, ROOT_SCOPE: cached 20 }
-name.slots = { ROOT_SCOPE: cached "bar" }
+S1.slots    = { count → cached 10 }            # unchanged
+ROOT.slots  = { count → cached 20, name → cached "bar" }
 ambient = S1
 ```
 
-**Step 10 (alternate):** `get(count)` in outer body. `getCurrentScope()` →
-`S1`. `invoke(count, S1)` → hit, **cached 10**. `outerReads.push(10)`. ✗
+**Step 10 (alternate):** `get(count)` in outer body. `invoke(count, S1)` →
+`S1.slots.get(count)` hit, **cached 10**. `outerReads.push(10)`. ✗
 
 The outer's read returns _the outer's earlier write_, not the inner's
-post-commit value. The chain `[S1, ROOT_SCOPE]` resolves to `S1` first; the
-inner's commit-to-ROOT is invisible.
+post-commit value. Most-specific-wins per the chain `[S1, ROOT]` resolves
+to the `S1` entry first; the inner's commit-to-ROOT is invisible.
 
 It gets worse at outer-commit. **Step 12 (alternate):** `closeScope(S1,
-'commit')` promotes `count.slots[S1]` (still cached 10) to `ROOT_SCOPE`. This
+'commit')` promotes `S1.slots[count]` (still cached 10) to `ROOT`. This
 **overwrites the inner's earlier commit-to-ROOT** with the outer's stale
-value. Final `count.slots[ROOT_SCOPE].cached = 10`. **The inner's commit was
+value. Final `ROOT.slots[count].cached = 10`. **The inner's commit was
 clobbered.**
 
 Position (ii) doesn't work without additional bookkeeping — the engine would
@@ -1932,23 +1960,27 @@ separately.
 
 **Inner discards; outer continues.** Setup: inner body throws.
 
-- `closeScope(S2, 'discard')`: drop `count.slots[S2]`, drop `name.slots[S2]`.
-  Fire `S2.cleanups` (none). `S2.status = 'discarded'`.
-- State: `count.slots = { S1: 10 }`, `name.slots = {}`.
-- Outer continues. `get(count)` under `S1` → 10. `get(name)` under `S1` →
-  chain `[S1, ROOT_SCOPE]` miss-miss → `name.defaultRecipe()` → "foo".
-- Outer-commit later: `count.slots[ROOT_SCOPE] = 10`, `name.slots` stays empty
-  (no `S1` slot to promote).
+- `closeScope(S2, 'discard')`: skip promotion; walk `S2.edges` (∅); drop
+  `S2.slots` for `S2.readSet ∪ S2.writeSet = { count, name }`; fire
+  `S2.cleanups` (none). `S2.status = 'discarded'`.
+- State: `S1.slots = { count → 10 }`, `ROOT.slots = ∅`.
+- Outer continues. `get(count)` under `S1` → 10. `get(name)` under `S1`:
+  chain `[S1, ROOT]` miss-miss → `name.defaultRecipe()` → "foo"
+  (read-populated into `S1.slots`).
+- Outer-commit later: `ROOT.slots[count] = 10`; `name` is in `S1.readSet`
+  only (never written) so it drops without promotion.
 - ✓ Inner's effects fully unwound.
 
 **Outer discards; inner had committed.** Setup: outer body throws after
 inner returns.
 
-- After inner commits: `count.slots = { S1: 20 }`, `name.slots = { S1: "bar" }`.
-- `closeScope(S1, 'discard')`: drop both `S1` slots.
+- After inner commits: `S1.slots = { count → 20, name → "bar" }`,
+  `S1.writeSet = { count, name }`.
+- `closeScope(S1, 'discard')`: skip promotion; walk `S1.edges` (∅);
+  drop all S1 slots.
 - ✓ Outer discard rolls back both outer's _and_ inner's writes. Savepoint
-  semantics: inner's commit is conditional on outer's commit. Databases work
-  the same way.
+  semantics: inner's commit is conditional on outer's commit. Databases
+  work the same way.
 
 If a use case ever surfaces where the inner should _survive_ outer discard
 (autonomous inner action), it would be a _different primitive_ — not nested
@@ -1968,19 +2000,23 @@ effect(() => {
 }) // chain [ROOT_SCOPE]
 ```
 
-Initial run: `observed = 0` (from `count.defaultRecipe`). Edge formed:
-`count → effectSlot` with chain `[ROOT_SCOPE]`.
+Initial run: `observed = 0` (from `count.defaultRecipe`, read-populated
+into `ROOT.slots`). Edge formed: `edge_eff = { source: count, target:
+slot_E_R, targetScope: ROOT }` in `count.subs` and `ROOT.edges`.
+`chainFor(ROOT) = [ROOT]`.
 
 During the nested actions above, does the effect re-run?
 
-- _Step 2 (setCount under S1):_ writeScope=`S1`. Effect's chain
-  `[ROOT_SCOPE]`. `chain.indexOf(S1)=-1`. **Don't fire.** ✓
-- _Step 5 (setCount under S2):_ writeScope=`S2`. Don't fire. ✓
-- _Step 9 (inner-commit: writeSlot count to S1):_ writeScope=`S1`. Effect
-  chain `[ROOT_SCOPE]`, doesn't include S1. **Don't fire.** ✓
-- _Step 12 (outer-commit: writeSlot count to ROOT_SCOPE):_ writeScope=
-  `ROOT_SCOPE`. Effect chain `[ROOT_SCOPE]`, writeIdx=0, no more-specific
-  in chain. **Fire.** Effect invalidates, scheduler queues re-run.
+- _Step 2 (setCount under S1):_ writeScope=`S1`. Chain-match for
+  `edge_eff`: `chainFor(ROOT) = [ROOT]`, doesn't include S1.
+  **Don't fire.** ✓
+- _Step 5 (setCount under S2):_ writeScope=`S2`. **Don't fire.** ✓
+- _Step 9 (inner-commit promotion: writeSlot count to S1):_
+  writeScope=`S1`. Chain `[ROOT]` doesn't include S1. **Don't fire.** ✓
+- _Step 12 (outer-commit promotion: writeSlot count to ROOT):_
+  writeScope=`ROOT`. Chain `[ROOT]`, writeIdx=0, no more-specific check
+  needed. **Fire** (queued in commit's deferred-fires region).
+  Effect's `slot_E_R` invalidates; scheduler queues re-run; region drains.
 - Effect re-runs, observes `count = 20`. ✓
 
 The effect fires _exactly once_ after outer commits — not on inner-commit,
@@ -2006,9 +2042,11 @@ intermediate `10`.
    are conditional on outer commits; outer discard rolls back inner's
    effects. We get database-style nested-transaction semantics without any
    engine-level transaction machinery.
-5. **Q8 (scope nesting via parent pointers).** The scope is a linked
-   structure with `parent` pointers. `chainFor` is just `walk parents
-until you hit ROOT_SCOPE`. Confirms the scope-as-tree shape.
+5. **[Q6](./questions.md#q6--what-is-a-scope-as-a-value)
+   (scope nesting via parent pointers).** The scope is a linked
+   structure with `parent` pointers. `chainFor` walks `scope.parent`
+   until `undefined`; terminal is structural, not a privileged
+   ROOT_SCOPE key. Per-tenant / multi-world roots fall out for free.
 6. **Inner-promotes-to-outer is the _only_ coherent answer** under our
    framings. Position (ii) requires explicit bookkeeping that doesn't fit
    the architecture; Position (i) requires no new machinery.
@@ -2027,29 +2065,21 @@ Position (ii) was tested and ruled out by the trace.
 
 ### Sub-questions surfaced
 
-1. **`chainFor` policy.** The library's `chainFor(scope)` walks
-   `scope.parent` pointers up to and including `ROOT_SCOPE`. Is this
-   always correct? Two edge cases:
-   - A user-defined custom scope hierarchy (per-tenant roots, multiple
-     reactive "worlds") might want a _non-ROOT_SCOPE_ terminal. The
-     library should make `chainFor` user-overridable, or expose
-     `terminalScope` as a configurable per-tree property.
-   - For non-nested contexts (e.g., reads outside any action),
-     `chainFor(ROOT_SCOPE) = [ROOT_SCOPE]` is the natural answer.
-2. **Edge-ordering during multi-write commits.** Step 9 promoted `count`
-   then `name`. If those slots had interlocking edges (a derived computed
-   that read both), the _order_ of promotion might fire intermediate
-   invalidations that re-resolve incorrectly. Same issue as the doubleName
-   trace's commit-ordering open question (#1) — dep-order leaves-first is
-   the working hypothesis. Worth keeping in mind for complex commits.
-3. **Promotion atomicity at the consumer level.** External consumers
-   _should_ see "outer's commit" as a single event, not a sequence. Right
-   now each `writeSlot(node, ROOT_SCOPE, ...)` during commit fires its
-   edges immediately. If many writes happen, consumers might see partial
-   intermediate states. Solution: same as K1's deferred-fires mechanism —
-   commit collects deferred fires and drains them at the end. Probably
-   the _commit operation_ should itself defer fires until all promotions
-   are done.
+1. **`chainFor` policy — resolved** by Q6: terminal is structural
+   (`scope.parent === undefined`), not a privileged key. `ROOT_SCOPE`
+   is just a library-provided parentless scope. Multiple-roots /
+   per-tenant scopes fall out for free.
+2. **Edge-ordering during multi-write commits — resolved** by
+   [Q10](./questions.md#q10--commit-as-transaction-ordering-atomicity-deferred-fires):
+   promotion walks `S.writeSet` in dep-order leaves-first inside the
+   deferred-fires region. Intermediate fires queue without re-running
+   consumers, so a derived consumer that depends on multiple promoted
+   signals never observes partial state.
+3. **Promotion atomicity at the consumer level — resolved** by
+   [Q10](./questions.md#q10--commit-as-transaction-ordering-atomicity-deferred-fires):
+   commit IS a deferred-fires region; fires deduplicate by
+   `(node, targetSlot)` before draining. Consumers see one invalidation
+   per affected slot regardless of how many writes contributed.
 
 ---
 
