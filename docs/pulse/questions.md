@@ -396,8 +396,10 @@ semantics), [Q11](#q11--effect-chain-policy-chain-follows-owner-or-always-root_s
 
 ### Q3 — Consumer patterns
 
-Status: working candidate framing identified via the [H1a-c trace](./scenario-traces.md#h1a-c--effect-under-speculation). Not locked
-in; sub-questions remain at the next level down.
+Status: **resolved.** Consumer shape verified by
+[H1a-c trace](./scenario-traces.md#h1a-c--effect-under-speculation);
+microtask batching, dirty propagation, and effect ordering pinned by
+[P6](./framings.md#p6--pull-driven-reads-push-driven-consumers-no-explicit-flush).
 
 **Candidate framing.** Consumers are *library code* over the engine's
 `subscribe` primitive plus a scheduler. Uniform shape:
@@ -427,8 +429,8 @@ fire. *No defer logic anywhere; the chain is the policy.*
 **Verified by [H1a-c trace](./scenario-traces.md#h1a-c--effect-under-speculation).** H1a (write under S → effect doesn't fire), H1b
 (commit → effect fires once), H1c (discard → effect never fires).
 
-**Load-bearing principle: pull-driven reads, push-driven notifications,
-no explicit flush.**
+**Load-bearing principle ([P6](./framings.md#p6--pull-driven-reads-push-driven-consumers-no-explicit-flush)):
+pull-driven reads, push-driven notifications, no explicit flush.**
 
 The two halves of reactivity get different treatment:
 
@@ -476,12 +478,13 @@ flush code.
   Library iterates this through the existing engine `subscribe` mechanism;
   no special engine primitive needed.
 
-**Sub-questions still open:**
+**Additional sub-questions resolved:**
 
-- *Effect priority and ordering.* When two effects depend on the same
-  signal, what order do they re-run in? Default: registration order
-  (FIFO within the per-microtask scheduled set). Sufficient unless a
-  Dim 3 priority story emerges. Not blocking.
+- *Effect priority and ordering.* **FIFO — registration order within
+  the per-microtask scheduled set.** No priority lanes (Dim 3 isn't
+  load-bearing for pulse's expected workload). If a use case forces a
+  priority story later, the scheduler can be extended; default stays
+  FIFO.
 - *Effect-during-recompute (re-entrancy).* Covered by
   [K1 trace](./scenario-traces.md#k1--re-entrant-setter-mid-recompute) at
   the recompute level; consumer-level re-entrancy is the same mechanism

@@ -28,6 +28,7 @@ the principles), falsified hypotheses (dead ends to avoid), and engine
 - [P3 — Plain reads are honest](#p3--plain-reads-are-honest)
 - [P4 — Explicit boundaries over implicit pervasiveness](#p4--explicit-boundaries-over-implicit-pervasiveness)
 - [P5 — Compose, don't proliferate (in either direction)](#p5--compose-dont-proliferate-in-either-direction)
+- [P6 — Pull-driven reads, push-driven consumers, no explicit flush](#p6--pull-driven-reads-push-driven-consumers-no-explicit-flush)
 
 **[Framings (adopted provisionally)](#framings-adopted-provisionally)**
 
@@ -135,6 +136,34 @@ value the doc has named.
 Rejects (in both directions): React-style proliferation of specialised
 hooks for cases that compose cleanly; and pre-emptive refusal of
 ergonomic sugar when it would clarify a common use.
+
+### P6 — Pull-driven reads, push-driven consumers, no explicit flush
+
+Reading a value always returns the result consistent with the latest
+writes, synchronously. No `flush()`, no `batch(() => ...)`, no "await a
+microtask before reading." Side-effecting consumers (effects, JSX
+re-renders) are batched via microtask de-dup — multiple invalidations
+in one synchronous turn produce exactly one re-run — but the batching
+is invisible to read sites.
+
+```ts
+setValue('x')
+console.log(get(doubleValue))   // "xx" — synchronously, always
+```
+
+The mechanism: invalidation propagates synchronously through the dep
+graph (cache cleared, dirty bit set); recomputes happen lazily on read.
+Consumers (push-driven) use a per-Node "scheduled" flag to coalesce
+their re-runs to one per microtask. Reads (pull-driven) never wait.
+
+Rejects: any design where the user has to remember to flush a queue, await
+a microtask, or close a batch before reading coherent state. Reading is
+not a discipline.
+
+See [Q3](./questions.md#q3--consumer-patterns) for the consumer
+implementation and [Q10](./questions.md#q10--commit-as-transaction-ordering-atomicity-deferred-fires)
+for how this interacts with commit's deferred-fires region (commit's
+batching is also invisible to subsequent reads).
 
 ---
 
