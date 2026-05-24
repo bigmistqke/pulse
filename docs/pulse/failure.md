@@ -353,13 +353,13 @@ The cross-framework survey above showed that "retry" splits into three things (b
 
 #### 3a. Recipe-failure tracking + boundary-driven recipe retry
 
-The Solid `<Errored>` / `reset()` pattern. The framework owns the retry provenance — no user code specifies what to retry.
+The Solid `<Errored>` / `reset()` pattern. The framework owns the retry *provenance* — no user code specifies what to retry, because the engine already knows.
 
 Mechanism: when a recipe throws during `invoke(node, scope)`, the engine catches at the recipe boundary and records `{ failedNode, failedScope, error, attempt }` on the slot. The error propagates to a containing boundary (similar to `<Loading>` but for errors — call it `<Errored>` provisionally). The boundary's fallback receives `(error, retry)`. Calling `retry()` re-marks the specific failed slot for re-evaluation; the engine re-invokes that recipe; if it succeeds, the value propagates downstream through normal invalidation and the boundary clears.
 
-Why this is "self-healing": the framework already has the information (which node, which scope) because the throw happened mid-recompute. User code never says "retry this specific computation" — the framework knows.
+What "self-healing" actually means here, precisely: the *retry path is built-in and targeted* — not that the framework auto-retries on its own. The framework provides provenance + targeted re-execution machinery; the user provides the trigger (typically a click handler on a "retry" button in the fallback UI). No auto-execution of code the framework can't verify is safe to re-run.
 
-This works cleanly because recipes are *idempotent*: re-running produces the same result given the same inputs. No side-effect re-execution problem.
+**Idempotency discipline is the user's responsibility.** Recipes are not guaranteed pure — they can set signals (K1 re-entrant writes), do async work, touch external systems. Re-executing an impure recipe re-fires those side effects exactly the same way re-executing an action body does. The framework can't enforce purity. The benefit of 3a over user-rolled-your-own-retry is **the targeting**, not safety — the framework knows what to re-execute; the user says "go" via reset.
 
 #### 3b. Action-body retry via handle
 
@@ -369,25 +369,32 @@ handle.retry() // re-run the same action body in a fresh scope
 
 For action-body failures. The retry re-executes the original body. The handle's identity is preserved so retry-counting libraries can track per-handle attempt history. The fresh scope is opened at the same parent as the original (typically ROOT).
 
-This is fundamentally different from 3a in two ways:
+This differs from 3a in *who triggers* and *what's identified*, not in correctness profile:
 
-- *User-driven, not framework-driven.* The user (or library wrapping the action) decides when to retry, because action bodies have side effects and the framework can't safely re-execute them on its own.
-- *Per-handle identity matters.* The user's code holds a reference to *this specific action attempt* and asks for it to be retried. Different from boundary-retry which is anonymous (just "retry whatever failed in this subtree").
+- *Identification:* user-held handle (the action's identity) vs framework-tracked recipe (the node + scope).
+- *Trigger source:* user code (`handle.retry()`) vs user UI in the boundary fallback (`reset()`).
+- *Anchored on:* a specific action's identity vs an `<Errored>` boundary's subtree.
 
-**The footgun:** action bodies have side effects (network POSTs, ID generation, logging). Re-running re-fires them. Two sub-cases:
+Both rely on the same idempotency discipline. The framework provides the targeted retry mechanism; the user is responsible for ensuring the retried body / recipe is safe to re-execute. Same footgun in both cases — re-running re-fires side effects (network POSTs, ID generation, logging, etc.).
 
-- *Idempotent bodies:* re-execution is safe (counter increments derived from current state, retried POST that the server deduplicates by request ID, etc.). Retry just works.
-- *Non-idempotent bodies:* re-execution duplicates side effects (sending two POSTs that create two records, sending two emails, etc.). User must be careful — design action bodies for idempotency, or check action's `attempt` count and skip already-done side effects.
+**Mitigation patterns the user can apply:**
 
-Pulse can't enforce idempotency. The retry primitive provides the mechanism; correctness discipline is the user's.
+- *Make bodies idempotent by design:* counter increments derived from current state rather than precomputed; POSTs with request-ID deduplication on the server; reads guarded by snapshot version checks.
+- *Check `attempt` count:* skip already-done side effects on retry (`if (handle.attempt === 1) yield* sendEmail()`).
+- *Wrap non-idempotent side effects:* separate "compute the desired new state" (pure, safe to re-execute) from "fire the side effect" (guarded).
+
+Pulse can't enforce any of this. The primitive provides re-execution; correctness is on the user.
 
 Open sub-questions: does retry produce a new handle or reuse the original (with a bumped attempt counter)? Lean: reuse the handle — the user said "retry *this* action," not "make a new action that happens to be like this one." Same handle, new scope, new attempt.
 
 #### Why split into two
 
-3a and 3b address different patterns with different correctness profiles. Conflating them — treating "retry" as one thing — would either (a) limit recipe-retry to opt-in patterns the user wires manually (losing self-healing), or (b) expose action-bodies to silent re-execution as a framework feature (creating a footgun).
+3a and 3b address different *patterns*, not different *correctness profiles*. Both rely on user discipline for idempotency; the framework can't enforce purity in either case. The split is useful because they serve different shapes of failure UX:
 
-The split mirrors what Solid actually does (recipe-retry via `<Errored>`, action-body retry via user re-invocation) but explicitly: pulse provides recipe-retry as automatic framework machinery, and action-body retry as an opt-in handle method.
+- *Boundary-anchored failure UX:* "an error happened in this subtree; show a fallback with retry." Natural fit for derivations that throw — the user doesn't have a handle to call; the failure manifests in the rendering path. 3a provides the targeted retry built into the boundary.
+- *Handle-anchored failure UX:* "the user clicked save; it failed; click retry." Natural fit for action invocations the user explicitly initiated. 3b provides the retry method on the handle the caller already has.
+
+The split mirrors what Solid does (`<Errored>` for the first, user re-invocation for the second). The improvement pulse can offer over Solid is making *both* first-class — Solid only does the first; the second is hand-rolled by every app.
 
 #### Boundary-level retry (the third kind)
 
@@ -459,10 +466,10 @@ Per the application/framework split principle, the minimum-viable ship set:
 
 **4. Two retry primitives.**
 
-- *Recipe retry (framework-driven).* Engine catches throws at the recipe boundary; records `{ failedNode, failedScope, error, attempt }` on the slot; an `<Errored>`-style boundary receives `(error, retry)`; `retry()` re-marks just that recipe for re-evaluation. Self-healing because the framework owns the provenance. Solid's `<Errored>` model.
-- *Action-body retry (user-driven).* `handle.retry()` re-runs the same body in a fresh scope; preserves handle identity; bumps an attempt counter. Covers F1/F3/F5/F9 directly. Has the idempotency footgun (re-running re-fires side effects); user discipline required.
+- *Recipe retry, boundary-anchored.* Engine catches throws at the recipe boundary; records `{ failedNode, failedScope, error, attempt }` on the slot; an `<Errored>`-style boundary receives `(error, retry)`; `retry()` re-marks just that recipe for re-evaluation. Framework owns the targeting; user triggers via boundary UI. Solid's `<Errored>` model.
+- *Action-body retry, handle-anchored.* `handle.retry()` re-runs the same body in a fresh scope; preserves handle identity; bumps an attempt counter. Covers F1/F3/F5/F9 directly.
 
-These are different mechanisms for different patterns. Both have leverage; both fit pulse's existing architecture cleanly.
+These are different mechanisms for different patterns (boundary-anchored UI recovery vs handle-anchored action retry). Both rely on the same user discipline for idempotency — the framework provides targeted re-execution; correctness on re-execution is the user's. Both fit pulse's existing architecture cleanly.
 
 **5. Cancellation-aware cleanup.** `onCleanup((cause) => ...)` accepts an optional cause argument so action bodies can branch on why they're being cleaned up. Backwards-compatible with the current `onCleanup(() => ...)` form (cause argument is just ignored).
 
