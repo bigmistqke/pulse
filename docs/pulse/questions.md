@@ -722,28 +722,27 @@ semantics differ:
   happened during the await). The intent is "this slot was just a memo cache
   for the duration of the scope; drop it on commit, don't promote."
 
-Two ways to handle it:
+Status: **resolved — (ii) writeSet on scope.** Sealed by [Q6](#q6--what-is-a-scope-as-a-value)'s
+scope-centric storage decision: `scope.writeSet: Set<Node>` is now part
+of the scope shape. Slots stay uniform (`{ recipe, cached, deps }` — no
+`wasWritten` flag); the scope's writeSet drives commit promotion.
 
-- **(i) `wasWritten: boolean` flag on `Slot`.** Engine tags slots at creation
-  time (true on `writeSlot`, false on `invoke`-populated). Commit walks only
-  promotes flagged slots; non-flagged ones drop.
-- **(ii) Library tracks write-set separately.** The scope itself maintains a
-  `writeSet: Set<Node>` populated by `writeSlot` calls. Commit walks
-  `writeSet`, not all slots tagged with the scope. Read-populated slots are
-  invisible to commit because they're not in `writeSet`.
+**Commit walks `writeSet`, not `slots`.** For each node in `scope.writeSet`,
+the library performs `writeSlot(node, scope.parent, scope.slots.get(node))`.
+Read-populated slots (in `scope.readSet` only) are dropped without
+promotion — they were just per-scope caches for the duration of the
+speculation. Resolves the C2d case (outside-action writes during an await
+don't get clobbered by read-populated slots from inside the action).
 
-(i) puts the distinction on the slot; (ii) puts it on the scope. (ii) is
-cleaner in spirit (scope owns its semantics; slots stay uniform) but (i) is
-more locally evident (a slot knows whether it represents "real" state).
+**Why not (i):** the per-slot `wasWritten` flag would have spread "is this
+real state or a cache" knowledge across every slot in the system. (ii)
+puts it once, on the scope, in the same data structure that already
+governs the scope's lifecycle.
 
-Connects to [Q5](#q5--recipe--cache-asymmetry-between-signal-and-computed-slots) (the Signal/Computed slot distinction) — that question also
-asks whether the engine needs to know what kind of slot it's looking at.
-Probably resolved together.
-
-**Lean: (ii)**, because it keeps the engine's `Slot` shape uniform and pushes
-intent into the library's scope handling. But (i) wins if performance
-measurements show that walking the scope's write-set is slower than checking
-flags during commit. Currently mostly cosmetic.
+Connects to [Q5](#q5--recipe--cache-asymmetry-between-signal-and-computed-slots) (Signal vs Computed slot asymmetry) — Q5 may dissolve
+under this resolution: signal slots are always in `writeSet`, computed
+slots are always in `readSet`, the distinction is *which set the scope
+files them under*, not a property of the slot itself.
 
 ### Q10 — Commit as transaction: ordering, atomicity, deferred fires
 
@@ -824,68 +823,58 @@ commits set up another. They compose by nesting.
 
 ### Q11 — Effect chain policy: chain follows owner, or always [ROOT_SCOPE]?
 
-Surfaced by the [H3 trace](./scenario-traces.md#h3--cleanup-chains-across-speculative-effect-runs). When an effect is created inside an action body
-(or inside any scope other than `ROOT_SCOPE`), what's the chain its
-tracking edges form against?
+Status: **resolved — Policy α (chain follows owner).** Sealed by
+[Q6](#q6--what-is-a-scope-as-a-value)'s scope-centric storage: an effect
+created in scope `S` has its tracking edges registered in `S.edges`. The
+edge's `targetScope` is `S`, so the engine's chain-match consults
+`chainFor(S) = [S, ..., ROOT_SCOPE]`. Writes inside `S` match the chain
+and fire the effect; writes outside `S`'s chain don't.
 
-- **Policy α** — chain = `chainFor(owner)`. Effect created inside action
-  `S` has chain `[S, ROOT_SCOPE]`. *Fires* on writes inside the action.
-  Effect reactivity follows its containing scope.
-- **Policy β** — chain = `[ROOT_SCOPE]` always. Effects only fire on
-  committed-state changes regardless of where created. The effect's
-  *lifecycle* is tied to its owner, but its *subscription* isn't.
+When `S` closes (commit or discard), `S.edges` is walked and each edge
+is removed from `node.subs` — the effect's reactivity dies with the
+owning scope, automatically. No "re-parent on commit" machinery needed.
 
-H1a-c established that effects *outside* actions have chain `[ROOT_SCOPE]`
-— consistent with both policies (an outside effect's owner is
-`ROOT_SCOPE`, so `chainFor(owner) = [ROOT_SCOPE]` under α). The policies
-diverge for effects inside actions.
-
-**Lean: Policy α** — composition is natural; the user creating an effect
-inside an action is opting into reactivity at the action's scope. Policy
-β is defensible (effects-always-committed-only as an invariant) but
-narrower. The mechanism (engine-side chain-match per [Q1](#q1--fall-through-and-edge-policy))
-supports both; this is a real design call.
-
-**Related sub-question:** *Effect re-parenting on commit.* Could an
-in-action effect *survive* commit by re-parenting its owner to `S.parent`
-and updating its chain accordingly? Possible but adds machinery; users
-wanting persistent effects can just create them in the outer scope.
-Probably out-of-scope.
+Policy α is what the storage shape produces; Policy β would require
+explicit override (registering the effect's edges in `ROOT_SCOPE.edges`
+instead of `S.edges`), and there's no demonstrated need for it. Users
+wanting an effect to survive past its enclosing scope create it in the
+outer scope directly.
 
 **Related:** [Q3](#q3--consumer-patterns) (consumer pattern depends on chain), [Q2](#q2--scopeowner-unification) (scope/owner
 unification — the chain question is "does subscription follow owner or
-not").
+not"), [Q6](#q6--what-is-a-scope-as-a-value) (the storage shape that makes α structural).
 
 ### Q12 — Body cleanups vs scope cleanups: composition and re-entrancy
 
-Surfaced by [H3 trace](./scenario-traces.md#h3--cleanup-chains-across-speculative-effect-runs). Two distinct cleanup mechanisms exist:
+Status: **resolved.** Two distinct cleanup mechanisms with clear homes,
+sealed by [Q6](#q6--what-is-a-scope-as-a-value)'s scope shape.
 
-- *Scope-level cleanup* — `onCleanup(fn)` outside an effect body,
-  registered to `scope.cleanups`. Fires on scope discard (and possibly
-  commit; see open below).
-- *Body-level cleanup* — `onCleanup(fn)` inside an effect body, registered
-  to `effectNode.bodyCleanups`. Fires before next body invocation or on
-  effect disposal.
+- *Scope cleanups* — `onCleanup(fn)` registered to `scope.cleanups`.
+  Fires on scope **discard only** (per Q6's `closeScope` logic: commit
+  is success, no cleanup needed). Users wanting "fire on both commit
+  and discard" use the surrounding pattern (e.g., `try { action(...) }
+  finally { releaseLock() }`) or an explicit `onSettle` helper if one
+  is shipped later.
+- *Body cleanups* — `onCleanup(fn)` registered inside an effect body
+  to `effectNode.bodyCleanups`. Fires before next body invocation or
+  on effect disposal. Distinct mechanism from scope cleanups because
+  the lifecycle is per-body-run, not per-scope-close.
 
-Open sub-questions:
+**Resolved sub-questions:**
 
-- *Does scope-level `onCleanup` fire on commit too, or only on discard?*
-  Working assumption: only on discard. Commit = success, no cleanup
-  needed. But some patterns (e.g., "always release this lock when scope
-  closes regardless") want it on both. Possible answer: separate
-  `onCleanup` and `onSettle` (the latter fires on both). Open.
-- *Re-entrancy during cleanup fires.* If a body cleanup calls `writeSlot`,
-  is the write deferred (per [Q10](#q10--commit-as-transaction-ordering-atomicity-deferred-fires)'s `deferredFires` mechanism)? The
-  cleanup runs inside `closeScope`, which is itself a deferred-fires
-  region per [Q10](#q10--commit-as-transaction-ordering-atomicity-deferred-fires). So yes, deferral covers it. Worth confirming with a
-  trace.
-- *Cleanup ordering for nested scopes.* If `S2` is a child of `S1` and
-  both have cleanups, does discard of `S1` fire `S2.cleanups` before
-  `S1.cleanups` (children-first)? Probably yes. Standard tree-disposal
-  pattern.
+- *Commit vs discard:* discard only. Q6 made this explicit
+  (`if (mode === 'discard') S.cleanups.forEach(fn => fn())`).
+- *Re-entrancy during cleanup:* covered by [Q10](#q10--commit-as-transaction-ordering-atomicity-deferred-fires)'s deferred-fires
+  region. Writes inside a cleanup queue onto the region; outermost
+  drain handles them. No special-case.
+- *Nested-scope ordering:* children-first. Scope discard recursively
+  closes children before firing own cleanups. Standard tree-disposal
+  invariant; falls out of `S.children: Set<Scope>` traversal in
+  `closeScope`.
 
-**Related:** [Q2](#q2--scopeowner-unification) (the scope/owner unification carries this composition),
-[Q10](#q10--commit-as-transaction-ordering-atomicity-deferred-fires) (re-entrant cleanups land in the commit's deferred-fires region).
+**Related:** [Q2](#q2--scopeowner-unification) (scope/owner unification carries cleanup composition),
+[Q6](#q6--what-is-a-scope-as-a-value) (the scope shape that pins the cleanup home),
+[Q10](#q10--commit-as-transaction-ordering-atomicity-deferred-fires) (re-entrant cleanups deferred via the same mechanism as commit fires).
 
 ### Q13 — Optimistic surface ergonomics (sugar over speculation)
 
