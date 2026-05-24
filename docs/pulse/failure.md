@@ -332,6 +332,10 @@ This is the load-bearing addition. Every other pattern depends on the framework 
 
 Implementation cost is tiny — the scope already tracks `status`; add a `discardCause` field populated by whichever code path closed the scope.
 
+**Cause categories: start with the four.** `failure | cancelled | superseded | timeout` is the minimum-viable set. Other plausible categories (`preconditionFailed`, `clientCrashed`, `programmaticError`) can be added as usage forces. Starting small and extending is cheaper than starting wide and pruning. `preconditionFailed` is the most likely first addition (per Q14 — actions with prereqs that didn't hold).
+
+**Failure-payload shape: preserve thrown value as-is; add a `FailureContext`.** The error inside `discardCause` is whatever the action body threw (an `Error`, a typed domain error, an object the user chose). Pulse doesn't standardize the shape — apps already have their own error categorization (network vs validation vs auth) and forcing a wrapper just adds noise. Alongside, the handle exposes `handle.failureContext: { attempt, startedAt, durationMs, ... }` for framework-tracked metadata that the user couldn't reconstruct themselves.
+
 ### 2. Lifecycle hooks per cause
 
 Building on (1):
@@ -361,6 +365,8 @@ What "self-healing" actually means here, precisely: the *retry path is built-in 
 
 **Idempotency discipline is the user's responsibility.** Recipes are not guaranteed pure — they can set signals (K1 re-entrant writes), do async work, touch external systems. Re-executing an impure recipe re-fires those side effects exactly the same way re-executing an action body does. The framework can't enforce purity. The benefit of 3a over user-rolled-your-own-retry is **the targeting**, not safety — the framework knows what to re-execute; the user says "go" via reset.
 
+**Framework-driven (not app-driven).** The information about which recipe failed is structurally present mid-`invoke` — the engine is currently executing that recipe when the throw happens. Exposing the provenance (so a boundary can target retry to the exact failed recipe) is the load-bearing benefit. The alternative — apps reconstruct "what was being computed when this threw" from their own state — wastes the information the framework already has.
+
 #### 3b. Action-body retry via handle
 
 ```ts
@@ -368,6 +374,12 @@ handle.retry() // re-run the same action body in a fresh scope
 ```
 
 For action-body failures. The retry re-executes the original body. The handle's identity is preserved so retry-counting libraries can track per-handle attempt history. The fresh scope is opened at the same parent as the original (typically ROOT).
+
+**Handle exposes attempt count:** `handle.attempt: number`. Starts at 1; increments on each `retry()`. Useful for backoff policies, degraded-mode detection, and per-attempt branching inside the body (`if (handle.attempt === 1) yield* sendInitialEmail()`).
+
+**Retry uses closure as-is.** The action body closes over variables. When `retry()` re-runs, those variables are read with their *current* values, not the values at the original invocation. This means a retried form-save reads the input fields' current state — what the user has now, not what they had when they first clicked submit. This matches user expectations for the common "retry button" pattern and naturally degrades to "fix-and-resubmit" if the user edits before retrying.
+
+**Same body = retry; different body = new action.** `handle.retry()` always re-runs the original body verbatim. If the user wants to retry with *different* inputs (a fix-and-resubmit pattern with explicitly changed payload), that's a new `action(...)` invocation, not a retry. Retry is for "do exactly what I tried before, just again."
 
 This differs from 3a in *who triggers* and *what's identified*, not in correctness profile:
 
@@ -441,18 +453,17 @@ Could be folded into existing `onCleanup` (which fires on any discard) with a `c
 
 ## Sub-questions still open
 
-- **Failure-payload shape.** Should pulse standardize the failure payload (`{ kind, error, attempt, source, ... }`) or just preserve the thrown value as-is? Lean: preserve as-is for primary, but provide a `FailureContext` object accessible via the handle that carries metadata (attempt count, timing, etc.).
-- **Cause categories beyond the four named.** Are failure / cancelled / superseded / timeout the right set, or do we need more (`preconditionFailed`, `clientCrashed`, etc.)? Lean: start with four; extend if usage forces.
-- **Retry semantics with mutable closure state.** The action body closes over variables. Retry uses the closure as-is — meaning if those variables changed since first execution, the retry sees the new values. Surprising? Or expected (the user wants the latest state)? Probably the latter, but worth flagging.
-- **Retry with mutated inputs.** F1's "retry button" sometimes wants to retry with the *same* inputs; sometimes (F2 fix-and-resubmit) wants different inputs. The latter is just a new action, not a retry. Lean: `handle.retry()` = same body, same closure, no input changes. Different-input cases construct a new action.
-- **Retry-counting.** Should the handle expose `attempt: number`? Useful for backoff policies and degraded-mode detection. Cheap to add; lean yes.
-- **Recipe-retry: framework-driven or app-driven?** 3a sketched the framework-tracks-provenance approach (engine catches throw at recipe boundary, records `failedNode`/`failedScope`, `<Errored>` boundary's `retry` re-invokes). Alternative: framework doesn't track; user wires retry manually via a re-execution helper. Lean framework-tracked because the information is structurally present (the engine is mid-`invoke` when the throw happens); not exposing it means apps re-implement what the framework already knows.
-- **Idempotency discipline for action-body retry.** Pulse can't enforce that action bodies are idempotent. Documentation territory: explicit guidance that `handle.retry()` re-runs the body verbatim including side effects, and that authors who care should check `handle.attempt` or use server-side request-ID deduplication. Maybe a dev-mode warning if a `handle.retry()` is called on an action body that contains operations the framework recognizes as non-idempotent? (Probably out of scope; the framework can't tell what's idempotent.)
-- **`<Errored>` boundary shape.** If pulse ships recipe-failure tracking, the boundary primitive needs to be designed. Open: does it look like `<Errored>` (a JSX boundary, parallel to `<Loading>`)? Or a non-JSX `errorBoundary(node, fallback, options)` library helper? Or an effect-level catch? Defer until the broader boundary story (Q-something — possibly new Q) crystallizes.
-- **`onSettle` versus `onCleanup`.** These are different mechanisms (action-level UX hooks vs scope-level resource cleanup) but they could be unified. Q12 has the related question.
-- **Persistence for queue-for-later (F5).** Pulse doesn't have a built-in mechanism to serialize a failed action and re-instantiate it later. Outside the framework's scope for now; library territory if/when offline-first patterns are concretely needed.
-- **Timeout primitives.** F14 wants a deadline; current pulse has none. Apps can build with `Promise.race` but it's manual. Worth considering a `withDeadline(action, ms)` library helper or a framework primitive.
-- **Failure observability for `Q3` consumers.** Effects subscribing to a signal don't see action failure directly — they just see the signal's value not change (or revert). Should consumers have a way to observe "the last action on this signal failed"? Probably out of scope — application-level concern.
+Genuinely undecided:
+
+- **`onSettle` versus `onCleanup`.** Are these two mechanisms (action-level UX hooks vs scope-level resource cleanup) or one? Connects to [Q12](./questions.md#q12--body-cleanups-vs-scope-cleanups-composition-and-re-entrancy). Possible unification: a single `onCleanup((cause?) => ...)` with optional cause argument covers both, distinguished only by whether the user reads the cause. Possible split: keep `scope.cleanups` discard-only for resources; expose `handle.onSettle` separately for action-level lifecycle. Genuine design call.
+- **Idempotency discipline as documentation vs dev-mode helper.** Pulse can't enforce that action bodies / recipes are idempotent. v1 is documentation-only ("if you retry, side effects re-fire; here's how to mitigate"). v2 could ship a dev-mode helper — annotation (`action(fn, { idempotent: true })`?), automatic warning when known-non-idempotent ops appear in a retried body, etc. Probably out of scope until usage shows a real footgun rate.
+
+Deferred (scope-or-shape blockers):
+
+- **`<Errored>` boundary shape.** If pulse ships recipe-failure tracking (3a), the boundary primitive needs to be designed. JSX boundary (parallel to `<Loading>`)? Non-JSX `errorBoundary(node, fallback)` helper? Effect-level catch? Defer until the broader boundary story (which `<Loading>` also sits inside, and which pulse hasn't designed yet) crystallizes.
+- **Persistence for queue-for-later (F5).** Pulse doesn't have a built-in mechanism to serialize a failed action and re-instantiate it later. Library territory; needs persistence integration outside pulse's core.
+- **Timeout primitives.** F14 wants a deadline; current pulse has none. Apps can build with `Promise.race` but it's manual. Worth considering a `withDeadline(action, ms)` library helper or a framework primitive; defer until concrete need.
+- **Failure observability for `Q3` consumers.** Effects subscribing to a signal don't see action failure directly — they just see the signal's value not change (or revert). Should consumers have a way to observe "the last action on this signal failed"? Probably out of scope — application-level concern (wire it explicitly via the handle's `onFailure`).
 
 ## Tentative recommendations
 
