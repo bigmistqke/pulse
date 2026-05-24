@@ -435,27 +435,73 @@ Lean: typed-rejection — keep the await idiom; users who want to distinguish us
 
 ### 5. Action body access to the cause-of-cancellation
 
-When the body is parked on `yield*` and the action gets discarded (user cancel or supersession), the body doesn't get to "clean up gracefully" — the discard-guard pattern just stops the body. But for some cases (releasing an external lock, aborting an HTTP fetch), the body needs to *do something* on cancellation.
+When the body is parked on `yield*` and the action gets discarded (user cancel, supersession, error), the body doesn't get to "clean up gracefully" — the discard-guard pattern just stops the body. But for some cases (releasing an external lock, aborting an HTTP fetch), the body needs to *do something* on close.
 
-One approach: the body can register an `onCancel` cleanup that fires on cancellation:
+This sits in pulse's existing `scope.cleanups` mechanism (per [Q12](./questions.md#q12--body-cleanups-vs-scope-cleanups-composition-and-re-entrancy)) — `onCleanup(fn)` registered inside the body fires on any discard cause. No new primitive needed for the cancel/abort case:
 
 ```ts
 action(function* () {
 	const ctrl = new AbortController()
-	onCancel(() => ctrl.abort())
+	onCleanup(() => ctrl.abort()) // fires on any discard (failure, cancel, supersede, timeout)
 	yield* fetchWithSignal(url, ctrl.signal)
 })
 ```
 
-This is per-body convenience, similar to existing `onCleanup`. The cleanup-on-cancel hook fires when the body's enclosing scope is discarded with `kind: 'cancelled'`.
+Per-cause discrimination at the body level is rare in practice — most body-local cleanup just wants "the action ended without committing; release this resource." If a body genuinely needs to branch on cause, it can either query the action handle from the cleanup (`if (handle.discardCause?.kind === 'cancelled') ...`) or move the cause-specific logic to a handle hook externally.
 
-Could be folded into existing `onCleanup` (which fires on any discard) with a `cause` argument: `onCleanup((cause) => { if (cause.kind === 'cancelled') ctrl.abort() })`. Either shape works.
+### 6. Body-local `onSettle` for "any close" cleanup
+
+A small addition to the body-local hook family: `onSettle(fn)` fires on *any* scope close, commit or discard. Distinct from `onCleanup(fn)` (Q12) which fires on discard only.
+
+```ts
+// onCleanup — fires on discard only (existing Q12 behaviour)
+//   For "roll back this resource if we didn't commit."
+action(function* () {
+	const lock = acquireLock()
+	onCleanup(() => releaseLock(lock)) // released on rollback only; held on commit
+})
+
+// onSettle — fires on any close (new)
+//   For "the action is over regardless of outcome; tear down in-flight machinery."
+action(function* () {
+	const ctrl = new AbortController()
+	onSettle(() => ctrl.abort()) // abort whether we commit or discard (safe; idempotent)
+})
+```
+
+The two are *distinct mechanisms with distinct purposes*, not variants of one thing:
+
+- `onCleanup` is about *rollback discipline* — resources tied to "the speculative state." Don't release on commit because the speculative state is now real.
+- `onSettle` is about *in-flight discipline* — work-in-progress tied to "the action's lifetime." Tear down regardless of outcome because the action is over.
+
+Both useful; neither subsumes the other. Two hooks, two clear use cases.
+
+**Specific gap this fills:** the [`optimistic-ui.md`](./optimistic-ui.md) wrapper needs cleanup to fire on *both* commit and discard so the overlay clears regardless of action outcome. Without `onSettle`, the wrapper would need to register both an `onCleanup` (for discard) AND a handle-side `onCommit` callback (for commit). With `onSettle`, one ambient registration covers both paths.
+
+**Why not unify with cause arg?** Both `onCleanup` and `onSettle` could be expressed as `onClose((cause) => ...)` with a unified hook where the user checks `cause.kind === 'commit'` to discriminate. But the common cases (just-rollback, just-on-any-close) read cleaner as separate named hooks. Per-cause discrimination is a handle-level concern; body-local hooks favour ergonomic specificity over uniformity.
+
+### Mechanism families recap
+
+Two distinct hook families serving distinct purposes:
+
+**Body-local hooks** (ambient registration inside the action body — for body-side discipline):
+
+- `onCleanup(fn)` — fires on discard only (Q12 unchanged). Rollback semantics.
+- `onSettle(fn)` — fires on any close. "Action is over" cleanup.
+
+**Handle hooks** (external registration on the action handle — for action-level lifecycle observation):
+
+- `handle.onCommit(fn)` — fires on commit.
+- `handle.onFailure((err) => fn(err))` — fires on failure-cause discard.
+- `handle.onCancel(fn)` — fires on cancellation-cause discard.
+- `handle.onSettle((cause) => fn(cause))` — fires on any close, with cause.
+
+The two families don't replace each other; they coexist for different concerns. Body authors use body-local hooks for resource discipline; UI / external code uses handle hooks for lifecycle observation. The distinction maps to where the registering code naturally lives.
 
 ## Sub-questions still open
 
 Genuinely undecided:
 
-- **`onSettle` versus `onCleanup`.** Are these two mechanisms (action-level UX hooks vs scope-level resource cleanup) or one? Connects to [Q12](./questions.md#q12--body-cleanups-vs-scope-cleanups-composition-and-re-entrancy). Possible unification: a single `onCleanup((cause?) => ...)` with optional cause argument covers both, distinguished only by whether the user reads the cause. Possible split: keep `scope.cleanups` discard-only for resources; expose `handle.onSettle` separately for action-level lifecycle. Genuine design call.
 - **Idempotency discipline as documentation vs dev-mode helper.** Pulse can't enforce that action bodies / recipes are idempotent. v1 is documentation-only ("if you retry, side effects re-fire; here's how to mitigate"). v2 could ship a dev-mode helper — annotation (`action(fn, { idempotent: true })`?), automatic warning when known-non-idempotent ops appear in a retried body, etc. Probably out of scope until usage shows a real footgun rate.
 
 Deferred (scope-or-shape blockers):
@@ -482,7 +528,7 @@ Per the application/framework split principle, the minimum-viable ship set:
 
 These are different mechanisms for different patterns (boundary-anchored UI recovery vs handle-anchored action retry). Both rely on the same user discipline for idempotency — the framework provides targeted re-execution; correctness on re-execution is the user's. Both fit pulse's existing architecture cleanly.
 
-**5. Cancellation-aware cleanup.** `onCleanup((cause) => ...)` accepts an optional cause argument so action bodies can branch on why they're being cleaned up. Backwards-compatible with the current `onCleanup(() => ...)` form (cause argument is just ignored).
+**5. Body-local `onSettle`.** Add a body-local hook that fires on *any* scope close (commit or discard), distinct from `onCleanup` (which stays Q12-as-is, discard-only). The two cover different patterns: `onCleanup` for rollback-discipline; `onSettle` for "the action is over regardless" cleanup. Closes the [`optimistic-ui.md`](./optimistic-ui.md) gap (overlay needs to clear on both paths) and the AbortController-abort case (cleanly idempotent on commit).
 
 **6. Defer everything else to libraries / apps.** Retry policies (backoff, max-attempts, jitter), queueing, conflict resolution, degraded-mode detection, error toasts, diagnostics — all application or library territory. Pulse provides the primitives; they provide the strategies.
 

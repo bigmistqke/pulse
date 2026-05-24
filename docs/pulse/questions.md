@@ -489,7 +489,8 @@ Policy α is what the storage shape produces; Policy β would require explicit o
 
 Status: **resolved.** Two distinct cleanup mechanisms with clear homes, sealed by [Q6](#q6--what-is-a-scope-as-a-value)'s scope shape.
 
-- *Scope cleanups* — `onCleanup(fn)` registered to `scope.cleanups`. Fires on scope **discard only** (per Q6's `closeScope` logic: commit is success, no cleanup needed). Users wanting "fire on both commit and discard" use the surrounding pattern (e.g., `try { action(...) } finally { releaseLock() }`) or an explicit `onSettle` helper if one is shipped later.
+- *Scope cleanups* — `onCleanup(fn)` registered to `scope.cleanups`. Fires on scope **discard only** (per Q6's `closeScope` logic: commit is success, no cleanup needed). For "rollback discipline" — release this resource if the action didn't commit.
+- *Body-local `onSettle(fn)`* — fires on **any** scope close (commit or discard). Distinct from `onCleanup`; for "the action is over regardless of outcome" cleanup (in-flight machinery teardown, optimistic-overlay clearing). Sketched in [`failure.md`](./failure.md#6-body-local-onsettle-for-any-close-cleanup). Two body-local hooks total: `onCleanup` (discard-only) and `onSettle` (any close); both useful; neither subsumes the other.
 - *Body cleanups* — `onCleanup(fn)` registered inside an effect body to `effectNode.bodyCleanups`. Fires before next body invocation or on effect disposal. Distinct mechanism from scope cleanups because the lifecycle is per-body-run, not per-scope-close.
 
 **Resolved sub-questions:**
@@ -499,7 +500,7 @@ Status: **resolved.** Two distinct cleanup mechanisms with clear homes, sealed b
 - *Nested-scope ordering:* children-first. Scope discard recursively closes children before firing own cleanups. Standard tree-disposal invariant; falls out of `S.children: Set<Scope>` traversal in `closeScope`.
 - *H3b — bodyCleanups on commit (surfaced by trace audit).* **Dissolved by [Q3](#q3--consumer-patterns)'s restriction:** effects are forbidden inside speculative scopes, so there are no body cleanups to fire on commit. The cleanup-vehicle ambiguity disappears with the use case.
 
-**Related:** [Q2](#q2--scopeowner-unification) (scope/owner unification carries cleanup composition), [Q6](#q6--what-is-a-scope-as-a-value) (the scope shape that pins the cleanup home), [Q10](#q10--commit-semantics-ordering-atomicity-deferred-fires) (re-entrant cleanups deferred via the same mechanism as commit fires).
+**Related:** [Q2](#q2--scopeowner-unification) (scope/owner unification carries cleanup composition), [Q6](#q6--what-is-a-scope-as-a-value) (the scope shape that pins the cleanup home), [Q10](#q10--commit-semantics-ordering-atomicity-deferred-fires) (re-entrant cleanups deferred via the same mechanism as commit fires), [`failure.md`](./failure.md#6-body-local-onsettle-for-any-close-cleanup) (adds body-local `onSettle` as a complement to `onCleanup`; doesn't change Q12 — extends the body-local hook family).
 
 ### Q13 — Optimistic surface ergonomics (sugar over speculation)
 
