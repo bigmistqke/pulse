@@ -912,7 +912,7 @@ writes Y → both commit/discard on their own schedule.
 This is closer to what Solid's lane-merge reaches for than pulse's
 nested actions are. Nested actions give shared isolation **and**
 coupled commit (the inner actions can't commit independently of the
-outer); shared-iso-with-independent-commit would let each transaction
+outer); shared-isolation-with-independent-commit would let each transaction
 finish on its own schedule while still seeing each other's progress.
 
 But this is *not* free. Here's the catch.
@@ -976,7 +976,7 @@ that it's a *coupling* not an *accident*, and accept the trade. The
 entanglement question reframes as "*how* should pulse express
 explicit coupling?" (already mostly answered by nested actions) and
 "*what* about within-coupling conflicts?" (open — Class D `'reject'`,
-etc.) — not as "*should* pulse offer shared-iso-independent-commit?"
+etc.) — not as "*should* pulse offer shared-isolation-independent-commit?"
 which the cascade-discard problem makes nearly unwinnable.
 
 ### Solid / React / Svelte rollback strategies
@@ -1079,7 +1079,7 @@ worry about.
 | React modern | No (private WIP trees) | Per-action `useOptimistic` overlay; vanishes if parent doesn't update source |
 | Solid 2.x | Yes (merged lanes) | Plain writes: no rollback. Optimistic overlays: auto-revert unconditionally |
 | Svelte 5 | No (fork isolates; batch merge is supersession) | Drop batch on discard; OBSOLETE silently swallows superseded async runs |
-| Pulse (current) | No (snapshot iso between siblings) | Drop scope on discard; explicit `.discard()` for supersession |
+| Pulse (current) | No (snapshot isolation between siblings) | Drop scope on discard; explicit `.discard()` for supersession |
 
 Each framework either avoids shared visibility (React, Svelte, pulse)
 or accepts that plain writes don't roll back across the shared region
