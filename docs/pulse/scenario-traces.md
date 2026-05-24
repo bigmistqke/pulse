@@ -2090,31 +2090,22 @@ disposes everything that scope owns (including effects).
 
 ### The chain policy for effects-inside-actions
 
-Open design call surfacing here: when an effect is created inside an action
-body, what's the chain its tracking edges form against?
-
-- **(Policy α) Chain = chainFor(owner).** Effect created inside action `S`
-  has chain `[S, ROOT_SCOPE]`. It _fires_ on writes inside the action (the
-  scope-tagged writes). Useful for "this effect should react to changes
-  during the action's life."
-- **(Policy β) Chain = `[ROOT_SCOPE]` always.** Effects only fire on
-  committed-state changes regardless of where created. The effect's
-  lifecycle is tied to the owner, but its subscription isn't.
+Resolved by [Q11](./questions.md#q11--effect-chain-policy-chain-follows-owner-or-always-root_scope):
+**Policy α (chain follows owner).** Sealed structurally by
+[Q6](./questions.md#q6--what-is-a-scope-as-a-value)'s scope-centric
+storage: an effect created in scope `S` has its tracking edges registered
+in `S.edges` with `targetScope = S`. The engine's chain-match consults
+`chainFor(S) = [S, ..., ROOT_SCOPE]`. Writes inside `S` match → fire;
+writes outside `S`'s chain don't.
 
 H1a-c established that effects _outside_ actions have chain `[ROOT_SCOPE]`
-and don't fire on speculative writes. This is the same answer under both
-policies (an outside-effect's owner _is_ `ROOT_SCOPE`, so `chainFor(owner)
-= [ROOT_SCOPE]` under α, matching β).
+and don't fire on speculative writes — the same answer falls out under
+Policy α, because an outside-effect's owner _is_ `ROOT_SCOPE`. For
+inside-action effects, Policy α gives natural composition: the effect
+reacts to the action's intermediate state, and when the action closes
+(commit or discard), its edges die structurally as `S.edges` is walked.
 
-The policies diverge for inside-action effects. **Lean: Policy α** — the
-effect's chain follows its owner, because that's the natural composition.
-The user creating an effect inside an action body is opting into reacting to
-the action's intermediate state; if they wanted committed-only reactivity,
-they wouldn't put the effect inside the action. β is defensible but
-narrower.
-
-This trace uses Policy α. Both policies survive H3a/H3b cleanly; the trace
-just looks slightly different under each.
+This trace uses Policy α throughout.
 
 ### Setup
 
@@ -2137,58 +2128,80 @@ const handle = action(function* () {
 
 ### H3a: action discards mid-flight
 
-**Step 1: open scope `S`.** `openScope()` → `S = { parent: ROOT_SCOPE,
-cleanups: [], status: 'open' }`. Push ambient.
+**Step 1: open scope `S`.** `openScope()` → `S = { parent: ROOT, children:
+∅, slots: ∅, edges: ∅, writeSet: ∅, readSet: ∅, cleanups: [], status:
+'open' }`. `ROOT.children.add(S)`. Push ambient.
 
 **Step 2: `effect(fn)` called.**
 
-- `getCurrentScope()` → `S`. `effectNode` = `createNode(fn)`. Owner = `S`,
-  subscription chain = `chainFor(S)` = `[S, ROOT_SCOPE]`.
-- Register `S.cleanups`-side disposer: when `S` discards, dispose
-  `effectNode` (fires its `bodyCleanups`, unlinks remaining edges).
+- `getCurrentScope()` → `S`. `effectNode = createNode(fn) = { defaultRecipe:
+  fn, subs: ∅ }`. Owner = `S`; per [Q11](./questions.md#q11--effect-chain-policy-chain-follows-owner-or-always-root_scope)
+  Policy α, the effect's tracking edges will have `targetScope = S`.
+- Register `S.cleanups.push(disposeEffectNode)`: when `S` discards, dispose
+  `effectNode` (fires its `bodyCleanups`, marks it disposed). The engine's
+  own walk of `S.edges` handles edge unlinking from `node.subs`.
 - Initial body run:
-  - `pushTracker(effectNode.slots[S])`, `pushScope(S)`.
+  - Create `slot_E_S = { recipe: fn, deps: [] }`; `S.slots.set(effectNode,
+    slot_E_S)`; `S.readSet.add(effectNode)`. Push `currentTracker = slot_E_S`,
+    `currentScope = S`.
   - `get(count)`:
-    - `link(count, effectNode.slots[S])` →
-      `edge1`.
-    - `invoke(count, S)` → miss → `count.slots[S]` created (read-populated;
-      `wasWritten = false`, per [Q9](./questions.md#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally)). Recipe = `() => 0`, `cached = 0`.
+    - `S.readSet.add(count)`. `link(count, slot_E_S)`:
+      - `edge1 = { source: count, target: slot_E_S, targetScope: S }`.
+        `count.subs.add(edge1)`; `S.edges.add(edge1)`;
+        `slot_E_S.deps.push(edge1)`.
+    - `invoke(count, S)` → miss → create `slot_C_S = { recipe: () => 0,
+      cached: 0, deps: [] }`; `S.slots.set(count, slot_C_S)`. Read-populated
+      (per [Q9](./questions.md#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally),
+      `count` enters `S.readSet` not `S.writeSet`).
   - Body: `c = 0`. `log.push("Effect ran with count=0")`. `onCleanup(cb)`
-    registers a _body-level_ cleanup: `cb = () => teardowns.push(
-"cleanup at count=0")`. `effectNode.bodyCleanups = [cb]`.
+    registers a _body-level_ cleanup on `effectNode.bodyCleanups`:
+    `cb = () => teardowns.push("cleanup at count=0")`.
   - Pop tracker, pop scope.
-- `subscribe(effectNode, handler)` — handler queues microtask re-run on
-  invalidation.
+- `subscribe(effectNode, handler)` — handler schedules a microtask re-run
+  on invalidation.
 
 **State after Step 2:**
 
 ```
-count.slots = { S: { recipe: () => 0, cached: 0, wasWritten: false } }
-effectNode.slots = { S: { recipe: body, cached: undefined, deps: [edge1] } }
-edge1 = { source: count, target: effectNode.slots[S] }
+count.subs      = { edge1 }
+effectNode.subs = ∅
+
+S.slots         = { count → slot_C_S(cached: 0),
+                    effectNode → slot_E_S(deps: [edge1]) }
+S.edges         = { edge1 }
+S.readSet       = { effectNode, count }
+S.writeSet      = ∅
+S.cleanups      = [disposeEffectNode]
+
+edge1 = { source: count, target: slot_E_S, targetScope: S }
 effectNode.bodyCleanups = [cleanupAtZero]
-S.cleanups = [disposeEffectNode]
-log = ["Effect ran with count=0"]
+
+log       = ["Effect ran with count=0"]
 teardowns = []
 ```
 
 **Step 3: `setCount(5)` under `S`.**
 
-- `writeSlot(count, S, { recipe: () => 5, cached: 5, wasWritten: true })`.
-  ([Q9](./questions.md#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally) marker: wasWritten=true overwrites the wasWritten=false slot.)
-- Walk `count`'s outgoing edges with `(count.slots, S)`:
-  - `edge1`'s chain `[S, ROOT_SCOPE]`. writeScope=S,
-    writeIdx=0. **Fire.** Invalidate `effectNode.slots[S]`. Emit
-    slot-changed event.
-- Subscriber receives event. `scheduleMicrotask(runBody)`. Re-run is queued.
+- `writeSlot(count, S, { recipe: () => 5, cached: 5, deps: [] })`.
+  `S.writeSet.add(count)`. This overwrites the read-populated `slot_C_S`
+  in `S.slots`. Per [Q9](./questions.md#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally),
+  `count` is now in both `S.readSet` and `S.writeSet` — writeSet
+  membership drives commit promotion.
+- Engine fires chain-match for each `edge ∈ count.subs`:
+  - `edge1`: `chainFor(S) = [S, ROOT]`. `writeScope = S` at index 0.
+    No more-specific check needed. **Fire.** Invalidate `slot_E_S`
+    (clear cached, mark dirty). Emit slot-changed event.
+- Subscriber receives event. `scheduleMicrotask(runBody)`. Re-run queued.
 
 **State after Step 3:**
 
 ```
-count.slots = { S: { recipe: () => 5, cached: 5, wasWritten: true } }
-effectNode.slots[S].cached = undefined (invalidated)
+S.slots    = { count → slot_C_S_new(cached: 5),
+               effectNode → slot_E_S(dirty, deps: [edge1]) }
+S.writeSet = { count }
+S.readSet  = { effectNode, count }
 microtask queue: [runBody]
-log = ["Effect ran with count=0"]
+log       = ["Effect ran with count=0"]
 teardowns = []
 ```
 
@@ -2199,28 +2212,31 @@ The body cleanup is _still installed_ — `effectNode.bodyCleanups =
 
 `closeScope(S, 'discard')`:
 
-1. _Drop `S`-tagged slots._ Walk each slot's `subs`, unlink edges.
-   - `count.slots[S].subs = [edge1]`. Unlink `edge1`: remove from
-     `count.slots[S].subs` and from `effectNode.slots[S].deps`.
-   - Drop `count.slots[S]`.
-   - `effectNode.slots[S]`: drop. Walk its `subs` (none). Done.
-2. _Fire `S.cleanups`._ `S.cleanups = [disposeEffectNode]`.
+1. Open deferred-fires region (invariant uniformity).
+2. Skip promotion (discard mode).
+3. **Walk `S.edges`, remove from `node.subs`.** `S.edges = { edge1 }`.
+   Remove `edge1` from `count.subs`. `count.subs = ∅`.
+4. **Drop `S.slots`** for `S.readSet ∪ S.writeSet = { effectNode, count }`.
+   `S.slots = ∅`.
+5. Close child scopes (none).
+6. Drain deferred-fires region (empty).
+7. **Fire `S.cleanups`** (per [Q12](./questions.md#q12--body-cleanups-vs-scope-cleanups-composition-and-re-entrancy):
+   discard only). `S.cleanups = [disposeEffectNode]`.
    - `disposeEffectNode()`:
      - Walk `effectNode.bodyCleanups`. Fire each.
        - `cleanupAtZero()` → `teardowns.push("cleanup at count=0")`.
-     - `effectNode.bodyCleanups = []`.
-     - Mark `effectNode` as disposed.
-3. `S.status = 'discarded'`. Pop ambient.
+     - `effectNode.bodyCleanups = []`. Mark `effectNode` disposed.
+8. `S.status = 'discarded'`. `ROOT.children.delete(S)`. Pop ambient.
 
 **State after Step 4:**
 
 ```
-count.slots = {}
-effectNode: disposed (slots map empty; bodyCleanups empty)
-edges: edge1 unlinked (gone)
-log = ["Effect ran with count=0"]
+count.subs = ∅                                # edge1 unlinked by step 3
+S          : fully disposed
+effectNode : disposed (bodyCleanups empty)
+log       = ["Effect ran with count=0"]
 teardowns = ["cleanup at count=0"]
-microtask queue: [runBody]   ← still queued!
+microtask queue: [runBody]                    ← still queued!
 ```
 
 **Step 5: microtask drains.**
@@ -2252,44 +2268,78 @@ throwing.
 
 **Step 4 (alternate): `closeScope(S, 'commit')`.**
 
-This is where [Q10](./questions.md#q10--commit-as-transaction-ordering-atomicity-deferred-fires) (commit-as-transaction) is exercised. The library's
-commit logic opens a deferred-fires region:
+Per [Q10](./questions.md#q10--commit-as-transaction-ordering-atomicity-deferred-fires):
+commit is a deferred-fires region.
 
-1. _Promote write-populated slots only_ (per [Q9](./questions.md#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally)).
-   - `count.slots[S].wasWritten === true` → promote.
-     - `writeSlot(count, ROOT_SCOPE, { recipe: () => 5, cached: 5, … })`.
-     - Walk `count`'s edges with `(count.slots, ROOT_SCOPE)`:
-       - `edge1`'s chain `[S, ROOT_SCOPE]`. writeScope=
-         ROOT_SCOPE, writeIdx=1. Check more-specific: `count.slots.has(S)`?
-         **Yes** (we haven't dropped `S` slots yet). Don't fire.
-   - `effectNode.slots[S].wasWritten === false` → don't promote (it's a
-     consumer-cache, not user-state).
-2. _Drop `S`-tagged slots._
-   - `count.slots[S].subs = [edge1]`. Unlink `edge1`. Drop.
-   - `effectNode.slots[S]`: drop.
-3. _Fire `S.cleanups`._ `disposeEffectNode()` fires `cleanupAtZero` →
-   `teardowns.push("cleanup at count=0")`. Mark effectNode disposed.
-4. _Close deferred-fires region._ No deferred fires queued (the write to
-   `ROOT_SCOPE` in step 1 didn't fire `edge1`).
-5. `S.status = 'committed'`.
+1. **Open deferred-fires region.** Fires queue.
+2. **Promote writeSet.** `S.writeSet = { count }`. Promote:
+   `writeSlot(count, ROOT, { recipe: () => 5, cached: 5, deps: [] })`.
+   `ROOT.slots.set(count, slot_C_R_new)`. `ROOT.writeSet.add(count)`.
+   Fire chain-match for each `edge ∈ count.subs`:
+   - `edge1`: `chainFor(S) = [S, ROOT]`. `writeScope = ROOT` at index 1.
+     More-specific check: `S.slots.has(count)`? **Yes** (we haven't dropped
+     `S` slots yet). **Skip.** (Per Q12 effects are owned by `S`, so the
+     effect's edge is about to die — firing it would be wasted work
+     anyway.)
+3. **Walk `S.edges`, remove from `node.subs`.** `S.edges = { edge1 }`.
+   Remove `edge1` from `count.subs`. `count.subs = ∅`.
+4. **Drop `S.slots`** for `S.readSet ∪ S.writeSet = { effectNode, count }`.
+   `S.slots = ∅`.
+5. Close child scopes (none).
+6. **Drain deferred-fires region.** No queued fires.
+7. _No `S.cleanups` fired_ (commit is success per [Q12](./questions.md#q12--body-cleanups-vs-scope-cleanups-composition-and-re-entrancy)
+   — cleanups fire on discard only).
 
-**Final state for H3b:**
+   But the trace expectation here was that an in-action effect's
+   `bodyCleanups` fire at commit. With Q12's "scope cleanups fire on
+   discard only" resolution, the effect-disposer registered in
+   `S.cleanups` does _not_ run on commit. This means the effect is left
+   in a stranded state: its tracking edge has been removed (step 3) so
+   it can no longer be invalidated, but `effectNode.bodyCleanups` has
+   never fired and `effectNode.disposed` remains false.
+
+   The mechanism that should fire bodyCleanups at scope close (regardless
+   of commit/discard) is the effect's own teardown path, not a
+   `scope.cleanups` callback. The library shape for `effect()` therefore
+   needs a separate hook — wired into `closeScope` itself or into the
+   "edge from `S.edges` removed → if it was the effect's last edge,
+   dispose the effect" structural cascade — that runs on both commit and
+   discard. Captured as an open sub-question below.
+
+8. `S.status = 'committed'`. `ROOT.children.delete(S)`. Pop ambient.
+
+**Final state for H3b (under the resolved Q12):**
 
 ```
-count.slots = { ROOT_SCOPE: { recipe: () => 5, cached: 5 } }
-effectNode: disposed
-log = ["Effect ran with count=0"]
-teardowns = ["cleanup at count=0"]
+count.subs = ∅
+ROOT.slots = { count → slot_C_R_new(cached: 5) }
+ROOT.writeSet = { count }
+effectNode : edges removed structurally; bodyCleanups NOT fired
+             (architectural gap — see below)
+log       = ["Effect ran with count=0"]
+teardowns = []                                # ← not the original expectation
 ```
 
-Hmm — the effect was disposed at commit, so it didn't re-run with the
-committed value. Is that what we want?
+**Architectural note (discrepancy from the original trace).** The earlier
+draft of H3b assumed `S.cleanups` fires on commit too, which sourced the
+`teardowns = ["cleanup at count=0"]` outcome. Q12's resolution
+(commit = success → no cleanup) breaks that assumption for any
+disposer registered as a scope-cleanup. The trace's _structural_
+finding (the effect is owned by `S`, dies with `S`, doesn't outlive
+its owner) still holds, but the _vehicle_ for the disposal must be
+something other than `S.cleanups`. The natural place is the
+library-side `effect()` shape registering a teardown that runs as
+part of the engine's `closeScope` regardless of mode, or as part of
+the structural-edge-removal cascade in step 3. **This is a small
+new design call surfaced by the trace — not a falsification of the
+architecture, but a clarification of where an effect-disposer hook
+lives.**
 
-**Yes, for effects created inside the action.** The effect's owner is `S`;
-when `S` closes (commit or discard), the effect disposes. Effects don't
-_outlive_ their owners. For an effect that should persist past the action,
-the user would create it in an outer scope (component, root) — _its_ owner
-would be that outer scope, not the action.
+For effects created inside the action: the effect's owner is `S`;
+when `S` closes (commit or discard), the effect disposes. Effects
+don't _outlive_ their owners. For an effect that should persist past
+the action, the user creates it in an outer scope (component, root)
+— _its_ owner would be that outer scope, not the action.
 
 This is conventional reactive-framework semantics (Solid, MobX, S.js): an
 effect's owner is its containing context, and effects die when their
@@ -2323,52 +2373,59 @@ action(function* () {
 // cleanupAtZero should fire first, then the new body runs.
 ```
 
-**Initial setup.** Effect's owner = `ROOT_SCOPE`, subscription chain =
-`[ROOT_SCOPE]`. `edge1` formed: `count → effectNode.slots[ROOT_SCOPE]`,
-chain `[ROOT_SCOPE]`. After initial run:
-`bodyCleanups = [cleanupAtZero]`. Log has "Effect ran with count=0".
+**Initial setup.** Effect's owner = `ROOT_SCOPE`. Per Policy α, tracking
+edges have `targetScope = ROOT`. `slot_E_R` lives in `ROOT.slots`.
+`edge1 = { source: count, target: slot_E_R, targetScope: ROOT }` in
+`count.subs` and `ROOT.edges`. After initial run:
+`effectNode.bodyCleanups = [cleanupAtZero]`. Log has "Effect ran with
+count=0".
 
 **Action runs. Inside `S`:**
 
-- `setCount(5)`: `writeSlot(count, S, { … })`. Engine chain-match for
-  `edge1` (target scope `ROOT_SCOPE`, chain `[ROOT_SCOPE]`) against
-  `writeScope = S`: chain doesn't include S → don't fire. ✓ (H1a-c.)
+- `setCount(5)`: `writeSlot(count, S, …)`. `S.writeSet.add(count)`.
+  `S.slots.set(count, slot_C_S)`. Engine chain-match for `edge1`
+  (`targetScope = ROOT`, `chainFor(ROOT) = [ROOT]`): `writeScope = S` not
+  in chain → **don't fire.** ✓ (H1a-c.)
 
-**Commit.**
+**Commit.** `closeScope(S, 'commit')`:
 
-- Promote: `writeSlot(count, ROOT_SCOPE, { recipe: () => 5, cached: 5 })`.
-- Engine chain-match for `edge1` against `writeScope = ROOT_SCOPE`:
-  writeIdx=0, no more-specific → **fire.** Invalidate
-  `effectNode.slots[ROOT_SCOPE]`. Emit invalidation event.
-- Subscriber: `scheduleMicrotask(runBody)`.
-- Drop `count.slots[S]`.
-- `S.status = 'committed'`. (`S.cleanups` is empty; effectNode isn't owned
-  by `S`, it's owned by `ROOT_SCOPE`.)
+1. Open deferred-fires region.
+2. Promote `S.writeSet = { count }`:
+   `writeSlot(count, ROOT, { recipe: () => 5, cached: 5, deps: [] })`.
+   Fire chain-match for `edge1`: `chainFor(ROOT) = [ROOT]`, writeScope ROOT
+   at index 0; no more-specific check needed. **Queue fire** for `slot_E_R`.
+   Subscriber receives event → `scheduleMicrotask(runBody)`.
+3. Walk `S.edges` (∅) — nothing to remove.
+4. Drop `S.slots[count]`.
+5. Close children (none).
+6. Drain region — `runBody` already scheduled.
+7. (Discard-only cleanups not fired.)
+8. `S.status = 'committed'`. Pop ambient.
 
 **Microtask: `runBody`.**
 
 - _Guard:_ `effectNode.disposed === false`. Proceed.
 - _Fire previous bodyCleanups first._ `cleanupAtZero()` →
-  `teardowns.push("cleanup at count=0")`. `bodyCleanups = []`.
-- _Unlink stale `deps`._ `effectNode.slots[ROOT_SCOPE].deps = [edge1]`.
-  Unlink each — remove `edge1` from `count.slots[ROOT_SCOPE].subs` and
-  from `effectNode.slots[ROOT_SCOPE].deps`.
-- _Push tracker, push scope. Invoke body._
-  - `get(count)`: `link(count, effectNode.slots[ROOT_SCOPE])` → `edge1'`.
-    `invoke(count, ROOT_SCOPE)` → hit, return 5.
+  `teardowns.push("cleanup at count=0")`. `effectNode.bodyCleanups = []`.
+- _Unlink stale `deps`._ `slot_E_R.deps = [edge1]`. Remove `edge1` from
+  `count.subs` and `ROOT.edges`. Reset `slot_E_R.deps = []`.
+- Push tracker = `slot_E_R`, scope = `ROOT`. Invoke body:
+  - `get(count)`: `link(count, slot_E_R)` → `edge1'` (fresh). `invoke(count,
+    ROOT)` → hit, return `5`.
   - Body: `c = 5`. `log.push("Effect ran with count=5")`. `onCleanup(...)`
-    → registers `cleanupAtFive`. `bodyCleanups = [cleanupAtFive]`.
+    registers `cleanupAtFive` → `effectNode.bodyCleanups = [cleanupAtFive]`.
 - Pop tracker, pop scope.
 
 **Final state for H3b':**
 
 ```
-count.slots = { ROOT_SCOPE: cached 5 }
-effectNode.slots = { ROOT_SCOPE: { cached: undefined, deps: [edge1'] } }
-edge1' (fresh identity, same shape)
-log = ["Effect ran with count=0", "Effect ran with count=5"]
-teardowns = ["cleanup at count=0"]
-bodyCleanups = [cleanupAtFive]
+count.subs      = { edge1' }
+ROOT.slots      = { count → cached 5,
+                    effectNode → slot_E_R(deps: [edge1']) }
+ROOT.edges      = { edge1' }
+log             = ["Effect ran with count=0", "Effect ran with count=5"]
+teardowns       = ["cleanup at count=0"]
+effectNode.bodyCleanups = [cleanupAtFive]
 ```
 
 ✓ The previous body's cleanup (`cleanupAtZero`) fired _before_ the new
@@ -2377,39 +2434,39 @@ which will fire on the next re-run or on effect disposal.
 
 ### Architecture exposed
 
-H3 traced cleanly under Policy α with one composition that's worth
-naming explicitly:
+H3 traced cleanly under Policy α (Q11) with one architectural gap
+flagged in H3b (the effect-disposer-on-commit vehicle).
 
-1. **Two cleanup mechanisms compose at the scope-discard boundary.**
-   `scope.cleanups` (the scope's own disposers) and `effectNode.
-bodyCleanups` (per-body cleanups). Scope discard fires its own
-   cleanups; among those, the effect's _disposer_ fires the effect's
-   bodyCleanups. **The composition is one-way** (scope discard → effect
-   dispose → bodyCleanups fire), and the engine doesn't know about
-   bodyCleanups at all — it just fires `scope.cleanups`, and the effect's
-   disposer (registered into `scope.cleanups` at creation) does the
-   inner unwinding.
-2. **Effect lifetime is owner-scope lifetime.** Effects don't outlive
-   their owners. Pulse follows the conventional Solid / S.js / MobX
-   model. An effect that should persist across an action is created
-   outside it.
+1. **Two cleanup mechanisms compose at scope close ([Q12](./questions.md#q12--body-cleanups-vs-scope-cleanups-composition-and-re-entrancy)).**
+   `scope.cleanups` (the scope's own disposers, **discard only**) and
+   `effectNode.bodyCleanups` (per-body cleanups, fire before re-run or
+   on dispose). They are distinct mechanisms with distinct triggers.
+   For H3a (discard) the disposer registered in `S.cleanups` carries
+   the effect's tear-down; for H3b (commit) the disposer cannot be
+   registered there because commit doesn't fire scope cleanups —
+   surfaced as a new sub-question (where does the effect-disposer
+   hook live so it runs on both commit and discard?).
+2. **Effect lifetime is owner-scope lifetime, structurally via Q11
+   Policy α + Q6 storage.** Effects don't outlive their owners. An
+   in-action effect's edges live in `S.edges`; when `S` closes, the
+   engine walks `S.edges` and removes each from `node.subs` — the
+   effect's reactivity dies structurally with no extra machinery.
 3. **Body cleanups fire _before_ re-run, not on resume.** The microtask
    `runBody` fires the previous body's cleanups first, then unlinks
-   stale deps, then invokes the body anew. r3's recompute pattern (run
-   disposal → recompute) carries forward unchanged.
-4. **Q9 (read-populated vs write-populated) was load-bearing in H3a.**
-   The trace explicitly distinguished `count.slots[S].wasWritten = true`
-   (from setCount) vs `effectNode.slots[S].wasWritten = false` (from
-   the body invoking the recipe). Only the write-populated slot
-   promotes on commit. Confirms [Q9](./questions.md#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally)'s lean toward the (ii) library-side
-   `writeSet` is the right call — though the trace uses the simpler
-   per-slot `wasWritten` flag for clarity.
-5. **Q10's deferred-fires region is straightforward at the commit
-   boundary.** No deferred fires were actually generated in H3b
-   because the promoted write's chain-match check (chain `[S, ROOT_SCOPE]`,
-   write to ROOT_SCOPE, S still has a slot) didn't fire. The deferral
-   region exists but was empty. Worth noting: in a multi-write commit,
-   the region would actually batch fires.
+   stale deps, then invokes the body anew (H3b').
+4. **[Q9](./questions.md#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally)
+   (writeSet vs readSet) was load-bearing in H3a.** `count` entered
+   `S.writeSet` (from `setCount(5)`) while `effectNode` stayed in
+   `S.readSet` only (read-populated by the effect body's invocation).
+   Commit promotion walks `writeSet`; only `count` would have
+   promoted. The earlier draft used a per-slot `wasWritten` flag;
+   under the resolved Q9, the flag is gone and the scope's writeSet
+   carries the same information.
+5. **[Q10](./questions.md#q10--commit-as-transaction-ordering-atomicity-deferred-fires)'s
+   deferred-fires region was empty in H3b** because the chain-match
+   for the only edge (`edge1` with `targetScope = S`) skipped (S still
+   had a slot at the moment of promotion). In H3b' the region carried
+   one queued fire (target slot in `ROOT_SCOPE`).
 6. **Policy α survives discard cleanly.** Effects-inside-actions fire on
    action-scope writes, invalidate, schedule re-runs — and the re-runs
    are absorbed by the dispose guard if the scope discards before the
@@ -2420,12 +2477,10 @@ bodyCleanups` (per-body cleanups). Scope discard fires its own
 
 ### Open sub-questions surfaced
 
-1. **Effect chain policy.** Policy α (effects-inside-actions track the
-   action scope) vs Policy β (effects always track ROOT_SCOPE only). The
-   trace used α; β would mean an effect inside an action never reacts
-   during the action body, only at commit (or dispose). Both are coherent.
-   _Lean α_ (composition is more natural), but **this is a real design
-   call** worth keeping open. Adding as [Q11](./questions.md#q11--effect-chain-policy-chain-follows-owner-or-always-root_scope) candidate.
+1. **Effect chain policy.** **Resolved — Policy α** (per
+   [Q11](./questions.md#q11--effect-chain-policy-chain-follows-owner-or-always-root_scope),
+   sealed structurally by Q6's scope-centric storage). The trace uses α
+   throughout; β is no longer a live alternative.
 2. **Effect re-parenting on commit.** Currently the trace disposes
    in-action effects at action close (commit or discard). An alternative:
    on commit _only_, re-parent the effect's owner to `S.parent`, so the
@@ -2441,10 +2496,21 @@ bodyCleanups` (per-body cleanups). Scope discard fires its own
    tracing if K1-style re-entrancy concerns surface here.
 4. **`onCleanup` outside an effect body but inside an action.** What's
    the registration target? Working assumption: `scope.cleanups` of the
-   ambient scope, which is the action. Fires on action discard or
-   commit (both — scope cleanups are blind to commit-vs-discard).
-   Different from body cleanups, which are tied to the effect lifecycle.
-   Worth being explicit; not yet in the doc.
+   ambient scope, which is the action. Per [Q12](./questions.md#q12--body-cleanups-vs-scope-cleanups-composition-and-re-entrancy)
+   (commit = success → no scope-cleanup fires), this means an action's
+   `onCleanup` only fires on discard. Users wanting "fire on both" use
+   the surrounding pattern (try/finally) or an explicit `onSettle`.
+5. **Where does an in-action effect's disposer hook live so it runs on
+   both commit and discard?** Surfaced by H3b under Q12's resolution.
+   Candidates: (a) library-side `effect()` wires the disposer into a
+   structural cascade — "when this effect's owner scope closes (either
+   mode), tear down `bodyCleanups`"; (b) the engine's `closeScope`
+   gains a per-scope `onClose` list that runs in both modes (distinct
+   from the discard-only `cleanups`); (c) the structural-edge-removal
+   in step 3 of close detects "this was the effect's last edge → fire
+   bodyCleanups." Option (a) is most aligned with slim-engine; (b)
+   would require a tiny engine extension; (c) is implicit and
+   error-prone. Not yet picked.
 
 ### Framings status after H3
 
@@ -2454,21 +2520,20 @@ All four framings held:
 - _Walks-first-class_: `get` inside the body forms edges with the right
   chain (per Policy α, the chain is the effect's owner's chain).
 - _Slim engine + thick library_: all the cleanup-chain composition is
-  library code. The engine just fires `scope.cleanups` on discard; the
-  library's effect disposer (registered there at creation) does the
-  inner unwinding.
-- _Scope/owner unification holds with one design call_: the unification
-  makes effect-disposal = scope-discard natural, but Policy α vs β is
-  the real call (does subscription chain follow owner, or always
-  `[ROOT_SCOPE]`?). Both are coherent compositions; α is the lean.
+  library code. The engine fires `scope.cleanups` on discard; the
+  library composes effect teardown on top.
+- _Scope/owner unification holds, structurally via Q6 + Q11_: an
+  effect's owner is its ambient scope at creation; the effect's edges
+  live in `ownerScope.edges`; the engine's walk of `S.edges` in
+  `closeScope` removes them from `node.subs` automatically (Policy α
+  falls out of the storage shape).
 
-**No falsifications.** H3 confirmed that the cleanup-chain composition
-across speculative boundaries works cleanly — bodyCleanups fire via the
-effect disposer registered into `scope.cleanups`. Two cleanup mechanisms,
-one-way composition, engine knows about one, library composes the other.
-
-The Policy α/β question is added to the next-level sub-questions; the
-mechanism doesn't pick a winner.
+**No falsifications**, but H3b surfaced a clarification under the
+resolved Q12: scope cleanups fire on discard only, so the "effect's
+disposer registered into `S.cleanups`" pattern needs a second hook to
+cover the commit path. Captured as a new sub-question (effect-disposer
+hook on commit). The architecture supports either resolution; the call
+is library-shape.
 
 ---
 
