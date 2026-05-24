@@ -1,15 +1,8 @@
 # Concurrent divergence — scenarios first, affordances second
 
-A deep exploration of what happens when multiple speculations are
-in flight at the same time and touch overlapping state. Organized
-**scenarios → intent → affordance** (rather than API → analysis),
-because the API can't be picked sensibly without first understanding
-which intents need to be served and which are conflated.
+A deep exploration of what happens when multiple speculations are in flight at the same time and touch overlapping state. Organized **scenarios → intent → affordance** (rather than API → analysis), because the API can't be picked sensibly without first understanding which intents need to be served and which are conflated.
 
-This doc is exploration, not specification. The goal: build a survey
-of the concrete situations users will hit, identify the user's intent
-in each, then derive the minimum API surface that lets each intent be
-expressed.
+This doc is exploration, not specification. The goal: build a survey of the concrete situations users will hit, identify the user's intent in each, then derive the minimum API surface that lets each intent be expressed.
 
 **Companion documents:**
 
@@ -44,53 +37,31 @@ expressed.
 
 ## What pulse does for free
 
-Before walking scenarios, pin down the baseline so each scenario can be
-described in terms of what's *already* handled vs what's *added* by the
-scenario:
+Before walking scenarios, pin down the baseline so each scenario can be described in terms of what's *already* handled vs what's *added* by the scenario:
 
-- **Snapshot isolation between sibling scopes during their lifetime.**
-  Reads inside `S1` never see writes inside `S2`. Chain-match
-  ([Q1](./questions.md#q1--fall-through-and-edge-policy)) skips writes
-  whose scope isn't in the reader's chain.
-- **Last-commit-wins on overlapping writes.** Two siblings both write
-  `X`; whichever commits second overwrites. Falls out of writeSet
-  promotion ([Q9](./questions.md#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally)
-  + [Q10](./questions.md#q10--commit-semantics-ordering-atomicity-deferred-fires)).
-- **Render coherence.** Microtask batching + deferred-fires region
-  ([P6](./framings.md#p6--pull-driven-reads-push-driven-consumers-no-explicit-flush) +
-  [Q10](./questions.md#q10--commit-semantics-ordering-atomicity-deferred-fires))
-  collapses multiple invalidations of the same consumer to one re-run.
-- **Transactional coupling via nested actions.** `action(() => {
-  a(); b() })` makes `a` and `b` commit-together; the outer action's
-  scope is the commit boundary.
-- **Explicit supersession.** Holding an action handle lets you call
-  `.discard()` on a prior in-flight action when a newer one arrives.
+- **Snapshot isolation between sibling scopes during their lifetime.** Reads inside `S1` never see writes inside `S2`. Chain-match ([Q1](./questions.md#q1--fall-through-and-edge-policy)) skips writes whose scope isn't in the reader's chain.
+- **Last-commit-wins on overlapping writes.** Two siblings both write `X`; whichever commits second overwrites. Falls out of writeSet promotion ([Q9](./questions.md#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally) + [Q10](./questions.md#q10--commit-semantics-ordering-atomicity-deferred-fires)).
+- **Render coherence.** Microtask batching + deferred-fires region ([P6](./framings.md#p6--pull-driven-reads-push-driven-consumers-no-explicit-flush) + [Q10](./questions.md#q10--commit-semantics-ordering-atomicity-deferred-fires)) collapses multiple invalidations of the same consumer to one re-run.
+- **Transactional coupling via nested actions.** `action(() => { a(); b() })` makes `a` and `b` commit-together; the outer action's scope is the commit boundary.
+- **Explicit supersession.** Holding an action handle lets you call `.discard()` on a prior in-flight action when a newer one arrives.
 
-Each scenario below describes what happens under these defaults and
-what (if anything) is missing.
+Each scenario below describes what happens under these defaults and what (if anything) is missing.
 
 ## The scenario space
 
-Eight classes. Each is grounded in a concrete app pattern, not a
-mechanism. The classes are organized by the *user's intent*, not by
-the mechanism that would serve it.
+Eight classes. Each is grounded in a concrete app pattern, not a mechanism. The classes are organized by the *user's intent*, not by the mechanism that would serve it.
 
 ---
 
 ### A — Same-target, replacement semantics
 
-**The pattern.** Two actions writing the same signal where each write
-is meant to be a *replacement* — the newer write supersedes the older.
+**The pattern.** Two actions writing the same signal where each write is meant to be a *replacement* — the newer write supersedes the older.
 
 **Concrete cases:**
 
-- A1. **Like/unlike race.** User clicks the heart icon twice rapidly.
-  Both clicks fire as actions. Each sets `liked = !current`.
-- A2. **Form field debounced save.** User types in a name field;
-  every keystroke fires a debounced save. The most recent value
-  is the one to persist.
-- A3. **Multi-click submit.** User mashes a submit button before the
-  first click's response returns.
+- A1. **Like/unlike race.** User clicks the heart icon twice rapidly. Both clicks fire as actions. Each sets `liked = !current`.
+- A2. **Form field debounced save.** User types in a name field; every keystroke fires a debounced save. The most recent value is the one to persist.
+- A3. **Multi-click submit.** User mashes a submit button before the first click's response returns.
 - A4. **Toggle settings.** Quick on/off switching.
 
 **Under pulse default:**
@@ -107,23 +78,13 @@ like() // sets liked = true (computed from snapshot liked = false), POST returns
 like() // sets liked = false (snapshot still false from S1; S1 hasn't committed)
 ```
 
-Both actions see `liked = false` at their start (snapshot isolation).
-Both compute and write their own values. Whichever commits last wins.
-For toggle-like cases, this is *usually* what the user wants — the
-final click's intent is the truth.
+Both actions see `liked = false` at their start (snapshot isolation). Both compute and write their own values. Whichever commits last wins. For toggle-like cases, this is *usually* what the user wants — the final click's intent is the truth.
 
-**Problem:** A1 and A4 are typically fine because the user's intent
-matches "newest wins." A2 and A3 are subtly broken: the user's first
-write might have been based on a value the second hasn't yet computed
-against (subjectivity around what "first" means when both started at
-the same snapshot).
+**Problem:** A1 and A4 are typically fine because the user's intent matches "newest wins." A2 and A3 are subtly broken: the user's first write might have been based on a value the second hasn't yet computed against (subjectivity around what "first" means when both started at the same snapshot).
 
-**Intent:** "the most recent user action is the truth." Last-wins is
-correct in spirit; the subtle wrongness is mostly about timing
-expectations, not semantics.
+**Intent:** "the most recent user action is the truth." Last-wins is correct in spirit; the subtle wrongness is mostly about timing expectations, not semantics.
 
-**Affordance needed:** none beyond default. Maybe a `.discard()` on
-in-flight prior actions when a new one starts (supersession — see F).
+**Affordance needed:** none beyond default. Maybe a `.discard()` on in-flight prior actions when a new one starts (supersession — see F).
 
 **Status:** ✓ handled by pulse default.
 
@@ -131,20 +92,14 @@ in-flight prior actions when a new one starts (supersession — see F).
 
 ### B — Same-target, accumulation semantics
 
-**The pattern.** Two actions whose writes are *operations* (deltas)
-on the same signal, not replacements. The intent is for both
-operations to apply.
+**The pattern.** Two actions whose writes are *operations* (deltas) on the same signal, not replacements. The intent is for both operations to apply.
 
 **Concrete cases:**
 
-- B1. **Counter increment.** Each click fires `setCount(get(count) +
-  1)`. User clicks twice rapidly.
-- B2. **Append to log / list.** Each action does `setLog([...get(log),
-  newEntry])`.
-- B3. **Cart add-item.** User clicks "add to cart" rapidly on two
-  different items; cart should contain both.
-- B4. **Vote / reaction tally.** Each user-action contributes a delta;
-  all should accumulate.
+- B1. **Counter increment.** Each click fires `setCount(get(count) + 1)`. User clicks twice rapidly.
+- B2. **Append to log / list.** Each action does `setLog([...get(log), newEntry])`.
+- B3. **Cart add-item.** User clicks "add to cart" rapidly on two different items; cart should contain both.
+- B4. **Vote / reaction tally.** Each user-action contributes a delta; all should accumulate.
 
 **Under pulse default:**
 
@@ -160,57 +115,29 @@ increment() // S2: snapshot count=0, writes count=1 (S1 hasn't committed)
 // S2 commits: count=1 (overwrites; should have been 2)
 ```
 
-**The default loses one of the increments.** This is the classic
-"compute-from-stale-read" problem.
+**The default loses one of the increments.** This is the classic "compute-from-stale-read" problem.
 
-**Intent:** "every action's contribution should land." For B1, total
-should be 2 not 1. For B2, log should have both entries.
+**Intent:** "every action's contribution should land." For B1, total should be 2 not 1. For B2, log should have both entries.
 
 **Affordances that serve this:**
 
-- **CRDT-style signal value.** Counter is a special signal type whose
-  value composes (e.g., a counter that increments). Two concurrent
-  increments produce the same total regardless of order. *Library
-  pattern, not engine; user lifts state into a CRDT type.* Strongest
-  answer for B1, B4. Doesn't help for B2 (list append could be modeled
-  as a Yjs array, but that's a library choice).
-- **Rebase-on-conflict.** Action body re-executes against
-  post-commit state. For B1, the rebase re-reads `count = 1`,
-  computes `count + 1 = 2`, writes 2. Works if the body is pure;
-  catastrophic if it has side effects (re-fires the POST).
-- **Optimistic concurrency rejection with retry loop in user code.**
-  Action throws on conflict; user-level wrapper catches and retries.
-  Same effect as rebase but the user-level loop can decide to
-  *not* re-run the side effect (e.g., re-issue only the local
-  write, not the POST). More control, more boilerplate.
+- **CRDT-style signal value.** Counter is a special signal type whose value composes (e.g., a counter that increments). Two concurrent increments produce the same total regardless of order. *Library pattern, not engine; user lifts state into a CRDT type.* Strongest answer for B1, B4. Doesn't help for B2 (list append could be modeled as a Yjs array, but that's a library choice).
+- **Rebase-on-conflict.** Action body re-executes against post-commit state. For B1, the rebase re-reads `count = 1`, computes `count + 1 = 2`, writes 2. Works if the body is pure; catastrophic if it has side effects (re-fires the POST).
+- **Optimistic concurrency rejection with retry loop in user code.** Action throws on conflict; user-level wrapper catches and retries. Same effect as rebase but the user-level loop can decide to *not* re-run the side effect (e.g., re-issue only the local write, not the POST). More control, more boilerplate.
 
-**Status:** ✗ not handled by pulse default. Class B is the strongest
-case for some kind of additional affordance, but the right answer
-depends on whether you want CRDT types (best for B1/B4), rebase
-(best for B2/B3 in some shapes), or user-level retry (best for cases
-with side effects).
+**Status:** ✗ not handled by pulse default. Class B is the strongest case for some kind of additional affordance, but the right answer depends on whether you want CRDT types (best for B1/B4), rebase (best for B2/B3 in some shapes), or user-level retry (best for cases with side effects).
 
 ---
 
 ### C — Same-target, precedence semantics
 
-**The pattern.** Two actions touching the same signal where the
-application has a *known precedence*: one source of writes should
-"win" over another based on the kind of action it is, not on
-timing.
+**The pattern.** Two actions touching the same signal where the application has a *known precedence*: one source of writes should "win" over another based on the kind of action it is, not on timing.
 
 **Concrete cases:**
 
-- C1. **User-edit vs background-refresh.** User edits a comment in
-  the UI (action U). A background poll fetches the latest from the
-  server (action R). U should win — never overwrite the user's
-  in-flight edit with a server fetch.
-- C2. **Local optimistic vs server authoritative.** Action L
-  optimistically updates UI. Action S receives server confirmation.
-  S should overwrite L on success; L should remain on failure.
-- C3. **Foreground user-action vs background sync.** Two background
-  sync passes might overlap; the foreground action should always
-  win regardless of timing.
+- C1. **User-edit vs background-refresh.** User edits a comment in the UI (action U). A background poll fetches the latest from the server (action R). U should win — never overwrite the user's in-flight edit with a server fetch.
+- C2. **Local optimistic vs server authoritative.** Action L optimistically updates UI. Action S receives server confirmation. S should overwrite L on success; L should remain on failure.
+- C3. **Foreground user-action vs background sync.** Two background sync passes might overlap; the foreground action should always win regardless of timing.
 
 **Under pulse default:**
 
@@ -231,103 +158,59 @@ refresh() // S_R opens
 //                                     accident, but only because edit committed last)
 ```
 
-The default *might* produce the correct outcome by luck of timing, but
-it's the wrong mechanism. If `refresh` happens to commit *after*
-`edit`, the user's edit is silently lost.
+The default *might* produce the correct outcome by luck of timing, but it's the wrong mechanism. If `refresh` happens to commit *after* `edit`, the user's edit is silently lost.
 
-**Intent:** "Action U has precedence over action R for signal `comment`,
-regardless of timing."
+**Intent:** "Action U has precedence over action R for signal `comment`, regardless of timing."
 
 **Affordances that serve this:**
 
-- **Application-level coordination.** Refresh checks "is edit in
-  flight?" before committing; if yes, skips its write. Requires a
-  `.status` query on action handles. Pulse handles already expose
-  this ([Q6](./questions.md#q6--what-is-a-scope-as-a-value) /
-  [Q14](./questions.md#q14--action-prereqs--standing-state-handle));
-  the user wires it up.
-- **Cancel the lower-precedence action.** When edit starts, discard
-  any in-flight refresh. Solved by `.discard()` on handles.
-- **Per-action `'reject'` policy on refresh.** Refresh's commit
-  throws if `comment` has been written-to during its lifetime; the
-  refresh action's wrapper catches and ignores. Less direct but
-  works.
+- **Application-level coordination.** Refresh checks "is edit in flight?" before committing; if yes, skips its write. Requires a `.status` query on action handles. Pulse handles already expose this ([Q6](./questions.md#q6--what-is-a-scope-as-a-value) / [Q14](./questions.md#q14--action-prereqs--standing-state-handle)); the user wires it up.
+- **Cancel the lower-precedence action.** When edit starts, discard any in-flight refresh. Solved by `.discard()` on handles.
+- **Per-action `'reject'` policy on refresh.** Refresh's commit throws if `comment` has been written-to during its lifetime; the refresh action's wrapper catches and ignores. Less direct but works.
 
-**Status:** ⚠ pulse default doesn't enforce precedence, but the
-application has all the pieces to coordinate (handle status,
-`.discard()`). Documenting the pattern + maybe a small helper
-(`action(body, { yields_to: [otherHandle] })`?) would smooth this.
+**Status:** ⚠ pulse default doesn't enforce precedence, but the application has all the pieces to coordinate (handle status, `.discard()`). Documenting the pattern + maybe a small helper (`action(body, { yields_to: [otherHandle] })?`) would smooth this.
 
 ---
 
 ### D — Read-dependent writes
 
-**The pattern.** An action reads state X to decide what to write to Y.
-If X changes during the action's flight, the write to Y was based
-on stale information.
+**The pattern.** An action reads state X to decide what to write to Y. If X changes during the action's flight, the write to Y was based on stale information.
 
 **Concrete cases:**
 
-- D1. **Conditional update.** "If user is logged in, increment
-  `userVisits`." Action reads `loggedIn`, then writes
-  `userVisits`. If `loggedIn` changes mid-flight, the action's
-  premise is invalid.
-- D2. **Validation against current state.** "Save this form only if
-  no other validation errors exist." Action reads `errors`, then
-  decides to save. If `errors` is mutated during the action, the
-  save shouldn't proceed.
-- D3. **Compute-from-state.** "Compute discount as a function of
-  cart total and user tier." Action reads both, computes, writes
-  discount. If either changes during compute, the discount is
-  stale.
+- D1. **Conditional update.** "If user is logged in, increment `userVisits`." Action reads `loggedIn`, then writes `userVisits`. If `loggedIn` changes mid-flight, the action's premise is invalid.
+- D2. **Validation against current state.** "Save this form only if no other validation errors exist." Action reads `errors`, then decides to save. If `errors` is mutated during the action, the save shouldn't proceed.
+- D3. **Compute-from-state.** "Compute discount as a function of cart total and user tier." Action reads both, computes, writes discount. If either changes during compute, the discount is stale.
 
 **Under pulse default:**
 
-The read returns the snapshot value (the value at the moment of read,
-isolated from other actions' writes). The subsequent write commits
-with `last-wins` semantics. So:
+The read returns the snapshot value (the value at the moment of read, isolated from other actions' writes). The subsequent write commits with `last-wins` semantics. So:
 
-- D1: the action's write to `userVisits` will be based on the snapshot
-  view of `loggedIn`. If `loggedIn` flipped to `false` in committed
-  state mid-flight, the action still writes `userVisits` — which is
-  semantically wrong.
+- D1: the action's write to `userVisits` will be based on the snapshot view of `loggedIn`. If `loggedIn` flipped to `false` in committed state mid-flight, the action still writes `userVisits` — which is semantically wrong.
 - D2: same — save proceeds even if other errors landed mid-flight.
 - D3: same — discount is stale.
 
-**Intent:** "if the state I based my decision on has changed, abort
-or redo." Classic optimistic concurrency control.
+**Intent:** "if the state I based my decision on has changed, abort or redo." Classic optimistic concurrency control.
 
 **Affordances that serve this:**
 
-- **`'reject'` policy.** At commit, check if any signal in
-  `S.readSet ∪ S.writeSet` has been committed-to since `S` started.
-  If yes, throw. Caller catches; retries with current state, gives
-  up, or surfaces to user.
-- **Rebase policy.** Re-execute the body. Works for D3 (pure
-  compute); risky for D1/D2 (might have other side effects).
-- **Manual version checking.** Action body queries
-  `latest(loggedIn)` at commit time and asserts. Verbose; doable
-  with current primitives but ugly.
+- **`'reject'` policy.** At commit, check if any signal in `S.readSet ∪ S.writeSet` has been committed-to since `S` started. If yes, throw. Caller catches; retries with current state, gives up, or surfaces to user.
+- **Rebase policy.** Re-execute the body. Works for D3 (pure compute); risky for D1/D2 (might have other side effects).
+- **Manual version checking.** Action body queries `latest(loggedIn)` at commit time and asserts. Verbose; doable with current primitives but ugly.
 
-**Status:** ✗ not handled by default. Class D is the canonical case
-for `'reject'` — small, well-understood mechanism, big payoff.
+**Status:** ✗ not handled by default. Class D is the canonical case for `'reject'` — small, well-understood mechanism, big payoff.
 
 ---
 
 ### E — Multi-step composite actions
 
-**The pattern.** Multiple coordinated writes that must succeed or
-fail as a unit.
+**The pattern.** Multiple coordinated writes that must succeed or fail as a unit.
 
 **Concrete cases:**
 
-- E1. **Two-phase save.** Action saves a draft (write metadata, then
-  write content). Both must commit or neither.
-- E2. **Coordinated batch.** Update three related signals atomically
-  (transferring money: debit account A, credit account B, log
-  speculation).
-- E3. **Compensating speculation.** Step 1 succeeds; step 2 fails;
-  step 1 must be rolled back.
+- E1. **Two-phase save.** Action saves a draft (write metadata, then write content). Both must commit or neither.
+- E2. **Coordinated batch.** Update three related signals atomically (transferring money: debit account A, credit account B, log speculation).
+- E3. **Compensating speculation.** Step 1 succeeds; step 2 fails; step 1 must be rolled back.
 
 **Under pulse default + nested actions:**
 
@@ -339,38 +222,26 @@ const transfer = action(function* () {
 })
 ```
 
-If any step throws, the outer action's body throws → outer scope
-discards → all sub-action writes (which had promoted to the outer
-scope, not yet to ROOT) are dropped together. **Transactional
-coupling falls out of nested actions for free.**
+If any step throws, the outer action's body throws → outer scope discards → all sub-action writes (which had promoted to the outer scope, not yet to ROOT) are dropped together. **Transactional coupling falls out of nested actions for free.**
 
-**Intent:** "these writes are a unit; commit together or roll back
-together."
+**Intent:** "these writes are a unit; commit together or roll back together."
 
 **Affordances:** nested actions cover this. No new mechanism needed.
 
-**Status:** ✓ handled by nested actions
-([Q15](./questions.md#q15--entanglement-dim-4-overlapping-speculations-on-shared-state)
-discussion).
+**Status:** ✓ handled by nested actions ([Q15](./questions.md#q15--entanglement-dim-4-overlapping-speculations-on-shared-state) discussion).
 
 ---
 
 ### F — Supersession (newer invalidates older)
 
-**The pattern.** A newer intent arrives while an older one is in
-flight; the older should be cancelled.
+**The pattern.** A newer intent arrives while an older one is in flight; the older should be cancelled.
 
 **Concrete cases:**
 
-- F1. **Search box typing.** User types "foo"; that fires a search
-  action. User types "foob"; older search should be cancelled.
-- F2. **Route navigation.** User clicks link to /page-a; that fires
-  a load action. User clicks /page-b; older load should be cancelled.
-- F3. **Autosave with rapid edits.** Older save in flight; newer
-  edit triggers a newer save; older save should be cancelled.
-- F4. **Retry after failure.** Action failed; user clicks retry;
-  the failed-action's residue should be cleaned up before the new
-  attempt starts.
+- F1. **Search box typing.** User types "foo"; that fires a search action. User types "foob"; older search should be cancelled.
+- F2. **Route navigation.** User clicks link to /page-a; that fires a load action. User clicks /page-b; older load should be cancelled.
+- F3. **Autosave with rapid edits.** Older save in flight; newer edit triggers a newer save; older save should be cancelled.
+- F4. **Retry after failure.** Action failed; user clicks retry; the failed-action's residue should be cleaned up before the new attempt starts.
 
 **Under pulse default + handles:**
 
@@ -385,46 +256,32 @@ function search(query) {
 }
 ```
 
-Explicit `.discard()` handles supersession cleanly. Action handles
-expose `.status` and `.discard()`; user-level wrapper coordinates.
+Explicit `.discard()` handles supersession cleanly. Action handles expose `.status` and `.discard()`; user-level wrapper coordinates.
 
 **Intent:** "I supersede the prior; cancel it." User-level pattern.
 
-**Affordances:** `.discard()` on action handles. Already covered by
-[Q6](./questions.md#q6--what-is-a-scope-as-a-value)'s action-handle API.
+**Affordances:** `.discard()` on action handles. Already covered by [Q6](./questions.md#q6--what-is-a-scope-as-a-value)'s action-handle API.
 
 **Status:** ✓ handled by `.discard()` + user-level coordination.
 
-**Note:** Solid does this implicitly via `_inFlight` identity-
-supersession (a newer write to the same signal silently drops the
-older async's result). Pulse's explicit `.discard()` is more visible
-but requires the user to track handles. Either model is defensible;
-pulse's is more honest about what's happening.
+**Note:** Solid does this implicitly via `_inFlight` identity-supersession (a newer write to the same signal silently drops the older async's result). Pulse's explicit `.discard()` is more visible but requires the user to track handles. Either model is defensible; pulse's is more honest about what's happening.
 
 ---
 
 ### G — Independent flows that share a downstream dep
 
-**The pattern.** Two actions writing *different* signals that happen
-to share a downstream computed or consumer.
+**The pattern.** Two actions writing *different* signals that happen to share a downstream computed or consumer.
 
 **Concrete cases:**
 
-- G1. **User updates name (action U); background updates lastSeen
-  (action B).** Both invalidate `<UserBadge>` somewhere because it
-  reads both.
-- G2. **Foreground form save; background analytics push.** Different
-  signals; share a downstream "any pending writes?" indicator.
+- G1. **User updates name (action U); background updates lastSeen (action B).** Both invalidate `<UserBadge>` somewhere because it reads both.
+- G2. **Foreground form save; background analytics push.** Different signals; share a downstream "any pending writes?" indicator.
 
 **Under pulse default:**
 
-Each action writes its own signal. Chain-match fires the consumer
-for each separately. Microtask batching ([P6](./framings.md#p6--pull-driven-reads-push-driven-consumers-no-explicit-flush))
-collapses both invalidations of the consumer into one re-render per
-microtask. The two actions commit independently when each finishes.
+Each action writes its own signal. Chain-match fires the consumer for each separately. Microtask batching ([P6](./framings.md#p6--pull-driven-reads-push-driven-consumers-no-explicit-flush)) collapses both invalidations of the consumer into one re-render per microtask. The two actions commit independently when each finishes.
 
-**This is correct.** The actions are independent; they should
-commit independently; render coherence is handled by batching.
+**This is correct.** The actions are independent; they should commit independently; render coherence is handled by batching.
 
 **Intent:** "these are independent; don't couple them."
 
@@ -432,40 +289,27 @@ commit independently; render coherence is handled by batching.
 
 **Status:** ✓ handled by pulse default.
 
-**Note:** This is the case where **Solid's auto-merge does the
-WRONG thing.** Solid welds the two unrelated actions because they
-share a downstream sub. Discarding one drags the other along.
-Pulse's explicit-only entanglement (nested actions) avoids this
-spooky merging.
+**Note:** This is the case where **Solid's auto-merge does the WRONG thing.** Solid welds the two unrelated actions because they share a downstream sub. Discarding one drags the other along. Pulse's explicit-only entanglement (nested actions) avoids this spooky merging.
 
 ---
 
 ### H — True collaboration
 
-**The pattern.** Multiple users or processes modifying the same
-shared state across a network or process boundary.
+**The pattern.** Multiple users or processes modifying the same shared state across a network or process boundary.
 
 **Concrete cases:**
 
-- H1. **Collaborative document editing.** Two users typing in the
-  same shared doc.
-- H2. **Offline-first sync.** User edits locally while offline;
-  server has its own concurrent edits; on reconnect, reconcile.
-- H3. **Multiplayer game state.** Multiple clients update positions;
-  server arbitrates.
+- H1. **Collaborative document editing.** Two users typing in the same shared doc.
+- H2. **Offline-first sync.** User edits locally while offline; server has its own concurrent edits; on reconnect, reconcile.
+- H3. **Multiplayer game state.** Multiple clients update positions; server arbitrates.
 
 **Under pulse default:**
 
-Out of scope. Collaboration is a *data layer* concern, not a
-reactivity concern. Pulse's reactivity propagates whatever the data
-layer produces.
+Out of scope. Collaboration is a *data layer* concern, not a reactivity concern. Pulse's reactivity propagates whatever the data layer produces.
 
-**Intent:** "this state is shared across processes; conflict
-resolution lives in the data type or at the server."
+**Intent:** "this state is shared across processes; conflict resolution lives in the data type or at the server."
 
-**Affordances:** CRDT data types (Yjs, Automerge) as signal values.
-Server-replay patterns (Replicache) as application architecture.
-Pulse does *not* try to solve this at the reactivity layer.
+**Affordances:** CRDT data types (Yjs, Automerge) as signal values. Server-replay patterns (Replicache) as application architecture. Pulse does *not* try to solve this at the reactivity layer.
 
 **Status:** ✓ correctly out of scope.
 
@@ -473,604 +317,258 @@ Pulse does *not* try to solve this at the reactivity layer.
 
 ## Speculation patterns in apps
 
-The A–H classes above are organized around what happens at the
-*overlap point* between two speculations. A complementary view: what
-do speculative flows actually *look like* in real apps? When do
-applications spawn speculative work in the first place, and what
-shape does the speculation take?
+The A–H classes above are organized around what happens at the *overlap point* between two speculations. A complementary view: what do speculative flows actually *look like* in real apps? When do applications spawn speculative work in the first place, and what shape does the speculation take?
 
-Cataloguing the patterns matters because each pattern has its own
-isolation profile — when two instances of the same pattern run
-concurrently, sometimes they should remain independent and sometimes
-they should compose; either choice is wrong outside its proper
-context.
+Cataloguing the patterns matters because each pattern has its own isolation profile — when two instances of the same pattern run concurrently, sometimes they should remain independent and sometimes they should compose; either choice is wrong outside its proper context.
 
 ### Inventory of speculative patterns
 
-**Request-response with optimism.** User performs an action; UI
-updates immediately to reflect the intent; a server round-trip
-confirms or rejects. The speculation lives for the duration of the
-round-trip. Examples: like/unlike, follow/unfollow, mark-read,
-toggle settings, vote.
+**Request-response with optimism.** User performs an action; UI updates immediately to reflect the intent; a server round-trip confirms or rejects. The speculation lives for the duration of the round-trip. Examples: like/unlike, follow/unfollow, mark-read, toggle settings, vote.
 
-**Form save with rollback.** User fills a form (potentially long
-sequence of field edits); a submit operation packages the data and
-sends it. During the in-flight period, the new values are tentative.
-On rejection, restore the prior committed state. Examples: edit
-profile, compose comment, settings update.
+**Form save with rollback.** User fills a form (potentially long sequence of field edits); a submit operation packages the data and sends it. During the in-flight period, the new values are tentative. On rejection, restore the prior committed state. Examples: edit profile, compose comment, settings update.
 
-**Edit-in-place with autosave.** User edits a cell / field / inline
-text. On commit (blur, debounce timer, explicit save), the edit
-flushes to server. Until then, the edit is speculative locally —
-visible to the user, not yet committed. Examples: spreadsheet cells,
-rich text drafts, inline title editing.
+**Edit-in-place with autosave.** User edits a cell / field / inline text. On commit (blur, debounce timer, explicit save), the edit flushes to server. Until then, the edit is speculative locally — visible to the user, not yet committed. Examples: spreadsheet cells, rich text drafts, inline title editing.
 
-**Drag-and-drop reorder.** User drags an item; list reorders
-optimistically; drop commits via server call; rejection restores
-order. The speculation covers both the optimistic visual reorder
-and any derived state (counts, positions, indices).
+**Drag-and-drop reorder.** User drags an item; list reorders optimistically; drop commits via server call; rejection restores order. The speculation covers both the optimistic visual reorder and any derived state (counts, positions, indices).
 
-**Multi-step wizard / staged speculation.** User progresses through
-steps; each step's data is collected; only the final "finish"
-commits everything. Cancel at any step discards the accumulated
-state. Examples: checkout flow, onboarding, multi-page form, file
-upload with chunked confirmation.
+**Multi-step wizard / staged speculation.** User progresses through steps; each step's data is collected; only the final "finish" commits everything. Cancel at any step discards the accumulated state. Examples: checkout flow, onboarding, multi-page form, file upload with chunked confirmation.
 
-**Preview before commit.** User triggers a "preview" of a change
-that would take effect if applied. The preview is fully speculative;
-no actual commit unless user confirms. Examples: image filter
-preview, what-if scenarios, theme preview, recipe diff preview.
+**Preview before commit.** User triggers a "preview" of a change that would take effect if applied. The preview is fully speculative; no actual commit unless user confirms. Examples: image filter preview, what-if scenarios, theme preview, recipe diff preview.
 
-**Paginated load.** User triggers loading the next page; new items
-appear speculatively while the fetch is in flight; rejection
-leaves the current view unchanged. Speculation here is additive
-(new content) rather than mutative.
+**Paginated load.** User triggers loading the next page; new items appear speculatively while the fetch is in flight; rejection leaves the current view unchanged. Speculation here is additive (new content) rather than mutative.
 
-**Search-as-you-type.** Each keystroke triggers a tentative search;
-newer keystrokes supersede older. The tentative state is "here are
-results for query Q1" while query Q2 is in flight. By the time
-the user reads anything, only the latest matters.
+**Search-as-you-type.** Each keystroke triggers a tentative search; newer keystrokes supersede older. The tentative state is "here are results for query Q1" while query Q2 is in flight. By the time the user reads anything, only the latest matters.
 
-**Navigation / route change.** User clicks a link; the next route
-is loaded speculatively; until the route is "ready" (data loaded),
-the current route remains visible. Modern frameworks (React Router,
-TanStack Router) treat this as a transition.
+**Navigation / route change.** User clicks a link; the next route is loaded speculatively; until the route is "ready" (data loaded), the current route remains visible. Modern frameworks (React Router, TanStack Router) treat this as a transition.
 
-**Background sync / pull-fresh.** Periodic polling, websocket push,
-service worker push — speculative updates from a background process
-that may or may not be wanted, depending on whether foreground
-state has changed.
+**Background sync / pull-fresh.** Periodic polling, websocket push, service worker push — speculative updates from a background process that may or may not be wanted, depending on whether foreground state has changed.
 
-**Compound batch operation.** "Select all → delete," "mark all
-read," "publish drafts." A set of operations applied atomically;
-all succeed or all roll back.
+**Compound batch operation.** "Select all → delete," "mark all read," "publish drafts." A set of operations applied atomically; all succeed or all roll back.
 
-**Per-context isolated state.** A panel, modal, route, or tenant
-has its own state that's independent from other panels/modals/etc.
-Each can have its own speculative operations. Examples: tabs in
-a tabbed UI, modals over a main view, per-user sessions, per-tenant
-workspaces in a multi-tenant app.
+**Per-context isolated state.** A panel, modal, route, or tenant has its own state that's independent from other panels/modals/etc. Each can have its own speculative operations. Examples: tabs in a tabbed UI, modals over a main view, per-user sessions, per-tenant workspaces in a multi-tenant app.
 
-**Animated transition.** UI is between two coherent states during
-an animation. The intermediate frames are speculative (you wouldn't
-ship the intermediate to logging/analytics); the destination state
-is what eventually commits.
+**Animated transition.** UI is between two coherent states during an animation. The intermediate frames are speculative (you wouldn't ship the intermediate to logging/analytics); the destination state is what eventually commits.
 
-**Race-aware toggle.** Like the like/unlike pattern but where
-rapid succession is expected. User mashes a button; UI should
-reflect the most recent click; intermediate clicks shouldn't
-flicker.
+**Race-aware toggle.** Like the like/unlike pattern but where rapid succession is expected. User mashes a button; UI should reflect the most recent click; intermediate clicks shouldn't flicker.
 
-**Cross-component coordinated update.** Click in component A
-triggers updates in components B, C, D — they should all appear
-together (one render, one logical change). Not atomic in
-the "rollback" sense; coherence in the "shown together" sense.
+**Cross-component coordinated update.** Click in component A triggers updates in components B, C, D — they should all appear together (one render, one logical change). Not atomic in the "rollback" sense; coherence in the "shown together" sense.
 
-**Workflow with checkpoints.** Long-running operation where the
-user reviews intermediate states and explicitly advances. Each
-checkpoint is a commit; cancel reverts to the prior checkpoint.
-Examples: data import with preview, multi-stage approval, doc
-publishing pipeline.
+**Workflow with checkpoints.** Long-running operation where the user reviews intermediate states and explicitly advances. Each checkpoint is a commit; cancel reverts to the prior checkpoint. Examples: data import with preview, multi-stage approval, doc publishing pipeline.
 
-**Real-time collaboration.** Multiple users editing concurrently;
-each user's changes are speculative locally until network round-trip
-reconciles them with others'. Out of pulse's scope (handled at the
-data layer via CRDT/OT) but listed for completeness.
+**Real-time collaboration.** Multiple users editing concurrently; each user's changes are speculative locally until network round-trip reconciles them with others'. Out of pulse's scope (handled at the data layer via CRDT/OT) but listed for completeness.
 
-**Undo / redo.** Operations can be replayed forward or reverted.
-Each operation is speculative until acknowledged irreversibly
-(persisted, sealed). The undo stack is a sequence of past
-speculations preserved for rollback.
+**Undo / redo.** Operations can be replayed forward or reverted. Each operation is speculative until acknowledged irreversibly (persisted, sealed). The undo stack is a sequence of past speculations preserved for rollback.
 
-**Tutorial / guided flow.** User walks through interactive
-explanation; tutorial may manipulate UI state to demonstrate;
-the manipulation should not persist into the real app state.
+**Tutorial / guided flow.** User walks through interactive explanation; tutorial may manipulate UI state to demonstrate; the manipulation should not persist into the real app state.
 
-**Time-bounded speculation.** Speculation with a deadline ("this
-will commit in 5 seconds unless you cancel"); user can stop the
-auto-commit. Examples: undo-toast for delete, scheduled actions,
-"sending in 10s" patterns.
+**Time-bounded speculation.** Speculation with a deadline ("this will commit in 5 seconds unless you cancel"); user can stop the auto-commit. Examples: undo-toast for delete, scheduled actions, "sending in 10s" patterns.
 
-**Conditional cascade.** Action A triggers; conditional on outcome,
-action B may follow. B's speculation is dependent on A having
-committed (or having failed in a specific way). Examples:
-"if approval succeeds, send notification"; "if file uploads,
-update reference."
+**Conditional cascade.** Action A triggers; conditional on outcome, action B may follow. B's speculation is dependent on A having committed (or having failed in a specific way). Examples: "if approval succeeds, send notification"; "if file uploads, update reference."
 
 ### Cross-cutting observation: speculation has many shapes
 
-The list above is non-exhaustive but covers what we'd expect to see
-in a typical interactive app. A few things to notice:
+The list above is non-exhaustive but covers what we'd expect to see in a typical interactive app. A few things to notice:
 
-- **Speculations vary wildly in lifetime.** A like-toggle lives
-  for ~200ms; a multi-step wizard might span minutes. A drag-and-drop
-  reorder commits at drop-time; a tutorial flow might never commit
-  at all.
-- **Speculations vary in scope of affected state.** A like-toggle
-  touches one signal; a wizard finalization commits dozens. A
-  preview affects only the UI; a paginated load adds to a list.
-- **Speculations vary in their relationship to the user's mental
-  model.** Some are "the user is *doing* a thing" (form submit);
-  others are "the system is *trying* a thing on the user's behalf"
-  (background sync); others are "what if?" (preview).
-- **Speculations vary in their commit triggers.** User-initiated
-  (button click), time-based (debounce), event-based (blur,
-  websocket push), procedural (end-of-action body return).
+- **Speculations vary wildly in lifetime.** A like-toggle lives for ~200ms; a multi-step wizard might span minutes. A drag-and-drop reorder commits at drop-time; a tutorial flow might never commit at all.
+- **Speculations vary in scope of affected state.** A like-toggle touches one signal; a wizard finalization commits dozens. A preview affects only the UI; a paginated load adds to a list.
+- **Speculations vary in their relationship to the user's mental model.** Some are "the user is *doing* a thing" (form submit); others are "the system is *trying* a thing on the user's behalf" (background sync); others are "what if?" (preview).
+- **Speculations vary in their commit triggers.** User-initiated (button click), time-based (debounce), event-based (blur, websocket push), procedural (end-of-action body return).
 
-This variability is why a one-size-fits-all coordination mechanism
-(like Solid's auto-merge) inevitably gets some scenarios wrong:
-the right answer depends on what kind of speculation you're in.
+This variability is why a one-size-fits-all coordination mechanism (like Solid's auto-merge) inevitably gets some scenarios wrong: the right answer depends on what kind of speculation you're in.
 
 ## Moments when isolation is essential
 
-The complementary survey: when is it *critical* that two speculative
-truths do NOT share state, entangle, or merge? When would auto-coupling
-be a bug?
+The complementary survey: when is it *critical* that two speculative truths do NOT share state, entangle, or merge? When would auto-coupling be a bug?
 
-This isn't just "the absence of an entanglement intent." It's
-positive: scenarios where the application's correctness depends on
-two speculative truths being kept apart.
+This isn't just "the absence of an entanglement intent." It's positive: scenarios where the application's correctness depends on two speculative truths being kept apart.
 
 ### Per-context speculations
 
-**Per-tab / per-pane state.** A user has two browser tabs open into
-the same app, each tab showing a different draft. The user is
-editing draft A in tab 1, draft B in tab 2. Each tab's edits should
-be isolated speculations — no merge between them, even if both
-touch a shared "user draft index" signal.
+**Per-tab / per-pane state.** A user has two browser tabs open into the same app, each tab showing a different draft. The user is editing draft A in tab 1, draft B in tab 2. Each tab's edits should be isolated speculations — no merge between them, even if both touch a shared "user draft index" signal.
 
-**Per-route speculations.** Single-page app with multiple routes
-open in tabs / a multi-pane UI. User clicks "save" in route A's
-form; the save should not interact with an in-progress draft in
-route B's form, even if both write to a shared "drafts" collection.
+**Per-route speculations.** Single-page app with multiple routes open in tabs / a multi-pane UI. User clicks "save" in route A's form; the save should not interact with an in-progress draft in route B's form, even if both write to a shared "drafts" collection.
 
-**Per-tenant in multi-tenant apps.** Tenant A's admin makes a
-change; tenant B's admin makes a change. They share the same app
-code and possibly the same backend, but their speculations must
-be tenant-isolated. Cross-tenant merging would be a data leak.
+**Per-tenant in multi-tenant apps.** Tenant A's admin makes a change; tenant B's admin makes a change. They share the same app code and possibly the same backend, but their speculations must be tenant-isolated. Cross-tenant merging would be a data leak.
 
-**Per-user in shared-view apps.** Admin shadow-watching a user's
-session via screen-share; their speculative manipulations
-("preview this change") shouldn't affect the watched user's state.
+**Per-user in shared-view apps.** Admin shadow-watching a user's session via screen-share; their speculative manipulations ("preview this change") shouldn't affect the watched user's state.
 
 ### Unrelated user flows
 
-**Background activity vs foreground action.** User is filling
-out a form (action A). A periodic background poll fetches updated
-notifications (action B). These should NOT entangle — failure of
-B shouldn't roll back A; A's commit shouldn't block on B's
-in-flight async. They share an observer ("any pending work?")
-but are not one logical change.
+**Background activity vs foreground action.** User is filling out a form (action A). A periodic background poll fetches updated notifications (action B). These should NOT entangle — failure of B shouldn't roll back A; A's commit shouldn't block on B's in-flight async. They share an observer ("any pending work?") but are not one logical change.
 
-**Two independent UI widgets.** A like-button on one card and a
-follow-button on another card, both clicked in rapid succession.
-Even if they share a downstream "activity feed" subscriber, they
-should commit independently. Discarding one should not affect the
-other.
+**Two independent UI widgets.** A like-button on one card and a follow-button on another card, both clicked in rapid succession. Even if they share a downstream "activity feed" subscriber, they should commit independently. Discarding one should not affect the other.
 
-**Sidebar action vs main-content action.** User opens a contextual
-sidebar (action A: load related content). Meanwhile they continue
-interacting with main content (action B: edit field). These are
-independent.
+**Sidebar action vs main-content action.** User opens a contextual sidebar (action A: load related content). Meanwhile they continue interacting with main content (action B: edit field). These are independent.
 
 ### Independent failure handling
 
-**Compensating speculations that fail independently.** Action A
-debits account X; action B credits account Y; in some systems,
-these are two separate compensating operations. If A succeeds but
-B fails, the system needs to handle each independently — not
-automatically roll both back.
+**Compensating speculations that fail independently.** Action A debits account X; action B credits account Y; in some systems, these are two separate compensating operations. If A succeeds but B fails, the system needs to handle each independently — not automatically roll both back.
 
-**Mixed-criticality speculations.** Action A is a critical save
-(user's typed message); action B is a non-critical analytics
-ping. B failing should not roll back A.
+**Mixed-criticality speculations.** Action A is a critical save (user's typed message); action B is a non-critical analytics ping. B failing should not roll back A.
 
-**Optimistic UI with retry on failure.** Action A optimistically
-updates UI and fires server call. Action B (separate optimistic
-update) does the same for a different concern. A fails (network
-flakiness); user retries A. B should be unaffected by A's failure
-or retry.
+**Optimistic UI with retry on failure.** Action A optimistically updates UI and fires server call. Action B (separate optimistic update) does the same for a different concern. A fails (network flakiness); user retries A. B should be unaffected by A's failure or retry.
 
 ### Permission / authorization isolation
 
-**Different operations may have different permission requirements.**
-User attempts to "publish" (requires admin); user concurrently
-attempts to "edit" (requires editor). Publish fails due to
-permission; edit succeeds. Entangling them would block edit on
-publish's authorization check.
+**Different operations may have different permission requirements.** User attempts to "publish" (requires admin); user concurrently attempts to "edit" (requires editor). Publish fails due to permission; edit succeeds. Entangling them would block edit on publish's authorization check.
 
-**Per-resource permission scoping.** User edits resource R1 (owned
-by them); concurrently a system-driven update touches resource R2
-(owned by another user). If R1's edit succeeds and R2's update
-hits a permission boundary, they should resolve independently.
+**Per-resource permission scoping.** User edits resource R1 (owned by them); concurrently a system-driven update touches resource R2 (owned by another user). If R1's edit succeeds and R2's update hits a permission boundary, they should resolve independently.
 
 ### Time-bounded vs unbounded speculations
 
-**Speculations with deadlines.** An action with a TTL ("auto-commits
-in 5s"); another action without. Entangling them would couple their
-lifetimes — the deadline-bound one would either expire the other
-prematurely or be kept alive indefinitely.
+**Speculations with deadlines.** An action with a TTL ("auto-commits in 5s"); another action without. Entangling them would couple their lifetimes — the deadline-bound one would either expire the other prematurely or be kept alive indefinitely.
 
-**Long-running vs short-running.** A 30s document export (action
-A); a 100ms button toggle (action B). They might both touch the
-same "active operations" indicator. Entanglement would force B to
-wait 30s or A to fail because B was discarded.
+**Long-running vs short-running.** A 30s document export (action A); a 100ms button toggle (action B). They might both touch the same "active operations" indicator. Entanglement would force B to wait 30s or A to fail because B was discarded.
 
 ### Application semantics: distinct intents
 
-**User intent vs automatic action.** User clicks "save" (action A);
-auto-save timer fires moments later (action B). These are different
-intents — the user's explicit save and the system's scheduled save.
-They shouldn't be coupled even though they both write the same
-field.
+**User intent vs automatic action.** User clicks "save" (action A); auto-save timer fires moments later (action B). These are different intents — the user's explicit save and the system's scheduled save. They shouldn't be coupled even though they both write the same field.
 
-**Different user gestures on same target.** User drag-edits a value
-(action A); user types a new value into the same field while drag
-is in flight (action B). These represent different intents at
-different moments; conflating them would be wrong (which intent
-wins?).
+**Different user gestures on same target.** User drag-edits a value (action A); user types a new value into the same field while drag is in flight (action B). These represent different intents at different moments; conflating them would be wrong (which intent wins?).
 
-**Replaying user history vs new actions.** User triggers an undo
-(action A: re-apply prior state); user makes a new edit (action B).
-The undo and the edit are distinct logical operations; entangling
-them would corrupt the undo semantics.
+**Replaying user history vs new actions.** User triggers an undo (action A: re-apply prior state); user makes a new edit (action B). The undo and the edit are distinct logical operations; entangling them would corrupt the undo semantics.
 
 ### Privacy and information-flow isolation
 
-**Speculations involving private data.** User A is composing a
-private draft message; the framework should not allow user A's
-speculative state to leak into user B's view via shared computed
-state.
+**Speculations involving private data.** User A is composing a private draft message; the framework should not allow user A's speculative state to leak into user B's view via shared computed state.
 
-**Sensitive intermediate values.** During a password change,
-intermediate values (current password, new password) are
-speculative until the change commits. They should never enter
-shared subscribers or be visible to background sync.
+**Sensitive intermediate values.** During a password change, intermediate values (current password, new password) are speculative until the change commits. They should never enter shared subscribers or be visible to background sync.
 
-**Per-cohort A/B test states.** Cohort A is experimentally seeing
-feature X enabled; cohort B is not. Speculative interactions in
-the experiment shouldn't bleed into the control group's view.
+**Per-cohort A/B test states.** Cohort A is experimentally seeing feature X enabled; cohort B is not. Speculative interactions in the experiment shouldn't bleed into the control group's view.
 
 ### Architectural isolation boundaries
 
-**Module / component boundaries.** Two independent feature modules
-(billing, settings) each manage their own speculative flows. Entangling
-their speculations would couple modules that were architecturally
-designed to be independent.
+**Module / component boundaries.** Two independent feature modules (billing, settings) each manage their own speculative flows. Entangling their speculations would couple modules that were architecturally designed to be independent.
 
-**Embedded subapps / micro-frontends.** An iframe-like embedded
-subapp has its own state model; its speculations are confined to
-itself. The parent shell's speculations are confined to the shell.
+**Embedded subapps / micro-frontends.** An iframe-like embedded subapp has its own state model; its speculations are confined to itself. The parent shell's speculations are confined to the shell.
 
-**Server-driven vs client-driven speculations.** A speculation
-originating from a server push (e.g., remote update suggestion)
-vs one originating from a local user click. These are conceptually
-different and shouldn't auto-couple — they have different
-trust/authority levels.
+**Server-driven vs client-driven speculations.** A speculation originating from a server push (e.g., remote update suggestion) vs one originating from a local user click. These are conceptually different and shouldn't auto-couple — they have different trust/authority levels.
 
 ### Same-target but distinct logical operations
 
-**Two users in a collaborative app touching the same field.**
-Even with CRDT data layers, the two users' speculations are
-*structurally separate* until reconciled. The framework should not
-auto-merge them at the reactive layer.
+**Two users in a collaborative app touching the same field.** Even with CRDT data layers, the two users' speculations are *structurally separate* until reconciled. The framework should not auto-merge them at the reactive layer.
 
-**Multiple-of-the-same gestures.** User clicks "favorite" twice
-on the same item rapidly. Each click is a distinct logical
-operation (intent to toggle); they should resolve via supersession
-or replacement, not merge.
+**Multiple-of-the-same gestures.** User clicks "favorite" twice on the same item rapidly. Each click is a distinct logical operation (intent to toggle); they should resolve via supersession or replacement, not merge.
 
-**Retry of a failed operation.** User retries a failed save; the
-retry is a *new* speculation, not a continuation of the failed
-one. The failed one's residual state must not entangle with the
-retry's fresh state.
+**Retry of a failed operation.** User retries a failed save; the retry is a *new* speculation, not a continuation of the failed one. The failed one's residual state must not entangle with the retry's fresh state.
 
 ### The crisp principle that emerges
 
-Two speculations should be **kept apart** (no sharing, no entangling,
-no merging) when:
+Two speculations should be **kept apart** (no sharing, no entangling, no merging) when:
 
-1. They originate from **different intents** (different users,
-   different gestures, different system triggers).
-2. They affect **independent failure domains** (one failing
-   shouldn't roll back the other).
-3. They live in **different lifetimes** (deadline vs unbounded,
-   short vs long).
-4. They cross **boundary lines** (per-tenant, per-route, per-user,
-   per-module, per-trust-level).
-5. They represent **competing intents on the same target** —
-   the user's most recent gesture should win via supersession,
-   not via blending.
+1. They originate from **different intents** (different users, different gestures, different system triggers).
+2. They affect **independent failure domains** (one failing shouldn't roll back the other).
+3. They live in **different lifetimes** (deadline vs unbounded, short vs long).
+4. They cross **boundary lines** (per-tenant, per-route, per-user, per-module, per-trust-level).
+5. They represent **competing intents on the same target** — the user's most recent gesture should win via supersession, not via blending.
 
-And conversely, two speculations might be **safely combined** only
-when:
+And conversely, two speculations might be **safely combined** only when:
 
-1. They are **two parts of one logical operation** (the user is
-   doing one thing, expressed as multiple writes).
-2. They share the **same failure domain** (succeed-together or
-   rollback-together is the desired semantic).
-3. They share the **same lifetime** (one user gesture, one
-   request, one wizard step).
-4. They are **structurally co-located** (same module, same
-   intent, same trust level).
+1. They are **two parts of one logical operation** (the user is doing one thing, expressed as multiple writes).
+2. They share the **same failure domain** (succeed-together or rollback-together is the desired semantic).
+3. They share the **same lifetime** (one user gesture, one request, one wizard step).
+4. They are **structurally co-located** (same module, same intent, same trust level).
 
-The application knows which case applies; the framework cannot
-infer it from the shape of the dep graph (Solid's mistake). The
-framework's job is to make the **default** (kept apart) match the
-overwhelmingly common case, and to provide an **opt-in** path
-(some affordance, TBD) for the rarer case where combination is
-genuinely wanted.
+The application knows which case applies; the framework cannot infer it from the shape of the dep graph (Solid's mistake). The framework's job is to make the **default** (kept apart) match the overwhelmingly common case, and to provide an **opt-in** path (some affordance, TBD) for the rarer case where combination is genuinely wanted.
 
 ### What this implies for pulse, scenario-only
 
 Stepping back from any specific affordance:
 
-- **Pulse's default of "isolate sibling speculations" is correct.**
-  The isolation list above is much longer than the combination
-  list; isolation should be the cheap, automatic default.
-- **The architecture must NOT auto-couple based on structural
-  overlap.** Solid's union-find approach is wrong for the majority
-  of the isolation cases listed above — auto-coupling unrelated
-  speculations that happen to share a downstream sub is a positive
-  bug, not a tradeoff.
-- **The architecture MUST support explicit boundary declarations.**
-  Per-tenant, per-route, per-tab, per-cohort isolation needs to be
-  expressible. (Pulse's scope tree with multiple root-style parentless
-  scopes — from Q6 — already supports this.)
-- **Combination, when wanted, needs to be opt-in and code-structural.**
-  The user makes it clear in code that "these two are part of one
-  logical change" by composing them in a way the framework can
-  recognize without inferring. (Nested actions express this
-  structurally; the form of opt-in for the post-hoc case is
-  unresolved.)
-- **Conflict resolution within an isolated speculation is a separate
-  question.** Most isolation cases above involve speculations that
-  don't conflict on shared signals at all (different signals,
-  different scopes). Conflict-on-shared-signal is a subset; even
-  in that subset, the right answer depends on the kind of
-  speculation (replacement, accumulation, precedence — see A/B/C
-  classes above), and the framework can't pick a single default that
-  covers all of them.
+- **Pulse's default of "isolate sibling speculations" is correct.** The isolation list above is much longer than the combination list; isolation should be the cheap, automatic default.
+- **The architecture must NOT auto-couple based on structural overlap.** Solid's union-find approach is wrong for the majority of the isolation cases listed above — auto-coupling unrelated speculations that happen to share a downstream sub is a positive bug, not a tradeoff.
+- **The architecture MUST support explicit boundary declarations.** Per-tenant, per-route, per-tab, per-cohort isolation needs to be expressible. (Pulse's scope tree with multiple root-style parentless scopes — from Q6 — already supports this.)
+- **Combination, when wanted, needs to be opt-in and code-structural.** The user makes it clear in code that "these two are part of one logical change" by composing them in a way the framework can recognize without inferring. (Nested actions express this structurally; the form of opt-in for the post-hoc case is unresolved.)
+- **Conflict resolution within an isolated speculation is a separate question.** Most isolation cases above involve speculations that don't conflict on shared signals at all (different signals, different scopes). Conflict-on-shared-signal is a subset; even in that subset, the right answer depends on the kind of speculation (replacement, accumulation, precedence — see A/B/C classes above), and the framework can't pick a single default that covers all of them.
 
-The scenario walk reinforces the architectural choice already in
-place — and surfaces a longer list of legitimate isolation
-requirements than the original A–H survey alone did.
+The scenario walk reinforces the architectural choice already in place — and surfaces a longer list of legitimate isolation requirements than the original A–H survey alone did.
 
 ## A conceptual aside — Scope is doing two jobs
 
-Worth naming explicitly, because it sharpens how to think about the
-entanglement question. Pulse's `Scope` primitive currently bundles
-two logically distinct concerns:
+Worth naming explicitly, because it sharpens how to think about the entanglement question. Pulse's `Scope` primitive currently bundles two logically distinct concerns:
 
-**Job 1 — Atomic commit boundary.** A set of writes that succeed-or-
-fail together. Has a lifecycle (open → run → commit / discard).
-Tracks `writeSet`, `cleanups`, `status`. Owns the action handle and
-its `.commit()` / `.discard()` semantics. This is the *atomic
-unit*.
+**Job 1 — Atomic commit boundary.** A set of writes that succeed-or-fail together. Has a lifecycle (open → run → commit / discard). Tracks `writeSet`, `cleanups`, `status`. Owns the action handle and its `.commit()` / `.discard()` semantics. This is the *atomic unit*.
 
-**Job 2 — Isolation context (the "view" or sandbox).** A region
-where reads see particular overlays. Has `slots`, `parent`, `readSet`,
-`edges`. The chain that fall-through reads walk; the set of writes
-visible to readers under this context; the lifecycle of the cache
-itself. This is the *visibility region*.
+**Job 2 — Isolation context (the "view" or sandbox).** A region where reads see particular overlays. Has `slots`, `parent`, `readSet`, `edges`. The chain that fall-through reads walk; the set of writes visible to readers under this context; the lifecycle of the cache itself. This is the *visibility region*.
 
-In current pulse these are 1:1 — every Scope is both a speculation
-and an isolation context. The conflation is invisible most of the
-time and works fine for most scenarios. But the entanglement question
-is exactly where the conflation becomes load-bearing, so it's worth
-unpacking.
+In current pulse these are 1:1 — every Scope is both a speculation and an isolation context. The conflation is invisible most of the time and works fine for most scenarios. But the entanglement question is exactly where the conflation becomes load-bearing, so it's worth unpacking.
 
 ### What disentanglement would open up
 
-If speculations and isolation contexts were separable, the design
-space gets richer:
+If speculations and isolation contexts were separable, the design space gets richer:
 
-- *Commit boundary without isolation.* Writes go straight to canonical
-  state but the *set* of them is atomic. Like a database batch
-  without read-isolation — useful if you trust other writers to
-  cooperate.
-- *Isolation without commit boundary.* A sandbox that's never meant
-  to commit — a preview, a what-if, a tutorial view. Currently you'd
-  use an action that's always discarded, which conflates "this isn't
-  a speculation" with "this is a failed speculation."
-- *One commit boundary spanning multiple isolation contexts.* Database
-  savepoints — sub-sandboxes within a speculation. Each sub can have
-  its own reads/writes; the outer speculation commits all of them
-  together.
-- *One isolation context shared by multiple commit boundaries.* Two
-  speculations sharing visibility but committing independently. This
-  is the *interesting* case for entanglement — see below.
+- *Commit boundary without isolation.* Writes go straight to canonical state but the *set* of them is atomic. Like a database batch without read-isolation — useful if you trust other writers to cooperate.
+- *Isolation without commit boundary.* A sandbox that's never meant to commit — a preview, a what-if, a tutorial view. Currently you'd use an action that's always discarded, which conflates "this isn't a speculation" with "this is a failed speculation."
+- *One commit boundary spanning multiple isolation contexts.* Database savepoints — sub-sandboxes within a speculation. Each sub can have its own reads/writes; the outer speculation commits all of them together.
+- *One isolation context shared by multiple commit boundaries.* Two speculations sharing visibility but committing independently. This is the *interesting* case for entanglement — see below.
 
 ### The case that matters: shared isolation, independent commit
 
-The bottom case from the list above is the one that maps onto
-"entanglement" intuitions. Two concurrent speculations A and B
-sharing one isolation context means: A writes X → B sees X
-immediately (no snapshot isolation between them) → B reads X and
-writes Y → both commit/discard on their own schedule.
+The bottom case from the list above is the one that maps onto "entanglement" intuitions. Two concurrent speculations A and B sharing one isolation context means: A writes X → B sees X immediately (no snapshot isolation between them) → B reads X and writes Y → both commit/discard on their own schedule.
 
-This is closer to what Solid's lane-merge reaches for than pulse's
-nested actions are. Nested actions give shared isolation **and**
-coupled commit (the inner actions can't commit independently of the
-outer); shared-isolation-with-independent-commit would let each speculation
-finish on its own schedule while still seeing each other's progress.
+This is closer to what Solid's lane-merge reaches for than pulse's nested actions are. Nested actions give shared isolation **and** coupled commit (the inner actions can't commit independently of the outer); shared-isolation-with-independent-commit would let each speculation finish on its own schedule while still seeing each other's progress.
 
 But this is *not* free. Here's the catch.
 
 ### Why the coupling isn't accidental
 
-Isolation is the mechanism that makes independent commit/discard
-*possible*. If speculation A's writes are visible to speculation B,
-and B reads them and writes Y based on them, what happens when A
-discards?
+Isolation is the mechanism that makes independent commit/discard *possible*. If speculation A's writes are visible to speculation B, and B reads them and writes Y based on them, what happens when A discards?
 
 Four options, none of them clean:
 
-- **Cascading discard.** B also rolls back. Now B's commit is
-  coupled to A's — defeating the "independent commit" point.
-- **Optimistic propagation.** Only B's writes that *causally
-  depended* on A's revert. Requires per-write dep tracking between
-  speculations; expensive; subtle ("did this read depend on A's
-  write, or coincidentally produce the same result?").
-- **Hard failure.** A discards; B's next read of an A-derived value
-  throws. User must catch and decide. Aggressive but visible.
-- **Phantom reads accepted.** B keeps its writes based on what A
-  wrote even though A's writes are gone. State corruption.
+- **Cascading discard.** B also rolls back. Now B's commit is coupled to A's — defeating the "independent commit" point.
+- **Optimistic propagation.** Only B's writes that *causally depended* on A's revert. Requires per-write dep tracking between speculations; expensive; subtle ("did this read depend on A's write, or coincidentally produce the same result?").
+- **Hard failure.** A discards; B's next read of an A-derived value throws. User must catch and decide. Aggressive but visible.
+- **Phantom reads accepted.** B keeps its writes based on what A wrote even though A's writes are gone. State corruption.
 
-The coupling between isolation and atomicity exists *because*
-isolation is what gives atomicity its bite. Without isolation,
-atomicity is meaningless — other speculations are already reading
-your half-done writes, so "discard" can't undo what they've already
-seen and decided on. With shared isolation across multiple
-speculations, atomicity stops composing.
+The coupling between isolation and atomicity exists *because* isolation is what gives atomicity its bite. Without isolation, atomicity is meaningless — other speculations are already reading your half-done writes, so "discard" can't undo what they've already seen and decided on. With shared isolation across multiple speculations, atomicity stops composing.
 
-Every framework that tries to offer shared-visibility-with-
-independent-commit has to pick one of those four options. (See [Solid /
-React / Svelte rollback strategies](#solid-react-svelte-rollback-strategies)
-below.) None pick a clean answer because there isn't one.
+Every framework that tries to offer shared-visibility-with-independent-commit has to pick one of those four options. (See [Solid / React / Svelte rollback strategies](#solid-react-svelte-rollback-strategies) below.) None pick a clean answer because there isn't one.
 
 ### What this means for pulse's choice
 
-Pulse's current 1:1 coupling between speculation and isolation is a
-*positive design choice*, not an accidental engineering decision. It
-sidesteps the cascade-discard problem by construction: each
-speculation has its own isolation context, so cross-speculation
-phantom reads can't happen.
+Pulse's current 1:1 coupling between speculation and isolation is a *positive design choice*, not an accidental engineering decision. It sidesteps the cascade-discard problem by construction: each speculation has its own isolation context, so cross-speculation phantom reads can't happen.
 
-The cost: you can't have two concurrent speculations share visibility
-while committing independently. The only way to share visibility is
-to share a speculation (nested actions) — which means coupled commit.
+The cost: you can't have two concurrent speculations share visibility while committing independently. The only way to share visibility is to share a speculation (nested actions) — which means coupled commit.
 
-The alternative would be to disentangle and offer shared-isolation as
-a feature, accepting cascade-discard (or one of the other three) as
-the cost. The scenario walk above doesn't surface a strong use case
-for this — *most* multi-speculation patterns in apps want either
-independent isolation (default) or coupled commit (nested actions).
-The narrow case of "share visibility, commit independently" doesn't
-seem to come up often, and when it does, the application can usually
-restructure to nest the speculations or coordinate via explicit
-status queries.
+The alternative would be to disentangle and offer shared-isolation as a feature, accepting cascade-discard (or one of the other three) as the cost. The scenario walk above doesn't surface a strong use case for this — *most* multi-speculation patterns in apps want either independent isolation (default) or coupled commit (nested actions). The narrow case of "share visibility, commit independently" doesn't seem to come up often, and when it does, the application can usually restructure to nest the speculations or coordinate via explicit status queries.
 
-So the practical takeaway: name the conceptual overload, understand
-that it's a *coupling* not an *accident*, and accept the trade. The
-entanglement question reframes as "*how* should pulse express
-explicit coupling?" (already mostly answered by nested actions) and
-"*what* about within-coupling conflicts?" (open — Class D `'reject'`,
-etc.) — not as "*should* pulse offer shared-isolation-independent-commit?"
-which the cascade-discard problem makes nearly unwinnable.
+So the practical takeaway: name the conceptual overload, understand that it's a *coupling* not an *accident*, and accept the trade. The entanglement question reframes as "*how* should pulse express explicit coupling?" (already mostly answered by nested actions) and "*what* about within-coupling conflicts?" (open — Class D `'reject'`, etc.) — not as "*should* pulse offer shared-isolation-independent-commit?" which the cascade-discard problem makes nearly unwinnable.
 
 ### Solid / React / Svelte rollback strategies
 
-What does each framework actually do when a speculation that's been
-sharing visibility with another rolls back? Each picks one of the
-four bad options above — or sidesteps the question entirely by
-refusing to share visibility in the first place.
+What does each framework actually do when a speculation that's been sharing visibility with another rolls back? Each picks one of the four bad options above — or sidesteps the question entirely by refusing to share visibility in the first place.
 
-**React modern — sidesteps the problem.** React doesn't really share
-visibility across concurrent transitions. Each transition builds its
-own WIP (work-in-progress) tree; the WIP is private until commit;
-when a transition's commit lands, it replaces the current tree. Two
-concurrent transitions live in two separate WIP trees, period.
+**React modern — sidesteps the problem.** React doesn't really share visibility across concurrent transitions. Each transition builds its own WIP (work-in-progress) tree; the WIP is private until commit; when a transition's commit lands, it replaces the current tree. Two concurrent transitions live in two separate WIP trees, period.
 
-The closest thing React has to "shared visibility on rollback" is
-`useOptimistic` — but it's per-action, not cross-transition. The
-optimistic value is shown only while *that specific* action is
-in-flight; if the action fails (parent doesn't update the underlying
-source), the optimistic value disappears implicitly. There's no
-cross-transition visibility to worry about because there's no
-cross-transition visibility at all.
+The closest thing React has to "shared visibility on rollback" is `useOptimistic` — but it's per-action, not cross-transition. The optimistic value is shown only while *that specific* action is in-flight; if the action fails (parent doesn't update the underlying source), the optimistic value disappears implicitly. There's no cross-transition visibility to worry about because there's no cross-transition visibility at all.
 
-For multi-step server-action partial failure: "no automatic
-compensation; manual try-catch and state-restoration is required."
-The application owns the rollback story.
+For multi-step server-action partial failure: "no automatic compensation; manual try-catch and state-restoration is required." The application owns the rollback story.
 
-React's approach: **(option zero) refuse to share visibility.** Each
-transition is a private parallel future; pick one at commit; throw
-the others away. Mental model: GGPO rollback netcode — build a
-speculative future, throw it away if the world changes, rebuild from
-new state.
+React's approach: **(option zero) refuse to share visibility.** Each transition is a private parallel future; pick one at commit; throw the others away. Mental model: GGPO rollback netcode — build a speculative future, throw it away if the world changes, rebuild from new state.
 
-**Solid 2.x — accepts phantom reads on plain writes; expects users
-to use explicit overlays for rollback.** Solid's lane-merge gives
-shared visibility (merged lanes inherit both halves' propagation
-paths and effect queues). When the merged lane's action throws,
-Solid's empirical behaviour (verified in
-[`../async/deep-dives/solid-2x.md`](../async/deep-dives/solid-2x.md)
-Finding 3) is:
+**Solid 2.x — accepts phantom reads on plain writes; expects users to use explicit overlays for rollback.** Solid's lane-merge gives shared visibility (merged lanes inherit both halves' propagation paths and effect queues). When the merged lane's action throws, Solid's empirical behaviour (verified in [`../async/deep-dives/solid-2x.md`](../async/deep-dives/solid-2x.md) Finding 3) is:
 
-- *Plain `createSignal` writes inside the action are NOT rolled
-  back.* They committed as they happened; the throw doesn't revert
-  them.
-- *`createOptimistic` overlay writes ARE auto-reverted at transition
-  commit, unconditionally.* Even successful transitions revert
-  overlays — the "kept on success" appearance comes from the action
-  also writing the underlying source.
+- *Plain `createSignal` writes inside the action are NOT rolled back.* They committed as they happened; the throw doesn't revert them.
+- *`createOptimistic` overlay writes ARE auto-reverted at transition commit, unconditionally.* Even successful transitions revert overlays — the "kept on success" appearance comes from the action also writing the underlying source.
 
-The pattern Solid pushes users toward: split state into a "committed
-source" (plain `createSignal`) and an "optimistic overlay"
-(`createOptimistic` derived from the committed source). The action
-writes the overlay for immediate visibility; if it succeeds, also
-writes the committed source; if it fails, only the overlay reverts,
-which the user perceives as a rollback.
+The pattern Solid pushes users toward: split state into a "committed source" (plain `createSignal`) and an "optimistic overlay" (`createOptimistic` derived from the committed source). The action writes the overlay for immediate visibility; if it succeeds, also writes the committed source; if it fails, only the overlay reverts, which the user perceives as a rollback.
 
-Under this pattern, the cross-speculation rollback problem partially
-dissolves: plain writes don't get rolled back (the user accepts the
-"phantom read" / "no rollback" behaviour for them), and optimistic
-overlays are per-overlay state with their own lifecycle that doesn't
-couple across speculations.
+Under this pattern, the cross-speculation rollback problem partially dissolves: plain writes don't get rolled back (the user accepts the "phantom read" / "no rollback" behaviour for them), and optimistic overlays are per-overlay state with their own lifecycle that doesn't couple across speculations.
 
-Solid's approach: **(option 3 + 4 hybrid) phantom reads accepted on
-plain writes; cascading revert on overlays only.** The cascade is
-opt-in via the overlay primitive, not implicit across all state.
+Solid's approach: **(option 3 + 4 hybrid) phantom reads accepted on plain writes; cascading revert on overlays only.** The cascade is opt-in via the overlay primitive, not implicit across all state.
 
-**Svelte 5 — isolates via fork(); cancels via OBSOLETE; no
-cross-batch failure cascade.** Svelte's `fork(fn)` (5.42+) is the
-closest thing to a user-level transition. It "reverts the underlying
-sources and keeps the mutations in the batch's `current` map only"
-— so the fork is *isolated* from other batches' view of sources.
-Sources see the pre-fork values; the fork's mutations live in
-the batch's map until commit.
+**Svelte 5 — isolates via fork(); cancels via OBSOLETE; no cross-batch failure cascade.** Svelte's `fork(fn)` (5.42+) is the closest thing to a user-level transition. It "reverts the underlying sources and keeps the mutations in the batch's `current` map only" — so the fork is *isolated* from other batches' view of sources. Sources see the pre-fork values; the fork's mutations live in the batch's map until commit.
 
-When a fork is discarded, the batch is simply dropped — sources
-never saw the mutations, so there's nothing to roll back. No
-cascade-discard problem because no cross-batch visibility.
+When a fork is discarded, the batch is simply dropped — sources never saw the mutations, so there's nothing to roll back. No cascade-discard problem because no cross-batch visibility.
 
 For cancellation of async work: Svelte uses two channels:
-- `OBSOLETE` — a newer run of the same async derived rejects older
-  in-flight runs. The underlying promise isn't aborted; its
-  resolution is just silently swallowed (handler early-returns on
-  `error === OBSOLETE`).
+- `OBSOLETE` — a newer run of the same async derived rejects older in-flight runs. The underlying promise isn't aborted; its resolution is just silently swallowed (handler early-returns on `error === OBSOLETE`).
 - `STALE_REACTION` — effect-level abort.
 
-For batch-merge (same-source overlap): "whole-batch merge into
-earlier" — newer batches with overlapping sources merge into older
-still-running batches. This is supersession-style merging, not
-cross-visibility merging. The merged batch is one unit; failure
-is handled per-async-derived inside it.
+For batch-merge (same-source overlap): "whole-batch merge into earlier" — newer batches with overlapping sources merge into older still-running batches. This is supersession-style merging, not cross-visibility merging. The merged batch is one unit; failure is handled per-async-derived inside it.
 
-Svelte's approach: **(option zero, similar to React)** isolate
-forks; no cross-fork visibility; no cross-batch rollback cascade to
-worry about.
+Svelte's approach: **(option zero, similar to React)** isolate forks; no cross-fork visibility; no cross-batch rollback cascade to worry about.
 
 **Summary: nobody solves the hard version.**
 
@@ -1081,78 +579,33 @@ worry about.
 | Svelte 5 | No (fork isolates; batch merge is supersession) | Drop batch on discard; OBSOLETE silently swallows superseded async runs |
 | Pulse (current) | No (snapshot isolation between siblings) | Drop scope on discard; explicit `.discard()` for supersession |
 
-Each framework either avoids shared visibility (React, Svelte, pulse)
-or accepts that plain writes don't roll back across the shared region
-(Solid). **Nobody offers true shared-visibility-with-independent-commit
-and clean rollback** because the semantics aren't recoverable.
+Each framework either avoids shared visibility (React, Svelte, pulse) or accepts that plain writes don't roll back across the shared region (Solid). **Nobody offers true shared-visibility-with-independent-commit and clean rollback** because the semantics aren't recoverable.
 
-Pulse's choice — no shared visibility between concurrent speculations
-— matches React and Svelte. It loses the within-action-overlay
-ergonomic story Solid has, but pulse can recover that as a library
-pattern (a signal value type that splits into "committed" and
-"optimistic" via library code, without engine support).
+Pulse's choice — no shared visibility between concurrent speculations — matches React and Svelte. It loses the within-action-overlay ergonomic story Solid has, but pulse can recover that as a library pattern (a signal value type that splits into "committed" and "optimistic" via library code, without engine support).
 
-Cross-references:
-[`../async/deep-dives/solid-2x.md`](../async/deep-dives/solid-2x.md)
-(merged lane mechanics, `_overrideValue` overlay, `resolveOptimisticNodes`);
-[`../async/deep-dives/react-modern.md`](../async/deep-dives/react-modern.md)
-(WIP-tree, `useOptimistic`, priority lanes);
-[`../async/deep-dives/svelte-5.md`](../async/deep-dives/svelte-5.md)
-(`fork()`, batch merge, `OBSOLETE`).
+Cross-references: [`../async/deep-dives/solid-2x.md`](../async/deep-dives/solid-2x.md) (merged lane mechanics, `_overrideValue` overlay, `resolveOptimisticNodes`); [`../async/deep-dives/react-modern.md`](../async/deep-dives/react-modern.md) (WIP-tree, `useOptimistic`, priority lanes); [`../async/deep-dives/svelte-5.md`](../async/deep-dives/svelte-5.md) (`fork()`, batch merge, `OBSOLETE`).
 
 ## Cross-scenario observations
 
 Taking the survey as a whole, a few patterns emerge.
 
-**Pulse's default behaviour is correct for A, E, F, G, H** (with
-appropriate user-level patterns for F/G). It handles **five of the
-eight classes** without any new mechanism.
+**Pulse's default behaviour is correct for A, E, F, G, H** (with appropriate user-level patterns for F/G). It handles **five of the eight classes** without any new mechanism.
 
-**Pulse's default is wrong for B, C, D.** Each of these needs *some*
-affordance beyond last-wins:
+**Pulse's default is wrong for B, C, D.** Each of these needs *some* affordance beyond last-wins:
 
-- B (accumulation): mostly solved by CRDT-style signal values; some
-  cases want rebase, but rebase has sharp footguns.
-- C (precedence): solved by application-level coordination using
-  existing action-handle queries + `.discard()`. Maybe sharpened by
-  a "yields-to" sugar.
+- B (accumulation): mostly solved by CRDT-style signal values; some cases want rebase, but rebase has sharp footguns.
+- C (precedence): solved by application-level coordination using existing action-handle queries + `.discard()`. Maybe sharpened by a "yields-to" sugar.
 - D (read-dependent writes): the canonical case for `'reject'` policy.
 
-**The single most impactful addition** is `'reject'` for class D.
-It's a small mechanism (per-slot version counter; read-aware
-snapshot version) that addresses the genuinely-unaddressed case
-(optimistic concurrency) cleanly.
+**The single most impactful addition** is `'reject'` for class D. It's a small mechanism (per-slot version counter; read-aware snapshot version) that addresses the genuinely-unaddressed case (optimistic concurrency) cleanly.
 
-**Class B's right answer is mostly NOT a framework feature.** CRDT
-data types live in user code (the signal's value type). The
-framework just propagates changes; it doesn't need to know the
-value composes. Rebase as a framework feature has too many footguns
-to be a default; it's possibly a power-user opt-in but probably
-shouldn't be in the first cut.
+**Class B's right answer is mostly NOT a framework feature.** CRDT data types live in user code (the signal's value type). The framework just propagates changes; it doesn't need to know the value composes. Rebase as a framework feature has too many footguns to be a default; it's possibly a power-user opt-in but probably shouldn't be in the first cut.
 
-**Class C's right answer is also mostly NOT a new framework feature.**
-The application coordinates via existing handle queries
-(`handle.status`, `handle.pending`) and existing primitives
-(`.discard()`). Maybe a small helper that wraps the common case
-("action U yields to in-flight action R") is worth shipping as
-sugar, but it's not a primitive.
+**Class C's right answer is also mostly NOT a new framework feature.** The application coordinates via existing handle queries (`handle.status`, `handle.pending`) and existing primitives (`.discard()`). Maybe a small helper that wraps the common case ("action U yields to in-flight action R") is worth shipping as sugar, but it's not a primitive.
 
-**Solid's auto-merge actively hurts class G.** This is the strongest
-argument against picking Solid's mechanism: it provides automatic
-coupling that's wrong as often as it's right. Pulse's explicit-only
-coupling (via nested actions) doesn't have this failure mode.
+**Solid's auto-merge actively hurts class G.** This is the strongest argument against picking Solid's mechanism: it provides automatic coupling that's wrong as often as it's right. Pulse's explicit-only coupling (via nested actions) doesn't have this failure mode.
 
-**Cross-speculation read coherence is handled for free by pulse's
-chain-match** — earlier drafts of this doc treated it as a separate
-gap, but tracing carefully shows it isn't. A consumer recomputing
-under scope `S1` that reads `X` (falling through to ROOT) registers
-an edge with `targetScope = S1`. When `S2` commits `X` to ROOT, the
-chain-match for that edge resolves `chainFor(S1) = [S1, ROOT]`,
-matches `writeScope = ROOT` at index 1, sees no shadow at S1, and
-fires. The consumer invalidates and recomputes against the new
-ROOT.X on its next read. Solid achieves the same with the
-`_gatedSubs` mechanism, but pulse's chain-match subsumes it
-structurally — no separate machinery needed.
+**Cross-speculation read coherence is handled for free by pulse's chain-match** — earlier drafts of this doc treated it as a separate gap, but tracing carefully shows it isn't. A consumer recomputing under scope `S1` that reads `X` (falling through to ROOT) registers an edge with `targetScope = S1`. When `S2` commits `X` to ROOT, the chain-match for that edge resolves `chainFor(S1) = [S1, ROOT]`, matches `writeScope = ROOT` at index 1, sees no shadow at S1, and fires. The consumer invalidates and recomputes against the new ROOT.X on its next read. Solid achieves the same with the `_gatedSubs` mechanism, but pulse's chain-match subsumes it structurally — no separate machinery needed.
 
 ## Affordances, derived bottom-up
 
@@ -1160,8 +613,7 @@ From the eight classes, the minimum affordance set:
 
 **1. Default last-commit-wins** (current).
 
-Serves A and is the right default for cases where the user doesn't
-specifically need anything else.
+Serves A and is the right default for cases where the user doesn't specifically need anything else.
 
 **2. Nested actions for atomic coupling** (current via Q6).
 
@@ -1177,114 +629,52 @@ Serves F. User wires up cancellation when a newer intent arrives.
 action(body, { onConflict: 'reject' })
 ```
 
-Serves D. At commit time, if any signal in `S.readSet ∪ S.writeSet`
-has been committed-to since `S` started, throw a `ConflictError`.
-The caller catches and decides what to do. Cheap implementation
-(per-slot version counter; snapshot version at first read/write;
-compare at commit).
+Serves D. At commit time, if any signal in `S.readSet ∪ S.writeSet` has been committed-to since `S` started, throw a `ConflictError`. The caller catches and decides what to do. Cheap implementation (per-slot version counter; snapshot version at first read/write; compare at commit).
 
-Read-aware (using `S.readSet`) rather than strict-write because the
-read-aware definition matches actual correctness needs (D's whole
-point is "my write was based on a read that's now stale").
+Read-aware (using `S.readSet`) rather than strict-write because the read-aware definition matches actual correctness needs (D's whole point is "my write was based on a read that's now stale").
 
-**5. CRDT-style signal values as a library pattern** (NEW as
-documentation, not as primitive).
+**5. CRDT-style signal values as a library pattern** (NEW as documentation, not as primitive).
 
-Serves B1, B4. Signals whose value is a counter or a CRDT register
-compose under concurrent writes by construction. No framework
-mechanism; just guidance on signal value types when accumulation
-matters.
+Serves B1, B4. Signals whose value is a counter or a CRDT register compose under concurrent writes by construction. No framework mechanism; just guidance on signal value types when accumulation matters.
 
 **6. `yields_to` / precedence sugar** (MAYBE).
 
-Sugar over (3) for the common Class C pattern. Optional; the
-unsugared pattern is short. Defer until friction surfaces.
+Sugar over (3) for the common Class C pattern. Optional; the unsugared pattern is short. Defer until friction surfaces.
 
-**That's it.** Five affordances cover the realistic intent space
-identified by walking the scenarios. Of these, only #4 is a genuinely
-new primitive. The rest are already pinned or are documentation /
-library patterns.
+**That's it.** Five affordances cover the realistic intent space identified by walking the scenarios. Of these, only #4 is a genuinely new primitive. The rest are already pinned or are documentation / library patterns.
 
 **Explicitly NOT in the affordance set:**
 
-- **`'rebase'` policy.** Use cases (B2, B3, some D3 variants) are
-  better served by CRDT signal values or by user-level retry loops
-  that don't re-execute side effects. Rebase's footgun (re-running
-  side effects) outweighs its benefit.
-- **Per-action merge callbacks.** Use cases are better served by
-  signal-value-level merge (CRDT). Per-action callbacks would
-  spread merge logic across the codebase and require per-conflict
-  decisions; the wrong layer.
-- **Auto-detection / dev-time warnings on overlap.** The scenario
-  walk shows that overlap is often *intended* (A, E) and that
-  warnings would create noise. Better to let the user opt into
-  `'reject'` where they care.
-- **Solid-style auto-merge.** Wrong for class G; redundant for E
-  (nested actions cover it explicitly); doesn't solve C or D.
+- **`'rebase'` policy.** Use cases (B2, B3, some D3 variants) are better served by CRDT signal values or by user-level retry loops that don't re-execute side effects. Rebase's footgun (re-running side effects) outweighs its benefit.
+- **Per-action merge callbacks.** Use cases are better served by signal-value-level merge (CRDT). Per-action callbacks would spread merge logic across the codebase and require per-conflict decisions; the wrong layer.
+- **Auto-detection / dev-time warnings on overlap.** The scenario walk shows that overlap is often *intended* (A, E) and that warnings would create noise. Better to let the user opt into `'reject'` where they care.
+- **Solid-style auto-merge.** Wrong for class G; redundant for E (nested actions cover it explicitly); doesn't solve C or D.
 
 ## What we genuinely don't know yet
 
-- **Are there scenario classes the survey missed?** The eight feel
-  comprehensive but might not be. Especially worth checking: real
-  app patterns from production codebases that don't fit any of A–H.
-- **How often does class D actually bite?** In the apps where pulse
-  would be used (interactive UI), how often is a read-then-write
-  with concurrent writes a real correctness bug vs a theoretical
-  one? Without usage data we can't tell. If it's rare, `'reject'`
-  becomes a "nice to have"; if it's common, it's load-bearing.
-- **Does class C need sugar, or is the unsugared pattern fine?**
-  Depends on how often class C arises and how repetitive the
-  coordination boilerplate becomes.
-- **Is there a clean way to express CRDT-style values in pulse
-  signals?** The signal's value type can be anything, but the
-  reactive layer would need to know not to "replace" but to "merge"
-  when commits happen. Or the signal-value type itself handles
-  composition externally (the framework just sees the new value
-  and propagates). The latter is simpler; the former might be more
-  ergonomic.
-- **Does the `_gatedSubs` analogue matter for pulse's use cases?**
-  Pulse's chain-match + microtask batching may already cover the
-  practical version. Need to find a concrete failing scenario
-  before adding machinery.
+- **Are there scenario classes the survey missed?** The eight feel comprehensive but might not be. Especially worth checking: real app patterns from production codebases that don't fit any of A–H.
+- **How often does class D actually bite?** In the apps where pulse would be used (interactive UI), how often is a read-then-write with concurrent writes a real correctness bug vs a theoretical one? Without usage data we can't tell. If it's rare, `'reject'` becomes a "nice to have"; if it's common, it's load-bearing.
+- **Does class C need sugar, or is the unsugared pattern fine?** Depends on how often class C arises and how repetitive the coordination boilerplate becomes.
+- **Is there a clean way to express CRDT-style values in pulse signals?** The signal's value type can be anything, but the reactive layer would need to know not to "replace" but to "merge" when commits happen. Or the signal-value type itself handles composition externally (the framework just sees the new value and propagates). The latter is simpler; the former might be more ergonomic.
+- **Does the `_gatedSubs` analogue matter for pulse's use cases?** Pulse's chain-match + microtask batching may already cover the practical version. Need to find a concrete failing scenario before adding machinery.
 
 ## Tentative recommendations
 
 Per the scenario walk, the *minimum* honest answer is:
 
-**1. Keep current defaults.** Last-wins, snapshot isolation,
-microtask batching, nested actions for coupling, `.discard()` for
-supersession. These handle A, E, F, G, H.
+**1. Keep current defaults.** Last-wins, snapshot isolation, microtask batching, nested actions for coupling, `.discard()` for supersession. These handle A, E, F, G, H.
 
-**2. Add `'reject'` as the one new policy.** Per-slot version
-counter (engine, trivial); `S.snapshotVersions: Map<Node, number>`
-recorded at first read or write (library or engine, small);
-commit-time check; throws `ConflictError` if any signal's committed
-version exceeds the snapshot version.
+**2. Add `'reject'` as the one new policy.** Per-slot version counter (engine, trivial); `S.snapshotVersions: Map<Node, number>` recorded at first read or write (library or engine, small); commit-time check; throws `ConflictError` if any signal's committed version exceeds the snapshot version.
 
-**3. Document the CRDT-signal-value pattern** as the answer for
-class B. Provide an example (counter signal, set signal) without
-making it a framework primitive.
+**3. Document the CRDT-signal-value pattern** as the answer for class B. Provide an example (counter signal, set signal) without making it a framework primitive.
 
-**4. Do not ship `'rebase'`, merge callbacks, or auto-merge.** The
-scenario walk doesn't justify them; they have known footguns.
+**4. Do not ship `'rebase'`, merge callbacks, or auto-merge.** The scenario walk doesn't justify them; they have known footguns.
 
-**5. Cross-speculation read coherence is already covered** by chain-match
-([Q1](./questions.md#q1--fall-through-and-edge-policy)) — consumers
-recomputing under scope S that read fall-through-to-ROOT values get
-fired correctly when those values are later committed at ROOT.
-Solid's `_gatedSubs` is the equivalent mechanism in their architecture;
-pulse subsumes it via chain-match.
+**5. Cross-speculation read coherence is already covered** by chain-match ([Q1](./questions.md#q1--fall-through-and-edge-policy)) — consumers recomputing under scope S that read fall-through-to-ROOT values get fired correctly when those values are later committed at ROOT. Solid's `_gatedSubs` is the equivalent mechanism in their architecture; pulse subsumes it via chain-match.
 
-**6. Revisit when the library exists** — these recommendations are
-informed by scenario reasoning, not by usage data. Once pulse ships
-and apps are built, the affordance set may need extending or
-trimming. The minimal ship-set is correct *as a starting point*,
-not as a final spec.
+**6. Revisit when the library exists** — these recommendations are informed by scenario reasoning, not by usage data. Once pulse ships and apps are built, the affordance set may need extending or trimming. The minimal ship-set is correct *as a starting point*, not as a final spec.
 
-The crux of the original question — "what about Solid's lane merge?"
-— resolves cleanly: lane merge bundles four concerns (render
-coherence, atomic coupling, cross-speculation read, conflict
-resolution) into one mechanism. Pulse disaggregates:
+The crux of the original question — "what about Solid's lane merge?" — resolves cleanly: lane merge bundles four concerns (render coherence, atomic coupling, cross-speculation read, conflict resolution) into one mechanism. Pulse disaggregates:
 
 | Concern | Pulse mechanism |
 | --- | --- |
@@ -1293,8 +683,4 @@ resolution) into one mechanism. Pulse disaggregates:
 | Cross-speculation read coherence | Chain-match in Q1 (automatic) |
 | Conflict resolution | `onConflict: 'reject'` (opt-in per action) |
 
-Smaller pieces, each addressing one intent, none with the spooky-
-merging failure mode. The four are independently controllable; Solid
-welds them together via one mechanism, which is what causes class G
-(unrelated actions sharing downstream deps) to get incorrectly
-coupled.
+Smaller pieces, each addressing one intent, none with the spooky-merging failure mode. The four are independently controllable; Solid welds them together via one mechanism, which is what causes class G (unrelated actions sharing downstream deps) to get incorrectly coupled.

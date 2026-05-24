@@ -1,10 +1,6 @@
 # Pulse — prior art and analysis
 
-Cross-framework analysis of reactive systems handling async + speculation,
-plus the synthesis that motivates pulse's design framings. The comparison
-table, the seven-concerns decomposition, and the signal=node+value-bag
-recasting all live here; they're the empirical and conceptual ground that
-[framings.md](./framings.md) builds on.
+Cross-framework analysis of reactive systems handling async + speculation, plus the synthesis that motivates pulse's design framings. The comparison table, the seven-concerns decomposition, and the signal=node+value-bag recasting all live here; they're the empirical and conceptual ground that [framings.md](./framings.md) builds on.
 
 **Companion documents:**
 
@@ -31,29 +27,11 @@ recasting all live here; they're the empirical and conceptual ground that
 
 ### What the research arc has shown
 
-Speculations (the field calls them _transitions_; see Principles below) are
-coordination machinery for **continuous-observation + concurrent-intent**
-workloads (UI is the canonical instance; also GGPO rollback, sync engines
-with optimistic+rebase, realtime collab). They branch along four structural
-dimensions — **Dim 1** internal structure of one speculation, **Dim 2**
-concurrence (multiple alive, disjoint state), **Dim 3** supersession (newer
-invalidates older), **Dim 4** overlap/entanglement (multiple alive, shared
-state) — the non-trivial corners of `{one, many} × {disjoint, overlapping}
-× {concurrent, sequential}`. Canonical definitions in the lexicon
-[`../async/CONTEXT.md`](../async/CONTEXT.md). Production
-frameworks differ in which dimensions they handle and how, AND in whether
-their user-facing API surface is minimal (Svelte) or proliferating (React).
-Pulse's articulated design philosophy is **user-visible primitives composed
-in userland** — distinct from React's "low-level API + library-authors
-compose ergonomics" and Solid's "framework-provided higher-level
-primitives" — though Svelte's evidence showed that "minimum API" does NOT
-entail "minimum engine"; concurrent speculations cost engine surface
-regardless of how small the user API is.
+Speculations (the field calls them _transitions_; see Principles below) are coordination machinery for **continuous-observation + concurrent-intent** workloads (UI is the canonical instance; also GGPO rollback, sync engines with optimistic+rebase, realtime collab). They branch along four structural dimensions — **Dim 1** internal structure of one speculation, **Dim 2** concurrence (multiple alive, disjoint state), **Dim 3** supersession (newer invalidates older), **Dim 4** overlap/entanglement (multiple alive, shared state) — the non-trivial corners of `{one, many} × {disjoint, overlapping} × {concurrent, sequential}`. Canonical definitions in the lexicon [`../async/CONTEXT.md`](../async/CONTEXT.md). Production frameworks differ in which dimensions they handle and how, AND in whether their user-facing API surface is minimal (Svelte) or proliferating (React). Pulse's articulated design philosophy is **user-visible primitives composed in userland** — distinct from React's "low-level API + library-authors compose ergonomics" and Solid's "framework-provided higher-level primitives" — though Svelte's evidence showed that "minimum API" does NOT entail "minimum engine"; concurrent speculations cost engine surface regardless of how small the user API is.
 
 ### Comparison: React modern / Svelte 5 / Solid 2.x
 
-The mechanical landscape for the three production frameworks pulse has the
-most-developed dives on. Each cell is what the framework actually does.
+The mechanical landscape for the three production frameworks pulse has the most-developed dives on. Each cell is what the framework actually does.
 
 |                                     | **React modern**                                                                                                                       | **Svelte 5 (`experimental.async`)**                                                                                                                          | **Solid 2.x**                                                                                                                                                                                             |
 | ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -101,8 +79,7 @@ See [concurrent-divergence.md](./concurrent-divergence.md#solid--react--svelte-r
 
 ### Decomposition — seven underlying concerns
 
-Looking at every mechanic in the comparison and asking _what problem is it
-actually solving_, the mechanics cluster into seven underlying concerns:
+Looking at every mechanic in the comparison and asking _what problem is it actually solving_, the mechanics cluster into seven underlying concerns:
 
 - **A. Versioned reads** — read X as it currently is, OR as it was committed, OR as it appears under this in-flight scope. (WIP fiber tree, `batch_values`, `_overrideValue`, `latest()`, `useDeferredValue`, snapshot-isolation in MVCC.)
 - **B. Pending propagation** — downstream computations learn that an upstream is in-flight. (`_pendingSource(s)`, `_asyncReporters`, `boundary.#pending_count`, pipeline-OR `isPending`.)
@@ -112,8 +89,7 @@ actually solving_, the mechanics cluster into seven underlying concerns:
 - **F. Lifecycle / cleanup** — async work that's no longer relevant gets cleaned up. (Drop, `AbortController`, `cleanup()`, owner disposal.)
 - **G. Priority** — some updates pre-empt others mid-flight. (React's 31-lane bitmask, uniquely.)
 
-The high-level abstractions in the table are combinations of subsets of
-{A, B, C, D, E, F, G}:
+The high-level abstractions in the table are combinations of subsets of {A, B, C, D, E, F, G}:
 
 - `<Loading>` / `<Suspense>` / `<svelte:boundary>` = **B** + **C**
 - `useOptimistic` / `createOptimistic` = **A** + **D** + **C**
@@ -122,25 +98,14 @@ The high-level abstractions in the table are combinations of subsets of
 - `fork()` = **D** + **A** + **C**
 - `<Reveal>` = composes multiple **C**s (coordination layer ABOVE boundaries)
 
-None of these abstractions is a primitive in this decomposition. Each is
-library code over a small subset of the seven concerns.
+None of these abstractions is a primitive in this decomposition. Each is library code over a small subset of the seven concerns.
 
 ### Signal = node + value-bag (the sharper recasting)
 
-The seven-concerns decomposition is roughly right but bundles two distinct
-concerns under "scoped versioned state." A cleaner factoring: **a signal
-isn't a single primitive — it's a (node identity, value-bag) pair.**
-Currently every reactive framework conflates these into "a signal _is_ its
-current value." Decoupling them is the underlying simplicity.
+The seven-concerns decomposition is roughly right but bundles two distinct concerns under "scoped versioned state." A cleaner factoring: **a signal isn't a single primitive — it's a (node identity, value-bag) pair.** Currently every reactive framework conflates these into "a signal _is_ its current value." Decoupling them is the underlying simplicity.
 
-- **Node** = the stable identity in the reactive dep graph. Other nodes /
-  subscribers depend on this identity. Owners hold it. Equality and
-  reference-tracking are based on it.
-- **Value-bag** = the multi-valued state the node currently has. Entries
-  are tagged with (scope, version, status). The "current committed value"
-  is one entry; the "in-flight pending value" is another; the
-  "optimistic-scope overlay" is a third; the "snapshot-as-of-time-T" is a
-  fourth.
+- **Node** = the stable identity in the reactive dep graph. Other nodes / subscribers depend on this identity. Owners hold it. Equality and reference-tracking are based on it.
+- **Value-bag** = the multi-valued state the node currently has. Entries are tagged with (scope, version, status). The "current committed value" is one entry; the "in-flight pending value" is another; the "optimistic-scope overlay" is a third; the "snapshot-as-of-time-T" is a fourth.
 
 Under this framing, the seven concerns recast as:
 
@@ -152,54 +117,22 @@ Under this framing, the seven concerns recast as:
 - **F (cleanup)** = entries can be removed from the bag
 - **G (priority)** = about the _work producing entries_, not about entries themselves — the only outlier (work scheduling, not value-bag operation)
 
-So **A–F are all operations on the value-bag of a node**. G is the one
-genuine outlier. The deeper decomposition shrinks from "7 concerns + 4
-primitives" to **three primitives**: (node identity) + (value-bag) +
-(work scheduling).
+So **A–F are all operations on the value-bag of a node**. G is the one genuine outlier. The deeper decomposition shrinks from "7 concerns + 4 primitives" to **three primitives**: (node identity) + (value-bag) + (work scheduling).
 
 ### Empirical pattern — every studied framework does node/value-bag internally
 
-Every framework implements the node/value-bag separation internally, but
-none exposes it as the user-facing primitive:
+Every framework implements the node/value-bag separation internally, but none exposes it as the user-facing primitive:
 
-- **Solid 2.x** — explicit per-node slots `_value` / `_pendingValue` /
-  `_overrideValue` / `_snapshotValue`. Internally exposed; user-facing
-  surface is `createOptimistic` / `createSignal` / `createMemo` as
-  separate hooks.
-- **Svelte 5** — `batch_values: Map<Value, [any, boolean]>` per batch.
-  Internally; user-facing is `<svelte:boundary>` / `$derived` / `fork()`.
-- **React modern** — WIP fiber vs current fiber. Same component identity,
-  different value-states. Internally; user-facing is `useOptimistic` /
-  `useTransition` / `useState`.
-- **Replicache** — B-tree DAG with `main` / `sync` heads. Closest to
-  exposing it (named heads are semi-public; most user code doesn't see
-  them).
-- **Postgres MVCC** — row identity stable; multiple tuple-versions per
-  row, indexed by transaction. Internally exposed via `xmin`/`xmax`; not
-  user-API.
+- **Solid 2.x** — explicit per-node slots `_value` / `_pendingValue` / `_overrideValue` / `_snapshotValue`. Internally exposed; user-facing surface is `createOptimistic` / `createSignal` / `createMemo` as separate hooks.
+- **Svelte 5** — `batch_values: Map<Value, [any, boolean]>` per batch. Internally; user-facing is `<svelte:boundary>` / `$derived` / `fork()`.
+- **React modern** — WIP fiber vs current fiber. Same component identity, different value-states. Internally; user-facing is `useOptimistic` / `useTransition` / `useState`.
+- **Replicache** — B-tree DAG with `main` / `sync` heads. Closest to exposing it (named heads are semi-public; most user code doesn't see them).
+- **Postgres MVCC** — row identity stable; multiple tuple-versions per row, indexed by transaction. Internally exposed via `xmin`/`xmax`; not user-API.
 
-The pattern is universal. None lets the user say "give me node N's
-value-bag entry tagged with scope S" as a primitive. Instead they each
-invent bespoke compositions (`useOptimistic`, `_overrideValue`,
-`Batch.current.get(node)`) that are internally just value-bag-entry-with-
-scope-S.
+The pattern is universal. None lets the user say "give me node N's value-bag entry tagged with scope S" as a primitive. Instead they each invent bespoke compositions (`useOptimistic`, `_overrideValue`, `Batch.current.get(node)`) that are internally just value-bag-entry-with-scope-S.
 
-**Solid's transition-machinery trajectory** (verified against the git
-history of `@solidjs/signals`): Solid moved from per-node `tValue` slot
-(1.x) → external scheduler holding cloned subgraph (2.x early) → cloning
-for transitions, overlay for optimistic (2.x mid) → per-node multi-slot
-with no cloning anywhere (current). Strong empirical evidence: the
-cloning approach was tried in production-grade 2.x development for ~2+
-years and was abandoned commit-by-commit. The direction of Solid's
-design — across both 1.x and 2.x — has been _toward making the value-bag
-larger and more structured_, **and away from external-scheduler-managed
-parallel structures**. Carniato's stated principle ("handle the
-transition at the computed node level instead of as a scheduler from
-outside") _is_ the move from a parallel cloned subgraph to per-node
-value-bag.
+**Solid's transition-machinery trajectory** (verified against the git history of `@solidjs/signals`): Solid moved from per-node `tValue` slot (1.x) → external scheduler holding cloned subgraph (2.x early) → cloning for transitions, overlay for optimistic (2.x mid) → per-node multi-slot with no cloning anywhere (current). Strong empirical evidence: the cloning approach was tried in production-grade 2.x development for ~2+ years and was abandoned commit-by-commit. The direction of Solid's design — across both 1.x and 2.x — has been _toward making the value-bag larger and more structured_, **and away from external-scheduler-managed parallel structures**. Carniato's stated principle ("handle the transition at the computed node level instead of as a scheduler from outside") _is_ the move from a parallel cloned subgraph to per-node value-bag.
 
-If pulse adopts the node/value-bag framing as the user-facing primitive,
-it would be _exposing what Solid arrived at internally_ as the API
-surface — making explicit what Solid has been keeping implicit.
+If pulse adopts the node/value-bag framing as the user-facing primitive, it would be _exposing what Solid arrived at internally_ as the API surface — making explicit what Solid has been keeping implicit.
 
 ---
