@@ -557,33 +557,100 @@ careful framing.
 
 ### Q6 — What is a Scope as a value?
 
-Currently typed `unknown` in the sketch. Practically, scopes need:
+Status: **resolved.** Scopes own their slots and edges explicitly; no
+WeakMap, no GC reliance for correctness. Nodes hold a `subs` index for
+fast write-fire lookup but no scope references.
 
-- *Identity.* Two scopes are equal iff they're the same scope. Reference
-  equality on a fresh object is the cheapest.
-- *Hierarchy.* Each scope (except the root) has a parent. Used for cleanup
-  cascade and ambient resolution.
-- *Lifecycle state.* "open", "committed", "discarded" — at minimum the engine
-  needs to know whether a scope is still alive (to decide whether to retain its
-  slots) or closed (slots either promoted or dropped).
-- *Walk-defined metadata.* Speculative scopes carry "committed slots map" or
-  similar; owner scopes might carry nothing extra. Engine doesn't know; walks
-  do.
+**Shape:**
 
-Sketch: `interface Scope { parent?: Scope; cleanups: Disposable[]; status:
-'open' | 'closed' }` — minimal, walk-extensible.
+```ts
+interface Node<T> {
+  defaultRecipe?: () => T | Promise<T>
+  subs: Set<Edge>                  // who subscribes to me (fast write-fire path)
+}
 
-**Open sub-question (surfaced by [G2 trace](./scenario-traces.md#g2--nested-actions-and-commit-promotion)):** `chainFor(scope)` walks
-`scope.parent` pointers up to and including `ROOT_SCOPE`. For custom scope
-hierarchies — per-tenant roots, per-document roots, multiple reactive
-"worlds" — the terminal might not be `ROOT_SCOPE`. The library should
-probably expose `chainFor` as user-overridable, or expose `terminalScope`
-as a configurable per-tree property. Open whether this is a library
-concern or whether the engine needs to know about it.
+interface Scope {
+  parent?: Scope                   // structural: chainFor walks until undefined
+  children: Set<Scope>             // back-link, for descendant queries
+  slots: Map<Node, Slot>           // this scope's per-node caches
+  edges: Set<Edge>                 // edges created in this scope (cleanup tracker)
+  writeSet: Set<Node>              // for commit promotion (per Q9 lean ii)
+  readSet: Set<Node>               // for slot drop on close
+  cleanups: Disposable[]           // fired on discard
+  status: 'open' | 'committed' | 'discarded'
+}
 
-**Related:** [Q2](#q2--scopeowner-unification) (the unification question), [Q1](#q1--fall-through-and-edge-policy) (the chain-match
-predicate consults scope identities; scope value-shape constrains how
-matching works).
+interface Edge {
+  source: Node
+  target: Slot
+  targetScope: Scope               // for chain-match: chainFor(targetScope)
+}
+```
+
+**Lifecycle:**
+
+```ts
+// link (during a tracked read):
+const edge = { source, target, targetScope }
+source.subs.add(edge)              // index, for write-fire lookup
+targetScope.edges.add(edge)        // owner, for cleanup
+
+// closeScope (commit or discard):
+for (const edge of S.edges)
+  edge.source.subs.delete(edge)    // unlink from the index
+S.edges.clear()
+for (const node of S.readSet) S.slots.delete(node)
+// (writeSet handled by commit's promote-or-drop logic; see Q10)
+if (mode === 'discard') S.cleanups.forEach(fn => fn())
+S.parent?.children.delete(S)
+// S is now unreachable except via user-held action handles
+```
+
+**Key invariants:**
+
+- *Identity = reference equality on a fresh object.* Engine never inspects
+  scope internals; only compares references during chain-match.
+- *Terminal is structural.* `chainFor(scope)` walks `scope.parent` until
+  `undefined`. `ROOT_SCOPE` is just *a* parentless scope the library
+  creates by default. Per-tenant / per-document / multiple-worlds roots
+  fall out for free — any parentless scope is a root. (Resolves the G2
+  sub-question.)
+- *No scope refs in long-lived data.* Nodes hold `subs: Set<Edge>` — each
+  edge holds a `targetScope`, but those edges live in *some scope's*
+  `edges` set and die when that scope closes. Cascading cleanup is
+  explicit.
+- *Three-state lifecycle.* `'open' | 'committed' | 'discarded'`. Drivers
+  guard on `status !== 'open'` before resuming async resumes (C2 trace).
+- *Write firing stays O(subs).* `node.subs` walked directly per write;
+  chain-match runs engine-side (Q1 Model 1) per edge.
+
+**User-facing API:** opaque, library-mediated. Users get an *action
+handle* (`const h = action(...)`) exposing `.status`, `.commit()`,
+`.discard()`, `.onCleanup(...)`. The scope identity inside is engine
+state, not a passable value.
+
+**Sub-questions resolved by this shape:**
+
+- *G2 terminal-scope sub-question.* Multiple roots = multiple parentless
+  scopes. No engine work.
+- *Disposal predictability.* `closeScope` walks finite sets; no GC
+  hand-waving. Memory shape is queryable per scope.
+- *Q11 effect chain policy α.* An effect created in scope `S` registers
+  its edge via `S.edges`. When `S` closes, the edge dies — effect
+  reactivity follows owner scope automatically.
+
+**Sub-questions deferred to other Qs:**
+
+- *Where exactly the writeSet/readSet drive commit logic.* → [Q9](#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally).
+- *Commit ordering and atomicity of multi-slot promotion.* → [Q10](#q10--commit-as-transaction-ordering-atomicity-deferred-fires).
+- *Whether cleanups fire on commit as well as discard.* → [Q12](#q12--body-cleanups-vs-scope-cleanups-composition-and-re-entrancy).
+- *Whether `currentTracker` is the same ambient as `currentScope` or a
+  separate one.* → [Q8](#q8--tracker-vs-scope-separate-or-unified).
+
+**Related:** [Q1](#q1--fall-through-and-edge-policy) (chain-match consults `edge.targetScope`'s chain),
+[Q2](#q2--scopeowner-unification) (scope/owner unification — this shape supports both: an "owner
+scope" is just a scope with no slot writes), [Q9](#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally) (writeSet vs readSet
+distinction), [Q11](#q11--effect-chain-policy-chain-follows-owner-or-always-root_scope) (Policy α falls out structurally).
 
 ### Q7 — The `defaultRecipe` mechanism
 

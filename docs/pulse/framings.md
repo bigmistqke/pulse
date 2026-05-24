@@ -607,14 +607,16 @@ value. **Wrong.**
 engine-level concern. Speculation cannot be "purely above" a single-slot
 engine.
 
-**Resolution.** The engine needs multi-slot per Node. This is structurally
-Solid 2.x's per-node multi-slot architecture (which Solid arrived at empirically
-after abandoning node-graph-cloning — see
-[`../async/deep-dives/solid-2x.md`](../async/deep-dives/solid-2x.md)).
-Pulse's user-facing novelty (Node-as-recipe + walks) is preserved; the engine
-internals converge on per-node multi-slot. **The smaller core in [Q1](./questions.md#q1--fall-through-and-edge-policy)'s (β) lean
-is not "r3 unchanged"** — it's r3 forked-and-extended (or a pulse-owned engine
-descended from r3).
+**Resolution.** The engine needs multiple cache cells (slots) per Node,
+one per scope. Solid 2.x reached the same structural conclusion empirically
+after abandoning node-graph-cloning (see
+[`../async/deep-dives/solid-2x.md`](../async/deep-dives/solid-2x.md));
+Solid stores these slots on the node, pulse stores them on the *scope*
+(per [Q6](./questions.md#q6--what-is-a-scope-as-a-value)) for explicit
+disposal — but the structural fact is the same. Pulse's user-facing
+novelty (Node-as-recipe + walks) is preserved; the engine internals
+keep r3's propagation algorithm with scope-centric storage. **This is not
+"r3 unchanged"** — it's r3 forked-and-extended.
 
 ### `.value` / `.peek()` / `.latest()` as methods on the Node would survive without smuggling
 
@@ -641,29 +643,38 @@ semantics, dep meaning, consumer pattern) is library code.
 ```ts
 // ── Engine: types ─────────────────────────────────────────────
 
-type Scope = unknown // opaque; library/user defines
-
 interface Slot<T> {
 	recipe: () => T | Promise<T> // what produces the value
 	cached?: T | Promise<T> // engine-managed cache
-	deps: Edge[] // incoming: source slots I was computed against
-	subs: Edge[] // outgoing: target slots that depend on me
+	deps: Edge[] // edges this slot was computed against
 }
 
 interface Node<T> {
-	slots: Map<Scope, Slot<T>> // engine sees scope→slot uniformly; no privileged key
 	defaultRecipe?: () => T | Promise<T> // fallback when a scope has no slot
+	subs: Set<Edge> // who subscribes to this node (write-fire index)
+}
+
+interface Scope {
+	parent?: Scope
+	children: Set<Scope>
+	slots: Map<Node<unknown>, Slot<unknown>> // this scope's per-node caches (Q6)
+	edges: Set<Edge> // edges created in this scope (cleanup tracker)
+	writeSet: Set<Node<unknown>> // for commit promotion (Q9 ii)
+	readSet: Set<Node<unknown>> // for slot drop on close
+	cleanups: Disposable[]
+	status: 'open' | 'committed' | 'discarded'
 }
 
 interface Edge {
 	source: Node<unknown>
 	target: Slot<unknown>
+	targetScope: Scope // for chain-match: chainFor(targetScope)
 }
 
 // Engine's fire predicate (Q1 Model 1):
 //   On writeSlot(node, writeScope, ...), for each edge in node.subs:
-//     chain = chainFor(edge.target.scope)
-//     if writeScope is in chain AND no more-specific scope has a slot
+//     chain = chainFor(edge.targetScope)
+//     if writeScope is in chain AND no more-specific scope has a slot for node
 //       → invalidate(edge.target)
 
 // ── Engine: primitives ────────────────────────────────────────
@@ -672,34 +683,39 @@ function createNode<T>(defaultRecipe?: () => T | Promise<T>): Node<T>
 function writeSlot<T>(node: Node<T>, scope: Scope, slot: Slot<T>): void
 function readSlot<T>(node: Node<T>, scope: Scope): Slot<T> | undefined
 function invoke<T>(node: Node<T>, scope: Scope): T | Promise<T>
-function link(source: Node<unknown>, target: Slot<unknown>): Edge
-function unlink(edge: Edge): void
+function link(source: Node<unknown>, target: Slot<unknown>): Edge // adds to source.subs + currentScope.edges
+function unlink(edge: Edge): void // removes from both
 function subscribe(node: Node<unknown>, handler: (e: SlotChangeEvent) => void): () => void
 
 // ── Engine: ambient context ───────────────────────────────────
 
 function openScope(): Scope // creates child of current
-function closeScope(scope: Scope, mode: 'commit' | 'discard'): void
+function closeScope(scope: Scope, mode: 'commit' | 'discard'): void // walks scope.edges + readSet to dispose explicitly
 function onCleanup(fn: Disposable): void // attaches to current ambient scope
 function getCurrentScope(): Scope // always returns a scope (library convention; see ROOT_SCOPE below)
 ```
 
 No `signal`, `compute`, `effect`, `get`, `latest`, `action`, `transition`,
 `speculation`, "canonical," or "committed" in the engine vocabulary. The engine
-sees a map of opaque scope keys to slots, uniformly. Those concepts are all
-library code.
+sees scopes that own slots/edges and nodes that index their subscribers.
+Those concepts are all library code.
 
 ## Library shape (illustrative)
 
 ```ts
-// Library convention: a singleton "root scope" stands in for
-// "outside any speculative context." The engine doesn't know this
-// is special — it's just a scope key the library uses by default.
-const ROOT_SCOPE: Scope = Symbol('root')
+// Library convention: a singleton root scope (no parent) stands in for
+// "outside any speculative context." Engine treats it like any other
+// parentless scope (per Q6).
+const ROOT_SCOPE: Scope = {
+	parent: undefined, children: new Set(),
+	slots: new Map(), edges: new Set(),
+	writeSet: new Set(), readSet: new Set(),
+	cleanups: [], status: 'open',
+}
 
 function signal<T>(initial: T): [Node<T>, (v: T) => void] {
 	const node = createNode<T>(() => initial)
-	return [node, v => writeSlot(node, getCurrentScope(), { recipe: () => v, deps: [], subs: [] })]
+	return [node, v => writeSlot(node, getCurrentScope(), { recipe: () => v, deps: [] })]
 }
 
 function compute<T>(fn: () => T): Node<T> {
@@ -708,6 +724,7 @@ function compute<T>(fn: () => T): Node<T> {
 
 function get<T>(node: Node<T>): GetReturn<T> {
 	const scope = getCurrentScope()
+	scope.readSet.add(node)
 	if (currentTracker) link(node, currentTracker)
 	const cached = invoke(node, scope) as T
 	if (cached && typeof (cached as any).then === 'function') {
@@ -731,17 +748,18 @@ function action(body): ActionHandle {
 	}
 }
 
-// chainFor(S) returns the scope chain from most-specific to root:
-//   chainFor(S2) where S2 is child of S1 (which is child of ROOT_SCOPE) → [S2, S1, ROOT_SCOPE]
+// chainFor(S) walks parent pointers until undefined:
+//   chainFor(S2) where S2.parent = S1, S1.parent = ROOT_SCOPE, ROOT_SCOPE.parent = undefined
+//     → [S2, S1, ROOT_SCOPE]
 //   chainFor(ROOT_SCOPE) → [ROOT_SCOPE]
-// `getCurrentScope()` returns ROOT_SCOPE when no action is active.
+// Terminal is structural (no parent), not a privileged key. Multiple
+// disjoint roots (per-tenant, per-document) are supported by construction.
 ```
 
-The engine never sees `ROOT_SCOPE` specially — it's just a `Symbol` the library
-chose to use as the "outside any action" key. A library author defining a
-different convention (per-tenant roots, per-document roots, multiple
-independent reactive worlds) substitutes their own scope shape; the engine
-doesn't care.
+The engine never treats `ROOT_SCOPE` specially — it's just a parentless
+scope the library creates by default. A library author wanting per-tenant
+roots, per-document roots, or multiple independent reactive worlds
+constructs additional parentless scopes; the engine doesn't care.
 
 Usage retains familiar shape:
 

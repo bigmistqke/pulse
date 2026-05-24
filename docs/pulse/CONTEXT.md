@@ -58,17 +58,17 @@ from here rather than re-defined.
   is the recipe shape and the cache discipline.
 - **Recipe.** The callback attached to a Node that produces the Node's value.
   Plain function, generator, or stage-list. Re-runs when invalidated.
-- **Slot.** A per-(Node, scope) cache cell. Holds the cached value for that Node
-  _within that scope_. Multi-slot per Node is the engine-level fix for the
-  speculation cache asymmetry surfaced in
-  [`framings.md`'s falsified hypotheses](./framings.md#speculation-purely-above-unmodified-r3-doesnt-work).
-- **Value-bag.** The per-scope collection of slots. Each scope owns a bag;
-  walks consult the active scope's bag first.
-- **Edge.** A plain `(source: Node, target: Slot)` dependency reference on
-  `node.subs`. Per [Q1](./questions.md#q1--fall-through-and-edge-policy)'s
-  resolution (Model 1 — engine-managed chains), edges carry no scope refs
-  and no closures; the engine resolves chain-match at fire time using the
-  target slot's scope. See [`framings.md`'s edges framing](./framings.md#edges-are-slot-local-dynamic-and-walk-policy-driven).
+- **Slot.** A per-(Node, scope) cache cell. Holds the cached value for that
+  Node _within that scope_. Per [Q6](./questions.md#q6--what-is-a-scope-as-a-value),
+  slots live on the scope (`scope.slots: Map<Node, Slot>`), not on the
+  node. Multi-slot per Node is the structural fix for the speculation
+  cache asymmetry; storing them on the scope makes disposal explicit.
+- **Edge.** A `{ source: Node, target: Slot, targetScope: Scope }` triple.
+  Per [Q1](./questions.md#q1--fall-through-and-edge-policy)'s resolution
+  (Model 1 — engine-managed chains), the engine derives the chain from
+  `targetScope` at fire time; no closures, no captured chain. Edges live
+  in `scope.edges` (cleanup tracker) and are indexed for write-fire via
+  `source.subs: Set<Edge>`.
 - **Chain-match.** The engine-side predicate that decides whether a write
   to `(node, writeScope)` should fire an edge whose target lives in some
   scope `S`. True iff `writeScope` is in `chainFor(S)` and no
@@ -125,17 +125,26 @@ distinguished only by where the consumer lives.
 
 ## Scope
 
-- **Scope.** The ambient context primitive. Carries the active value-bag, the
-  active speculation (if any), and the owner relationship for cleanup. Pulse's
-  exploration unifies _scope_ and _owner_ (see
-  [`questions.md`'s Q2](./questions.md#q2--scopeowner-unification)).
-- **Owner.** The cleanup-tree node. Under the unification, owner and scope
-  share structure.
-- **`ROOT_SCOPE`.** The global default scope used when no other is active —
-  i.e. "committed state."
-- **Commit / discard.** Terminal operations on a non-root scope's bag: commit
-  promotes the scope's slot values to the parent's bag (typically `ROOT_SCOPE`);
-  discard drops them.
+- **Scope.** The ambient context primitive. Owns its `slots`, `edges`,
+  `writeSet`, `readSet`, `cleanups`, `children`, and a `parent` pointer.
+  Closing a scope (commit or discard) walks these explicitly — no GC
+  reliance for correctness. Per [Q6](./questions.md#q6--what-is-a-scope-as-a-value).
+  Pulse's exploration unifies _scope_ and _owner_ (see
+  [Q2](./questions.md#q2--scopeowner-unification)) — an "owner scope"
+  is just a scope with no slot writes.
+- **`ROOT_SCOPE`.** A parentless scope the library creates by default —
+  the "outside any speculative context" world. Engine doesn't special-case
+  it; multiple disjoint roots (per-tenant, per-document) are supported by
+  constructing additional parentless scopes.
+- **`chainFor(scope)`.** Walks `scope.parent` pointers until `undefined`,
+  returning the scope chain from most-specific to terminal. Used by the
+  engine's chain-match predicate and by fall-through reads.
+- **WriteSet / ReadSet.** Per-scope `Set<Node>` tracking which nodes the
+  scope wrote to (for commit promotion, per [Q9](./questions.md#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally) lean ii) and which it
+  read from (for slot drop on close).
+- **Commit / discard.** Terminal operations: commit promotes `writeSet`
+  slots to the parent scope; both drop all `slots` and `edges` the scope
+  holds. Discard additionally fires `cleanups`.
 
 ## Stages and actions
 
