@@ -510,13 +510,17 @@ argument against picking Solid's mechanism: it provides automatic
 coupling that's wrong as often as it's right. Pulse's explicit-only
 coupling (via nested actions) doesn't have this failure mode.
 
-**The `_gatedSubs` cross-tx read replay machinery (Solid's other
-piece) addresses a real gap not covered by any of the eight scenarios
-directly** — it's about "consumer was re-running under one scope's
-context and read a committed value during another scope's commit
-window; should re-fire when the committing scope lands." This is
-more of a render-coherence question than a divergence question.
-Worth its own treatment but separable from the divergence question.
+**Cross-transaction read coherence is handled for free by pulse's
+chain-match** — earlier drafts of this doc treated it as a separate
+gap, but tracing carefully shows it isn't. A consumer recomputing
+under scope `S1` that reads `X` (falling through to ROOT) registers
+an edge with `targetScope = S1`. When `S2` commits `X` to ROOT, the
+chain-match for that edge resolves `chainFor(S1) = [S1, ROOT]`,
+matches `writeScope = ROOT` at index 1, sees no shadow at S1, and
+fires. The consumer invalidates and recomputes against the new
+ROOT.X on its next read. Solid achieves the same with the
+`_gatedSubs` mechanism, but pulse's chain-match subsumes it
+structurally — no separate machinery needed.
 
 ## Affordances, derived bottom-up
 
@@ -632,9 +636,12 @@ making it a framework primitive.
 **4. Do not ship `'rebase'`, merge callbacks, or auto-merge.** The
 scenario walk doesn't justify them; they have known footguns.
 
-**5. Treat the `_gatedSubs` cross-tx read replay question as
-separate** — possibly its own Q after Q15 if a concrete failing
-scenario surfaces.
+**5. Cross-tx read coherence is already covered** by chain-match
+([Q1](./questions.md#q1--fall-through-and-edge-policy)) — consumers
+recomputing under scope S that read fall-through-to-ROOT values get
+fired correctly when those values are later committed at ROOT.
+Solid's `_gatedSubs` is the equivalent mechanism in their architecture;
+pulse subsumes it via chain-match.
 
 **6. Revisit when the library exists** — these recommendations are
 informed by scenario reasoning, not by usage data. Once pulse ships
@@ -645,8 +652,17 @@ not as a final spec.
 The crux of the original question — "what about Solid's lane merge?"
 — resolves cleanly: lane merge bundles four concerns (render
 coherence, transactional coupling, cross-tx read, conflict
-resolution) into one mechanism. Pulse disaggregates: render coherence
-is automatic (P6 + Q10), coupling is explicit (nested actions),
-cross-tx read is a separable open question, conflict resolution is
-opt-in per-action (`'reject'`). Smaller pieces, each addressing one
-intent, none with the spooky-merging failure mode.
+resolution) into one mechanism. Pulse disaggregates:
+
+| Concern | Pulse mechanism |
+| --- | --- |
+| Render coherence | P6 + Q10 microtask batching (automatic) |
+| Transactional coupling | Nested actions (opt-in via code structure) |
+| Cross-tx read coherence | Chain-match in Q1 (automatic) |
+| Conflict resolution | `onConflict: 'reject'` (opt-in per action) |
+
+Smaller pieces, each addressing one intent, none with the spooky-
+merging failure mode. The four are independently controllable; Solid
+welds them together via one mechanism, which is what causes class G
+(unrelated actions sharing downstream deps) to get incorrectly
+coupled.
