@@ -427,25 +427,71 @@ fire. *No defer logic anywhere; the chain is the policy.*
 **Verified by [H1a-c trace](./scenario-traces.md#h1a-c--effect-under-speculation).** H1a (write under S → effect doesn't fire), H1b
 (commit → effect fires once), H1c (discard → effect never fires).
 
+**Load-bearing principle: pull-driven reads, push-driven notifications,
+no explicit flush.**
+
+The two halves of reactivity get different treatment:
+
+- *Reads (computeds, JSX-bindings as queried)* are **pull-driven**. A
+  read always returns the value consistent with the current committed
+  state. There is no read that requires "await microtask" or
+  "flush()" or "batch close" to be coherent.
+- *Side-effecting consumers (effects, JSX re-renders)* are **push-driven
+  with microtask batching**. Multiple invalidations of the same consumer
+  within one synchronous turn produce exactly one re-run on the next
+  microtask. Users never call `flush()` or `batch()` — the mechanism is
+  invisible.
+
+Concretely:
+
+```ts
+setValue('x')
+console.log(get(doubleValue))   // "xx" — always, synchronously
+```
+
+This works because invalidation propagates *synchronously* (cache is
+cleared, dirty bit set), but recomputes happen *lazily on read* (recipe
+runs when `get` finds a dirty slot). The "batching" only applies to
+side-effecting consumers, which are inherently async (microtask-scheduled)
+anyway — so users observing values via reads never see partial state, and
+users observing values via effects see batched updates without writing any
+flush code.
+
+**Resolved sub-questions:**
+
+- *Microtask batching for consumers.* Per-Node "scheduled" flag. When an
+  invalidation event arrives at a consumer, set the flag; subsequent
+  invalidations in the same turn no-op. Microtask drains scheduled
+  consumers; each runs once. Library-side mechanism, no engine
+  involvement.
+- *No explicit flush API.* Users never write `batch(() => ...)` or await a
+  microtask to read coherent state. The pull/push split is the
+  architectural guarantee.
+- *Dirty propagation.* Synchronous through the chain-match: on write,
+  engine invalidates direct subscribers; computed consumers' `onSlotChange`
+  clears their cache *and* re-fires their own subs (cascade). Each
+  invalidation in the cascade is O(1) (set a dirty flag); no recompute
+  happens until a read. So invalidation cascades are cheap; the work
+  amortizes to read sites and to microtask-batched consumer re-runs.
+  Library iterates this through the existing engine `subscribe` mechanism;
+  no special engine primitive needed.
+
 **Sub-questions still open:**
 
-- *Microtask batching.* Multiple invalidations in quick succession should
-  produce one re-run per microtask cycle per Node. Library-side "scheduled"
-  flag per Node handles it. Mechanical.
-- *Effect-during-recompute (re-entrancy).* If an effect's body triggers
-  another effect that writes to a signal the first effect reads… exactly
-  **K1 territory.** Worth tracing K1 next.
-- *Effect priority and ordering.* Multiple effects depending on the same
-  signal — order? Pulse hasn't articulated against Dim 3 (priority).
+- *Effect priority and ordering.* When two effects depend on the same
+  signal, what order do they re-run in? Default: registration order
+  (FIFO within the per-microtask scheduled set). Sufficient unless a
+  Dim 3 priority story emerges. Not blocking.
+- *Effect-during-recompute (re-entrancy).* Covered by
+  [K1 trace](./scenario-traces.md#k1--re-entrant-setter-mid-recompute) at
+  the recompute level; consumer-level re-entrancy is the same mechanism
+  generalized.
 - *Effects at chains longer than 1.* Component-owned effect chain
   `[component_scope, ROOT_SCOPE]`; action-inside-component effect chain
-  `[action_scope, component_scope, ROOT_SCOPE]`. Trace H2 would exercise.
-- *Dirty propagation.* Computeds propagate dirty downstream — their subs
-  also need to invalidate transitively. Library-side: the Computed
-  consumer's `onSlotChange` doesn't just invalidate its own cache; it
-  also fires its own subs (via the engine). Open: is this transitive
-  fire-and-invalidate something the engine should expose more directly,
-  or is iterating subs in the consumer correct?
+  `[action_scope, component_scope, ROOT_SCOPE]`. The chain-match per
+  [Q1](#q1--fall-through-and-edge-policy) handles it structurally
+  (`chainFor(effect.targetScope)` walks the parent pointers); trace H2
+  would verify by example but no new mechanism needed.
 
 **Related:** [Q1](#q1--fall-through-and-edge-policy) (engine-side chain-match is the policy; [Q3](#q3--consumer-patterns) subscribes via
 the same edge mechanism), [Q4](#q4--async-at-the-engine-level) (Promise resolution is *not* an engine event;
