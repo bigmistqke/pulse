@@ -1560,34 +1560,38 @@ const weird = computed(() => {
 })
 ```
 
-Assume `doubleName.slots[ROOT_SCOPE].cached = "foofoo"` (from an earlier
-read).
+Assume `ROOT.slots[doubleName].cached = "foofoo"` (from an earlier read),
+with `edge_N_D = { source: name, target: slot_DN_R, targetScope: ROOT }`
+in `name.subs` and `ROOT.edges`.
 
 **Under Position B (defer fires during recompute):**
 
-- Recipe runs. `deferredFires = []` (tracker active).
-- `setName("name")`: `writeSlot(name, ROOT_SCOPE, …)`. `name.slot[ROOT_SCOPE]
-.cached = "name"` (synchronous). Fire deferred → queue
-  `{ name, ROOT_SCOPE }`.
-- `get(doubleName)`: `invoke(doubleName, ROOT_SCOPE)`. Slot exists, cached
-  `"foofoo"`. **Is the slot dirty?** No — the fire was deferred, so the
-  dirty flag was never set. Returns `"foofoo"`.
-- Recipe: `"foofoo".capitalize() = "Foofoo"`. Cache `weird.slot = "Foofoo"`.
-- Pop tracker, drain queue. Fire `name → doubleName` edge. Mark
-  `doubleName.slot` dirty. (Too late.)
+- Recipe runs under `currentTracker = slot_weird_R`. Hypothetical
+  `deferredFires = []`.
+- `setName("name")`: `writeSlot(name, ROOT, …)`. `slot_N_R.cached = "name"`
+  (synchronous). Hypothetically queue the fire instead of running
+  chain-match.
+- `get(doubleName)`: `invoke(doubleName, ROOT)`. `ROOT.slots[doubleName]`
+  is `slot_DN_R` cached `"foofoo"`. **Is the slot dirty?** No — the fire
+  was deferred, so the dirty flag was never set. Returns `"foofoo"`.
+- Recipe: `"foofoo".capitalize() = "Foofoo"`. Cache
+  `slot_weird_R.cached = "Foofoo"`.
+- Pop tracker, drain queue. Fire chain-match for `edge_N_D`. Mark
+  `slot_DN_R` dirty. (Too late.)
 
 **Result under (B): `get(weird) = "Foofoo"`. Stale.** ✗
 
-The reason: deferred fires mean _the dirty flag on `doubleName.slot` isn't
-set until after the recipe returns_. The in-recipe `get(doubleName)`
-finds the slot clean and returns the stale cached value.
+The reason: deferred fires mean _the dirty flag on `slot_DN_R` isn't set
+until after the recipe returns_. The in-recipe `get(doubleName)` finds
+the slot clean and returns the stale cached value.
 
 **Under Position C (fire synchronously):**
 
 - Recipe runs. No deferral.
-- `setName("name")`: `writeSlot(name, ROOT_SCOPE, …)`. Walk edges
-  immediately. Fire `name → doubleName`. Mark `doubleName.slot` dirty.
-- `get(doubleName)`: `invoke(doubleName, ROOT_SCOPE)`. Slot is dirty.
+- `setName("name")`: `writeSlot(name, ROOT, …)`. Engine fires chain-match
+  for `edge_N_D` immediately (`chainFor(ROOT) = [ROOT]`, writeScope ROOT
+  at index 0). Mark `slot_DN_R` dirty.
+- `get(doubleName)`: `invoke(doubleName, ROOT)`. Slot exists but dirty.
   **Recompute**: reads `name` (now `"name"`), returns `"namename"`. Cache,
   clear dirty.
 - Recipe: `"namename".capitalize() = "Namename"`. Cache.
@@ -1638,12 +1642,12 @@ const incrementer = computed(() => {
 })
 ```
 
-- `get(count)`: edge formed `count → incrementer.slot`.
-- `setCount(c+1)`: `writeSlot(count, …)`. Walk edges. Fire `count →
-incrementer.slot`. Mark `incrementer.slot` dirty.
-- But `incrementer.slot` is currently being recomputed. Marking it dirty
-  just sets a flag. The recompute completes, caches `c`, leaves dirty
-  set.
+- `get(count)`: edge `edge_C_I = { source: count, target: slot_inc_R,
+  targetScope: ROOT }` formed in `count.subs` and `ROOT.edges`.
+- `setCount(c+1)`: `writeSlot(count, ROOT, …)`. Engine walks `count.subs`,
+  runs chain-match. `edge_C_I`: matches. Mark `slot_inc_R` dirty.
+- But `slot_inc_R` is currently being recomputed. Marking it dirty just
+  sets a flag. The recompute completes, caches `c`, leaves dirty set.
 - Next demand for `incrementer`: dirty, recompute. `c = new value`,
   `setCount` again, mark dirty. Cached, dirty.
 
@@ -1669,12 +1673,24 @@ K1's design call **dissolves**:
 **Settled: (C).** This is essentially r3's model (writes propagate dirty
 to subs synchronously; consumers schedule async via the heap + microtask).
 Pulse adopts the same semantics, just with the engine chain-match gating which
-edges actually fire.
+edges actually fire. Locked into the architecture by [Q10](./questions.md#q10--commit-as-transaction-ordering-atomicity-deferred-fires)
+("Recipes do not open a deferred-fires region") and
+[Q8](./questions.md#q8--tracker-vs-scope-separate-or-unified) (tracker
+and scope are separate ambients, parallel-coupled — re-entrant writes
+inherit the scope of the active recompute).
 
 Implication for [Q10](./questions.md#q10--commit-as-transaction-ordering-atomicity-deferred-fires) (commit-as-transaction): the deferred-fires region is
-**commit-mode-only**, not tracker-mode. Recipes don't defer; commits do.
-The two modes don't interfere because a recipe inside a commit is rare
-(commits are themselves outside any recompute).
+**commit-mode-only**, not tracker-mode. Recipes don't open a deferred-fires
+region (per Q10's "Recipes do not open a deferred-fires region" — Position
+C). Commits do. The two modes don't interfere because a recipe inside a
+commit is rare (commits are themselves outside any recompute).
+
+Note on Q10's vocabulary: earlier drafts described `deferredFires` as
+"keyed on tracker." Under the resolved architecture, the deferred-fires
+region is opened by `closeScope(..., 'commit')`, not by `invoke` — there
+is no tracker-keyed region. Fires inside a recipe go through `node.subs`
+chain-match synchronously; cascading dirty propagation is the standard
+reactive bookkeeping (per H1d).
 
 ### Updated framings status after K1+K1b
 
