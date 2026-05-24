@@ -329,9 +329,10 @@ Promise; resolving requires either awaiting or using a walk that suspends.
 **State after setup:**
 
 ```
-user = { slots: {}, defaultRecipe: () => userPromise }
-userPromise: pending
-edges = []
+user        = { defaultRecipe: () => userPromise, subs: ∅ }
+ROOT.slots  = ∅, ROOT.edges = ∅,
+ROOT.readSet = ∅, ROOT.writeSet = ∅
+userPromise : pending
 ```
 
 ### Walks involved
@@ -405,23 +406,25 @@ action(function* () {
 ```
 
 **Step 1: open scope.** `action(body)` → `openScope()` → engine creates
-`S = { parent: ROOT_SCOPE, cleanups: [], status: 'open' }`. Library pushes `S`
-as ambient. Library calls `driveAction(S, gen)`.
+`S = { parent: ROOT, children: ∅, slots: ∅, edges: ∅, writeSet: ∅,
+readSet: ∅, cleanups: [], status: 'open' }`. `ROOT.children.add(S)`.
+Library pushes `S` as ambient. Library calls `driveAction(S, gen)`.
 
 **Step 2: first `gen.next(undefined)`.** Generator runs until first yield.
 
 - Body calls `yield* get(user)`. The `get` sub-generator runs:
-  - `getCurrentScope()` → `S`. `currentTracker` → null (action-body reads
-    aren't tracked — see H1a-c discussion). No `link()` call.
+  - `getCurrentScope()` → `S`. `S.readSet.add(user)`. `currentTracker = null`
+    (action-body reads are imperative; per [Q8](./questions.md#q8--tracker-vs-scope-separate-or-unified)
+    the action body doesn't re-run on dep change). No `link()` call.
   - `invoke(user, S)`:
-    - Engine: `user.slots.get(S)` miss. Create `slot_U_S = { recipe:
-defaultRecipe, deps: [], subs: [] }`. Push `currentTracker = slot_U_S`.
-      Invoke recipe → `userPromise`. `slot_U_S.cached = userPromise`. Pop
-      tracker. Set `user.slots[S] = slot_U_S`. Return `userPromise`.
+    - Engine: `S.slots.has(user)`? No. Create `slot_U_S = { recipe:
+      user.defaultRecipe, deps: [] }`. Run recipe → `userPromise`.
+      `slot_U_S.cached = userPromise`. `S.slots.set(user, slot_U_S)`.
+      Return `userPromise`.
   - `get` sees Promise → yields `{ kind: 'park', promise: userPromise }`.
 - `yield*` propagates the park command up to the action body's iterator. The
   body's `gen.next(undefined)` returns `{ done: false, value: { kind: 'park',
-promise: userPromise } }`.
+  promise: userPromise } }`.
 - Driver: `cmd.kind === 'park'` → attach `userPromise.then(step, stepThrow)`.
 - Driver: `popScope()` runs (finally block). Ambient back to `ROOT_SCOPE`.
 - Driver returns. Synchronous portion of action handler is done.
@@ -429,14 +432,20 @@ promise: userPromise } }`.
 **State after Step 2:**
 
 ```
-user.slots = { S: { recipe: defaultRecipe, cached: userPromise, deps: [], subs: [] } }
-S.status = 'open'
-userPromise: pending (driver awaits)
-edges = []                              // no edges formed — action body doesn't track
+user.subs    = ∅
+S.slots      = { user → slot_U_S(cached: userPromise) }
+S.readSet    = { user }                 # read-populated only
+S.writeSet   = ∅                        # no writes yet
+S.edges      = ∅                        # action body doesn't track
+S.status     = 'open'
+userPromise  : pending (driver awaits)
 ```
 
 Notice: no edges. The action body's reads don't register tracking edges
-because the body isn't going to re-run on dep change.
+(no `currentTracker`) because the body isn't going to re-run on dep
+change. Per [Q9](./questions.md#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally),
+`user` lives in `S.readSet` only — it will drop at commit without
+promotion.
 
 **Step 3: time passes; `resolveUser("alice")` is called.**
 
@@ -448,34 +457,39 @@ because the body isn't going to re-run on dep change.
   sub-generator with `"alice"`. `get` returns `"alice"`. `yield*` resumes
   the action body with `"alice"`. `name = "alice"`.
 
-**Engine handling of Promise resolution** (refined since C2 was first traced;
-see [Q4](./questions.md#q4--async-at-the-engine-level) for the current framing): the engine does **nothing** on
-resolution. The driver above (which is the consumer for this action body)
-already held the Awaitable — it attached its own `.then` and is resuming
-the generator directly. The Awaitable's `status` flipped to `'fulfilled'`
-and `value: "alice"` populated as instance state on the Awaitable class
-(not as a side-table or tweak on a foreign Promise — pulse owns the
-wrapper, see the Awaitable framing). `slot_U_S.cached` still points at the
-same Awaitable; its identity didn't change, so there's no write event and
-no edge firing. Walks that later inspect the slot read `.status` and
-`.value` synchronously. Consumers that care about resolution (other than
-this driver) would have to hold the Awaitable themselves — there is no
-ambient "resolution fired" channel on the slot.
+**Engine handling of Promise resolution** (per
+[Q4](./questions.md#q4--async-at-the-engine-level)): the engine does
+**nothing** on resolution. The driver above (which is the consumer for
+this action body) already held the Awaitable — it attached its own
+`.then` and is resuming the generator directly. The Awaitable's `status`
+flipped to `'fulfilled'` and `value: "alice"` populated as instance state
+on the Awaitable class (not as a side-table or tweak on a foreign Promise
+— pulse owns the wrapper, see the Awaitable framing). `slot_U_S.cached`
+still points at the same Awaitable; its identity didn't change, so
+there's no write event and no chain-match firing. Walks that later
+inspect the slot read `.status` and `.value` synchronously. Consumers
+that care about resolution (other than this driver) would have to hold
+the Awaitable themselves — there is no ambient "resolution fired"
+channel on the slot.
 
 **Step 4: body continues — `setUser(Promise.resolve("alice!"))`.**
 
 - Library: `setUser` (closed-over setter) runs. `getCurrentScope()` → `S`.
 - Library: `writeSlot(user, S, { recipe: () => Promise.resolve("alice!"),
-deps: [], subs: [] })`.
-- Engine: walk `user`'s outgoing edges with `(user.slots, S)`. None. Set
-  `user.slots[S]` = new slot. Compute `cached = recipe() = Promise<"alice!">`.
-  Engine attaches `.then` to resolve `cached` to `"alice!"` in a microtask.
+  cached: Promise<"alice!">, deps: [] })`. `S.writeSet.add(user)`.
+  `S.slots.set(user, slot_U_S_new)` (overwrites the read-populated entry).
+- Engine fires chain-match for each `edge ∈ user.subs = ∅`. Nothing.
+
+(The library's setter is responsible for the Awaitable wrapping; whether
+the cached value here is the raw `Promise<"alice!">` or an Awaitable is
+a wrapper question per Q4 — either way, slot identity is what matters.)
 
 **State after Step 4 (before microtask):**
 
 ```
-user.slots = { S: { recipe: () => Promise.resolve("alice!"),
-                    cached: Promise<"alice!">, deps: [], subs: [] } }
+S.slots    = { user → slot_U_S_new(cached: Promise<"alice!">) }
+S.writeSet = { user }                  # gained user
+S.readSet  = { user }                  # already present
 ```
 
 **Step 5: generator returns; action commits.**
@@ -483,24 +497,30 @@ user.slots = { S: { recipe: () => Promise.resolve("alice!"),
 - Body's `gen.next(...)` (the one from step 3) continues past `setUser` and
   reaches the end. Returns `{ done: true }`.
 - Driver: `done` → `closeScope(S, 'commit')`.
-- Library promotes `user.slots[S]` to `user.slots[ROOT_SCOPE]`. Engine:
-  `writeSlot(user, ROOT_SCOPE, { recipe: () => Promise.resolve("alice!"),
-cached: Promise<"alice!"> })`. Walk `user`'s outgoing edges (none in this
-  trace). Drop `user.slots[S]`.
-- `S.status = 'committed'`. Pop ambient back to `ROOT_SCOPE`. Driver returns.
+
+Per [Q10](./questions.md#q10--commit-as-transaction-ordering-atomicity-deferred-fires):
+
+1. Open deferred-fires region.
+2. Promote `S.writeSet = { user }`: `writeSlot(user, ROOT, { recipe:
+   () => Promise.resolve("alice!"), cached: Promise<"alice!">, deps: [] })`.
+   `ROOT.slots.set(user, …)`. `ROOT.writeSet.add(user)`. Fire chain-match
+   for each `edge ∈ user.subs = ∅`. Nothing.
+3. Walk `S.edges = ∅`. Nothing.
+4. Drop `S.slots` for `S.readSet ∪ S.writeSet = { user }`.
+5. Close children (none).
+6. Drain region (empty).
+7. `S.status = 'committed'`. `ROOT.children.delete(S)`. Pop ambient.
 
 **State after Step 5:**
 
 ```
-user.slots = { ROOT_SCOPE: { recipe: () => Promise.resolve("alice!"),
-                              cached: Promise<"alice!"> } }
-// next microtask: cached resolves to "alice!"
-S.status = 'committed'
-ambient = ROOT_SCOPE
+ROOT.slots    = { user → cached: Promise<"alice!"> }
+ROOT.writeSet = { user }
+S             : committed
 ```
 
-Subsequent `get(user)` returns `Promise.resolve("alice!")` (or `"alice!"` if
-the cache has settled). ✓
+Subsequent `get(user)` returns the Promise (or `"alice!"` once settled,
+per Q4 — `slot.cached` is an Awaitable whose `status` flips internally). ✓
 
 ### Architecture exposed by C2a
 
@@ -525,15 +545,14 @@ get(node)` yields a `park` command; the action driver decides what to do
 5. **The driver's discard-guard on resume.** `if (scope.status !== 'open')
 return` is what makes C2c safe — see below. [Q2](./questions.md#q2--scopeowner-unification) (cancellation) interacts
    with [Q4](./questions.md#q4--async-at-the-engine-level) (async) through this guard.
-6. **Engine choice: update cache on Promise resolve, or not.** Open ([Q4](./questions.md#q4--async-at-the-engine-level));
-   the lean is yes (so [Q3](./questions.md#q3--consumer-patterns) consumer-pattern fires correctly when async deps
-   resolve). Doesn't affect C2a's correctness either way.
-7. **Promise identity as supersession signal.** D8 in the main doc notes
-   _"a new Promise is minted per dependency change, so unwrap keyed on
-   promise identity doubles as the supersession signal."_ The trace
-   reaches this: the driver attached `.then` to a _specific_
-   `userPromise`; if the slot's `cached` later changes to a different
-   Promise, the original `.then` is stale. The discard-guard catches it.
+6. **Engine does nothing on Promise resolution** (per
+   [Q4](./questions.md#q4--async-at-the-engine-level)). The Awaitable's
+   `status` flips internally; consumers that hold the Awaitable handle
+   their own resumption via `.then` / `yield*` / `use`.
+7. **Promise identity as supersession signal.** The driver attached
+   `.then` to a _specific_ `userPromise`; if the slot's `cached` later
+   changes to a different Promise (a new Awaitable), the original `.then`
+   is stale. The discard-guard catches it.
 
 ### C2b: long-lived open scope
 
@@ -568,20 +587,26 @@ handle.discard()                // or: another action arrives and supersedes
 **Step C2c-1: `handle.discard()` while parked.**
 
 - Library: `closeScope(S, 'discard')`.
-- Engine: drop slots tagged `S`. Walk `slot_U_S.subs` (empty); delete
-  `user.slots[S]`. (Any edges with `S` in target's chain would also unlink,
-  but there are none in this trace.)
-- Engine: fire `S.cleanups` (e.g., `abortController.abort()` if the action
-  body had registered one — none in this trace).
-- `S.status = 'discarded'`. Ambient stays at whatever it was (not pushed
-  because `discard()` was called from outside any scope context).
+  1. Open deferred-fires region.
+  2. Skip promotion (discard mode).
+  3. Walk `S.edges = ∅`. Nothing.
+  4. Drop `S.slots` for `S.readSet ∪ S.writeSet = { user }`.
+     `S.slots.delete(user)`.
+  5. Close children (none).
+  6. Drain region (empty).
+  7. Fire `S.cleanups` per [Q12](./questions.md#q12--body-cleanups-vs-scope-cleanups-composition-and-re-entrancy)
+     (e.g., `abortController.abort()` if the action body had registered
+     one — none in this trace).
+  8. `S.status = 'discarded'`. `ROOT.children.delete(S)`. Ambient stays
+     at whatever it was (not pushed because `discard()` was called from
+     outside any scope context).
 
 **State after Step C2c-1:**
 
 ```
-user.slots = {}                          // S slot dropped
-S.status = 'discarded'
-userPromise: still pending (no one called resolveUser yet)
+S.slots      = ∅
+S.status     = 'discarded'
+userPromise  : still pending (no one called resolveUser yet)
 ```
 
 **Step C2c-2: `resolveUser("alice")` fires later.**
@@ -628,76 +653,85 @@ to `user` (in `ROOT_SCOPE` here, since the outside write has no ambient
 scope). What does the action body see when it resumes?
 
 **Step C2d-1: action parks at `yield* get(user)`.** Same as C2a Steps 1-2.
-After: `user.slots[S]` cached as `userPromise`; driver awaits.
+After: `S.slots[user] = slot_U_S(cached: userPromise)`,
+`S.readSet = { user }`, `S.writeSet = ∅`. Driver awaits.
 
 **Step C2d-2: outside `setUser(Promise.resolve("bob"))`.**
 
-- `getCurrentScope()` → `ROOT_SCOPE` (no action active outside).
-- `writeSlot(user, ROOT_SCOPE, { recipe: () => Promise.resolve("bob"),
-cached: Promise<"bob"> })`.
-- Engine: walk `user`'s outgoing edges. None. Set `user.slots[ROOT_SCOPE]`.
+- `getCurrentScope()` → `ROOT_SCOPE` (no action active outside; the driver
+  popped scope when the body parked).
+- `writeSlot(user, ROOT, { recipe: () => Promise.resolve("bob"),
+  cached: Promise<"bob">, deps: [] })`. `ROOT.writeSet.add(user)`.
+  `ROOT.slots.set(user, slot_U_R)`.
+- Engine fires chain-match for each `edge ∈ user.subs = ∅`. Nothing.
 
 **State after C2d-2:**
 
 ```
-user.slots = {
-  ROOT_SCOPE: { cached: Promise<"bob">, ... },        // new
-  S:          { cached: userPromise (pending), ... }, // existing
-}
+ROOT.slots = { user → slot_U_R(cached: Promise<"bob">) }   # new
+S.slots    = { user → slot_U_S(cached: userPromise, pending) }
+S.readSet  = { user }, S.writeSet = ∅
 ```
 
 **Step C2d-3: `resolveUser("alice")` resolves the original promise.**
 
 - The driver's `.then("alice")` callback fires.
 - Guard: `S.status === 'open'` → continue. `pushScope(S)`.
-- `gen.next("alice")` resumes the body. `name = "alice"`. `console.log("alice")`.
+- `gen.next("alice")` resumes the body. `name = "alice"`.
+  `console.log("alice")`.
 - Body returns. `closeScope(S, 'commit')`.
-- But: `S` has nothing to promote (no scope-tagged writes happened). Engine
-  walks `S.slots` (the engine's slot index, not really shown — but
-  conceptually, `S` may track which Nodes have S-tagged slots). Promotes
-  `user.slots[S]` to `ROOT_SCOPE`? **This is the wrinkle.**
 
-The wrinkle: `user.slots[S]` was created by the _read_ (lazily populating
-the cache for the scope-S read), not by a _write_. Is it "the action's
-write" that gets promoted on commit, or "every slot tagged S regardless of
-how it got there"?
+Per [Q10](./questions.md#q10--commit-as-transaction-ordering-atomicity-deferred-fires)
++ [Q9](./questions.md#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally):
 
-Two positions:
+1. Open deferred-fires region.
+2. **Promote `S.writeSet` only.** `S.writeSet = ∅` — nothing to promote.
+   This is the load-bearing step: the action read `user` but never wrote
+   it, so `user` is in `S.readSet` only, not `S.writeSet`. The outside
+   write to `ROOT.slots[user]` is preserved.
+3. Walk `S.edges = ∅`. Nothing.
+4. Drop `S.slots` for `S.readSet ∪ S.writeSet = { user }`.
+   `S.slots.delete(user)`. The read-populated `slot_U_S` (containing the
+   original `userPromise`) is dropped without affecting `ROOT.slots[user]`.
+5. Close children (none).
+6. Drain region (empty).
+7. `S.status = 'committed'`. Pop ambient.
 
-- **(α) Promote every S-tagged slot.** Then committing this action _overwrites_
-  the outside `setUser("bob")` because `user.slots[S]` (containing the
-  original pending promise) is promoted to `ROOT_SCOPE`, clobbering
-  `Promise<"bob">`. Wrong.
-- **(β) Promote only slots that were _written_ under S (not just read-populated).**
-  The engine tags slots as `wasWritten: boolean` to distinguish. Commit
-  promotes only `wasWritten` slots. Then the outside `setUser("bob")` wins;
-  the action's `user.slots[S]` (which was read-populated, never written)
-  drops without promotion. The action saw `"alice"` (the original promise
-  resolved), but committed nothing about `user`.
+**Final state:**
 
-Position (β) is clearly correct, but it requires the engine to distinguish
-read-populated vs write-populated slots.
+```
+ROOT.slots = { user → cached: Promise<"bob"> }   # outside write wins
+S          : committed (fully disposed)
+```
 
-This is a **major surfaced design decision**. Adding to open questions.
+This is exactly the C2d wrinkle the trace originally surfaced — the
+distinction between read-populated and write-populated slots — and the
+resolved [Q9](./questions.md#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally)
+"scope.writeSet drives promotion" lands it correctly. The earlier draft
+proposed a per-slot `wasWritten` flag (position β); Q9 instead puts the
+distinction on the scope (`writeSet` vs `readSet`), with uniform slot
+shape. Same semantics, cleaner locus.
 
 What C2d exposes:
 
-- **Read-populated slots aren't the same as write-populated slots.** Both
-  end up in `node.slots[scope]`, but their commit semantics differ. Need
-  a `wasWritten` flag or equivalent on `Slot`.
+- **Read-populated vs write-populated slots live on the scope, not the
+  slot.** Per [Q9](./questions.md#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally),
+  `scope.writeSet` and `scope.readSet` partition the distinction at the
+  scope level; slot shape stays uniform.
 - **Read-skew is real.** The action body saw `"alice"` because it read
   before the outside write. After the action commits, the canonical value
   is `Promise<"bob">` (from outside) — _not_ what the action body "saw."
-  This is intrinsic to the await-and-resume model; per D8 in the main doc.
+  Intrinsic to await-and-resume.
 - **The action body had no way to notice the outside write.** Because it
-  didn't form a tracking edge. If it _had_ formed an edge, the edge would
-  have invalidated → but the action body wouldn't re-run anyway (it's
-  one-shot). So edges are useless for action bodies; pure imperative reads
-  are the right shape.
-- **D-skew between scopes:** when scope `S` is open and outside writes
-  happen to `ROOT_SCOPE`, the scope `S` doesn't see them because reads
-  under `S` walk `chain = [S, ROOT_SCOPE]` and `S` has a slot. To see the
-  outside write, the action would have to drop its slot or read `latest()`.
+  didn't form a tracking edge (no `currentTracker` in an action body).
+  If it _had_ formed an edge, the edge would have invalidated → but the
+  action body wouldn't re-run anyway. Edges are useless for action
+  bodies; pure imperative reads are the right shape.
+- **D-skew between scopes.** When scope `S` is open and outside writes
+  happen to `ROOT_SCOPE`, scope `S` doesn't see them because reads under
+  `S` walk most-specific in `chainFor(S) = [S, ROOT]` and `S` has a slot.
+  To see the outside write, the action would have to drop its slot or
+  read `latest()` (which invokes against `ROOT_SCOPE` directly).
 
 ### Summary
 
@@ -711,37 +745,33 @@ sub-questions into the open:
    `gen.next`.** Driver responsibility.
 4. **Action bodies don't track.** No edges formed.
 5. **Discard-guard on resume.** `if (scope.status !== 'open') return`.
-6. **Engine does nothing on Promise resolution.** Refined post-C2; see
-   [Q4](./questions.md#q4--async-at-the-engine-level). The slot's `cached`
-   is an Awaitable; its identity doesn't change when the underlying
-   Promise settles (only the instance's `status`/`value`/`reason` flips).
-   The consumer that received the Awaitable from `get(...)` — the action
-   body's driver in this trace — holds the reference and attaches its
-   own `.then` for resumption. No engine-level `'resolved'` event;
-   chain-match fires on writes only.
-7. **`Slot` needs `wasWritten` (or equivalent).** Read-populated and
-   write-populated slots have different commit semantics; the engine must
-   distinguish. **New sub-question — added to [Q7](./questions.md#q7--the-defaultrecipe-mechanism) and [Q1](./questions.md#q1--fall-through-and-edge-policy) territory.**
-8. **Read-skew is intrinsic to await-and-resume; programmer's responsibility.**
-   D8 (sequential `yield*`s sample at different instants) confirmed by trace.
+6. **Engine does nothing on Promise resolution** (per
+   [Q4](./questions.md#q4--async-at-the-engine-level)). The slot's
+   `cached` is an Awaitable; its identity doesn't change when the
+   underlying Promise settles (only the instance's
+   `status`/`value`/`reason` flips). The consumer that received the
+   Awaitable from `get(...)` — the action body's driver in this trace —
+   holds the reference and attaches its own `.then` for resumption. No
+   engine-level `'resolved'` event; chain-match fires on writes only.
+7. **Read-vs-write slot distinction lives on the scope** (per
+   [Q9](./questions.md#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally)):
+   `scope.writeSet` drives commit promotion; `scope.readSet ∪ writeSet`
+   drives slot drop on close. Slot shape stays uniform.
+8. **Read-skew is intrinsic to await-and-resume; programmer's
+   responsibility.** D8 (sequential `yield*`s sample at different
+   instants) confirmed by trace.
 9. **Cancellation discipline is library code over scope-discard +
-   `onCleanup`.** Confirms [Q2](./questions.md#q2--scopeowner-unification) working hypothesis. No new engine primitive
-   for cancellation.
+   `onCleanup`** (per [Q2](./questions.md#q2--scopeowner-unification),
+   [Q12](./questions.md#q12--body-cleanups-vs-scope-cleanups-composition-and-re-entrancy)).
+   No new engine primitive for cancellation.
 
-**New open question surfaced:** _the read-vs-write slot distinction_ — should
-slots carry a `wasWritten` flag (or equivalent) so the commit promotion logic
-only promotes write-populated slots? **Lean: yes**, but the alternative
-(promote everything, accept that reads pin values into the scope) is
-defensible too — it would mean an action that reads but never writes still
-"captures" the state at the moment of the read, which has some appeal for
-snapshot-isolation semantics.
-
-The framings all held: Node-as-recipe survived (recipes can return Promises),
-walks-first-class survived (`get` and `yield* get` are walks), slim-engine
-
-- thick-library survived (driver is library; engine sees writes), scope/owner
-  unification held (cleanups + scope-status + discard mechanism). No
-  falsifications.
+All sub-questions surfaced by C2 are now resolved by the locked-in
+framings (Q4, Q6, Q9, Q10, Q12). All framings held: Node-as-recipe
+survived (recipes can return Promises), walks-first-class survived
+(`get` and `yield* get` are walks), slim-engine + thick-library
+survived (driver is library; engine sees writes), scope/owner
+unification held (cleanups + scope-status + discard mechanism). No
+falsifications.
 
 ---
 
