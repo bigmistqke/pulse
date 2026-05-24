@@ -34,6 +34,7 @@ expressed.
 - [H — True collaboration](#h--true-collaboration)
 - [Speculation patterns in apps](#speculation-patterns-in-apps)
 - [Moments when isolation is essential](#moments-when-isolation-is-essential)
+- [A conceptual aside — Scope is doing two jobs](#a-conceptual-aside--scope-is-doing-two-jobs)
 - [Cross-scenario observations](#cross-scenario-observations)
 - [Affordances, derived bottom-up](#affordances-derived-bottom-up)
 - [What we genuinely don't know yet](#what-we-genuinely-dont-know-yet)
@@ -854,6 +855,250 @@ Stepping back from any specific affordance:
 The scenario walk reinforces the architectural choice already in
 place — and surfaces a longer list of legitimate isolation
 requirements than the original A–H survey alone did.
+
+## A conceptual aside — Scope is doing two jobs
+
+Worth naming explicitly, because it sharpens how to think about the
+entanglement question. Pulse's `Scope` primitive currently bundles
+two logically distinct concerns:
+
+**Job 1 — Atomic commit boundary.** A set of writes that succeed-or-
+fail together. Has a lifecycle (open → run → commit / discard).
+Tracks `writeSet`, `cleanups`, `status`. Owns the action handle and
+its `.commit()` / `.discard()` semantics. This is the *transactional
+unit*.
+
+**Job 2 — Isolation context (the "view" or sandbox).** A region
+where reads see particular overlays. Has `slots`, `parent`, `readSet`,
+`edges`. The chain that fall-through reads walk; the set of writes
+visible to readers under this context; the lifecycle of the cache
+itself. This is the *visibility region*.
+
+In current pulse these are 1:1 — every Scope is both a transaction
+and an isolation context. The conflation is invisible most of the
+time and works fine for most scenarios. But the entanglement question
+is exactly where the conflation becomes load-bearing, so it's worth
+unpacking.
+
+### What disentanglement would open up
+
+If transactions and isolation contexts were separable, the design
+space gets richer:
+
+- *Commit boundary without isolation.* Writes go straight to canonical
+  state but the *set* of them is atomic. Like a database batch
+  without read-isolation — useful if you trust other writers to
+  cooperate.
+- *Isolation without commit boundary.* A sandbox that's never meant
+  to commit — a preview, a what-if, a tutorial view. Currently you'd
+  use an action that's always discarded, which conflates "this isn't
+  a transaction" with "this is a failed transaction."
+- *One commit boundary spanning multiple isolation contexts.* Database
+  savepoints — sub-sandboxes within a transaction. Each sub can have
+  its own reads/writes; the outer transaction commits all of them
+  together.
+- *One isolation context shared by multiple commit boundaries.* Two
+  transactions sharing visibility but committing independently. This
+  is the *interesting* case for entanglement — see below.
+
+### The case that matters: shared isolation, independent commit
+
+The bottom case from the list above is the one that maps onto
+"entanglement" intuitions. Two concurrent transactions A and B
+sharing one isolation context means: A writes X → B sees X
+immediately (no snapshot isolation between them) → B reads X and
+writes Y → both commit/discard on their own schedule.
+
+This is closer to what Solid's lane-merge reaches for than pulse's
+nested actions are. Nested actions give shared isolation **and**
+coupled commit (the inner actions can't commit independently of the
+outer); shared-iso-with-independent-commit would let each transaction
+finish on its own schedule while still seeing each other's progress.
+
+But this is *not* free. Here's the catch.
+
+### Why the coupling isn't accidental
+
+Isolation is the mechanism that makes independent commit/discard
+*possible*. If transaction A's writes are visible to transaction B,
+and B reads them and writes Y based on them, what happens when A
+discards?
+
+Four options, none of them clean:
+
+- **Cascading discard.** B also rolls back. Now B's commit is
+  coupled to A's — defeating the "independent commit" point.
+- **Optimistic propagation.** Only B's writes that *causally
+  depended* on A's revert. Requires per-write dep tracking between
+  transactions; expensive; subtle ("did this read depend on A's
+  write, or coincidentally produce the same result?").
+- **Hard failure.** A discards; B's next read of an A-derived value
+  throws. User must catch and decide. Aggressive but visible.
+- **Phantom reads accepted.** B keeps its writes based on what A
+  wrote even though A's writes are gone. State corruption.
+
+The coupling between isolation and atomicity exists *because*
+isolation is what gives atomicity its bite. Without isolation,
+atomicity is meaningless — other transactions are already reading
+your half-done writes, so "discard" can't undo what they've already
+seen and decided on. With shared isolation across multiple
+transactions, atomicity stops composing.
+
+Every framework that tries to offer shared-visibility-with-
+independent-commit has to pick one of those four options. (See [Solid /
+React / Svelte rollback strategies](#solid-react-svelte-rollback-strategies)
+below.) None pick a clean answer because there isn't one.
+
+### What this means for pulse's choice
+
+Pulse's current 1:1 coupling between transaction and isolation is a
+*positive design choice*, not an accidental engineering decision. It
+sidesteps the cascade-discard problem by construction: each
+transaction has its own isolation context, so cross-transaction
+phantom reads can't happen.
+
+The cost: you can't have two concurrent transactions share visibility
+while committing independently. The only way to share visibility is
+to share a transaction (nested actions) — which means coupled commit.
+
+The alternative would be to disentangle and offer shared-isolation as
+a feature, accepting cascade-discard (or one of the other three) as
+the cost. The scenario walk above doesn't surface a strong use case
+for this — *most* multi-transaction patterns in apps want either
+independent isolation (default) or coupled commit (nested actions).
+The narrow case of "share visibility, commit independently" doesn't
+seem to come up often, and when it does, the application can usually
+restructure to nest the transactions or coordinate via explicit
+status queries.
+
+So the practical takeaway: name the conceptual overload, understand
+that it's a *coupling* not an *accident*, and accept the trade. The
+entanglement question reframes as "*how* should pulse express
+explicit coupling?" (already mostly answered by nested actions) and
+"*what* about within-coupling conflicts?" (open — Class D `'reject'`,
+etc.) — not as "*should* pulse offer shared-iso-independent-commit?"
+which the cascade-discard problem makes nearly unwinnable.
+
+### Solid / React / Svelte rollback strategies
+
+What does each framework actually do when a speculation that's been
+sharing visibility with another rolls back? Each picks one of the
+four bad options above — or sidesteps the question entirely by
+refusing to share visibility in the first place.
+
+**React modern — sidesteps the problem.** React doesn't really share
+visibility across concurrent transitions. Each transition builds its
+own WIP (work-in-progress) tree; the WIP is private until commit;
+when a transition's commit lands, it replaces the current tree. Two
+concurrent transitions live in two separate WIP trees, period.
+
+The closest thing React has to "shared visibility on rollback" is
+`useOptimistic` — but it's per-action, not cross-transition. The
+optimistic value is shown only while *that specific* action is
+in-flight; if the action fails (parent doesn't update the underlying
+source), the optimistic value disappears implicitly. There's no
+cross-transition visibility to worry about because there's no
+cross-transition visibility at all.
+
+For multi-step server-action partial failure: "no automatic
+compensation; manual try-catch and state-restoration is required."
+The application owns the rollback story.
+
+React's approach: **(option zero) refuse to share visibility.** Each
+transition is a private parallel future; pick one at commit; throw
+the others away. Mental model: GGPO rollback netcode — build a
+speculative future, throw it away if the world changes, rebuild from
+new state.
+
+**Solid 2.x — accepts phantom reads on plain writes; expects users
+to use explicit overlays for rollback.** Solid's lane-merge gives
+shared visibility (merged lanes inherit both halves' propagation
+paths and effect queues). When the merged lane's action throws,
+Solid's empirical behaviour (verified in
+[`../async/deep-dives/solid-2x.md`](../async/deep-dives/solid-2x.md)
+Finding 3) is:
+
+- *Plain `createSignal` writes inside the action are NOT rolled
+  back.* They committed as they happened; the throw doesn't revert
+  them.
+- *`createOptimistic` overlay writes ARE auto-reverted at transition
+  commit, unconditionally.* Even successful transitions revert
+  overlays — the "kept on success" appearance comes from the action
+  also writing the underlying source.
+
+The pattern Solid pushes users toward: split state into a "committed
+source" (plain `createSignal`) and an "optimistic overlay"
+(`createOptimistic` derived from the committed source). The action
+writes the overlay for immediate visibility; if it succeeds, also
+writes the committed source; if it fails, only the overlay reverts,
+which the user perceives as a rollback.
+
+Under this pattern, the cross-transaction rollback problem partially
+dissolves: plain writes don't get rolled back (the user accepts the
+"phantom read" / "no rollback" behaviour for them), and optimistic
+overlays are per-overlay state with their own lifecycle that doesn't
+couple across transactions.
+
+Solid's approach: **(option 3 + 4 hybrid) phantom reads accepted on
+plain writes; cascading revert on overlays only.** The cascade is
+opt-in via the overlay primitive, not implicit across all state.
+
+**Svelte 5 — isolates via fork(); cancels via OBSOLETE; no
+cross-batch failure cascade.** Svelte's `fork(fn)` (5.42+) is the
+closest thing to a user-level transition. It "reverts the underlying
+sources and keeps the mutations in the batch's `current` map only"
+— so the fork is *isolated* from other batches' view of sources.
+Sources see the pre-fork values; the fork's mutations live in
+the batch's map until commit.
+
+When a fork is discarded, the batch is simply dropped — sources
+never saw the mutations, so there's nothing to roll back. No
+cascade-discard problem because no cross-batch visibility.
+
+For cancellation of async work: Svelte uses two channels:
+- `OBSOLETE` — a newer run of the same async derived rejects older
+  in-flight runs. The underlying promise isn't aborted; its
+  resolution is just silently swallowed (handler early-returns on
+  `error === OBSOLETE`).
+- `STALE_REACTION` — effect-level abort.
+
+For batch-merge (same-source overlap): "whole-batch merge into
+earlier" — newer batches with overlapping sources merge into older
+still-running batches. This is supersession-style merging, not
+cross-visibility merging. The merged batch is one unit; failure
+is handled per-async-derived inside it.
+
+Svelte's approach: **(option zero, similar to React)** isolate
+forks; no cross-fork visibility; no cross-batch rollback cascade to
+worry about.
+
+**Summary: nobody solves the hard version.**
+
+| Framework | Shared visibility across transactions? | Rollback strategy |
+| --- | --- | --- |
+| React modern | No (private WIP trees) | Per-action `useOptimistic` overlay; vanishes if parent doesn't update source |
+| Solid 2.x | Yes (merged lanes) | Plain writes: no rollback. Optimistic overlays: auto-revert unconditionally |
+| Svelte 5 | No (fork isolates; batch merge is supersession) | Drop batch on discard; OBSOLETE silently swallows superseded async runs |
+| Pulse (current) | No (snapshot iso between siblings) | Drop scope on discard; explicit `.discard()` for supersession |
+
+Each framework either avoids shared visibility (React, Svelte, pulse)
+or accepts that plain writes don't roll back across the shared region
+(Solid). **Nobody offers true shared-visibility-with-independent-commit
+and clean rollback** because the semantics aren't recoverable.
+
+Pulse's choice — no shared visibility between concurrent transactions
+— matches React and Svelte. It loses the within-action-overlay
+ergonomic story Solid has, but pulse can recover that as a library
+pattern (a signal value type that splits into "committed" and
+"optimistic" via library code, without engine support).
+
+Cross-references:
+[`../async/deep-dives/solid-2x.md`](../async/deep-dives/solid-2x.md)
+(merged lane mechanics, `_overrideValue` overlay, `resolveOptimisticNodes`);
+[`../async/deep-dives/react-modern.md`](../async/deep-dives/react-modern.md)
+(WIP-tree, `useOptimistic`, priority lanes);
+[`../async/deep-dives/svelte-5.md`](../async/deep-dives/svelte-5.md)
+(`fork()`, batch merge, `OBSOLETE`).
 
 ## Cross-scenario observations
 

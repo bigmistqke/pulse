@@ -83,6 +83,22 @@ Three observations worth carrying forward:
 2. **Dim 3 is uniquely React's.** Both Svelte and Solid punt on input-priority entirely. If pulse wants to handle Dim 3, React is the only existing production reference point.
 3. **Optimistic state is genuinely different across all three** — dedicated hook (React), no API + auto-revert via reject (Svelte), typed primitive tied to action lifecycle (Solid). None are the same shape; each is a position pulse could lean toward.
 
+### Rollback strategies under shared visibility
+
+The four-options framing (cascading discard / optimistic propagation / hard failure / phantom reads accepted) — see [concurrent-divergence.md](./concurrent-divergence.md#why-the-coupling-isnt-accidental) — applied to the three production frameworks:
+
+| Framework | Shared visibility across concurrent transactions? | Rollback strategy |
+| --- | --- | --- |
+| React modern | No (private WIP trees per transition) | Per-action `useOptimistic` overlay; vanishes if parent doesn't update source |
+| Solid 2.x | Yes (merged lanes via union-find) | Plain writes: no rollback (phantom reads accepted). Optimistic overlays: auto-revert unconditionally at transition commit |
+| Svelte 5 | No (`fork()` isolates the batch; batch merge is supersession-style) | Drop the batch on discard; `OBSOLETE` silently swallows superseded async runs |
+
+**Nobody offers true shared-visibility-with-independent-commit and clean rollback** because the semantics aren't recoverable — every choice has costs. React and Svelte sidestep the problem by refusing shared visibility; Solid accepts no-rollback-on-plain-writes and pushes users to express rollback intent via explicit overlay primitives.
+
+Pulse's current choice (no shared visibility between concurrent transactions) matches React and Svelte. The within-action overlay ergonomics that Solid gets can be recovered in pulse as a library pattern (split signal value into committed + optimistic) without requiring engine-level shared visibility.
+
+See [concurrent-divergence.md](./concurrent-divergence.md#solid--react--svelte-rollback-strategies) for the detailed mechanics of each framework's rollback path; the deep-dives ([solid-2x.md](../async/deep-dives/solid-2x.md), [react-modern.md](../async/deep-dives/react-modern.md), [svelte-5.md](../async/deep-dives/svelte-5.md)) for source-level evidence.
+
 ### Decomposition — seven underlying concerns
 
 Looking at every mechanic in the comparison and asking _what problem is it
