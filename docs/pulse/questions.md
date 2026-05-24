@@ -32,6 +32,7 @@ either:
 - [Q12 — Body cleanups vs scope cleanups: composition and re-entrancy](#q12--body-cleanups-vs-scope-cleanups-composition-and-re-entrancy)
 - [Q13 — Optimistic surface ergonomics (sugar over speculation)](#q13--optimistic-surface-ergonomics-sugar-over-speculation)
 - [Q14 — Action prereqs / standing-state handle](#q14--action-prereqs--standing-state-handle)
+- [Q15 — Entanglement (Dim 4): overlapping speculations on shared state](#q15--entanglement-dim-4-overlapping-speculations-on-shared-state)
 
 ---
 
@@ -984,6 +985,48 @@ action = a reactive prerequisite `compute` → an imperative body invoked
 on demand**, with the body receiving the *resolved* prereq values.
 
 Not yet traced; this is a future trace target.
+
+### Q15 — Entanglement (Dim 4): overlapping speculations on shared state
+
+Status: **open — exploration in progress.** The full deep dive lives in
+its own document: [`concurrent-divergence.md`](./concurrent-divergence.md).
+This stub records the question and the current direction.
+
+**The question.** When two concurrent speculations both touch the same
+signal, what should happen? Pulse's implicit default (snapshot isolation
+between siblings + last-commit-wins on overlap) falls out of the chain-
+match mechanism for free, but it's not the right answer for every app
+pattern.
+
+**Current state of the exploration:**
+
+- **5 of 8 scenario classes (A, E, F, G, H) are handled by pulse defaults**
+  (last-wins, nested actions, `.discard()`, snapshot isolation,
+  microtask batching, out-of-scope).
+- **Class B (accumulation)** is mostly an application data-type concern
+  (CRDT-style signal values).
+- **Class C (precedence)** is application-level coordination via existing
+  handle queries + `.discard()`.
+- **Class D (read-dependent writes)** is the one genuinely unaddressed
+  case in pulse's defaults.
+
+The exploration is *scenario-first*: working backwards from real app
+patterns to whatever affordances they require, not picking API shapes
+up front. The doc surveys ~20 speculative patterns common in apps and
+catalogues ~12 distinct isolation requirements — most of which Solid's
+auto-merge would actively violate.
+
+**Not committing to specific affordances yet.** Earlier drafts proposed
+`{ onConflict: 'last-wins' | 'reject' }`, `openGroupScope()`, nested-
+action coupling, etc. These are *candidates* derived from the scenario
+walk, not pinned answers. The exploration continues.
+
+**Related:** the [four dimensions of transition](../async/CONTEXT.md#the-four-dimensions-of-transition)
+in the research lexicon (Q15 = Dim 4); [P4](./framings.md#p4--explicit-boundaries-over-implicit-pervasiveness)
+(explicit boundaries); [P5](./framings.md#p5--compose-dont-proliferate-in-either-direction)
+(compose, don't proliferate); [Q6](#q6--what-is-a-scope-as-a-value)
+(the scope-tree mechanism that supports parentless scopes for
+per-context isolation).
 
 ---
 
