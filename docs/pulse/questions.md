@@ -381,6 +381,13 @@ registered. A "speculation scope" is a `Scope` that has `writeSlot`
 calls populating its `writeSet`. Same primitive, different usage
 pattern.
 
+One small concession to the unification: `scope.kind: 'owner' |
+'speculative'` (per [Q6](#q6--what-is-a-scope-as-a-value)) is set at
+creation time so library-level invariants can be enforced (e.g.,
+[Q3](#q3--consumer-patterns) forbids `effect(...)` inside speculative
+scopes). The engine never branches on `kind`; the shape and behaviour
+of the scope are otherwise identical.
+
 **Sub-questions resolved:**
 
 - *Are scope identities first-class?* No — opaque, library-mediated.
@@ -400,6 +407,19 @@ Status: **resolved.** Consumer shape verified by
 [H1a-c trace](./scenario-traces.md#h1a-c--effect-under-speculation);
 microtask batching, dirty propagation, and effect ordering pinned by
 [P6](./framings.md#p6--pull-driven-reads-push-driven-consumers-no-explicit-flush).
+
+**Restriction: `effect(...)` is forbidden inside a speculative scope.**
+At effect-creation time, the library walks `currentScope` and its
+ancestors; if any has `kind === 'speculative'` (per
+[Q6](#q6--what-is-a-scope-as-a-value)'s `kind` field), the call throws.
+Rationale: effects-in-actions have no clean lifecycle story (commit
+versus discard requires different cleanup vehicles; see
+[Q12](#q12--body-cleanups-vs-scope-cleanups-composition-and-re-entrancy))
+and no demonstrated legitimate use case. Effects in *owner* scopes
+(component scopes, `createRoot`) remain fine — Policy α from
+[Q11](#q11--effect-chain-policy-chain-follows-owner-or-always-root_scope)
+applies there. If a real use case for in-action effects surfaces, this
+restriction can be lifted by resolving the H3b cleanup-vehicle question.
 
 **Candidate framing.** Consumers are *library code* over the engine's
 `subscribe` primitive plus a scheduler. Uniform shape:
@@ -622,6 +642,7 @@ interface Scope {
   readSet: Set<Node>               // for slot drop on close
   cleanups: Disposable[]           // fired on discard
   status: 'open' | 'committed' | 'discarded'
+  kind: 'owner' | 'speculative'    // library-level metadata; engine doesn't branch on it
 }
 
 interface Edge {
@@ -667,6 +688,14 @@ S.parent?.children.delete(S)
   guard on `status !== 'open'` before resuming async resumes (C2 trace).
 - *Write firing stays O(subs).* `node.subs` walked directly per write;
   chain-match runs engine-side (Q1 Model 1) per edge.
+- *`kind` is library metadata only.* Set by the library helper that opens
+  the scope (`action(...)` → `'speculative'`; component-scope helpers /
+  `createRoot` → `'owner'`). The engine never branches on it; it exists
+  so library invariants can be enforced — e.g., `effect(...)` throws if
+  any ancestor scope is `'speculative'` (per [Q3](#q3--consumer-patterns)
+  / H3b dissolution). The unification from [Q2](#q2--scopeowner-unification)
+  stays — the shape is one primitive; `kind` is a small flag for invariant
+  enforcement.
 
 **User-facing API:** opaque, library-mediated. Users get an *action
 handle* (`const h = action(...)`) exposing `.status`, `.commit()`,
@@ -873,9 +902,15 @@ instead of `S.edges`), and there's no demonstrated need for it. Users
 wanting an effect to survive past its enclosing scope create it in the
 outer scope directly.
 
-**Related:** [Q3](#q3--consumer-patterns) (consumer pattern depends on chain), [Q2](#q2--scopeowner-unification) (scope/owner
-unification — the chain question is "does subscription follow owner or
-not"), [Q6](#q6--what-is-a-scope-as-a-value) (the storage shape that makes α structural).
+**Scope narrowed by [Q3](#q3--consumer-patterns)'s restriction:**
+Policy α applies to effects in *owner* scopes. Effects in *speculative*
+scopes are forbidden at creation time (throw), so the H3b "bodyCleanups
+on commit" ambiguity doesn't arise.
+
+**Related:** [Q3](#q3--consumer-patterns) (consumer pattern + speculative-scope restriction),
+[Q2](#q2--scopeowner-unification) (scope/owner unification — the chain question is "does
+subscription follow owner or not"), [Q6](#q6--what-is-a-scope-as-a-value) (the storage shape that
+makes α structural).
 
 ### Q12 — Body cleanups vs scope cleanups: composition and re-entrancy
 
@@ -904,6 +939,10 @@ sealed by [Q6](#q6--what-is-a-scope-as-a-value)'s scope shape.
   closes children before firing own cleanups. Standard tree-disposal
   invariant; falls out of `S.children: Set<Scope>` traversal in
   `closeScope`.
+- *H3b — bodyCleanups on commit (surfaced by trace audit).* **Dissolved
+  by [Q3](#q3--consumer-patterns)'s restriction:** effects are forbidden
+  inside speculative scopes, so there are no body cleanups to fire on
+  commit. The cleanup-vehicle ambiguity disappears with the use case.
 
 **Related:** [Q2](#q2--scopeowner-unification) (scope/owner unification carries cleanup composition),
 [Q6](#q6--what-is-a-scope-as-a-value) (the scope shape that pins the cleanup home),

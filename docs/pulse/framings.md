@@ -692,6 +692,7 @@ interface Scope {
 	readSet: Set<Node<unknown>> // for slot drop on close
 	cleanups: Disposable[]
 	status: 'open' | 'committed' | 'discarded'
+	kind: 'owner' | 'speculative' // library metadata; gates invariants like Q3's effect-creation restriction
 }
 
 interface Edge {
@@ -739,7 +740,7 @@ const ROOT_SCOPE: Scope = {
 	parent: undefined, children: new Set(),
 	slots: new Map(), edges: new Set(),
 	writeSet: new Set(), readSet: new Set(),
-	cleanups: [], status: 'open',
+	cleanups: [], status: 'open', kind: 'owner',
 }
 
 function signal<T>(initial: T): [Node<T>, (v: T) => void] {

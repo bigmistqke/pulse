@@ -2115,18 +2115,20 @@ Position (ii) was tested and ruled out by the trace.
 
 ## H3 — cleanup chains across speculative effect runs
 
-A worked trace of two related cleanup-discipline scenarios:
+A worked trace of effect cleanup discipline. **The earlier H3a / H3b
+scenarios (effect created _inside_ an action body) are no longer
+applicable** — per [Q3](./questions.md#q3--consumer-patterns)'s
+restriction, calling `effect(...)` inside a speculative scope throws.
+The H3a/H3b text below is preserved as a record of how the trace
+surfaced the H3b cleanup-vehicle ambiguity that motivated the
+restriction; the operative verification trace is **H3b' (effect outside
+the action)**, which the resolved architecture handles cleanly.
 
-- **H3a:** an effect created _inside_ an action body, action then discards.
-  Tests: do the effect's body cleanups fire as part of the scope discard,
-  in the right order, and does the previously-scheduled re-run get suppressed?
-- **H3b:** an effect created _outside_ an action with an established
+The single remaining live scenario:
+
+- **H3b':** an effect created _outside_ an action, with an established
   cleanup from its initial run; action commits and triggers the effect.
   Tests: does the previous body's cleanup fire before the new body runs?
-
-H3 is the test that's been called out as "where scope/owner unification
-either holds or breaks." Spoiler: it holds, with one design call (effect
-chain policy for effects-inside-actions).
 
 ### Two kinds of cleanup, distinct in this stack
 
@@ -2167,7 +2169,7 @@ reacts to the action's intermediate state, and when the action closes
 
 This trace uses Policy α throughout.
 
-### Setup
+### Setup (historical — H3a/H3b)
 
 ```ts
 const [count, setCount] = signal(0)
@@ -2176,17 +2178,24 @@ const log: string[] = []
 
 const handle = action(function* () {
 	// outer scope S
-	effect(() => {
+	effect(() => {                          // ← THROWS under Q3 restriction
 		const c = get(count)
 		log.push(`Effect ran with count=${c}`)
 		onCleanup(() => teardowns.push(`cleanup at count=${c}`))
 	})
-	setCount(5) // triggers effect's edge
-	// (we'll vary what happens next per H3a/H3b)
+	setCount(5)
 })
 ```
 
-### H3a: action discards mid-flight
+**Under the resolved architecture, the `effect(...)` call above throws**
+at creation time: the library walks the scope chain, finds `S.kind ===
+'speculative'`, and raises. The H3a/H3b traces below were written
+before this restriction was adopted; they're preserved as the record
+that surfaced the cleanup-vehicle ambiguity which motivated the
+restriction. Skip to [H3b'](#h3b-previous-bodys-cleanup-fires-before-re-run-effect-outside-action)
+for the live verification trace.
+
+### H3a (historical): action discards mid-flight
 
 **Step 1: open scope `S`.** `openScope()` → `S = { parent: ROOT, children:
 ∅, slots: ∅, edges: ∅, writeSet: ∅, readSet: ∅, cleanups: [], status:
@@ -2321,7 +2330,7 @@ cleanup fired exactly once when the action discarded. No re-run occurred
 because the action discarded before the microtask drained. The action's
 speculative writes left no observable trace.
 
-### H3b: action commits — previous body's cleanup fires before re-run
+### H3b (historical): action commits — previous body's cleanup fires before re-run
 
 Same setup as H3a, but the action body returns normally instead of
 throwing.
@@ -2561,16 +2570,15 @@ flagged in H3b (the effect-disposer-on-commit vehicle).
    `onCleanup` only fires on discard. Users wanting "fire on both" use
    the surrounding pattern (try/finally) or an explicit `onSettle`.
 5. **Where does an in-action effect's disposer hook live so it runs on
-   both commit and discard?** Surfaced by H3b under Q12's resolution.
-   Candidates: (a) library-side `effect()` wires the disposer into a
-   structural cascade — "when this effect's owner scope closes (either
-   mode), tear down `bodyCleanups`"; (b) the engine's `closeScope`
-   gains a per-scope `onClose` list that runs in both modes (distinct
-   from the discard-only `cleanups`); (c) the structural-edge-removal
-   in step 3 of close detects "this was the effect's last edge → fire
-   bodyCleanups." Option (a) is most aligned with slim-engine; (b)
-   would require a tiny engine extension; (c) is implicit and
-   error-prone. Not yet picked.
+   both commit and discard?** **Dissolved.** The H3b audit surfaced
+   this as a real ambiguity. Resolution: in-action effects are now
+   forbidden ([Q3](./questions.md#q3--consumer-patterns)). The
+   `effect(...)` library helper throws if any ancestor scope has
+   `kind === 'speculative'`. No in-action effects means no disposer
+   ambiguity to resolve. If a legitimate use case for in-action effects
+   emerges, the restriction can be lifted and one of the original
+   candidates — (a) library-side cascade, (b) engine `onClose` list,
+   or (c) last-edge-removal trigger — picked then.
 
 ### Framings status after H3
 

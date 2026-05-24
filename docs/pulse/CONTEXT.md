@@ -132,6 +132,11 @@ distinguished only by where the consumer lives.
   Pulse's exploration unifies _scope_ and _owner_ (see
   [Q2](./questions.md#q2--scopeowner-unification)) — an "owner scope"
   is just a scope with no slot writes.
+- **`kind: 'owner' | 'speculative'`.** Library metadata set at scope
+  creation. `action(...)` opens speculative; component scopes /
+  `createRoot` open owner. Engine doesn't branch on it. Library uses
+  it to enforce invariants — most notably, `effect(...)` throws if any
+  ancestor scope is `'speculative'` (per [Q3](./questions.md#q3--consumer-patterns)).
 - **`ROOT_SCOPE`.** A parentless scope the library creates by default —
   the "outside any speculative context" world. Engine doesn't special-case
   it; multiple disjoint roots (per-tenant, per-document) are supported by
