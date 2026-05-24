@@ -32,6 +32,8 @@ expressed.
 - [F — Supersession (newer invalidates older)](#f--supersession-newer-invalidates-older)
 - [G — Independent flows that share a downstream dep](#g--independent-flows-that-share-a-downstream-dep)
 - [H — True collaboration](#h--true-collaboration)
+- [Speculation patterns in apps](#speculation-patterns-in-apps)
+- [Moments when isolation is essential](#moments-when-isolation-is-essential)
 - [Cross-scenario observations](#cross-scenario-observations)
 - [Affordances, derived bottom-up](#affordances-derived-bottom-up)
 - [What we genuinely don't know yet](#what-we-genuinely-dont-know-yet)
@@ -467,6 +469,391 @@ Pulse does *not* try to solve this at the reactivity layer.
 **Status:** ✓ correctly out of scope.
 
 ---
+
+## Speculation patterns in apps
+
+The A–H classes above are organized around what happens at the
+*overlap point* between two speculations. A complementary view: what
+do speculative flows actually *look like* in real apps? When do
+applications spawn speculative work in the first place, and what
+shape does the speculation take?
+
+Cataloguing the patterns matters because each pattern has its own
+isolation profile — when two instances of the same pattern run
+concurrently, sometimes they should remain independent and sometimes
+they should compose; either choice is wrong outside its proper
+context.
+
+### Inventory of speculative patterns
+
+**Request-response with optimism.** User performs an action; UI
+updates immediately to reflect the intent; a server round-trip
+confirms or rejects. The speculation lives for the duration of the
+round-trip. Examples: like/unlike, follow/unfollow, mark-read,
+toggle settings, vote.
+
+**Form save with rollback.** User fills a form (potentially long
+sequence of field edits); a submit operation packages the data and
+sends it. During the in-flight period, the new values are tentative.
+On rejection, restore the prior committed state. Examples: edit
+profile, compose comment, settings update.
+
+**Edit-in-place with autosave.** User edits a cell / field / inline
+text. On commit (blur, debounce timer, explicit save), the edit
+flushes to server. Until then, the edit is speculative locally —
+visible to the user, not yet committed. Examples: spreadsheet cells,
+rich text drafts, inline title editing.
+
+**Drag-and-drop reorder.** User drags an item; list reorders
+optimistically; drop commits via server call; rejection restores
+order. The speculation covers both the optimistic visual reorder
+and any derived state (counts, positions, indices).
+
+**Multi-step wizard / staged transaction.** User progresses through
+steps; each step's data is collected; only the final "finish"
+commits everything. Cancel at any step discards the accumulated
+state. Examples: checkout flow, onboarding, multi-page form, file
+upload with chunked confirmation.
+
+**Preview before commit.** User triggers a "preview" of a change
+that would take effect if applied. The preview is fully speculative;
+no actual commit unless user confirms. Examples: image filter
+preview, what-if scenarios, theme preview, recipe diff preview.
+
+**Paginated load.** User triggers loading the next page; new items
+appear speculatively while the fetch is in flight; rejection
+leaves the current view unchanged. Speculation here is additive
+(new content) rather than mutative.
+
+**Search-as-you-type.** Each keystroke triggers a tentative search;
+newer keystrokes supersede older. The tentative state is "here are
+results for query Q1" while query Q2 is in flight. By the time
+the user reads anything, only the latest matters.
+
+**Navigation / route change.** User clicks a link; the next route
+is loaded speculatively; until the route is "ready" (data loaded),
+the current route remains visible. Modern frameworks (React Router,
+TanStack Router) treat this as a transition.
+
+**Background sync / pull-fresh.** Periodic polling, websocket push,
+service worker push — speculative updates from a background process
+that may or may not be wanted, depending on whether foreground
+state has changed.
+
+**Compound batch operation.** "Select all → delete," "mark all
+read," "publish drafts." A set of operations applied atomically;
+all succeed or all roll back.
+
+**Per-context isolated state.** A panel, modal, route, or tenant
+has its own state that's independent from other panels/modals/etc.
+Each can have its own speculative operations. Examples: tabs in
+a tabbed UI, modals over a main view, per-user sessions, per-tenant
+workspaces in a multi-tenant app.
+
+**Animated transition.** UI is between two coherent states during
+an animation. The intermediate frames are speculative (you wouldn't
+ship the intermediate to logging/analytics); the destination state
+is what eventually commits.
+
+**Race-aware toggle.** Like the like/unlike pattern but where
+rapid succession is expected. User mashes a button; UI should
+reflect the most recent click; intermediate clicks shouldn't
+flicker.
+
+**Cross-component coordinated update.** Click in component A
+triggers updates in components B, C, D — they should all appear
+together (one render, one logical change). Not transactional in
+the "rollback" sense; coherence in the "shown together" sense.
+
+**Workflow with checkpoints.** Long-running operation where the
+user reviews intermediate states and explicitly advances. Each
+checkpoint is a commit; cancel reverts to the prior checkpoint.
+Examples: data import with preview, multi-stage approval, doc
+publishing pipeline.
+
+**Real-time collaboration.** Multiple users editing concurrently;
+each user's changes are speculative locally until network round-trip
+reconciles them with others'. Out of pulse's scope (handled at the
+data layer via CRDT/OT) but listed for completeness.
+
+**Undo / redo.** Operations can be replayed forward or reverted.
+Each operation is speculative until acknowledged irreversibly
+(persisted, sealed). The undo stack is a sequence of past
+speculations preserved for rollback.
+
+**Tutorial / guided flow.** User walks through interactive
+explanation; tutorial may manipulate UI state to demonstrate;
+the manipulation should not persist into the real app state.
+
+**Time-bounded speculation.** Speculation with a deadline ("this
+will commit in 5 seconds unless you cancel"); user can stop the
+auto-commit. Examples: undo-toast for delete, scheduled actions,
+"sending in 10s" patterns.
+
+**Conditional cascade.** Action A triggers; conditional on outcome,
+action B may follow. B's speculation is dependent on A having
+committed (or having failed in a specific way). Examples:
+"if approval succeeds, send notification"; "if file uploads,
+update reference."
+
+### Cross-cutting observation: speculation has many shapes
+
+The list above is non-exhaustive but covers what we'd expect to see
+in a typical interactive app. A few things to notice:
+
+- **Speculations vary wildly in lifetime.** A like-toggle lives
+  for ~200ms; a multi-step wizard might span minutes. A drag-and-drop
+  reorder commits at drop-time; a tutorial flow might never commit
+  at all.
+- **Speculations vary in scope of affected state.** A like-toggle
+  touches one signal; a wizard finalization commits dozens. A
+  preview affects only the UI; a paginated load adds to a list.
+- **Speculations vary in their relationship to the user's mental
+  model.** Some are "the user is *doing* a thing" (form submit);
+  others are "the system is *trying* a thing on the user's behalf"
+  (background sync); others are "what if?" (preview).
+- **Speculations vary in their commit triggers.** User-initiated
+  (button click), time-based (debounce), event-based (blur,
+  websocket push), procedural (end-of-action body return).
+
+This variability is why a one-size-fits-all coordination mechanism
+(like Solid's auto-merge) inevitably gets some scenarios wrong:
+the right answer depends on what kind of speculation you're in.
+
+## Moments when isolation is essential
+
+The complementary survey: when is it *critical* that two speculative
+truths do NOT share state, entangle, or merge? When would auto-coupling
+be a bug?
+
+This isn't just "the absence of an entanglement intent." It's
+positive: scenarios where the application's correctness depends on
+two speculative truths being kept apart.
+
+### Per-context speculations
+
+**Per-tab / per-pane state.** A user has two browser tabs open into
+the same app, each tab showing a different draft. The user is
+editing draft A in tab 1, draft B in tab 2. Each tab's edits should
+be isolated speculations — no merge between them, even if both
+touch a shared "user draft index" signal.
+
+**Per-route speculations.** Single-page app with multiple routes
+open in tabs / a multi-pane UI. User clicks "save" in route A's
+form; the save should not interact with an in-progress draft in
+route B's form, even if both write to a shared "drafts" collection.
+
+**Per-tenant in multi-tenant apps.** Tenant A's admin makes a
+change; tenant B's admin makes a change. They share the same app
+code and possibly the same backend, but their speculations must
+be tenant-isolated. Cross-tenant merging would be a data leak.
+
+**Per-user in shared-view apps.** Admin shadow-watching a user's
+session via screen-share; their speculative manipulations
+("preview this change") shouldn't affect the watched user's state.
+
+### Unrelated user flows
+
+**Background activity vs foreground action.** User is filling
+out a form (action A). A periodic background poll fetches updated
+notifications (action B). These should NOT entangle — failure of
+B shouldn't roll back A; A's commit shouldn't block on B's
+in-flight async. They share an observer ("any pending work?")
+but are not one logical change.
+
+**Two independent UI widgets.** A like-button on one card and a
+follow-button on another card, both clicked in rapid succession.
+Even if they share a downstream "activity feed" subscriber, they
+should commit independently. Discarding one should not affect the
+other.
+
+**Sidebar action vs main-content action.** User opens a contextual
+sidebar (action A: load related content). Meanwhile they continue
+interacting with main content (action B: edit field). These are
+independent.
+
+### Independent failure handling
+
+**Compensating transactions that fail independently.** Action A
+debits account X; action B credits account Y; in some systems,
+these are two separate compensating operations. If A succeeds but
+B fails, the system needs to handle each independently — not
+automatically roll both back.
+
+**Mixed-criticality speculations.** Action A is a critical save
+(user's typed message); action B is a non-critical analytics
+ping. B failing should not roll back A.
+
+**Optimistic UI with retry on failure.** Action A optimistically
+updates UI and fires server call. Action B (separate optimistic
+update) does the same for a different concern. A fails (network
+flakiness); user retries A. B should be unaffected by A's failure
+or retry.
+
+### Permission / authorization isolation
+
+**Different operations may have different permission requirements.**
+User attempts to "publish" (requires admin); user concurrently
+attempts to "edit" (requires editor). Publish fails due to
+permission; edit succeeds. Entangling them would block edit on
+publish's authorization check.
+
+**Per-resource permission scoping.** User edits resource R1 (owned
+by them); concurrently a system-driven update touches resource R2
+(owned by another user). If R1's edit succeeds and R2's update
+hits a permission boundary, they should resolve independently.
+
+### Time-bounded vs unbounded speculations
+
+**Speculations with deadlines.** An action with a TTL ("auto-commits
+in 5s"); another action without. Entangling them would couple their
+lifetimes — the deadline-bound one would either expire the other
+prematurely or be kept alive indefinitely.
+
+**Long-running vs short-running.** A 30s document export (action
+A); a 100ms button toggle (action B). They might both touch the
+same "active operations" indicator. Entanglement would force B to
+wait 30s or A to fail because B was discarded.
+
+### Application semantics: distinct intents
+
+**User intent vs automatic action.** User clicks "save" (action A);
+auto-save timer fires moments later (action B). These are different
+intents — the user's explicit save and the system's scheduled save.
+They shouldn't be coupled even though they both write the same
+field.
+
+**Different user gestures on same target.** User drag-edits a value
+(action A); user types a new value into the same field while drag
+is in flight (action B). These represent different intents at
+different moments; conflating them would be wrong (which intent
+wins?).
+
+**Replaying user history vs new actions.** User triggers an undo
+(action A: re-apply prior state); user makes a new edit (action B).
+The undo and the edit are distinct logical operations; entangling
+them would corrupt the undo semantics.
+
+### Privacy and information-flow isolation
+
+**Speculations involving private data.** User A is composing a
+private draft message; the framework should not allow user A's
+speculative state to leak into user B's view via shared computed
+state.
+
+**Sensitive intermediate values.** During a password change,
+intermediate values (current password, new password) are
+speculative until the change commits. They should never enter
+shared subscribers or be visible to background sync.
+
+**Per-cohort A/B test states.** Cohort A is experimentally seeing
+feature X enabled; cohort B is not. Speculative interactions in
+the experiment shouldn't bleed into the control group's view.
+
+### Architectural isolation boundaries
+
+**Module / component boundaries.** Two independent feature modules
+(billing, settings) each manage their own speculative flows. Entangling
+their speculations would couple modules that were architecturally
+designed to be independent.
+
+**Embedded subapps / micro-frontends.** An iframe-like embedded
+subapp has its own state model; its speculations are confined to
+itself. The parent shell's speculations are confined to the shell.
+
+**Server-driven vs client-driven speculations.** A speculation
+originating from a server push (e.g., remote update suggestion)
+vs one originating from a local user click. These are conceptually
+different and shouldn't auto-couple — they have different
+trust/authority levels.
+
+### Same-target but distinct logical operations
+
+**Two users in a collaborative app touching the same field.**
+Even with CRDT data layers, the two users' speculations are
+*structurally separate* until reconciled. The framework should not
+auto-merge them at the reactive layer.
+
+**Multiple-of-the-same gestures.** User clicks "favorite" twice
+on the same item rapidly. Each click is a distinct logical
+operation (intent to toggle); they should resolve via supersession
+or replacement, not merge.
+
+**Retry of a failed operation.** User retries a failed save; the
+retry is a *new* speculation, not a continuation of the failed
+one. The failed one's residual state must not entangle with the
+retry's fresh state.
+
+### The crisp principle that emerges
+
+Two speculations should be **kept apart** (no sharing, no entangling,
+no merging) when:
+
+1. They originate from **different intents** (different users,
+   different gestures, different system triggers).
+2. They affect **independent failure domains** (one failing
+   shouldn't roll back the other).
+3. They live in **different lifetimes** (deadline vs unbounded,
+   short vs long).
+4. They cross **boundary lines** (per-tenant, per-route, per-user,
+   per-module, per-trust-level).
+5. They represent **competing intents on the same target** —
+   the user's most recent gesture should win via supersession,
+   not via blending.
+
+And conversely, two speculations might be **safely combined** only
+when:
+
+1. They are **two parts of one logical operation** (the user is
+   doing one thing, expressed as multiple writes).
+2. They share the **same failure domain** (succeed-together or
+   rollback-together is the desired semantic).
+3. They share the **same lifetime** (one user gesture, one
+   request, one wizard step).
+4. They are **structurally co-located** (same module, same
+   intent, same trust level).
+
+The application knows which case applies; the framework cannot
+infer it from the shape of the dep graph (Solid's mistake). The
+framework's job is to make the **default** (kept apart) match the
+overwhelmingly common case, and to provide an **opt-in** path
+(some affordance, TBD) for the rarer case where combination is
+genuinely wanted.
+
+### What this implies for pulse, scenario-only
+
+Stepping back from any specific affordance:
+
+- **Pulse's default of "isolate sibling speculations" is correct.**
+  The isolation list above is much longer than the combination
+  list; isolation should be the cheap, automatic default.
+- **The architecture must NOT auto-couple based on structural
+  overlap.** Solid's union-find approach is wrong for the majority
+  of the isolation cases listed above — auto-coupling unrelated
+  speculations that happen to share a downstream sub is a positive
+  bug, not a tradeoff.
+- **The architecture MUST support explicit boundary declarations.**
+  Per-tenant, per-route, per-tab, per-cohort isolation needs to be
+  expressible. (Pulse's scope tree with multiple root-style parentless
+  scopes — from Q6 — already supports this.)
+- **Combination, when wanted, needs to be opt-in and code-structural.**
+  The user makes it clear in code that "these two are part of one
+  logical change" by composing them in a way the framework can
+  recognize without inferring. (Nested actions express this
+  structurally; the form of opt-in for the post-hoc case is
+  unresolved.)
+- **Conflict resolution within an isolated speculation is a separate
+  question.** Most isolation cases above involve speculations that
+  don't conflict on shared signals at all (different signals,
+  different scopes). Conflict-on-shared-signal is a subset; even
+  in that subset, the right answer depends on the kind of
+  speculation (replacement, accumulation, precedence — see A/B/C
+  classes above), and the framework can't pick a single default that
+  covers all of them.
+
+The scenario walk reinforces the architectural choice already in
+place — and surfaces a longer list of legitimate isolation
+requirements than the original A–H survey alone did.
 
 ## Cross-scenario observations
 
