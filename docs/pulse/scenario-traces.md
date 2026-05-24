@@ -828,35 +828,47 @@ const handle = effect(() => {
 **Step 0: effect creation, initial run.**
 
 - `effect(fn)` runs. `getCurrentScope()` → `ROOT_SCOPE` (top-level).
-- `createNode<void>(fn)` → engine creates `effectNode`.
+- `createNode<void>(fn)` → engine creates `effectNode = { defaultRecipe: fn,
+  subs: ∅ }`.
 - `runBody()`:
-  - `pushScope(ROOT_SCOPE)` (no-op; already there).
-  - `pushTracker(getOrCreateSlot(effectNode, ROOT_SCOPE))` → creates
-    `slot_E_R` = { recipe: fn, deps: [], subs: [] }. Tracker now points at it.
+  - `pushScope(ROOT_SCOPE)` (no-op; already there). Create
+    `slot_E_R = { recipe: fn, deps: [] }` and `ROOT.slots.set(effectNode,
+    slot_E_R)`. Push `currentTracker = slot_E_R`.
   - Invoke `fn`:
     - `get(count)`:
-      - `getCurrentScope()` → `ROOT_SCOPE`. `currentTracker` → `slot_E_R`.
-      - `link(count, slot_E_R)`.
-        - Engine: `edge1` = { source: count, target: `slot_E_R` }. Add to
-          `count`'s outgoing edges; add to `slot_E_R.deps`. (Chain at fire
-          time will be `chainFor(ROOT_SCOPE) = [ROOT_SCOPE]`.)
-      - `invoke(count, ROOT_SCOPE)`:
-        - Engine: `count.slots.get(ROOT_SCOPE)` miss. Create `slot_C_R`
-          = { recipe: () => 0, deps: [], subs: [edge1] }. Invoke → 0.
-          `slot_C_R.cached = 0`. Return 0.
-    - Body: `value = 0`. `effectRuns = 1`. `console.log("Effect runs: 1,
-value: 0")`. Returns undefined.
-  - `lastCleanup = undefined`. Pop tracker. Pop scope.
-- `subscribe(effectNode, handler)`. Engine registers handler.
+      - `currentScope = ROOT`. `ROOT.readSet.add(count)`.
+        `currentTracker = slot_E_R` → `link(count, slot_E_R)`:
+        - `edge1 = { source: count, target: slot_E_R, targetScope: ROOT }`.
+          `count.subs.add(edge1)`; `ROOT.edges.add(edge1)`;
+          `slot_E_R.deps.push(edge1)`.
+      - `invoke(count, ROOT)`: miss. Create `slot_C_R = { recipe: () => 0,
+        deps: [] }`. Run recipe → `0`. `slot_C_R.cached = 0`.
+        `ROOT.slots.set(count, slot_C_R)`. Return `0`.
+    - Body: `value = 0`. `effectRuns = 1`. Returns undefined.
+  - `lastCleanup = undefined`. Pop tracker.
+- `subscribe(effectNode, handler)`. Library registers handler.
+
+Per [Q11](./questions.md#q11--effect-chain-policy-chain-follows-owner-or-always-root_scope)
+Policy α: because the effect was created in `ROOT_SCOPE`, its tracking
+edges live in `ROOT.edges` with `targetScope = ROOT`. When `ROOT_SCOPE`
+ever closes (it doesn't, by library convention), the edges would die
+structurally.
 
 **State after Step 0:**
 
 ```
-count.slots = { ROOT_SCOPE: { recipe: () => 0, cached: 0, deps: [], subs: [edge1] } }
-effectNode.slots = { ROOT_SCOPE: { recipe: fn, cached: undefined,
-                                    deps: [edge1], subs: [] } }
-edge1 = { source: count, target: effectNode.slots[ROOT_SCOPE] }
-        // chain at fire time: [ROOT_SCOPE]
+count.subs      = { edge1 }
+effectNode.subs = ∅
+
+ROOT.slots      = { count → slot_C_R(cached: 0),
+                    effectNode → slot_E_R(deps: [edge1]) }
+ROOT.edges      = { edge1 }
+ROOT.readSet    = { count }
+ROOT.writeSet   = ∅
+
+edge1 = { source: count, target: slot_E_R, targetScope: ROOT }
+        // chainFor(ROOT) = [ROOT]
+
 effectRuns = 1
 ```
 
@@ -869,27 +881,30 @@ action(function* () {
 // expectation: effect does NOT run inside the action
 ```
 
-**Step 1a-1: open scope.** `openScope()` → `S`. Push ambient. Begin driving
-generator.
+**Step 1a-1: open scope.** `openScope()` → `S = { parent: ROOT, children: ∅,
+slots: ∅, edges: ∅, writeSet: ∅, readSet: ∅, cleanups: [], status: 'open' }`.
+`ROOT.children.add(S)`. Push ambient. Begin driving generator.
 
 **Step 1a-2: `setCount(5)` inside the action.**
 
 - Library: setter runs. `getCurrentScope()` → `S`. `writeSlot(count, S,
-{ recipe: () => 5, cached: 5, deps: [], subs: [] })`.
-- Engine: walk `count`'s outgoing edges, evaluating chain-match for
-  `writeScope = S`:
-  - `edge1`: target scope `ROOT_SCOPE` → chain `[ROOT_SCOPE]`.
-    `chain.indexOf(S)` → `-1`. **Don't fire.** ✓
-- Set `count.slots[S]` = new slot.
+  { recipe: () => 5, cached: 5, deps: [] })`. `S.writeSet.add(count)`.
+  `S.slots.set(count, slot_C_S)`.
+- Engine fires chain-match for each `edge ∈ count.subs`:
+  - `edge1`: `chainFor(ROOT) = [ROOT]`. `writeScope = S` not in chain.
+    **Don't fire.** ✓
 
 **State after Step 1a-2:**
 
 ```
-count.slots = {
-  ROOT_SCOPE: cached 0,    subs: [edge1],
-  S:          cached 5,    subs: [],
-}
-effectNode.slots[ROOT_SCOPE] unchanged. effectRuns = 1.
+count.subs   = { edge1 }   (unchanged)
+
+S.slots      = { count → slot_C_S(cached: 5) }
+S.writeSet   = { count }
+S.readSet    = ∅
+S.edges      = ∅
+
+ROOT unchanged. effectRuns = 1.
 ```
 
 **Step 1a-3: generator returns.** _(we'll cover commit in H1b.)_
@@ -910,19 +925,32 @@ Continuing from the H1a state, with the generator returning normally:
 
 **Step 1b-1: `closeScope(S, 'commit')`.**
 
-Library promotes `count.slots[S]` to `count.slots[ROOT_SCOPE]`:
+Per [Q10](./questions.md#q10--commit-as-transaction-ordering-atomicity-deferred-fires):
+commit is a deferred-fires region.
 
-- `writeSlot(count, ROOT_SCOPE, { recipe: () => 5, cached: 5, … })`.
-- Engine: walk `count`'s outgoing edges with `writeScope = ROOT_SCOPE`:
-  - `edge1`: target scope `ROOT_SCOPE` → chain `[ROOT_SCOPE]`.
-    `chain.indexOf(ROOT_SCOPE)` → `0`. No more-specific in chain. **Fire.**
-  - Engine: invalidate `slot_E_R` (clear `cached`, mark "dirty" — set a
-    flag or use `cached === undefined` as the signal).
-  - Engine: emit `SlotChangeEvent { kind: 'invalidated', node: effectNode,
-scope: ROOT_SCOPE }` to subscribers of `effectNode`.
-- Library: drop `count.slots[S]`. (No edges had it as source; nothing to
-  unlink on the S side.)
-- `S.status = 'committed'`. Pop ambient back to `ROOT_SCOPE`.
+1. **Open deferred-fires region.** Subsequent fires queue.
+
+2. **Promote writeSet.** `S.writeSet = { count }`. Promote:
+   `writeSlot(count, ROOT, { recipe: () => 5, cached: 5, deps: [] })`.
+   `ROOT.slots.set(count, slot_C_R_new)`. `ROOT.writeSet.add(count)`.
+   Fire chain-match for each `edge ∈ count.subs`:
+   - `edge1`: `chainFor(ROOT) = [ROOT]`. `writeScope = ROOT` at index 0;
+     no more-specific check needed. **Queue fire** for `slot_E_R`.
+     Effect's subscribe-handler receives the invalidation; calls
+     `scheduleMicrotask(runBody)` — the per-Node scheduled flag dedups
+     subsequent calls within this turn.
+
+3. **Walk `S.edges`, remove from `node.subs`.** `S.edges = ∅` — nothing.
+
+4. **Drop S's slots.** `S.readSet ∪ S.writeSet = { count }`.
+   `S.slots.delete(count)`. `S.slots = ∅`.
+
+5. **Close child scopes.** None.
+
+6. **Drain deferred-fires region.** One queued fire for `slot_E_R`;
+   already scheduled.
+
+7. `S.status = 'committed'`. `ROOT.children.delete(S)`. Pop ambient.
 
 **Step 1b-2: microtask runs scheduler.**
 
@@ -931,28 +959,28 @@ The effect's `subscribe` handler received the invalidation event in Step
 
 - `runBody()`:
   - `lastCleanup?.()` — none yet.
-  - `pushScope(ROOT_SCOPE)`. `pushTracker(slot_E_R)`.
-  - **Important:** before re-invoking, the library should _unlink_ `slot_E_R`'s
-    old `deps` (so they get rebuilt from scratch). Same discipline as r3's
-    `recompute`. Drop `edge1` from `slot_E_R.deps` and from `count`'s outgoing
-    index. (`subs` on `count` side: `edge1` removed.)
+  - `pushScope(ROOT)`. `pushTracker(slot_E_R)`.
+  - **Unlink stale deps.** `slot_E_R.deps = [edge1]`. Remove `edge1`
+    from `count.subs` and from `ROOT.edges`. Reset `slot_E_R.deps = []`.
   - Invoke `fn`:
     - `get(count)`:
-      - `link(count, slot_E_R)` → creates `edge1'` (new identity, same
-        shape). Add to `count`'s outgoing, add to `slot_E_R.deps`.
-      - `invoke(count, ROOT_SCOPE)`:
-        - Engine: `count.slots[ROOT_SCOPE]` exists with `cached: 5`. Return 5.
-    - Body: `value = 5`. `effectRuns = 2`. `console.log("Effect runs: 2,
-value: 5")`. Returns undefined.
+      - `ROOT.readSet.add(count)` — already present.
+      - `link(count, slot_E_R)` → creates `edge1'` (fresh identity):
+        `{ source: count, target: slot_E_R, targetScope: ROOT }`.
+        `count.subs.add(edge1')`; `ROOT.edges.add(edge1')`;
+        `slot_E_R.deps.push(edge1')`.
+      - `invoke(count, ROOT)`: hit, return cached `5`.
+    - Body: `value = 5`. `effectRuns = 2`. Returns undefined.
   - `lastCleanup = undefined`. Pop tracker. Pop scope.
 
 **State after Step 1b-2:**
 
 ```
-count.slots = { ROOT_SCOPE: cached 5, subs: [edge1'] }
-effectNode.slots = { ROOT_SCOPE: cached undefined, deps: [edge1'] }
-edge1' = { ... (same shape as edge1, fresh identity) }
-effectRuns = 2
+count.subs   = { edge1' }
+ROOT.slots   = { count → slot_C_R_new(cached: 5),
+                 effectNode → slot_E_R(deps: [edge1']) }
+ROOT.edges   = { edge1' }
+effectRuns   = 2
 ```
 
 ✓ The effect fired _exactly once_ on commit, with the committed value `5`.
@@ -964,21 +992,28 @@ Same setup as H1a (post Step 0 state). The action body throws (or
 
 **Step 1c-1: `closeScope(S, 'discard')`.**
 
-- Engine: drop slots tagged `S`. Walk `count.slots[S].subs` (empty); delete
-  `count.slots[S]`. No edges to unlink on the S side.
-- Engine: fire `S.cleanups` (none).
-- `S.status = 'discarded'`. Pop ambient.
-- **No write to `count.slots[ROOT_SCOPE]` happens.** The chain-match for
-  the effect's edge is never tested against a fire-worthy write.
-- Subscribers receive no events. The microtask scheduler queues nothing.
+1. Open deferred-fires region (invariant uniformity; no fires expected).
+2. Skip promotion (discard mode — `S.writeSet` is not promoted).
+3. Walk `S.edges` (∅), remove from `node.subs` — nothing.
+4. Drop `S.slots` entries for `S.readSet ∪ S.writeSet = { count }`.
+   `S.slots.delete(count)`. No edges had `slot_C_S` as a target.
+5. Close child scopes (none).
+6. Drain region (empty).
+7. Fire `S.cleanups` per [Q12](./questions.md#q12--body-cleanups-vs-scope-cleanups-composition-and-re-entrancy)
+   (none in this trace).
+8. `S.status = 'discarded'`. `ROOT.children.delete(S)`. Pop ambient.
+
+**No write to `ROOT.slots[count]` happens.** The chain-match for the
+effect's edge is never tested against a fire-worthy write. Subscribers
+receive no events; the microtask scheduler queues nothing.
 
 **State after Step 1c-1:**
 
 ```
-count.slots = { ROOT_SCOPE: cached 0, subs: [edge1] }      // unchanged from initial
-effectNode.slots[ROOT_SCOPE] cached undefined (or 0 — never re-invoked)
-edge1 still alive (unchanged)
-effectRuns = 1                                              // never advanced
+count.subs   = { edge1 }                  // unchanged from Step 0
+ROOT.slots   = { count → slot_C_R(cached: 0),
+                 effectNode → slot_E_R(deps: [edge1]) }
+effectRuns   = 1                          // never advanced
 ```
 
 ✓ The effect _never_ fired during or after the action. The discard cleanly
@@ -1010,12 +1045,15 @@ handler)` for the engine-side notification, `scheduleMicrotask(...)` for
    is a Node whose consumer schedules a DOM update on invalidation. Same
    shape as `effect`; the scheduler hands off to the DOM updater instead
    of running a side-effecting body. **I1 falls out of H1.**
-6. **Scope/owner unification holds.** The effect's ambient scope at
-   creation = its owner. Disposing the scope disposes the effect
-   (cleanup fires, edges unlink). H2 (effect inside action body) would
-   work the same way: the effect's scope is the action's scope, chain
-   is `[action, ROOT_SCOPE]`, so writes to the action's scope DO fire
-   the effect — which is what you want for effects inside actions.
+6. **Scope/owner unification holds, structurally via Q11 Policy α.** The
+   effect's ambient scope at creation = its owner; its tracking edges
+   live in `ownerScope.edges` with `targetScope = ownerScope`. When the
+   owner closes, the engine walks `S.edges`, removes each from
+   `node.subs`, and the effect's reactivity dies. H2 (effect inside
+   action body) works the same way: the effect's scope is the action's
+   scope `S`, so edges have `targetScope = S` and `chainFor(S) =
+   [S, ROOT]` — writes to `S` DO fire the effect, which is what you want
+   for effects inside actions.
 
 ### Consumer-pattern abstraction (Q3 answered)
 
