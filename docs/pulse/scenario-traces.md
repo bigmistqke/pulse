@@ -2804,82 +2804,108 @@ action(function* () {
 
 ### Initial state (after effect registration)
 
-The effect's body ran once at registration, forming edges:
+The effect's body ran once at registration under `ROOT_SCOPE`, forming
+edges. Per [Q6](./questions.md#q6--what-is-a-scope-as-a-value),
+slots live on the scope and `node.subs` is an edge index:
 
 ```
-count.slots = { ROOT: { cached: 0, subs: [edge_C_D, edge_C_E] } }
-doubled.slots = { ROOT: { recipe: () => get(count)*2, cached: 0,
-                          deps: [edge_C_D], subs: [edge_D_E] } }
-effect.slots = { ROOT: { recipe: body, cached: undefined,
-                         deps: [edge_C_E, edge_D_E] } }
+count.subs   = { edge_C_D, edge_C_E }
+doubled.subs = { edge_D_E }
+effect.subs  = ∅
 
-edge_C_D = { source: count, target: doubled.slot[ROOT] }
-edge_C_E = { source: count, target: effect.slot[ROOT] }
-edge_D_E = { source: doubled, target: effect.slot[ROOT] }
+ROOT.slots   = { count   → slot_C_R(cached: 0, deps: []),
+                 doubled → slot_D_R(cached: 0, deps: [edge_C_D]),
+                 effect  → slot_E_R(cached: undefined,
+                                    deps: [edge_C_E, edge_D_E]) }
+ROOT.edges    = { edge_C_D, edge_C_E, edge_D_E }
+ROOT.readSet  = { count, doubled }   (effect body read both)
+ROOT.writeSet = ∅                   (effect was registered, no write yet)
+
+edge_C_D = { source: count,   target: slot_D_R, targetScope: ROOT }
+edge_C_E = { source: count,   target: slot_E_R, targetScope: ROOT }
+edge_D_E = { source: doubled, target: slot_E_R, targetScope: ROOT }
 
 observations = [{ c: 0, d: 0 }]
 ```
 
 ### Step 1: open scope
 
-`openScope()` → `S = { parent: ROOT_SCOPE, cleanups: [], status: 'open' }`.
+`openScope()` → `S = { parent: ROOT, children: ∅, slots: ∅, edges: ∅,
+writeSet: ∅, readSet: ∅, cleanups: [], status: 'open' }`.
+`ROOT.children.add(S)`.
 
 ### Step 2: `setCount(5)` inside the action
 
-- `getCurrentScope()` → `S`. `writeSlot(count, S, { recipe: () => 5, cached:
-5, wasWritten: true, deps: [], subs: [] })`.
-- Engine walks `count`'s outgoing edges with `(count.slots, S)`:
-  - `edge_C_D`'s chain `[ROOT_SCOPE]`. `chain.indexOf(S) =
--1`. **Don't fire.**
-  - `edge_C_E`: chain `[ROOT_SCOPE]` (same). **Don't fire.**
-- Set `count.slots[S] = newSlot`.
+- `getCurrentScope()` → `S`. `writeSlot(count, S, { recipe: () => 5,
+  cached: 5, deps: [] })`. `S.writeSet.add(count)`. `S.slots.set(count,
+  slot_C_S)`.
+- Engine fires chain-match for each `edge ∈ count.subs`:
+  - `edge_C_D`: `chainFor(ROOT) = [ROOT]`. `writeScope = S` not in chain.
+    **Don't fire.**
+  - `edge_C_E`: same. **Don't fire.**
 
 **State after Step 2:**
 
 ```
-count.slots = { ROOT: cached 0, S: cached 5 (wasWritten) }
-doubled.slots[ROOT] unchanged (cached 0)
-effect.slots[ROOT] unchanged
-observations still [{ c: 0, d: 0 }]
+count.subs    = { edge_C_D, edge_C_E }   (unchanged)
+S.slots       = { count → slot_C_S(cached: 5) }
+S.writeSet    = { count }
+S.readSet     = ∅
+S.edges       = ∅
+ROOT unchanged. observations still [{ c: 0, d: 0 }].
 ```
 
 Committed state untouched per H1a-c (the chain doesn't include `S`).
 
 ### Step 3: action returns. `closeScope(S, 'commit')`
 
-Per [Q10](./questions.md#q10--commit-as-transaction-ordering-atomicity-deferred-fires), open a deferred-fires region (for consumer-side scheduling
-deduplication). Per [Q9](./questions.md#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally), promote only write-populated `S` slots:
-`count.slots[S]` is wasWritten.
+Per [Q10](./questions.md#q10--commit-as-transaction-ordering-atomicity-deferred-fires):
+commit is a deferred-fires region. Per
+[Q9](./questions.md#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally):
+promote `S.writeSet` only; drop slots in `S.readSet ∪ S.writeSet`.
 
-**`writeSlot(count, ROOT_SCOPE, { recipe: () => 5, cached: 5, wasWritten:
-true })`:**
+1. **Open deferred-fires region.** Subsequent fires queue.
 
-- Engine walks `count`'s outgoing edges with `(count.slots, ROOT_SCOPE)`:
-  - `edge_C_D`: chain `[ROOT_SCOPE]`. writeScope=ROOT, writeIdx=0,
-    no more-specific. **Fire.** Mark `doubled.slot[ROOT]` dirty (clear
-    cached). Doubled's consumer-pattern (Computed-cache-propagate)
-    cascades dirty to subs:
-    - `doubled.slot[ROOT].subs = [edge_D_E]`. Mark `effect.slot[ROOT]`
-      dirty. Effect's consumer (scheduler) wants to
-      `scheduleMicrotask(runBody)` — but we're in a deferred-fires region.
-      The scheduler queues the schedule-intent.
-  - `edge_C_E`: same chain. **Fire.** Mark `effect.slot[ROOT]` dirty
-    (already dirty — no-op). Scheduler attempts schedule again →
-    deduplicated by [Q10](./questions.md#q10--commit-as-transaction-ordering-atomicity-deferred-fires).
+2. **Promote writeSet.** `S.writeSet = { count }`. Promote:
+   `writeSlot(count, ROOT, { recipe: () => 5, cached: 5, deps: [] })`.
+   `ROOT.slots.set(count, slot_C_R_new)`. `ROOT.writeSet.add(count)`.
+   Fire chain-match for each `edge ∈ count.subs`:
+   - `edge_C_D`: `chainFor(ROOT) = [ROOT]`. `writeScope = ROOT` at index 0;
+     no more-specific check needed. **Queue fire** for `slot_D_R`. The
+     consumer pattern attached to `slot_D_R` (Computed-cache-propagate)
+     marks it dirty and walks `doubled.subs = { edge_D_E }` to cascade
+     dirty to `slot_E_R`. The effect's scheduler tries to
+     `scheduleMicrotask(runBody)` — but we're in a deferred-fires region,
+     and the per-Node "scheduled" flag dedups.
+   - `edge_C_E`: same chain. **Queue fire** for `slot_E_R`. Mark dirty
+     (already dirty — no-op). Scheduler tries again — deduplicated.
 
-**Drop `count.slots[S]`:** walk `slot.subs` (none). Delete.
+3. **Walk `S.edges`, remove from `node.subs`.** `S.edges = ∅` — nothing
+   to remove.
 
-**Close deferred-fires region:** drain. Effect's `runBody` is scheduled
-**once** (microtask).
+4. **Drop S's slots.** `S.readSet ∪ S.writeSet = { count }`.
+   `S.slots.delete(count)`. `S.slots = ∅`.
 
-`S.status = 'committed'`. Pop ambient.
+5. **Close child scopes.** None.
+
+6. **Drain deferred-fires region.** Dedupe by `(node, targetSlot)`. One
+   logical re-run scheduled: `runBody` for the effect. (Both `edge_C_E`
+   and the cascade through `edge_D_E` target `slot_E_R`; dedupe collapses
+   them.)
+
+7. `S.status = 'committed'`. `ROOT.children.delete(S)`. Pop ambient.
 
 **State after Step 3:**
 
 ```
-count.slots = { ROOT: cached 5 (wasWritten) }
-doubled.slots = { ROOT: dirty, cached cleared, deps: [edge_C_D] }
-effect.slots = { ROOT: dirty, deps: [edge_C_E, edge_D_E] }
+count.subs   = { edge_C_D, edge_C_E }
+doubled.subs = { edge_D_E }
+
+ROOT.slots = { count   → slot_C_R_new(cached: 5),
+               doubled → slot_D_R(cached: undefined, dirty,
+                                  deps: [edge_C_D]),
+               effect  → slot_E_R(dirty, deps: [edge_C_E, edge_D_E]) }
+ROOT.writeSet = { count }
 microtask queue: [runBody]
 observations still [{ c: 0, d: 0 }]
 ```
@@ -2892,27 +2918,27 @@ portion) completes.
 
 - Guard: `effect.disposed === false`. Proceed.
 - Fire previous bodyCleanups (none in this trace).
-- Unlink stale deps: `effect.slot[ROOT].deps = [edge_C_E, edge_D_E]`.
-  Unlink each — remove from `count.slots[ROOT].subs` and from
-  `doubled.slots[ROOT].subs`. Set `deps = []`.
-- Push tracker = `effect.slot[ROOT]`. Push scope = `ROOT_SCOPE`.
+- Unlink stale deps: `slot_E_R.deps = [edge_C_E, edge_D_E]`. For each,
+  remove from `node.subs` and from `ROOT.edges`. Set `deps = []`.
+- Push `currentTracker = slot_E_R`, `currentScope = ROOT`.
 - Invoke body:
   - `get(count)`:
-    - `link(count, effect.slot[ROOT])` →
-      `edge_C_E'` (fresh identity).
-    - `invoke(count, ROOT_SCOPE)`: cached 5. Return.
+    - `ROOT.readSet.add(count)`.
+    - `link(count, slot_E_R)` →
+      `edge_C_E' = { source: count, target: slot_E_R, targetScope: ROOT }`.
+      `count.subs.add(edge_C_E')`; `ROOT.edges.add(edge_C_E')`.
+    - `invoke(count, ROOT)`: hit. Return cached `5`.
   - `c = 5`.
   - `get(doubled)`:
-    - `link(doubled, effect.slot[ROOT])` →
-      `edge_D_E'`.
-    - `invoke(doubled, ROOT_SCOPE)`: **slot is dirty**. Recompute.
-      - Push tracker = `doubled.slot[ROOT]`. Push scope. Unlink doubled's
-        stale deps. Run recipe.
-      - Recipe: `get(count) * 2`. Inside: `link(count, …, doubled.slot[ROOT])`
-        → `edge_C_D'`. `invoke(count, ROOT)` → 5. Return.
-      - Recipe returns `5 * 2 = 10`. Cache `doubled.slot[ROOT].cached = 10`.
-        Pop tracker.
-    - Return 10.
+    - `ROOT.readSet.add(doubled)`.
+    - `link(doubled, slot_E_R)` → `edge_D_E'`.
+    - `invoke(doubled, ROOT)`: hit, but **dirty**. Recompute.
+      - Push `currentTracker = slot_D_R`. Unlink doubled's stale deps.
+        Run recipe.
+      - Recipe: `get(count) * 2`. Inside: `link(count, slot_D_R)` →
+        `edge_C_D'`. `invoke(count, ROOT)` → `5`. Recipe returns `10`.
+        `slot_D_R.cached = 10`. Clear dirty. Pop tracker.
+    - Return `10`.
   - `d = 10`.
   - `observations.push({ c: 5, d: 10 })`.
 - Pop tracker, pop scope.
@@ -2920,9 +2946,13 @@ portion) completes.
 **Final state:**
 
 ```
-count.slots = { ROOT: cached 5, subs: [edge_C_D', edge_C_E'] }
-doubled.slots = { ROOT: cached 10, deps: [edge_C_D'], subs: [edge_D_E'] }
-effect.slots = { ROOT: deps: [edge_C_E', edge_D_E'] }
+count.subs   = { edge_C_D', edge_C_E' }
+doubled.subs = { edge_D_E' }
+
+ROOT.slots = { count   → cached 5,
+               doubled → cached 10, deps: [edge_C_D'],
+               effect  → deps: [edge_C_E', edge_D_E'] }
+
 observations = [{ c: 0, d: 0 }, { c: 5, d: 10 }]   ✓ coherent
 ```
 
@@ -2950,8 +2980,8 @@ two compounding mechanisms:**
 
 So the effect body, when it runs, sees both:
 
-- `count.slot[ROOT].cached = 5` (set during commit).
-- `doubled.slot[ROOT]` dirty → recomputes → 10 (recipe reads the
+- `ROOT.slots[count].cached = 5` (set during commit promotion).
+- `ROOT.slots[doubled]` dirty → recomputes → 10 (recipe reads the
   committed count).
 
 **Q10's commit-region deduplication** is what makes this _efficient_
@@ -2979,10 +3009,10 @@ H1d traced cleanly with no new design calls. The trace validates that:
    doubleName), but post-commit consumer reads are always coherent
    because invalidations are synchronous and consumers are async-
    scheduled.
-5. **Q9 (read-vs-write slots) is load-bearing.** `count.slot[S]` is
-   `wasWritten = true` → promotes. The slots in `doubled` and `effect`
-   for `S` (if any had been created via the effect being read inside the
-   action) wouldn't promote because they'd be read-populated. In this
+5. **Q9 (writeSet vs readSet) is load-bearing.** `count` is in
+   `S.writeSet` → promotes. Any slots in `doubled` or `effect` created
+   under `S` (if the effect had been read inside the action) would have
+   landed in `S.readSet` and been dropped without promotion. In this
    trace no such slots were created — the effect runs at `ROOT_SCOPE`
    and was never invoked under `S`.
 
