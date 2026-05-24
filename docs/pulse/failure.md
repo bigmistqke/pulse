@@ -207,7 +207,8 @@ For reference, not authority. Each framework has its own approach; none is obvio
 - Server Actions return either an error object or success result via `useActionState`. Inside the action body, `try/catch` around `await` is the standard idiom; un-caught errors propagate to the framework.
 - `useTransition`'s `isPending` flips false on either success or failure; the app reads the returned state to detect which.
 - `useOptimistic` reverts implicitly when the parent doesn't update the value — failure-handling is "the parent re-renders with the same `value` it had before, so the optimistic value disappears." No explicit failure callback.
-- No framework-provided retry; apps build their own (often via manually re-invoking the Action).
+- *Boundary-level retry:* `<ErrorBoundary FallbackComponent={Fallback} onReset={…}>` (from `react-error-boundary`, or via class component `componentDidCatch` + `resetErrorBoundary`). Re-renders the subtree from scratch; relies on whatever caused the throw having changed by retry time.
+- *No action-level retry:* apps manually re-invoke the Action; no per-handle identity.
 - No distinction between cancellation, supersession, and error at the framework level. Apps disambiguate via their own status tracking.
 
 Reference: [`../async/deep-dives/react-modern.md`](../async/deep-dives/react-modern.md).
@@ -217,8 +218,9 @@ Reference: [`../async/deep-dives/react-modern.md`](../async/deep-dives/react-mod
 - `action()` body is a generator; throws propagate via the iterator; the action's promise rejects.
 - `createOptimistic` reverts unconditionally at transition completion — whether the transition succeeded or failed. (The pattern: write both the overlay and the committed source; on failure, only the overlay reverts.)
 - Identity-based stale-discard for async: `_inFlight !== result` silently drops superseded async resolutions.
-- No retry primitive; user reconstructs the action.
-- No first-class failure categorization; the thrown error is just a JS exception.
+- *Boundary-level retry — and importantly, recipe-targeted:* `<ErrorBoundary>` / `<Errored>` catches; the fallback receives a `reset` callback. Because the reactive runtime catches the throw at the *specific recipe* being recomputed, the framework knows which computation failed. On `reset()`, the framework re-marks that specific recipe (not the whole subtree) for re-evaluation; downstream consumers see the new value through normal invalidation. This is genuinely "self-healing" — the framework owns the provenance, no user code needs to specify what to retry.
+- *No action-level retry primitive:* user re-constructs the action; each invocation is a new transition; no per-handle identity that survives to retry.
+- No first-class failure categorization for ordinary errors; `NotReadyError` is reserved for suspension. `StatusError` exists internally.
 
 Reference: [`../async/deep-dives/solid-2x.md`](../async/deep-dives/solid-2x.md).
 
@@ -227,19 +229,42 @@ Reference: [`../async/deep-dives/solid-2x.md`](../async/deep-dives/solid-2x.md).
 - `OBSOLETE` symbol: rejected promise from a superseded async derived; the handler early-returns and the resolution is silently swallowed.
 - `STALE_REACTION`: thrown when an effect is aborted; also swallowed.
 - Errors funnel via `ERROR_VALUE` flag on signals; when a consumer later reads the errored signal, the read throws; the throw propagates to the nearest `<svelte:boundary>` with a `failed` snippet for UI handling.
+- *Boundary-level retry:* `<svelte:boundary>` `failed` snippet receives `{ error, reset }`; calling `reset()` re-runs the boundary's children.
 - `fork()` reverts the batch's mutations on throw.
-- No retry primitive; user re-invokes.
+- *No action-level retry primitive:* user re-invokes; `fork()` doesn't have retry sugar.
 
 Reference: [`../async/deep-dives/svelte-5.md`](../async/deep-dives/svelte-5.md).
 
+**Three retry mechanisms to distinguish:**
+
+The cross-framework picture is sharper if "retry" is split into three distinct things, which different frameworks support to different degrees:
+
+| Kind | What it does | Used for |
+| --- | --- | --- |
+| **Boundary retry** | Re-render the subtree after a caught error; doesn't know what failed specifically. | Generic UI recovery; works when something downstream has changed by retry time. |
+| **Recipe retry** | Framework-tracked: re-execute the specific recipe whose body threw; downstream auto-updates. | "Self-healing" derivations; clean because recipes are idempotent. |
+| **Action-body retry** | Re-run a specific action's generator with same closure / inputs. | Save / submit / mutation patterns where the user said "do X" and X failed. |
+
+Per-framework support:
+
+| | Boundary retry | Recipe retry | Action-body retry |
+| --- | --- | --- | --- |
+| React modern | ✓ via `<ErrorBoundary>` `reset` | partial (re-mount-based, not recipe-targeted in the reactive sense) | ✗ |
+| Solid 2.x | ✓ | ✓ via `<Errored>` `reset` — framework knows which recipe | ✗ |
+| Svelte 5 | ✓ via `<svelte:boundary>` `failed` snippet | partial | ✗ |
+
 **Common patterns across frameworks:**
 
-- *None* distinguish cancellation / supersession / error at the framework level. All three look like "the speculation ended without committing"; apps disambiguate by their own state.
-- *None* provide a retry primitive. Apps reconstruct.
+- *None* distinguish cancellation / supersession / error at the framework level for user code. All three look like "the speculation ended without committing"; apps disambiguate by their own state. Svelte gets closest *internally* (OBSOLETE / STALE_REACTION sentinels) but doesn't surface this to user code.
+- *None* provide an action-body retry primitive. Apps reconstruct each time.
 - *None* model failure as typed data; everything is a JS exception with whatever payload the action body throws.
-- *All* assume the application owns the UX side of failure.
+- *All* assume the application owns the UX side of failure beyond the boundary-level fallback.
 
-So the field hasn't converged on a richer model. Pulse has room to pick something better, but the priority isn't catching up — it's deciding what would actually help apps without bloating the primitive.
+The interesting move Solid makes that others don't: **framework-owned retry provenance for recipes.** Because the reactive runtime catches throws at the specific recipe-recompute boundary, it knows exactly which computation failed and can re-execute just that one on reset. User code never specifies "what to retry" — the framework already knows. This is structurally different from boundary-level retry (which is "re-render the subtree and hope") and from action-body retry (which is user-driven re-invocation).
+
+Pulse has the same information available structurally — when a recipe is being invoked under a scope, the engine knows the `(node, scope, attempt)` of any throw. The framework can record it and offer targeted retry without user input.
+
+So the field hasn't converged on a richer model overall, but Solid's recipe-retry pattern is a real precedent pulse can build on. The actual gap nobody fills: action-body retry as a first-class primitive.
 
 ## The application / framework split
 
@@ -322,15 +347,51 @@ These are sugar over `handle.completion.then/.catch`, but the typed-cause discri
 
 Note this interacts with [Q12](./questions.md#q12--body-cleanups-vs-scope-cleanups-composition-and-re-entrancy) — pulse's `scope.cleanups` currently fire on discard only. The hooks above fire conditional on cause, which is finer-grained. Both mechanisms can coexist (`onCleanup` for scope-level resources; `onFailure`/`onCancel`/`onCommit` for action-level UX).
 
-### 3. Retry primitive
+### 3. Retry — two distinct primitives
+
+The cross-framework survey above showed that "retry" splits into three things (boundary / recipe / action-body). Of those, pulse should consider *two* as candidate primitives, because they serve genuinely different patterns and have different correctness profiles.
+
+#### 3a. Recipe-failure tracking + boundary-driven recipe retry
+
+The Solid `<Errored>` / `reset()` pattern. The framework owns the retry provenance — no user code specifies what to retry.
+
+Mechanism: when a recipe throws during `invoke(node, scope)`, the engine catches at the recipe boundary and records `{ failedNode, failedScope, error, attempt }` on the slot. The error propagates to a containing boundary (similar to `<Loading>` but for errors — call it `<Errored>` provisionally). The boundary's fallback receives `(error, retry)`. Calling `retry()` re-marks the specific failed slot for re-evaluation; the engine re-invokes that recipe; if it succeeds, the value propagates downstream through normal invalidation and the boundary clears.
+
+Why this is "self-healing": the framework already has the information (which node, which scope) because the throw happened mid-recompute. User code never says "retry this specific computation" — the framework knows.
+
+This works cleanly because recipes are *idempotent*: re-running produces the same result given the same inputs. No side-effect re-execution problem.
+
+#### 3b. Action-body retry via handle
 
 ```ts
 handle.retry() // re-run the same action body in a fresh scope
 ```
 
-The retry runs the original body again. The handle's identity is preserved so retry-counting libraries can track per-handle attempt history. The fresh scope is opened at the same parent as the original (typically ROOT).
+For action-body failures. The retry re-executes the original body. The handle's identity is preserved so retry-counting libraries can track per-handle attempt history. The fresh scope is opened at the same parent as the original (typically ROOT).
+
+This is fundamentally different from 3a in two ways:
+
+- *User-driven, not framework-driven.* The user (or library wrapping the action) decides when to retry, because action bodies have side effects and the framework can't safely re-execute them on its own.
+- *Per-handle identity matters.* The user's code holds a reference to *this specific action attempt* and asks for it to be retried. Different from boundary-retry which is anonymous (just "retry whatever failed in this subtree").
+
+**The footgun:** action bodies have side effects (network POSTs, ID generation, logging). Re-running re-fires them. Two sub-cases:
+
+- *Idempotent bodies:* re-execution is safe (counter increments derived from current state, retried POST that the server deduplicates by request ID, etc.). Retry just works.
+- *Non-idempotent bodies:* re-execution duplicates side effects (sending two POSTs that create two records, sending two emails, etc.). User must be careful — design action bodies for idempotency, or check action's `attempt` count and skip already-done side effects.
+
+Pulse can't enforce idempotency. The retry primitive provides the mechanism; correctness discipline is the user's.
 
 Open sub-questions: does retry produce a new handle or reuse the original (with a bumped attempt counter)? Lean: reuse the handle — the user said "retry *this* action," not "make a new action that happens to be like this one." Same handle, new scope, new attempt.
+
+#### Why split into two
+
+3a and 3b address different patterns with different correctness profiles. Conflating them — treating "retry" as one thing — would either (a) limit recipe-retry to opt-in patterns the user wires manually (losing self-healing), or (b) expose action-bodies to silent re-execution as a framework feature (creating a footgun).
+
+The split mirrors what Solid actually does (recipe-retry via `<Errored>`, action-body retry via user re-invocation) but explicitly: pulse provides recipe-retry as automatic framework machinery, and action-body retry as an opt-in handle method.
+
+#### Boundary-level retry (the third kind)
+
+Pulse may or may not want a generic "re-render this subtree" retry beyond 3a. The boundary-retry pattern (React's `<ErrorBoundary>` `reset`, Svelte's `<svelte:boundary>` `reset`) is mostly subsumed by recipe-retry under 3a — re-rendering a subtree is what happens *because* the underlying recipes re-evaluate. The framework gets it for free from 3a; no separate primitive needed.
 
 ### 4. Cancellation distinguished from failure in `completion`
 
@@ -378,6 +439,9 @@ Could be folded into existing `onCleanup` (which fires on any discard) with a `c
 - **Retry semantics with mutable closure state.** The action body closes over variables. Retry uses the closure as-is — meaning if those variables changed since first execution, the retry sees the new values. Surprising? Or expected (the user wants the latest state)? Probably the latter, but worth flagging.
 - **Retry with mutated inputs.** F1's "retry button" sometimes wants to retry with the *same* inputs; sometimes (F2 fix-and-resubmit) wants different inputs. The latter is just a new action, not a retry. Lean: `handle.retry()` = same body, same closure, no input changes. Different-input cases construct a new action.
 - **Retry-counting.** Should the handle expose `attempt: number`? Useful for backoff policies and degraded-mode detection. Cheap to add; lean yes.
+- **Recipe-retry: framework-driven or app-driven?** 3a sketched the framework-tracks-provenance approach (engine catches throw at recipe boundary, records `failedNode`/`failedScope`, `<Errored>` boundary's `retry` re-invokes). Alternative: framework doesn't track; user wires retry manually via a re-execution helper. Lean framework-tracked because the information is structurally present (the engine is mid-`invoke` when the throw happens); not exposing it means apps re-implement what the framework already knows.
+- **Idempotency discipline for action-body retry.** Pulse can't enforce that action bodies are idempotent. Documentation territory: explicit guidance that `handle.retry()` re-runs the body verbatim including side effects, and that authors who care should check `handle.attempt` or use server-side request-ID deduplication. Maybe a dev-mode warning if a `handle.retry()` is called on an action body that contains operations the framework recognizes as non-idempotent? (Probably out of scope; the framework can't tell what's idempotent.)
+- **`<Errored>` boundary shape.** If pulse ships recipe-failure tracking, the boundary primitive needs to be designed. Open: does it look like `<Errored>` (a JSX boundary, parallel to `<Loading>`)? Or a non-JSX `errorBoundary(node, fallback, options)` library helper? Or an effect-level catch? Defer until the broader boundary story (Q-something — possibly new Q) crystallizes.
 - **`onSettle` versus `onCleanup`.** These are different mechanisms (action-level UX hooks vs scope-level resource cleanup) but they could be unified. Q12 has the related question.
 - **Persistence for queue-for-later (F5).** Pulse doesn't have a built-in mechanism to serialize a failed action and re-instantiate it later. Outside the framework's scope for now; library territory if/when offline-first patterns are concretely needed.
 - **Timeout primitives.** F14 wants a deadline; current pulse has none. Apps can build with `Promise.race` but it's manual. Worth considering a `withDeadline(action, ms)` library helper or a framework primitive.
@@ -393,7 +457,12 @@ Per the application/framework split principle, the minimum-viable ship set:
 
 **3. Per-cause lifecycle hooks.** `handle.onFailure(err => ...)`, `handle.onCancel(() => ...)`, `handle.onSettle((cause) => ...)`, `handle.onCommit(() => ...)`. These are library-level sugar over the typed completion promise; ship them as default helpers.
 
-**4. Retry primitive.** `handle.retry()` re-runs the same body in a fresh scope; preserves handle identity; bumps an attempt counter. This is the second-biggest leverage after (1) — covers the F1, F3, F5, F9 patterns directly.
+**4. Two retry primitives.**
+
+- *Recipe retry (framework-driven).* Engine catches throws at the recipe boundary; records `{ failedNode, failedScope, error, attempt }` on the slot; an `<Errored>`-style boundary receives `(error, retry)`; `retry()` re-marks just that recipe for re-evaluation. Self-healing because the framework owns the provenance. Solid's `<Errored>` model.
+- *Action-body retry (user-driven).* `handle.retry()` re-runs the same body in a fresh scope; preserves handle identity; bumps an attempt counter. Covers F1/F3/F5/F9 directly. Has the idempotency footgun (re-running re-fires side effects); user discipline required.
+
+These are different mechanisms for different patterns. Both have leverage; both fit pulse's existing architecture cleanly.
 
 **5. Cancellation-aware cleanup.** `onCleanup((cause) => ...)` accepts an optional cause argument so action bodies can branch on why they're being cleaned up. Backwards-compatible with the current `onCleanup(() => ...)` form (cause argument is just ignored).
 
