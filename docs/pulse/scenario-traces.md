@@ -44,203 +44,262 @@ forced deliberate design calls into the open (K1 → resolved to Position
 
 ## `doubleName` under scope `S`
 
-A worked trace verifying that **multi-slot + the chain-match predicate (Q1 Model 1)**
-handles the case the [falsified hypothesis](#speculation-purely-above-unmodified-r3-doesnt-work)
+A worked trace verifying the resolved architecture
+(Q1 Model 1 + Q6 scope-centric storage + Q9 writeSet/readSet + Q10
+deferred-fires region + P6 pull-driven reads) against the case the
+[falsified hypothesis](#speculation-purely-above-unmodified-r3-doesnt-work)
 broke on. Walks every engine call and every state change.
 
 ### Setup
 
 ```ts
 const [name, setName] = signal('foo')
-const doubleName = computed(() => get(name) + get(name))
+const doubleName = compute(() => get(name) + get(name))
 ```
 
-- `signal("foo")` → library calls `createNode<string>(() => "foo")` → engine
-  creates Node `name`. Returns `[name, setName]` where
-  `setName = (v) => writeSlot(name, getCurrentScope(), { recipe: () => v, deps: [], subs: [] })`.
-- `computed(fn)` → library calls `createNode<string>(fn)` → engine creates
-  Node `doubleName`. Returns the Node.
+- `signal("foo")` → library calls `createNode<string>(() => "foo")` →
+  engine creates Node `name = { defaultRecipe: () => "foo", subs: ∅ }`.
+  Returns `[name, setName]` where `setName(v)` calls
+  `writeSlot(name, getCurrentScope(), { recipe: () => v, cached: v, deps: [] })`
+  and adds `name` to `scope.writeSet`.
+- `compute(fn)` → library calls `createNode<string>(fn)` → engine creates
+  Node `doubleName = { defaultRecipe: fn, subs: ∅ }`.
 
-**State.** Both Nodes have empty `slots`. No edges. No reads have happened yet.
+**Initial state:**
+
+```
+name        = { defaultRecipe: () => "foo", subs: ∅ }
+doubleName  = { defaultRecipe: () => get(name) + get(name), subs: ∅ }
+
+ROOT = Scope {
+  parent: undefined, children: ∅,
+  slots: ∅, edges: ∅,
+  writeSet: ∅, readSet: ∅,
+  cleanups: [], status: 'open',
+}
+```
 
 ### Step 1: `get(doubleName)` outside any action
 
-- Library: `getCurrentScope()` → `ROOT_SCOPE` (library default). `currentTracker`
-  is null. `invoke(doubleName, ROOT_SCOPE)`.
-- Engine: `doubleName.slots.get(ROOT_SCOPE)` → miss. Create slot `slot_DN_R`,
-  push `currentTracker = slot_DN_R`, invoke `defaultRecipe`.
-  - Recipe body: `get(name) + get(name)`.
-  - First `get(name)`: library `link(name, slot_DN_R)` → engine creates
-    `edge1 = { source: name, target: slot_DN_R }`. Then `invoke(name,
-    ROOT_SCOPE)` → miss, create `slot_N_R` with recipe `() => "foo"`,
-    cache `"foo"`, return.
-  - Second `get(name)`: cached hit, returns `"foo"`. `link` dedupes.
-  - Body returns `"foofoo"`. Cache. Pop currentTracker.
-- Returns `"foofoo"`. ✓
+- Library: `scope = ROOT` (no action active). `scope.readSet.add(doubleName)`.
+  `currentTracker = null` → no `link`. `invoke(doubleName, ROOT)`.
+- Engine: chain-walk for an existing slot — `ROOT.slots.has(doubleName)`? No.
+  Miss. Create `slot_DN_R = { recipe: doubleName.defaultRecipe, deps: [] }`.
+  Push `currentTracker = slot_DN_R`. Run recipe under ROOT.
+  - Recipe: `get(name) + get(name)`.
+  - First `get(name)`:
+    - `scope.readSet.add(name)`.
+    - `currentTracker = slot_DN_R` → `link(name, slot_DN_R)`:
+      - `edge1 = { source: name, target: slot_DN_R, targetScope: ROOT }`
+      - `name.subs.add(edge1)`; `ROOT.edges.add(edge1)`;
+        `slot_DN_R.deps.push(edge1)`.
+    - `invoke(name, ROOT)`: `ROOT.slots.has(name)`? No. Create
+      `slot_N_R = { recipe: () => "foo", deps: [] }`. Run recipe → `"foo"`.
+      `slot_N_R.cached = "foo"`. `ROOT.slots.set(name, slot_N_R)`. Return `"foo"`.
+  - Second `get(name)`:
+    - `scope.readSet.add(name)` — no-op (already present).
+    - `link(name, slot_DN_R)` — dedup: `name.subs` already has an edge with
+      `target === slot_DN_R`; skip.
+    - `invoke(name, ROOT)`: hit, return cached `"foo"`.
+  - Recipe returns `"foofoo"`. `slot_DN_R.cached = "foofoo"`.
+    `ROOT.slots.set(doubleName, slot_DN_R)`. Pop tracker.
+- Return `"foofoo"`. ✓
 
 **State after Step 1:**
 
 ```
-name.slots       = { ROOT_SCOPE: cached "foo",     subs: [edge1] }
-doubleName.slots = { ROOT_SCOPE: cached "foofoo",  deps: [edge1] }
-edge1 = { source: name, target: doubleName.slots[ROOT_SCOPE] }
-        // engine's chain at fire time: chainFor(ROOT_SCOPE) = [ROOT_SCOPE]
+name.subs       = { edge1 }
+doubleName.subs = ∅
+
+ROOT.slots      = { name → slot_N_R("foo"), doubleName → slot_DN_R("foofoo") }
+ROOT.edges      = { edge1 }
+ROOT.readSet    = { name, doubleName }
+ROOT.writeSet   = ∅
+
+edge1 = { source: name, target: slot_DN_R, targetScope: ROOT }
 ```
 
 ### Step 2: `action(function* () { … })` opens scope `S`
 
-Library `openScope()` → engine creates `S = { parent: ROOT_SCOPE, cleanups: [],
-status: 'open' }`. Ambient scope is now `S`.
+- Library: `S = openScope()`. Engine creates
+  `S = { parent: ROOT, children: ∅, slots: ∅, edges: ∅, writeSet: ∅,
+  readSet: ∅, cleanups: [], status: 'open' }`. `ROOT.children.add(S)`.
+- Push `currentScope = S`. Driver begins.
 
-### Step 3: `setName("name")` inside the action
+### Step 3: `setName("bar")` inside the action
 
-- Library: `getCurrentScope()` → `S`. Calls
-  `writeSlot(name, S, { recipe: () => "name", … })`.
-- Engine: walk `name`'s outgoing edges, evaluating chain-match for each:
-  - `edge1`: target's scope is `ROOT_SCOPE`, so chain = `[ROOT_SCOPE]`.
-    `writeScope = S` not in chain → **don't fire.** ✓ Committed state
-    untouched.
-- Set `name.slots[S]` = the new slot.
+- Library: `scope = S`. `writeSlot(name, S, { recipe: () => "bar", cached:
+  "bar", deps: [] })`. `S.writeSet.add(name)`.
+- Engine: `S.slots.set(name, slot_N_S)`. Fire chain-match for each
+  `edge ∈ name.subs`:
+  - `edge1`: `targetScope = ROOT`, `chainFor(ROOT) = [ROOT]`. `writeScope = S`
+    not in chain → **don't fire.** ✓ Committed state untouched.
 
-**The falsified case.** Under unmodified r3, `setName` would have walked
-`name.subs` and fired the only edge → invalidating `doubleName`'s committed
-cache → corrupting committed state. Under multi-slot + the engine's
-chain-match predicate: the edge correctly stays inert; committed state
-preserved.
+**The falsified case.** Under unmodified r3 (single-slot), `setName` would
+have invalidated `doubleName`'s only cache → corrupting committed state.
+Under the resolved architecture: a new slot is created in `S.slots`, and the
+chain-match correctly skips `edge1` because `S` is not in the target's chain.
+
+**State after Step 3:**
+
+```
+name.subs       = { edge1 }  (unchanged)
+S.slots         = { name → slot_N_S("bar") }
+S.writeSet      = { name }
+S.readSet       = ∅
+S.edges         = ∅
+ROOT unchanged.
+```
 
 ### Step 4: `get(doubleName)` inside the action
 
-- Library: `getCurrentScope()` → `S`. `currentTracker` null (action-body reads
-  are imperative — see [open question](#open-questions-from-the-trace) below).
-  `invoke(doubleName, S)`.
-- Engine: `doubleName.slots.get(S)` → miss. Create `slot_DN_S`, push
-  `currentTracker = slot_DN_S`, invoke `defaultRecipe`.
-  - Recipe body: `get(name) + get(name)`.
-  - First `get(name)`: library `link(name, slot_DN_S)` → engine creates
-    `edge2 = { source: name, target: slot_DN_S }`. Then `invoke(name, S)`
-    → `name.slots[S]` hit, return `"name"`.
-  - Second `get(name)`: cached hit, returns `"name"`. `link` dedupes.
-  - Body returns `"namename"`. Cache. Pop.
-- Returns `"namename"`. ✓
+- Library: `scope = S`. `scope.readSet.add(doubleName)`. `currentTracker =
+  null` (action-body reads are imperative; per [Q8](./questions.md#q8--tracker-vs-scope-separate-or-unified)
+  the action body doesn't re-run on dep change). `invoke(doubleName, S)`.
+- Engine: `S.slots.has(doubleName)`? No. Miss. Create `slot_DN_S = { recipe:
+  doubleName.defaultRecipe, deps: [] }`. Push `currentTracker = slot_DN_S`.
+  Run recipe under S.
+  - Recipe: `get(name) + get(name)`.
+  - First `get(name)`:
+    - `scope.readSet.add(name)`. (`S.readSet` now `{ doubleName, name }`.)
+    - `currentTracker = slot_DN_S` → `link(name, slot_DN_S)`:
+      - `edge2 = { source: name, target: slot_DN_S, targetScope: S }`
+      - `name.subs.add(edge2)`; `S.edges.add(edge2)`;
+        `slot_DN_S.deps.push(edge2)`.
+    - `invoke(name, S)`: `S.slots.has(name)`? Yes — `slot_N_S` from Step 3.
+      Return cached `"bar"`. ✓ (Reads inside the recipe pull the most-specific
+      slot.)
+  - Second `get(name)`: dedup; hit; return `"bar"`.
+  - Recipe returns `"barbar"`. `slot_DN_S.cached = "barbar"`.
+    `S.slots.set(doubleName, slot_DN_S)`. Pop tracker.
+- Return `"barbar"`. ✓ (Per [P6](./framings.md#p6--pull-driven-reads-push-driven-consumers-no-explicit-flush):
+  synchronous, no flush.)
 
 **State after Step 4:**
 
 ```
-name.slots = {
-  ROOT_SCOPE: cached "foo",  subs: [edge1],
-  S:          cached "name", subs: [edge2],
-}
-doubleName.slots = {
-  ROOT_SCOPE: cached "foofoo",   deps: [edge1],
-  S:          cached "namename", deps: [edge2],
-}
-edge1 = { source: name, target: doubleName.slots[ROOT_SCOPE] }  // chain: [ROOT_SCOPE]
-edge2 = { source: name, target: doubleName.slots[S] }            // chain: [S, ROOT_SCOPE]
+name.subs        = { edge1, edge2 }
+doubleName.subs  = ∅
+
+S.slots          = { name → slot_N_S("bar"), doubleName → slot_DN_S("barbar") }
+S.edges          = { edge2 }
+S.readSet        = { doubleName, name }
+S.writeSet       = { name }
+
+ROOT unchanged (slot_DN_R still cached "foofoo", slot_N_R still "foo")
+
+edge1 = { source: name, target: slot_DN_R, targetScope: ROOT }   // chain: [ROOT]
+edge2 = { source: name, target: slot_DN_S, targetScope: S }       // chain: [S, ROOT]
 ```
 
 ### Step 5a: action returns → `closeScope(S, 'commit')`
 
-Commit semantics: for each Node with a slot tagged `S`, **promote that slot to
-`ROOT_SCOPE`** (move its `recipe` + `cached`), then drop the `S` slot.
+Per [Q10](./questions.md#q10--commit-as-transaction-ordering-atomicity-deferred-fires):
+commit is a deferred-fires region. Per
+[Q9](./questions.md#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally):
+walk `writeSet` for promotion; drop slots in `readSet` ∪ `writeSet`.
 
-Sketched order: dep-order, leaves-first. Gather `[(name, S), (doubleName, S)]`.
-`name` first; `doubleName` after.
+1. **Open deferred-fires region.** Subsequent `writeSlot` fires queue.
 
-**Promote `name`:** `writeSlot(name, ROOT_SCOPE, { recipe: () => "name",
-cached: "name", … })`.
+2. **Promote writeSet** in dep-order leaves-first. `S.writeSet = { name }` —
+   one entry. Promote:
+   `writeSlot(name, ROOT, { recipe: () => "bar", cached: "bar", deps: [] })`.
+   `ROOT.slots.set(name, slot_N_R_new)`. `ROOT.writeSet.add(name)`.
+   Fire chain-match for each `edge ∈ name.subs`:
+   - `edge1`: `targetScope = ROOT`, `chainFor(ROOT) = [ROOT]`. `writeScope =
+     ROOT` at index 0; no more-specific check needed. **Queue fire** for
+     `slot_DN_R`.
+   - `edge2`: `targetScope = S`, `chainFor(S) = [S, ROOT]`. `writeScope =
+     ROOT` at index 1. More-specific check: `name.slots.has(S)`?
+     At this moment `S.slots[name]` still exists (we haven't dropped yet).
+     **Skip.** ✓ (S's own consumer doesn't get a spurious fire for its
+     own write being committed.)
 
-- Engine evaluates chain-match per edge:
-  - `edge1`: target scope `ROOT_SCOPE` → chain `[ROOT_SCOPE]`. `writeScope =
-    ROOT_SCOPE` at index 0 → no more-specific scopes ahead → **fire.**
-    Invalidate `doubleName.slots[ROOT_SCOPE]`.
-  - `edge2`: target scope `S` → chain `[S, ROOT_SCOPE]`. `writeScope =
-    ROOT_SCOPE` at index 1. More-specific check: `name.slots.has(S)`? At
-    this moment yes (we haven't dropped it) → **don't fire.** ✓
+3. **Walk `S.edges`, remove from `node.subs`.** `S.edges = { edge2 }`.
+   Remove `edge2` from `name.subs`. After this step: `name.subs = { edge1 }`.
 
-**Drop `name.slots[S]`:** walk `slot_N_S.subs = [edge2]`; unlink `edge2` from
-`name`'s outgoing index and from `slot_DN_S.deps`. Delete the slot.
+4. **Drop S's slots.** For each node in `S.readSet ∪ S.writeSet =
+   { doubleName, name }`: `S.slots.delete(node)`. `S.slots` now `∅`.
 
-**Promote `doubleName`:** `writeSlot(doubleName, ROOT_SCOPE, { recipe:
-defaultRecipe, cached: "namename", deps: [], … })`. Engine fires
-`doubleName`'s outgoing edges (none here). The invalidation from `edge1` is
-overwritten by this write — final cached value `"namename"`. ✓
+5. **Close child scopes.** `S.children = ∅` — nothing to recurse into.
 
-**Drop `doubleName.slots[S]`:** `subs` empty; delete.
+6. **Drain deferred-fires region.** One queued fire: invalidate `slot_DN_R`
+   (clear `cached`, mark dirty).
 
-**Close scope:** `S.status = 'committed'`. Cleanups don't fire on commit
-(library convention).
+7. **Finalize.** `S.status = 'committed'`. `S.cleanups` empty.
+   `ROOT.children.delete(S)`. Pop ambient.
 
 **State after Step 5a:**
 
 ```
-name.slots       = { ROOT_SCOPE: cached "name" }
-doubleName.slots = { ROOT_SCOPE: cached "namename" }
-edge1 unchanged. edge2 unlinked.
+name.subs        = { edge1 }   (edge2 removed in step 3)
+doubleName.subs  = ∅
+
+ROOT.slots       = { name → slot_N_R_new("bar"),
+                     doubleName → slot_DN_R(cached: undefined, dirty) }
+ROOT.edges       = { edge1 }   (unchanged)
+ROOT.writeSet    = { name }    (gained name from promotion)
+ROOT.readSet     = { name, doubleName }  (unchanged)
+
+S — fully disposed. No references to S except possibly the user's action handle.
 ```
 
-`get(doubleName)` after commit: cached `"namename"`. ✓
+Subsequent `get(doubleName)` outside any action: `ROOT.slots.has(doubleName)`?
+Yes, but cached is undefined → recompute under ROOT. Recipe reads `name` →
+`ROOT.slots[name].cached = "bar"`. Returns `"barbar"`. ✓
 
 ### Step 5b: action throws → `closeScope(S, 'discard')`
 
-Alternative: action body throws.
+Alternative: action body throws. No promotion happens.
 
-- Engine: drop every `S`-tagged slot. Walk each dropped slot's `subs`, unlink
-  edges. Fire cleanups registered against `S` (none in this trace; would be
-  `onCleanup(…)` calls from the action body, e.g. AbortController.abort()).
-- Engine: `S.status = 'discarded'`.
+1. Open deferred-fires region (no fires expected, but for invariant uniformity).
+2. Skip promotion (discard mode).
+3. Walk `S.edges`, remove from `node.subs`. Remove `edge2` from `name.subs`.
+4. Drop `S.slots` entries (both `doubleName` and `name`).
+5. Close child scopes (none).
+6. Drain deferred-fires region (empty).
+7. Fire `S.cleanups` (none in this trace; would be `onCleanup(...)`
+   registrations, e.g. `AbortController.abort()`).
+8. `S.status = 'discarded'`. `ROOT.children.delete(S)`. Pop ambient.
 
-**State after Step 5b:** identical to State after Step 1 (committed state never
-observed the speculation). ✓
+**State after Step 5b:** identical to State after Step 1 (committed state
+never observed the speculation). ✓ `get(doubleName)` after discard: cached
+`"foofoo"`. ✓
 
-`get(doubleName)` after discard: cached `"foofoo"`. ✓
+### Verification: every architectural decision exercised
 
-### Open questions from the trace
+| Decision | Where exercised |
+| --- | --- |
+| [Q1 Model 1](./questions.md#q1--fall-through-and-edge-policy) (engine-side chain-match) | Steps 3, 5a — fire / skip decisions per edge. |
+| [Q6 scope-centric storage](./questions.md#q6--what-is-a-scope-as-a-value) | All state representations; slots live in `S.slots` / `ROOT.slots`. |
+| [Q6 explicit disposal](./questions.md#q6--what-is-a-scope-as-a-value) | Steps 5a/5b — walk `S.edges` to clean `node.subs`; drop `S.slots`. |
+| [Q9 writeSet / readSet](./questions.md#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally) | Steps 3, 4 — Set membership decides promotion vs drop. |
+| [Q10 deferred-fires region](./questions.md#q10--commit-as-transaction-ordering-atomicity-deferred-fires) | Step 5a — fires queue during promotion, drain after slot drops. |
+| [Q11 Policy α](./questions.md#q11--effect-chain-policy-chain-follows-owner-or-always-root_scope) | (Trivially — no effect in this trace, but `S.edges` ownership is the same mechanism.) |
+| [P6 synchronous reads](./framings.md#p6--pull-driven-reads-push-driven-consumers-no-explicit-flush) | Step 4 — `get(doubleName)` returns `"barbar"` synchronously, no flush. |
 
-The architecture works for this case, but the trace exposed several
-under-specified edges. Listed in roughly load-bearing order:
+**No falsifications. No new sub-questions.** The trace previously exposed
+eight follow-ups (commit ordering, promoted-slot cached carry, action-body
+tracking, edge index location, edge dedup, late subscribers, async, commit
+ordering races). All eight are now resolved by the locked-in framings:
 
-1. **Commit ordering matters.** Promoting `name` before `doubleName` works
-   because `edge2`'s chain-match correctly doesn't fire while `name.slots[S]`
-   still exists. Other orders (or dropping `S` slots before writing
-   `ROOT_SCOPE`) can fire wrongly. The library's commit logic needs
-   a defined order (likely dep-order leaves-first).
-2. **What `cached` does a promoted slot carry?** Three options: (a) preserve
-   cached + carry over deps (but old deps' edges targeted a slot at the old
-   scope; the chain-match at the new scope would re-resolve anyway); (b)
-   preserve cached + drop deps (next recompute rebuilds); (c) drop cached +
-   force recompute. Lean (b); related to [Q7](./questions.md#q7--the-defaultrecipe-mechanism).
-3. **Action body reads: do they track?** The trace assumed `currentTracker =
-null` for top-level reads inside an action body (imperative, not
-   declarative — the action body doesn't re-run on dep change). Probably
-   correct but worth being explicit. Related to [Q2](./questions.md#q2--scopeowner-unification) (scope/owner) and [Q8](./questions.md#q8--tracker-vs-scope-separate-or-unified)
-   (tracker/scope).
-4. **Edge index location.** The trace shows edges in `slot.subs` for clarity,
-   but in practice the engine probably maintains a per-Node outgoing-edges
-   index (the chain-match runs per-edge at fire time). Per-slot `subs`
-   arrays are useful for cleanup-on-slot-drop, but the firing path likely
-   iterates per-Node. Fold into [Q1](./questions.md#q1--fall-through-and-edge-policy).
-5. **Edge dedup.** `link(name, slot_DN_S)` is called twice in the recipe;
-   the second should be a no-op. Under Model 1 the edge is plain
-   `(source, target)`, so dedup is straightforward — check whether
-   `(source, target)` is already in `node.subs`. Fold into
-   [Q1](./questions.md#q1--fall-through-and-edge-policy).
-6. **Late subscribers / new edges mid-action.** The trace didn't exercise a
-   subscriber arriving mid-action and reading under `S` (e.g., a component
-   mounting inside an action). The chain-match handles it (the new edge's
-   target lives in `S`, so subsequent writes resolve against the right
-   chain), but worth a separate trace.
-7. **Async ([Q4](./questions.md#q4--async-at-the-engine-level)) untouched.** All reads in this trace were sync. The async
-   case — `name`'s recipe returns a `Promise<T>`, or the action body awaits —
-   needs its own trace.
-8. **Dangling-ref window during commit ordering.** When `edge2` is unlinked
-   from `name`'s outgoing index, `slot_DN_S.deps` still briefly references it
-   from the target side. By Step 5a's end, the edge is fully unlinked, but
-   the ordering needs verification.
-
-Verification summary: **the falsified hypothesis is genuinely fixed** by
-multi-slot + engine-side chain-match. The trace exposed eight follow-up
-sub-questions, none of which gate the architecture — they're next-level
-resolution.
+1. **Commit ordering** — Q10 dep-order leaves-first inside deferred-fires region.
+2. **Promoted-slot cached** — preserved; old deps not carried (chain-match
+   re-resolves naturally at the new scope).
+3. **Action-body tracking** — Q8 confirms separate ambients;
+   `currentTracker = null` for action bodies, parallel-coupled with scope.
+4. **Edge index location** — Q6: `node.subs: Set<Edge>` is the write-fire
+   index; `scope.edges` is the cleanup tracker. Both for free.
+5. **Edge dedup** — under Model 1 edges are plain `(source, target)`; dedup
+   checks `node.subs` for the same target.
+6. **Late subscribers / chains longer than 1** — Q1 chain-match handles
+   any chain depth naturally; trace H2 would verify by example but no new
+   mechanism needed.
+7. **Async** — Q4: Promise resolution is not an engine event; consumers
+   that hold the Awaitable handle their own resumption. Traced separately
+   in C2 / C2e.
+8. **Dangling-ref window** — Q6 explicit disposal removes from
+   `node.subs` before dropping `S.slots`, so no dangling ref ever escapes.
 
 ---
 
