@@ -2630,8 +2630,8 @@ action(function* () {
 // later: resolveUser("Alice")
 ```
 
-**State at start:** `user.slots = {}`, `greeting.slots = {}` (internally, the
-two stage nodes also empty), edges = []. The Promise is pending.
+**State at start:** `user.subs = ∅`, `greeting.subs = ∅`,
+`ROOT.slots = ∅`, `ROOT.edges = ∅`. The Promise is pending.
 
 Note: previous iterations of this trace used a generator-form `greeting`
 (`compute(function*() { const u = yield* get(user); return ... })`) —
@@ -2671,20 +2671,23 @@ intermediate.
 
 ### Step-by-step trace
 
-**Step 1: open scope.** `openScope()` → `S = { parent: ROOT_SCOPE, cleanups:
-[], status: 'open' }`. Push ambient.
+**Step 1: open scope.** `openScope()` → `S = { parent: ROOT, children: ∅,
+slots: ∅, edges: ∅, writeSet: ∅, readSet: ∅, cleanups: [], status:
+'open' }`. `ROOT.children.add(S)`. Push ambient.
 
 **Step 2: `yield* get(user)` parks.**
 
 - Library `get(user)`:
-  - `getCurrentScope()` → `S`. `currentTracker` → null (action body).
+  - `getCurrentScope()` → `S`. `S.readSet.add(user)`. `currentTracker = null`
+    (action body).
   - `invoke(user, S)`:
-    - Engine: `user.slots.get(S)` miss. Create `slot_U_S = { recipe:
-defaultRecipe, deps: [], subs: [] }`. Invoke recipe → `userPromise`.
-      Library wraps via `makeAwaitable`: `slot_U_S.cached =
+    - Engine: `S.slots.has(user)`? No. Create `slot_U_S = { recipe:
+      user.defaultRecipe, deps: [] }`. Run recipe → `userPromise`. Library
+      wraps via `makeAwaitable`: `slot_U_S.cached =
       Awaitable<U, pending>` (an Awaitable instance whose internal state is
-      currently `{ status: 'pending' }`). Per [Q4](./questions.md#q4--async-at-the-engine-level),
-      the engine attaches nothing — resolution is consumer-handled.
+      currently `{ status: 'pending' }`). `S.slots.set(user, slot_U_S)`.
+      Per [Q4](./questions.md#q4--async-at-the-engine-level), the engine
+      attaches nothing — resolution is consumer-handled.
     - Return the Awaitable.
   - `get` sees a pending Awaitable → yields
     `{ kind: 'park', promise: awaitable }`.
@@ -2697,9 +2700,12 @@ defaultRecipe, deps: [], subs: [] }`. Invoke recipe → `userPromise`.
 **State after Step 2:**
 
 ```
-user.slots = { S: { recipe: defaultRecipe, cached: Awaitable<U, pending>, deps: [], subs: [] } }
+user.subs   = ∅
+S.slots     = { user → slot_U_S(cached: Awaitable<U, pending>) }
+S.readSet   = { user }
+S.writeSet  = ∅
+S.edges     = ∅                        # action body doesn't track
 Awaitable<U>.then queue: [driver-handler]
-no edges
 ```
 
 **Step 3: `resolveUser("Alice")`.**
@@ -2722,25 +2728,29 @@ hasn't been read yet, so there are no subscribers regardless.
 - `gen.next("Alice")` resumes the action body. `name = "Alice"`. Continues
   to `yield* get(greeting)`.
 - Library `get(greeting)` (sub-generator):
-  - `getCurrentScope()` → `S`. `currentTracker` → null (action body).
+  - `getCurrentScope()` → `S`. `S.readSet.add(greeting)`.
+    `currentTracker = null` (action body).
   - `invoke(greeting, S)`:
-    - Engine: `greeting.slots.get(S)` miss. Create `slot_G_S`. Push
-      `currentTracker = slot_G_S`, push scope = `S`. Run greeting's
-      stage chain:
+    - Engine: `S.slots.has(greeting)`? No. Create `slot_G_S = { recipe:
+      greeting.defaultRecipe, deps: [] }`. `S.slots.set(greeting, slot_G_S)`.
+      Push `currentTracker = slot_G_S`. Run greeting's stage chain:
       - Stage 0 (source): `get(user)`.
-        - `link(user, slot_G_S)` → `edge1`.
+        - `link(user, slot_G_S)` →
+          `edge1 = { source: user, target: slot_G_S, targetScope: S }`.
+          `user.subs.add(edge1)`; `S.edges.add(edge1)`;
+          `slot_G_S.deps.push(edge1)`.
         - `invoke(user, S)` → hit, `cached = Awaitable<U, fulfilled>`
           (already resolved from Step 3).
         - `get` sees Awaitable → checks `.status` → `'fulfilled'`. Returns
           the Awaitable. Stage machinery unwraps to `.value` = `"Alice"`
-          before passing to stage 1 (since the Awaitable is already
-          fulfilled, no `.then` chaining is needed — synchronous unwrap).
+          before passing to stage 1 (synchronous unwrap since already
+          fulfilled).
       - Stage 1: receives `"Alice"`, returns `"Hello, Alice!"`.
     - Stage chain wraps the final value in a resolved Awaitable:
       `slot_G_S.cached = Awaitable<G, fulfilled, "Hello, Alice!">`. This
       preserves type-level async-ness — `greeting` is
       `Computed<Promise<string>>`.
-    - Pop tracker, pop scope. Return the Awaitable.
+    - Pop tracker. Return the Awaitable.
   - `get` sees Awaitable → `.status === 'fulfilled'` → returns the
     Awaitable. `yield*` machinery unwraps to `.value` = `"Hello, Alice!"`
     **synchronously** (no park).
@@ -2749,10 +2759,17 @@ hasn't been read yet, so there are no subscribers regardless.
 **State after Step 4:**
 
 ```
-user.slots = { S: { cached: Awaitable<U, fulfilled, "Alice"> } }
-greeting.slots = { S: { cached: Awaitable<G, fulfilled, "Hello, Alice!">,
-                         deps: [edge1] } }
-edge1 = { source: user, target: slot_G_S }
+user.subs    = { edge1 }
+greeting.subs = ∅
+
+S.slots      = { user → cached: Awaitable<U, fulfilled, "Alice">,
+                 greeting → cached: Awaitable<G, fulfilled, "Hello, Alice!">,
+                            deps: [edge1] }
+S.readSet    = { user, greeting }
+S.writeSet   = ∅
+S.edges      = { edge1 }
+
+edge1 = { source: user, target: slot_G_S, targetScope: S }
 ```
 
 Both slots' `cached` values are Awaitables with `status: 'fulfilled'`.
@@ -2762,19 +2779,27 @@ async-ness preserved through the graph.
 
 **Step 5: action body returns. `closeScope(S, 'commit')`.**
 
-- Per [Q9](./questions.md#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally): only write-populated slots promote. **Both `user.slot[S]` and
-  `greeting.slot[S]` were read-populated** (no `writeSlot` was called
-  during the action). So nothing promotes.
-- Drop `user.slot[S]` and `greeting.slot[S]`. Walk subs, unlink edges
-  (`edge1`).
-- `S.status = 'committed'`. Pop ambient.
+Per [Q10](./questions.md#q10--commit-as-transaction-ordering-atomicity-deferred-fires)
++ [Q9](./questions.md#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally):
+
+1. Open deferred-fires region.
+2. **Promote `S.writeSet`.** `S.writeSet = ∅` — nothing to promote.
+   Both `user` and `greeting` are in `S.readSet` only.
+3. **Walk `S.edges`, remove from `node.subs`.** `S.edges = { edge1 }`.
+   Remove `edge1` from `user.subs`. `user.subs = ∅`.
+4. **Drop `S.slots`** for `S.readSet ∪ S.writeSet = { user, greeting }`.
+   `S.slots = ∅`.
+5. Close children (none).
+6. Drain deferred-fires region (empty).
+7. `S.status = 'committed'`. `ROOT.children.delete(S)`. Pop ambient.
 
 **Final state:**
 
 ```
-user.slots = {}
-greeting.slots = {}
-edges: []
+user.subs     = ∅
+greeting.subs = ∅
+ROOT.slots    = ∅                    # action never wrote to ROOT
+S             : committed (fully disposed)
 console output: "Hello, Alice!"
 ```
 
