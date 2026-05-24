@@ -194,7 +194,7 @@ edge2 = { source: name, target: slot_DN_S, targetScope: S }       // chain: [S, 
 
 ### Step 5a: action returns → `closeScope(S, 'commit')`
 
-Per [Q10](./questions.md#q10--commit-as-transaction-ordering-atomicity-deferred-fires):
+Per [Q10](./questions.md#q10--commit-semantics-ordering-atomicity-deferred-fires):
 commit is a deferred-fires region. Per
 [Q9](./questions.md#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally):
 walk `writeSet` for promotion; drop slots in `readSet` ∪ `writeSet`.
@@ -274,7 +274,7 @@ never observed the speculation). ✓ `get(doubleName)` after discard: cached
 | [Q6 scope-centric storage](./questions.md#q6--what-is-a-scope-as-a-value) | All state representations; slots live in `S.slots` / `ROOT.slots`. |
 | [Q6 explicit disposal](./questions.md#q6--what-is-a-scope-as-a-value) | Steps 5a/5b — walk `S.edges` to clean `node.subs`; drop `S.slots`. |
 | [Q9 writeSet / readSet](./questions.md#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally) | Steps 3, 4 — Set membership decides promotion vs drop. |
-| [Q10 deferred-fires region](./questions.md#q10--commit-as-transaction-ordering-atomicity-deferred-fires) | Step 5a — fires queue during promotion, drain after slot drops. |
+| [Q10 deferred-fires region](./questions.md#q10--commit-semantics-ordering-atomicity-deferred-fires) | Step 5a — fires queue during promotion, drain after slot drops. |
 | [Q11 Policy α](./questions.md#q11--effect-chain-policy-chain-follows-owner-or-always-root_scope) | (Trivially — no effect in this trace, but `S.edges` ownership is the same mechanism.) |
 | [P6 synchronous reads](./framings.md#p6--pull-driven-reads-push-driven-consumers-no-explicit-flush) | Step 4 — `get(doubleName)` returns `"barbar"` synchronously, no flush. |
 
@@ -498,7 +498,7 @@ S.readSet  = { user }                  # already present
   reaches the end. Returns `{ done: true }`.
 - Driver: `done` → `closeScope(S, 'commit')`.
 
-Per [Q10](./questions.md#q10--commit-as-transaction-ordering-atomicity-deferred-fires):
+Per [Q10](./questions.md#q10--commit-semantics-ordering-atomicity-deferred-fires):
 
 1. Open deferred-fires region.
 2. Promote `S.writeSet = { user }`: `writeSlot(user, ROOT, { recipe:
@@ -681,7 +681,7 @@ S.readSet  = { user }, S.writeSet = ∅
   `console.log("alice")`.
 - Body returns. `closeScope(S, 'commit')`.
 
-Per [Q10](./questions.md#q10--commit-as-transaction-ordering-atomicity-deferred-fires)
+Per [Q10](./questions.md#q10--commit-semantics-ordering-atomicity-deferred-fires)
 + [Q9](./questions.md#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally):
 
 1. Open deferred-fires region.
@@ -955,7 +955,7 @@ Continuing from the H1a state, with the generator returning normally:
 
 **Step 1b-1: `closeScope(S, 'commit')`.**
 
-Per [Q10](./questions.md#q10--commit-as-transaction-ordering-atomicity-deferred-fires):
+Per [Q10](./questions.md#q10--commit-semantics-ordering-atomicity-deferred-fires):
 commit is a deferred-fires region.
 
 1. **Open deferred-fires region.** Subsequent fires queue.
@@ -1540,7 +1540,7 @@ production). Mode flags are a hedge against locking in.
 
 2. **Consumer cycle-detection policy.** Max re-runs per microtask, or
    per-second, or detect "this consumer scheduled itself with no input
-   change"? Library design call. **New [Q10](./questions.md#q10--commit-as-transaction-ordering-atomicity-deferred-fires) candidate.**
+   change"? Library design call. **New [Q10](./questions.md#q10--commit-semantics-ordering-atomicity-deferred-fires) candidate.**
 
 3. **`untrack` interaction.** Calling `setShadow` inside an
    `untrack(() => ...)` block: does the deferral still apply? Per the
@@ -1703,13 +1703,13 @@ K1's design call **dissolves**:
 **Settled: (C).** This is essentially r3's model (writes propagate dirty
 to subs synchronously; consumers schedule async via the heap + microtask).
 Pulse adopts the same semantics, just with the engine chain-match gating which
-edges actually fire. Locked into the architecture by [Q10](./questions.md#q10--commit-as-transaction-ordering-atomicity-deferred-fires)
+edges actually fire. Locked into the architecture by [Q10](./questions.md#q10--commit-semantics-ordering-atomicity-deferred-fires)
 ("Recipes do not open a deferred-fires region") and
 [Q8](./questions.md#q8--tracker-vs-scope-separate-or-unified) (tracker
 and scope are separate ambients, parallel-coupled — re-entrant writes
 inherit the scope of the active recompute).
 
-Implication for [Q10](./questions.md#q10--commit-as-transaction-ordering-atomicity-deferred-fires) (commit-as-transaction): the deferred-fires region is
+Implication for [Q10](./questions.md#q10--commit-semantics-ordering-atomicity-deferred-fires) (commit semantics): the deferred-fires region is
 **commit-mode-only**, not tracker-mode. Recipes don't open a deferred-fires
 region (per Q10's "Recipes do not open a deferred-fires region" — Position
 C). Commits do. The two modes don't interfere because a recipe inside a
@@ -1759,7 +1759,7 @@ Two positions on what _inner-action commit_ should do:
   _conditional on outer's commit_.
 - **(ii) Inner promotes directly to ROOT.** Inner-commit publishes
   immediately; outer's scope doesn't see inner's writes (because the chain
-  would still resolve to the outer's earlier slot). Independent-transaction
+  would still resolve to the outer's earlier slot). Independent-speculation
   semantics.
 
 The architecture forces (i), as the trace shows — but the _why_ is worth
@@ -1877,7 +1877,7 @@ S2.writeSet   = { count, name },  S2.readSet  = { count, name }
 
 **Step 9: inner returns. `closeScope(S2, 'commit')`.**
 
-Per [Q10](./questions.md#q10--commit-as-transaction-ordering-atomicity-deferred-fires):
+Per [Q10](./questions.md#q10--commit-semantics-ordering-atomicity-deferred-fires):
 
 1. Open deferred-fires region.
 2. Promote `S2.writeSet = { count, name }` to `S2.parent = S1`:
@@ -2070,8 +2070,8 @@ intermediate `10`.
    write to an intermediate scope that _no external chain matches_.
 4. **Savepoint semantics fall out of the chain mechanism.** Inner commits
    are conditional on outer commits; outer discard rolls back inner's
-   effects. We get database-style nested-transaction semantics without any
-   engine-level transaction machinery.
+   effects. We get database-style nested-savepoint semantics without any
+   engine-level transactional machinery (in the DB-transaction sense).
 5. **[Q6](./questions.md#q6--what-is-a-scope-as-a-value)
    (scope nesting via parent pointers).** The scope is a linked
    structure with `parent` pointers. `chainFor` walks `scope.parent`
@@ -2100,13 +2100,13 @@ Position (ii) was tested and ruled out by the trace.
    is just a library-provided parentless scope. Multiple-roots /
    per-tenant scopes fall out for free.
 2. **Edge-ordering during multi-write commits — resolved** by
-   [Q10](./questions.md#q10--commit-as-transaction-ordering-atomicity-deferred-fires):
+   [Q10](./questions.md#q10--commit-semantics-ordering-atomicity-deferred-fires):
    promotion walks `S.writeSet` in dep-order leaves-first inside the
    deferred-fires region. Intermediate fires queue without re-running
    consumers, so a derived consumer that depends on multiple promoted
    signals never observes partial state.
 3. **Promotion atomicity at the consumer level — resolved** by
-   [Q10](./questions.md#q10--commit-as-transaction-ordering-atomicity-deferred-fires):
+   [Q10](./questions.md#q10--commit-semantics-ordering-atomicity-deferred-fires):
    commit IS a deferred-fires region; fires deduplicate by
    `(node, targetSlot)` before draining. Consumers see one invalidation
    per affected slot regardless of how many writes contributed.
@@ -2337,7 +2337,7 @@ throwing.
 
 **Step 4 (alternate): `closeScope(S, 'commit')`.**
 
-Per [Q10](./questions.md#q10--commit-as-transaction-ordering-atomicity-deferred-fires):
+Per [Q10](./questions.md#q10--commit-semantics-ordering-atomicity-deferred-fires):
 commit is a deferred-fires region.
 
 1. **Open deferred-fires region.** Fires queue.
@@ -2531,7 +2531,7 @@ flagged in H3b (the effect-disposer-on-commit vehicle).
    promoted. The earlier draft used a per-slot `wasWritten` flag;
    under the resolved Q9, the flag is gone and the scope's writeSet
    carries the same information.
-5. **[Q10](./questions.md#q10--commit-as-transaction-ordering-atomicity-deferred-fires)'s
+5. **[Q10](./questions.md#q10--commit-semantics-ordering-atomicity-deferred-fires)'s
    deferred-fires region was empty in H3b** because the chain-match
    for the only edge (`edge1` with `targetScope = S`) skipped (S still
    had a slot at the moment of promotion). In H3b' the region carried
@@ -2561,7 +2561,7 @@ flagged in H3b (the effect-disposer-on-commit vehicle).
    fired the effect's bodyCleanups after dropping S slots but before
    `S.status = 'committed'`. If an effect's bodyCleanup itself calls
    `writeSlot` (re-entrancy during cleanup), the deferred-fires region
-   ([Q10](./questions.md#q10--commit-as-transaction-ordering-atomicity-deferred-fires)) should absorb that. The trace didn't exercise it. Worth
+   ([Q10](./questions.md#q10--commit-semantics-ordering-atomicity-deferred-fires)) should absorb that. The trace didn't exercise it. Worth
    tracing if K1-style re-entrancy concerns surface here.
 4. **`onCleanup` outside an effect body but inside an action.** What's
    the registration target? Working assumption: `scope.cleanups` of the
@@ -2787,7 +2787,7 @@ async-ness preserved through the graph.
 
 **Step 5: action body returns. `closeScope(S, 'commit')`.**
 
-Per [Q10](./questions.md#q10--commit-as-transaction-ordering-atomicity-deferred-fires)
+Per [Q10](./questions.md#q10--commit-semantics-ordering-atomicity-deferred-fires)
 + [Q9](./questions.md#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally):
 
 1. Open deferred-fires region.
@@ -2941,7 +2941,7 @@ C2e traced cleanly. No falsifications. The key findings:
    anything; it just performed reads with side effects (the
    `console.log`). The action's only purpose was awaiting + observing.
    [Q9](./questions.md#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally) distinguishes this from a write-and-commit action cleanly.
-5. **Q10 commit-as-transaction is uneventful** here. Nothing to promote;
+5. **Q10's commit semantics are uneventful** here. Nothing to promote;
    the deferred-fires region opens and closes with no fires.
 
 ### Sub-questions surfaced (small)
@@ -3071,7 +3071,7 @@ Committed state untouched per H1a-c (the chain doesn't include `S`).
 
 ### Step 3: action returns. `closeScope(S, 'commit')`
 
-Per [Q10](./questions.md#q10--commit-as-transaction-ordering-atomicity-deferred-fires):
+Per [Q10](./questions.md#q10--commit-semantics-ordering-atomicity-deferred-fires):
 commit is a deferred-fires region. Per
 [Q9](./questions.md#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally):
 promote `S.writeSet` only; drop slots in `S.readSet ∪ S.writeSet`.
@@ -3198,7 +3198,7 @@ So the effect body, when it runs, sees both:
 
 **Q10's commit-region deduplication** is what makes this _efficient_
 (one re-run instead of N for an effect that depends on N commit-promoted
-signals) — but the coherence itself doesn't depend on [Q10](./questions.md#q10--commit-as-transaction-ordering-atomicity-deferred-fires). Even with N
+signals) — but the coherence itself doesn't depend on [Q10](./questions.md#q10--commit-semantics-ordering-atomicity-deferred-fires). Even with N
 re-runs, each one sees coherent state because all invalidations land
 before the first microtask.
 
@@ -3231,10 +3231,10 @@ H1d traced cleanly with no new design calls. The trace validates that:
 ### Sub-questions surfaced (small)
 
 - _Multi-write commits with overlapping consumers._ If the action wrote
-  to N signals all depending on the same effect, [Q10](./questions.md#q10--commit-as-transaction-ordering-atomicity-deferred-fires)'s dedupe ensures
+  to N signals all depending on the same effect, [Q10](./questions.md#q10--commit-semantics-ordering-atomicity-deferred-fires)'s dedupe ensures
   one re-run. But this trace only had one write. Worth a follow-up
   trace if pulse ever finds itself debugging "why does my effect run 5
-  times after a commit." Probably absorbed into [Q10](./questions.md#q10--commit-as-transaction-ordering-atomicity-deferred-fires)'s existing scope.
+  times after a commit." Probably absorbed into [Q10](./questions.md#q10--commit-semantics-ordering-atomicity-deferred-fires)'s existing scope.
 - _What if `doubled`'s recipe were async?_ Then the recompute inside
   `invoke(doubled, ROOT)` would yield a park command. The effect body's
   `get(doubled)` would return a Promise; the effect would have to
@@ -3244,7 +3244,7 @@ H1d traced cleanly with no new design calls. The trace validates that:
 ### Framings status after H1d
 
 All four framings still hold. Position C from K1+K1b is reconfirmed at
-the commit-fire level. [Q10](./questions.md#q10--commit-as-transaction-ordering-atomicity-deferred-fires)'s deferred-fires region works as designed for
+the commit-fire level. [Q10](./questions.md#q10--commit-semantics-ordering-atomicity-deferred-fires)'s deferred-fires region works as designed for
 deduplication. The "Derivation kind matches reactivity scope" framing is
 implicit here — `doubled` is a Computed (synchronously fresh on read);
 if it had been an effect-driven signal (H5), the trace would have

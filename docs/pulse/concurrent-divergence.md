@@ -28,7 +28,7 @@ expressed.
 - [B — Same-target, accumulation semantics](#b--same-target-accumulation-semantics)
 - [C — Same-target, precedence semantics](#c--same-target-precedence-semantics)
 - [D — Read-dependent writes](#d--read-dependent-writes)
-- [E — Multi-step transactions](#e--multi-step-transactions)
+- [E — Multi-step composite actions](#e--multi-step-composite-actions)
 - [F — Supersession (newer invalidates older)](#f--supersession-newer-invalidates-older)
 - [G — Independent flows that share a downstream dep](#g--independent-flows-that-share-a-downstream-dep)
 - [H — True collaboration](#h--true-collaboration)
@@ -55,10 +55,10 @@ scenario:
 - **Last-commit-wins on overlapping writes.** Two siblings both write
   `X`; whichever commits second overwrites. Falls out of writeSet
   promotion ([Q9](./questions.md#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally)
-  + [Q10](./questions.md#q10--commit-as-transaction-ordering-atomicity-deferred-fires)).
+  + [Q10](./questions.md#q10--commit-semantics-ordering-atomicity-deferred-fires)).
 - **Render coherence.** Microtask batching + deferred-fires region
   ([P6](./framings.md#p6--pull-driven-reads-push-driven-consumers-no-explicit-flush) +
-  [Q10](./questions.md#q10--commit-as-transaction-ordering-atomicity-deferred-fires))
+  [Q10](./questions.md#q10--commit-semantics-ordering-atomicity-deferred-fires))
   collapses multiple invalidations of the same consumer to one re-run.
 - **Transactional coupling via nested actions.** `action(() => {
   a(); b() })` makes `a` and `b` commit-together; the outer action's
@@ -314,7 +314,7 @@ for `'reject'` — small, well-understood mechanism, big payoff.
 
 ---
 
-### E — Multi-step transactions
+### E — Multi-step composite actions
 
 **The pattern.** Multiple coordinated writes that must succeed or
 fail as a unit.
@@ -325,8 +325,8 @@ fail as a unit.
   write content). Both must commit or neither.
 - E2. **Coordinated batch.** Update three related signals atomically
   (transferring money: debit account A, credit account B, log
-  transaction).
-- E3. **Compensating transaction.** Step 1 succeeds; step 2 fails;
+  speculation).
+- E3. **Compensating speculation.** Step 1 succeeds; step 2 fails;
   step 1 must be rolled back.
 
 **Under pulse default + nested actions:**
@@ -510,7 +510,7 @@ optimistically; drop commits via server call; rejection restores
 order. The speculation covers both the optimistic visual reorder
 and any derived state (counts, positions, indices).
 
-**Multi-step wizard / staged transaction.** User progresses through
+**Multi-step wizard / staged speculation.** User progresses through
 steps; each step's data is collected; only the final "finish"
 commits everything. Cancel at any step discards the accumulated
 state. Examples: checkout flow, onboarding, multi-page form, file
@@ -563,7 +563,7 @@ flicker.
 
 **Cross-component coordinated update.** Click in component A
 triggers updates in components B, C, D — they should all appear
-together (one render, one logical change). Not transactional in
+together (one render, one logical change). Not atomic in
 the "rollback" sense; coherence in the "shown together" sense.
 
 **Workflow with checkpoints.** Long-running operation where the
@@ -675,7 +675,7 @@ independent.
 
 ### Independent failure handling
 
-**Compensating transactions that fail independently.** Action A
+**Compensating speculations that fail independently.** Action A
 debits account X; action B credits account Y; in some systems,
 these are two separate compensating operations. If A succeeds but
 B fails, the system needs to handle each independently — not
@@ -865,7 +865,7 @@ two logically distinct concerns:
 **Job 1 — Atomic commit boundary.** A set of writes that succeed-or-
 fail together. Has a lifecycle (open → run → commit / discard).
 Tracks `writeSet`, `cleanups`, `status`. Owns the action handle and
-its `.commit()` / `.discard()` semantics. This is the *transactional
+its `.commit()` / `.discard()` semantics. This is the *atomic
 unit*.
 
 **Job 2 — Isolation context (the "view" or sandbox).** A region
@@ -874,7 +874,7 @@ where reads see particular overlays. Has `slots`, `parent`, `readSet`,
 visible to readers under this context; the lifecycle of the cache
 itself. This is the *visibility region*.
 
-In current pulse these are 1:1 — every Scope is both a transaction
+In current pulse these are 1:1 — every Scope is both a speculation
 and an isolation context. The conflation is invisible most of the
 time and works fine for most scenarios. But the entanglement question
 is exactly where the conflation becomes load-bearing, so it's worth
@@ -882,7 +882,7 @@ unpacking.
 
 ### What disentanglement would open up
 
-If transactions and isolation contexts were separable, the design
+If speculations and isolation contexts were separable, the design
 space gets richer:
 
 - *Commit boundary without isolation.* Writes go straight to canonical
@@ -892,19 +892,19 @@ space gets richer:
 - *Isolation without commit boundary.* A sandbox that's never meant
   to commit — a preview, a what-if, a tutorial view. Currently you'd
   use an action that's always discarded, which conflates "this isn't
-  a transaction" with "this is a failed transaction."
+  a speculation" with "this is a failed speculation."
 - *One commit boundary spanning multiple isolation contexts.* Database
-  savepoints — sub-sandboxes within a transaction. Each sub can have
-  its own reads/writes; the outer transaction commits all of them
+  savepoints — sub-sandboxes within a speculation. Each sub can have
+  its own reads/writes; the outer speculation commits all of them
   together.
 - *One isolation context shared by multiple commit boundaries.* Two
-  transactions sharing visibility but committing independently. This
+  speculations sharing visibility but committing independently. This
   is the *interesting* case for entanglement — see below.
 
 ### The case that matters: shared isolation, independent commit
 
 The bottom case from the list above is the one that maps onto
-"entanglement" intuitions. Two concurrent transactions A and B
+"entanglement" intuitions. Two concurrent speculations A and B
 sharing one isolation context means: A writes X → B sees X
 immediately (no snapshot isolation between them) → B reads X and
 writes Y → both commit/discard on their own schedule.
@@ -912,7 +912,7 @@ writes Y → both commit/discard on their own schedule.
 This is closer to what Solid's lane-merge reaches for than pulse's
 nested actions are. Nested actions give shared isolation **and**
 coupled commit (the inner actions can't commit independently of the
-outer); shared-isolation-with-independent-commit would let each transaction
+outer); shared-isolation-with-independent-commit would let each speculation
 finish on its own schedule while still seeing each other's progress.
 
 But this is *not* free. Here's the catch.
@@ -920,7 +920,7 @@ But this is *not* free. Here's the catch.
 ### Why the coupling isn't accidental
 
 Isolation is the mechanism that makes independent commit/discard
-*possible*. If transaction A's writes are visible to transaction B,
+*possible*. If speculation A's writes are visible to speculation B,
 and B reads them and writes Y based on them, what happens when A
 discards?
 
@@ -930,7 +930,7 @@ Four options, none of them clean:
   coupled to A's — defeating the "independent commit" point.
 - **Optimistic propagation.** Only B's writes that *causally
   depended* on A's revert. Requires per-write dep tracking between
-  transactions; expensive; subtle ("did this read depend on A's
+  speculations; expensive; subtle ("did this read depend on A's
   write, or coincidentally produce the same result?").
 - **Hard failure.** A discards; B's next read of an A-derived value
   throws. User must catch and decide. Aggressive but visible.
@@ -939,10 +939,10 @@ Four options, none of them clean:
 
 The coupling between isolation and atomicity exists *because*
 isolation is what gives atomicity its bite. Without isolation,
-atomicity is meaningless — other transactions are already reading
+atomicity is meaningless — other speculations are already reading
 your half-done writes, so "discard" can't undo what they've already
 seen and decided on. With shared isolation across multiple
-transactions, atomicity stops composing.
+speculations, atomicity stops composing.
 
 Every framework that tries to offer shared-visibility-with-
 independent-commit has to pick one of those four options. (See [Solid /
@@ -951,24 +951,24 @@ below.) None pick a clean answer because there isn't one.
 
 ### What this means for pulse's choice
 
-Pulse's current 1:1 coupling between transaction and isolation is a
+Pulse's current 1:1 coupling between speculation and isolation is a
 *positive design choice*, not an accidental engineering decision. It
 sidesteps the cascade-discard problem by construction: each
-transaction has its own isolation context, so cross-transaction
+speculation has its own isolation context, so cross-speculation
 phantom reads can't happen.
 
-The cost: you can't have two concurrent transactions share visibility
+The cost: you can't have two concurrent speculations share visibility
 while committing independently. The only way to share visibility is
-to share a transaction (nested actions) — which means coupled commit.
+to share a speculation (nested actions) — which means coupled commit.
 
 The alternative would be to disentangle and offer shared-isolation as
 a feature, accepting cascade-discard (or one of the other three) as
 the cost. The scenario walk above doesn't surface a strong use case
-for this — *most* multi-transaction patterns in apps want either
+for this — *most* multi-speculation patterns in apps want either
 independent isolation (default) or coupled commit (nested actions).
 The narrow case of "share visibility, commit independently" doesn't
 seem to come up often, and when it does, the application can usually
-restructure to nest the transactions or coordinate via explicit
+restructure to nest the speculations or coordinate via explicit
 status queries.
 
 So the practical takeaway: name the conceptual overload, understand
@@ -1033,11 +1033,11 @@ writes the overlay for immediate visibility; if it succeeds, also
 writes the committed source; if it fails, only the overlay reverts,
 which the user perceives as a rollback.
 
-Under this pattern, the cross-transaction rollback problem partially
+Under this pattern, the cross-speculation rollback problem partially
 dissolves: plain writes don't get rolled back (the user accepts the
 "phantom read" / "no rollback" behaviour for them), and optimistic
 overlays are per-overlay state with their own lifecycle that doesn't
-couple across transactions.
+couple across speculations.
 
 Solid's approach: **(option 3 + 4 hybrid) phantom reads accepted on
 plain writes; cascading revert on overlays only.** The cascade is
@@ -1074,7 +1074,7 @@ worry about.
 
 **Summary: nobody solves the hard version.**
 
-| Framework | Shared visibility across transactions? | Rollback strategy |
+| Framework | Shared visibility across speculations? | Rollback strategy |
 | --- | --- | --- |
 | React modern | No (private WIP trees) | Per-action `useOptimistic` overlay; vanishes if parent doesn't update source |
 | Solid 2.x | Yes (merged lanes) | Plain writes: no rollback. Optimistic overlays: auto-revert unconditionally |
@@ -1086,7 +1086,7 @@ or accepts that plain writes don't roll back across the shared region
 (Solid). **Nobody offers true shared-visibility-with-independent-commit
 and clean rollback** because the semantics aren't recoverable.
 
-Pulse's choice — no shared visibility between concurrent transactions
+Pulse's choice — no shared visibility between concurrent speculations
 — matches React and Svelte. It loses the within-action-overlay
 ergonomic story Solid has, but pulse can recover that as a library
 pattern (a signal value type that splits into "committed" and
@@ -1142,7 +1142,7 @@ argument against picking Solid's mechanism: it provides automatic
 coupling that's wrong as often as it's right. Pulse's explicit-only
 coupling (via nested actions) doesn't have this failure mode.
 
-**Cross-transaction read coherence is handled for free by pulse's
+**Cross-speculation read coherence is handled for free by pulse's
 chain-match** — earlier drafts of this doc treated it as a separate
 gap, but tracing carefully shows it isn't. A consumer recomputing
 under scope `S1` that reads `X` (falling through to ROOT) registers
@@ -1163,7 +1163,7 @@ From the eight classes, the minimum affordance set:
 Serves A and is the right default for cases where the user doesn't
 specifically need anything else.
 
-**2. Nested actions for transactional coupling** (current via Q6).
+**2. Nested actions for atomic coupling** (current via Q6).
 
 Serves E. `action(() => { a(); b() })` makes a and b commit together.
 
@@ -1268,7 +1268,7 @@ making it a framework primitive.
 **4. Do not ship `'rebase'`, merge callbacks, or auto-merge.** The
 scenario walk doesn't justify them; they have known footguns.
 
-**5. Cross-tx read coherence is already covered** by chain-match
+**5. Cross-speculation read coherence is already covered** by chain-match
 ([Q1](./questions.md#q1--fall-through-and-edge-policy)) — consumers
 recomputing under scope S that read fall-through-to-ROOT values get
 fired correctly when those values are later committed at ROOT.
@@ -1283,14 +1283,14 @@ not as a final spec.
 
 The crux of the original question — "what about Solid's lane merge?"
 — resolves cleanly: lane merge bundles four concerns (render
-coherence, transactional coupling, cross-tx read, conflict
+coherence, atomic coupling, cross-speculation read, conflict
 resolution) into one mechanism. Pulse disaggregates:
 
 | Concern | Pulse mechanism |
 | --- | --- |
 | Render coherence | P6 + Q10 microtask batching (automatic) |
 | Transactional coupling | Nested actions (opt-in via code structure) |
-| Cross-tx read coherence | Chain-match in Q1 (automatic) |
+| Cross-speculation read coherence | Chain-match in Q1 (automatic) |
 | Conflict resolution | `onConflict: 'reject'` (opt-in per action) |
 
 Smaller pieces, each addressing one intent, none with the spooky-

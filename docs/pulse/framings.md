@@ -161,7 +161,7 @@ a microtask, or close a batch before reading coherent state. Reading is
 not a discipline.
 
 See [Q3](./questions.md#q3--consumer-patterns) for the consumer
-implementation and [Q10](./questions.md#q10--commit-as-transaction-ordering-atomicity-deferred-fires)
+implementation and [Q10](./questions.md#q10--commit-semantics-ordering-atomicity-deferred-fires)
 for how this interacts with commit's deferred-fires region (commit's
 batching is also invisible to subsequent reads).
 

@@ -27,7 +27,7 @@ either:
 - [Q7 — The `defaultRecipe` mechanism](#q7--the-defaultrecipe-mechanism)
 - [Q8 — Tracker vs Scope: separate or unified?](#q8--tracker-vs-scope-separate-or-unified)
 - [Q9 — Read-populated vs write-populated slots: do they differ structurally?](#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally)
-- [Q10 — Commit as transaction: ordering, atomicity, deferred fires](#q10--commit-as-transaction-ordering-atomicity-deferred-fires)
+- [Q10 — Commit semantics: ordering, atomicity, deferred fires](#q10--commit-semantics-ordering-atomicity-deferred-fires)
 - [Q11 — Effect chain policy: chain follows owner, or always `[ROOT_SCOPE]`?](#q11--effect-chain-policy-chain-follows-owner-or-always-root_scope)
 - [Q12 — Body cleanups vs scope cleanups: composition and re-entrancy](#q12--body-cleanups-vs-scope-cleanups-composition-and-re-entrancy)
 - [Q13 — Optimistic surface ergonomics (sugar over speculation)](#q13--optimistic-surface-ergonomics-sugar-over-speculation)
@@ -716,7 +716,7 @@ state, not a passable value.
 **Sub-questions deferred to other Qs:**
 
 - *Where exactly the writeSet/readSet drive commit logic.* → [Q9](#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally).
-- *Commit ordering and atomicity of multi-slot promotion.* → [Q10](#q10--commit-as-transaction-ordering-atomicity-deferred-fires).
+- *Commit ordering and atomicity of multi-slot promotion.* → [Q10](#q10--commit-semantics-ordering-atomicity-deferred-fires).
 - *Whether cleanups fire on commit as well as discard.* → [Q12](#q12--body-cleanups-vs-scope-cleanups-composition-and-re-entrancy).
 - *Whether `currentTracker` is the same ambient as `currentScope` or a
   separate one.* → [Q8](#q8--tracker-vs-scope-separate-or-unified).
@@ -772,7 +772,7 @@ explicitly opted out of tracking) but worth confirming as the policy.
 Connects to L1 in the scenario catalog.
 
 **Related:** [Q2](#q2--scopeowner-unification) (scope/owner unification — tracker is the third
-ambient, parallel to scope), [Q10](#q10--commit-as-transaction-ordering-atomicity-deferred-fires) (`deferredFires` is keyed on tracker).
+ambient, parallel to scope), [Q10](#q10--commit-semantics-ordering-atomicity-deferred-fires) (`deferredFires` is keyed on tracker).
 
 ### Q9 — Read-populated vs write-populated slots: do they differ structurally?
 
@@ -812,7 +812,7 @@ under this resolution: signal slots are always in `writeSet`, computed
 slots are always in `readSet`, the distinction is *which set the scope
 files them under*, not a property of the slot itself.
 
-### Q10 — Commit as transaction: ordering, atomicity, deferred fires
+### Q10 — Commit semantics: ordering, atomicity, deferred fires
 
 Status: **resolved — commit is a deferred-fires region.** Generalizes
 K1's recompute mechanism: the engine's invariant is "if `deferredFires`
@@ -933,7 +933,7 @@ sealed by [Q6](#q6--what-is-a-scope-as-a-value)'s scope shape.
 
 - *Commit vs discard:* discard only. Q6 made this explicit
   (`if (mode === 'discard') S.cleanups.forEach(fn => fn())`).
-- *Re-entrancy during cleanup:* covered by [Q10](#q10--commit-as-transaction-ordering-atomicity-deferred-fires)'s deferred-fires
+- *Re-entrancy during cleanup:* covered by [Q10](#q10--commit-semantics-ordering-atomicity-deferred-fires)'s deferred-fires
   region. Writes inside a cleanup queue onto the region; outermost
   drain handles them. No special-case.
 - *Nested-scope ordering:* children-first. Scope discard recursively
@@ -947,7 +947,7 @@ sealed by [Q6](#q6--what-is-a-scope-as-a-value)'s scope shape.
 
 **Related:** [Q2](#q2--scopeowner-unification) (scope/owner unification carries cleanup composition),
 [Q6](#q6--what-is-a-scope-as-a-value) (the scope shape that pins the cleanup home),
-[Q10](#q10--commit-as-transaction-ordering-atomicity-deferred-fires) (re-entrant cleanups deferred via the same mechanism as commit fires).
+[Q10](#q10--commit-semantics-ordering-atomicity-deferred-fires) (re-entrant cleanups deferred via the same mechanism as commit fires).
 
 ### Q13 — Optimistic surface ergonomics (sugar over speculation)
 

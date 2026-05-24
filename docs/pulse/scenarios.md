@@ -379,8 +379,8 @@ get(doubleName).capitalize() })`. Tests **in-recipe coherence**: does
   re-entrancy? **Cleanup-time re-entrancy + coherence probe.** Cuts
   multiple ways: (i) commit is atomic, cleanups see post-promotion
   state; (ii) cleanups fire mid-promotion, half-state; (iii) cleanups
-  fire pre-promotion, scope-still-open chain. [Q10](./questions.md#q10--commit-as-transaction-ordering-atomicity-deferred-fires) (commit-as-
-  transaction) is upstream.
+  fire pre-promotion, scope-still-open chain. [Q10](./questions.md#q10--commit-semantics-ordering-atomicity-deferred-fires)
+  (commit semantics) is upstream.
 - **K3.** Action body calls `setX` where `X` is updated by an effect that
   was itself triggered by that write (would-be cycle). Tests: cycle
   detection under scope; policy bans or runs.
