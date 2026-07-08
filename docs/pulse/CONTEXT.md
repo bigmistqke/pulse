@@ -55,7 +55,7 @@ A _walk_ is a read primitive: a function that takes a Node and consults the acti
 
 The library ships named patterns over the engine. All of them are _consumer patterns_ over Nodes — the underlying abstraction is shared; the names exist for DX.
 
-- **`signal(value)`** — a Node whose recipe is "return the last written value." The write-populated slot.
+- **`signal(value)`** / **`signal(value, { equals })`** — a Node whose recipe is "return the last written value." The write-populated slot. Writes are change-detected: a write `Object.is`-equal to the current value is a no-op — no propagation, no writeSet entry, no version bump — unless overridden by `equals` (a custom comparator, or `false` to always notify). Per [ADR 0008](../adr/0008-signals-dedupe-writes-by-object-is.md).
 - **`compute(recipe)`** / **Computed.** A Node whose recipe derives from other Nodes via walks. The read-populated slot.
 - **`effect(fn)`** — a consumer pattern that runs `fn` on changes. Not a Node; a leaf consumer.
 - **`onCleanup(fn)`** — registers a teardown to run when the surrounding scope disposes or the consumer re-runs.
