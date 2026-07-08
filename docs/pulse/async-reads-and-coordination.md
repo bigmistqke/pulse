@@ -99,6 +99,6 @@ Proposed changes to [`CONTEXT.md`](./CONTEXT.md), to apply on approval:
 ## Open questions
 
 - **Naming.** `settled` / `stable` / `frame` for the wait-for-all combinator — cosmetic; defer to ergonomic feedback.
-- **`.value` and genuine `undefined`.** `s().value → T | undefined` is ambiguous when `undefined` is a legitimate value. Needs a story: a distinct sentinel, or pairing with `isPending` / a `has`-check.
+- **`.value` and genuine `undefined` — resolved.** `s().value → T | undefined` is terse and accepts the ambiguity, but the `Awaitable` already carries `.status` (`'pending' | 'fulfilled' | 'rejected'`) to disambiguate on the same object: `.value === undefined` with `.status === 'fulfilled'` is a genuine `undefined`; with `.status === 'pending'` it is not-ready. (An `.isResolved` convenience boolean is just `.status !== 'pending'`.) So `.value` is the terse read; `.status` is the disambiguator — no sentinel required.
 - **Resolved-`Awaitable` allocation.** An async read stays a wrapper even after settling; whether the `Awaitable` for a settled value is cached/reused per read is an implementation edge to pin. (The related question — do purely-*synchronous* signals wrap? — is resolved: they stay bare `T`; the read type mirrors the body.)
 - **`settled` and refetch promises.** `settled` must await the *in-flight* promise of a refetching input, which under SWR is tracked out-of-band from the stored stale value. Confirm `settled` reaches it (via the node's pending state, not via `.value`).

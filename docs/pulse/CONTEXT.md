@@ -40,16 +40,17 @@ This file covers terms whose meaning is _pulse-specific_ — the engine and libr
 
 A _walk_ is a read primitive: a function that takes a Node and consults the active scope's bag (and possibly the recipe) to produce a value. Walks are first-class — the library ships named walks as approachable DX over the engine. See [`framings.md`'s walks framing](./framings.md#walks-are-first-class).
 
-- **`get(node)`** — the unified read walk. Returns `T` for sync nodes and `Awaitable<U>` for `Node<Promise<U>>`. Used by computeds, effects, and the JSX binding alike.
+- **`get(node)`** — the unified read walk. A **sync** node reads as bare `T`; an **async** node (`Node<Promise<U>>`) reads as `Awaitable<U>` — *uniformly*, staying an `Awaitable` after settling rather than flipping to a bare `U`. The `Awaitable`'s three faces are the ways to resolve it: `.value` (synchronous peek, `U | undefined` while pending — the stale-while-revalidate read), `yield*` (await, for composition inside a stage/action), and [`use(node)`](#walks) (suspend). Per [`async-reads-and-coordination.md`](./async-reads-and-coordination.md), which supersedes [ADR 0002](../adr/0002-pending-model.md)'s write-back. Used by computeds, effects, and the JSX binding alike.
 - **`peek(node)`** — non-tracking read. Currently under review for removal; see [`questions.md`](./questions.md).
-- **`latest(node)`** — returns the last committed value, bypassing the active speculation's slot.
+- **`committed(node)`** — returns the last committed value, bypassing the active speculation's slot (the *isolation* axis). Renamed from `latest` per [`async-reads-and-coordination.md`](./async-reads-and-coordination.md#lexicon-deltas): `latest` clashed with the shipped readiness-axis stale read (and with Solid's `latest`). The readiness-axis stale read is subsumed by `Awaitable.value` under stale-while-revalidate, so there is no separate `latest` walk.
 - **`use(node)`** — React-style throw-to-suspend at the leaf. See [`framings.md`'s `use()` section](./framings.md#use-is-react-style-throw-to-suspend-at-the-leaf).
 - **`isPending(node)`** — whether the node currently has unresolved async work in the active scope.
 - **`subscribe(node, fn)`** — imperative external subscription.
 
 ## Async
 
-- **`Awaitable<T>`.** A `Promise<T>` subclass that adds (a) `[Symbol.iterator]` so it can be `yield*`ed inside generator stages and action bodies, and (b) React-convention `{status, value, reason}` fields for synchronous inspection after resolution. One type covers three call-site shapes: sync read of a resolved value, async wait, and generator wait. See [`framings.md`'s Awaitable section](./framings.md#awaitablet--one-type-three-legitimate-uses).
+- **`Awaitable<T>`.** A `Promise<T>` subclass that adds (a) `[Symbol.iterator]` so it can be `yield*`ed inside generator stages and action bodies, and (b) React-convention `{status, value, reason}` fields for synchronous inspection. One type covers three call-site shapes — sync read of a resolved value (`.value`), async wait (`await`), and generator wait (`yield*`) — and it *remains* an `Awaitable` after settling (no write-back to a bare `T`; the resolved value is read via `.value`). `.status` disambiguates a pending read from a genuinely-`undefined` resolved `.value` (an `.isResolved` boolean is just `.status !== 'pending'`). See [`framings.md`'s Awaitable section](./framings.md#awaitablet--one-type-three-legitimate-uses) and [`async-reads-and-coordination.md`](./async-reads-and-coordination.md#part-1--the-read-model-s-is-always-an-awaitable).
+- **`settled([a, b, …])`.** A *wait-for-all* combinator — the plural form of `yield* get(node)`. Awaits every input's `Awaitable` and resolves to the tuple of values once all have settled (≈ `Promise.all` over the reads). The read-side coordination barrier for a shared consumer: keep the last coherent frame (via stale-while-revalidate), swap atomically when every input is ready. Per [`async-reads-and-coordination.md`](./async-reads-and-coordination.md#part-2--the-coordination-barrier-settled-on-stale-while-revalidate).
 
 ## Library patterns
 
