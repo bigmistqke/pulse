@@ -205,3 +205,20 @@ test('reading a computed under a speculation runs its recipe into an S-slot and 
   expect(s.slots.has(doubleName)).toBe(true)
   expect([...name.subs].some((e) => e.targetScope === s)).toBe(true)
 })
+
+test('doubleName trace steps 1-4: speculative recompute is isolated and reactive', () => {
+  const name = signalNode('foo')
+  const doubleName = computedNode(() => readValue(name) + readValue(name))
+  const s = createScope(ROOT_SCOPE, 'speculative')
+
+  runInScope(s, undefined, () => {
+    expect(readValue(doubleName)).toBe('foofoo') // step: read under S, computes from committed
+    writeValue(name, 'bar')                      // step: setName under S (speculative)
+    expect(readValue(name)).toBe('bar')          // S sees its own write
+    expect(readValue(doubleName)).toBe('barbar') // step: doubleName recomputes under S — THE break, fixed
+  })
+
+  // committed world never moved:
+  expect(readValue(name)).toBe('foo')
+  expect(readValue(doubleName)).toBe('foofoo')
+})
