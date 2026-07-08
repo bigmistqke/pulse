@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { createScope, chainFor, writeSlot, readSlot, chainMatch, linkEdge, edgesToFire, closeScopeEdges, ROOT_KIND, ROOT_SCOPE, getCurrentScope, getCurrentTracker, runInScope, signalNode, computedNode, readValue, writeValue, type Scope, type Node, type Slot, type Edge } from '../src/scope'
+import { createScope, chainFor, writeSlot, readSlot, chainMatch, linkEdge, edgesToFire, closeScopeEdges, ROOT_KIND, ROOT_SCOPE, getCurrentScope, getCurrentTracker, runInScope, signalNode, computedNode, readValue, writeValue, commit, type Scope, type Node, type Slot, type Edge } from '../src/scope'
 import { read as r3Read } from 'r3'
 
 test('createScope produces an open scope with empty bags', () => {
@@ -248,4 +248,22 @@ test('a committed computed reacts to a committed signal write (no speculation)',
   expect(readValue(doubleName)).toBe('foofoo')
   writeValue(name, 'bar')          // committed write (ambient is ROOT_SCOPE)
   expect(readValue(doubleName)).toBe('barbar') // committed computed recomputed
+})
+
+test('commit promotes a speculative signal write to committed (doubleName step 5a)', () => {
+  const name = signalNode('foo')
+  const doubleName = computedNode(() => readValue(name) + readValue(name))
+  expect(readValue(doubleName)).toBe('foofoo')
+
+  const s = createScope(ROOT_SCOPE, 'speculative')
+  runInScope(s, undefined, () => writeValue(name, 'bar'))
+  // before commit: committed world unchanged
+  expect(readValue(name)).toBe('foo')
+
+  commit(s)
+  // after commit: promoted to committed; computed recomputes
+  expect(readValue(name)).toBe('bar')
+  expect(readValue(doubleName)).toBe('barbar')
+  expect(s.status).toBe('committed')
+  expect(s.slots.size).toBe(0) // slots dropped
 })

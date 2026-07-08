@@ -254,3 +254,29 @@ function writeSpeculative<T>(node: Node<T>, scope: Scope, value: T): void {
     edge.target.cached = undefined
   }
 }
+
+/** Commit a scope (ADR 0010 order): snapshot the writeSet's promoted values
+ *  (before closeScopeEdges clears writeSet + drops slots), tear down the
+ *  scope's pulse edges (edges-down-before-promote → no double-fire), then
+ *  promote to the parent. Promoting to ROOT_SCOPE bridges to r3 via setSignal
+ *  + a single stabilize (r3's InHeap-deduped heap gives Q10 batching). A
+ *  speculative parent (nested actions) receives the value as a parent slot. */
+export function commit(scope: Scope): void {
+  const promotions: Array<{ node: Node; value: unknown }> = []
+  for (const node of scope.writeSet) {
+    promotions.push({ node, value: scope.slots.get(node)!.cached })
+  }
+  closeScopeEdges(scope)
+  const parent = scope.parent ?? ROOT_SCOPE
+  if (parent === ROOT_SCOPE) {
+    for (const { node, value } of promotions) {
+      r3SetSignal(node.backing as R3Signal<unknown>, value)
+    }
+    stabilize()
+  } else {
+    for (const { node, value } of promotions) {
+      writeSpeculative(node, parent, value)
+    }
+  }
+  scope.status = 'committed'
+}
