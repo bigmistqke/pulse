@@ -194,3 +194,14 @@ test('a speculative write marks matching downstream speculative slots dirty', ()
   runInScope(s, undefined, () => writeValue(name, 'bar'))
   expect(derivedSlot.cached).toBeUndefined() // dirtied (cached dropped)
 })
+
+test('reading a computed under a speculation runs its recipe into an S-slot and links deps', () => {
+  const name = signalNode('foo')
+  const doubleName = computedNode(() => readValue(name) + readValue(name))
+  const s = createScope(ROOT_SCOPE, 'speculative')
+  const v = runInScope(s, undefined, () => readValue(doubleName))
+  expect(v).toBe('foofoo')
+  // an S-slot was created for doubleName, and name got a pulse edge into it:
+  expect(s.slots.has(doubleName)).toBe(true)
+  expect([...name.subs].some((e) => e.targetScope === s)).toBe(true)
+})

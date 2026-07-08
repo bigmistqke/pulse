@@ -4,6 +4,7 @@ import {
   setSignal as r3SetSignal,
   signal as r3Signal,
   stabilize,
+  untrack as r3Untrack,
   type Computed as R3Computed,
   type Signal as R3Signal,
 } from 'r3'
@@ -176,15 +177,44 @@ export function computedNode<T>(recipe: () => T): Node<T> {
   return { subs: new Set(), defaultRecipe: recipe, backing: r3Computed(recipe) }
 }
 
-/** Scope-aware read. Committed (no speculative slot in the chain) delegates to
- *  r3; speculative slots are handled in Tasks 4–6. */
 export function readValue<T>(node: Node<T>): T {
   const scope = getCurrentScope()
   const slot = readSlot(node, scope)
-  if (slot !== undefined) return slot.cached as T // speculative (Tasks 4–6)
-  // committed: pull r3 up to date, then read the backing value
+  if (slot !== undefined) {
+    if (slot.cached === undefined && slot.recipe !== undefined) {
+      slot.cached = runRecipe(slot.recipe, scope, slot) // dirtied → recompute
+    }
+    // record a dep edge into the currently-computing slot (Q8 tracker)
+    trackRead(node, scope)
+    return slot.cached as T
+  }
+  if (scope !== ROOT_SCOPE && node.defaultRecipe !== undefined) {
+    // speculative computed miss: run the recipe into a fresh S-slot
+    const newSlot: Slot<T> = { recipe: node.defaultRecipe, cached: undefined, deps: [] }
+    writeSlot(node, scope, newSlot)
+    newSlot.cached = runRecipe(node.defaultRecipe, scope, newSlot)
+    scope.readSet.add(node)
+    trackRead(node, scope)
+    return newSlot.cached as T
+  }
+  // committed leaf
   stabilize()
+  trackRead(node, scope)
   return (node.backing as R3Signal<T>).value
+}
+
+/** Run a recipe under `scope` with `slot` as the tracker, r3 context nulled so
+ *  inner reads cannot form stray r3 links (ADR 0010 correctness requirement). */
+function runRecipe<T>(recipe: () => T | Promise<T>, scope: Scope, slot: Slot): T {
+  return r3Untrack(() => runInScope(scope, slot, () => recipe() as T))
+}
+
+/** If a slot is currently being computed under a speculation, link `node` to it. */
+function trackRead(node: Node, scope: Scope): void {
+  const tracker = getCurrentTracker()
+  if (tracker !== undefined && scope !== ROOT_SCOPE) {
+    linkEdge(node, tracker, scope)
+  }
 }
 
 /** Scope-aware write. Committed (ambient scope is ROOT_SCOPE) delegates to r3;
