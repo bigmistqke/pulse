@@ -114,3 +114,13 @@ export function edgesToFire(node: Node, writeScope: Scope): Edge[] {
   }
   return fired
 }
+
+/** The edge/slot teardown shared by commit and discard (Q6 closeScope). Does
+ *  NOT promote or fire cleanups — later plans add those around this. */
+export function closeScopeEdges(scope: Scope): void {
+  for (const edge of scope.edges) edge.source.subs.delete(edge)
+  scope.edges.clear()
+  for (const node of scope.readSet) scope.slots.delete(node)
+  for (const node of scope.writeSet) scope.slots.delete(node)
+  scope.parent?.children.delete(scope)
+}

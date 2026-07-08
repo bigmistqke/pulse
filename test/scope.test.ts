@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { createScope, chainFor, writeSlot, readSlot, chainMatch, linkEdge, edgesToFire, ROOT_KIND, type Scope, type Node, type Slot, type Edge } from '../src/scope'
+import { createScope, chainFor, writeSlot, readSlot, chainMatch, linkEdge, edgesToFire, closeScopeEdges, ROOT_KIND, type Scope, type Node, type Slot, type Edge } from '../src/scope'
 
 test('createScope produces an open scope with empty bags', () => {
   const s = createScope(undefined, 'speculative')
@@ -117,4 +117,19 @@ test('edgesToFire does not fire consumers outside the write chain', () => {
   writeSlot(name, s, { recipe: () => 'bar', cached: 'bar', deps: [] })
   const fired = edgesToFire(name, s)
   expect(fired.map((e) => e.target)).not.toContain(rootConsumer)
+})
+
+test('closeScopeEdges unlinks the scope edges from their sources and drops slots', () => {
+  const root = createScope(undefined, 'owner')
+  const s = createScope(root, 'speculative')
+  const name = sigNode()
+  const targetInS: Slot = { recipe: undefined, cached: 'x', deps: [] }
+  const edge = linkEdge(name, targetInS, s)
+  writeSlot(name, s, { recipe: () => 'bar', cached: 'bar', deps: [] })
+  s.readSet.add(name)
+  closeScopeEdges(s)
+  expect(name.subs.has(edge)).toBe(false)
+  expect(s.edges.size).toBe(0)
+  expect(s.slots.has(name)).toBe(false)
+  expect(root.children.has(s)).toBe(false)
 })
