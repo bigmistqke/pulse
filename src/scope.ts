@@ -82,3 +82,16 @@ export function readSlot(node: Node, scope: Scope): Slot | undefined {
   }
   return undefined
 }
+
+/** The engine-side fire predicate (Q1 Model 1). Fires iff `writeScope` is in
+ *  the target slot's chain AND no more-specific scope in that chain has its own
+ *  slot for the source (which would shadow the write). */
+export function chainMatch(edge: Edge, writeScope: Scope): boolean {
+  const chain = chainFor(edge.targetScope)
+  const idx = chain.indexOf(writeScope)
+  if (idx === -1) return false
+  for (let i = 0; i < idx; i++) {
+    if (chain[i].slots.has(edge.source)) return false
+  }
+  return true
+}

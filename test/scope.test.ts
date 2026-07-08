@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { createScope, chainFor, writeSlot, readSlot, ROOT_KIND, type Scope, type Node, type Slot } from '../src/scope'
+import { createScope, chainFor, writeSlot, readSlot, chainMatch, ROOT_KIND, type Scope, type Node, type Slot, type Edge } from '../src/scope'
 
 test('createScope produces an open scope with empty bags', () => {
   const s = createScope(undefined, 'speculative')
@@ -56,4 +56,32 @@ test('a more-specific slot shadows an ancestor slot', () => {
   writeSlot(name, s, { recipe: () => 'bar', cached: 'bar', deps: [] })
   expect(readSlot(name, s)?.cached).toBe('bar')
   expect(readSlot(name, root)?.cached).toBe('foo')
+})
+
+test('chainMatch fires when writeScope is in the target chain and unshadowed', () => {
+  const root = createScope(undefined, 'owner')
+  const name = sigNode()
+  const consumerSlot: Slot = { recipe: undefined, cached: undefined, deps: [] }
+  const edge: Edge = { source: name, target: consumerSlot, targetScope: root }
+  expect(chainMatch(edge, root)).toBe(true)
+})
+
+test('chainMatch does NOT fire when writeScope is outside the target chain', () => {
+  const root = createScope(undefined, 'owner')
+  const s = createScope(root, 'speculative')
+  const name = sigNode()
+  const consumerSlot: Slot = { recipe: undefined, cached: undefined, deps: [] }
+  const edge: Edge = { source: name, target: consumerSlot, targetScope: root }
+  expect(chainMatch(edge, s)).toBe(false)
+})
+
+test('chainMatch does NOT fire when a more-specific scope shadows the write', () => {
+  const root = createScope(undefined, 'owner')
+  const s = createScope(root, 'speculative')
+  const name = sigNode()
+  writeSlot(name, s, { recipe: () => 'bar', cached: 'bar', deps: [] })
+  const consumerSlot: Slot = { recipe: undefined, cached: undefined, deps: [] }
+  const edge: Edge = { source: name, target: consumerSlot, targetScope: s }
+  expect(chainMatch(edge, root)).toBe(false)
+  expect(chainMatch(edge, s)).toBe(true)
 })
