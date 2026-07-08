@@ -68,10 +68,16 @@ export function signal<T>(initial: T): [Accessor<T>, Setter<T>] {
         ? (next as (prev: T) => T)(untrack(() => readValue(node)))
         : next
     let toWrite: T = value
-    // Only wrap at the top-level (outside any r3 computation). When called
-    // from within a computed body (e.g. computed.ts's internal setPublishedValue),
-    // getContext() is non-null — skip wrapping so internal signals in computed
-    // continue to store raw promises during the two-home window (ADR 0011).
+    // Wrap only outside any r3 computation. Inside an r3 computed body —
+    // which is BOTH computed.ts's internal setPublishedValue AND any user
+    // pulse.effect() body (effects run under r3Computed too) — getContext() is
+    // non-null and we skip wrapping. This preserves the two-home window
+    // (ADR 0011): computed's internal signals stay raw promises until Plan 7b.
+    // Known limitation of the broad guard: a promise written to a signal from
+    // *inside* an effect/computed body is not Awaitable-wrapped, so it gets no
+    // SWR `.value` seeding — `use()`/`isPending()` still work via track's
+    // raw-promise fallback. Unusual usage (writing a signal from an effect);
+    // revisit with a narrower guard if it bites.
     if (isPromise(value) && getContext() === null) {
       // SWR: seed the prior from the node's current value (ADR 0011 — the
       // setter has no lastResolvedValue closure; the prior is the current value).
