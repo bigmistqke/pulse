@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { Awaitable, toAwaitable } from '../src/awaitable'
+import { type Awaitable, toAwaitable } from '../src/awaitable'
 
 const tick = () => new Promise<void>((r) => setTimeout(r))
 
@@ -38,4 +38,16 @@ test("track returns an Awaitable's own live state", async () => {
   // reading the Awaitable's fields reflects the settled state
   expect(track(a).status).toBe('fulfilled')
   expect(track(a).value).toBe(1)
+})
+
+import { latest } from '../src/async'
+import { signal } from '../src/signal'
+
+test('latest reads .value for an Awaitable and falls through for a sync value', async () => {
+  const [n] = signal(5)
+  expect(latest(n)).toBe(5) // sync value — fall through (NOT (5).value === undefined)
+  const [s, setS] = signal<number | Promise<number>>(0)
+  setS(Promise.resolve(9))
+  await tick()
+  expect(latest(s)).toBe(9) // Awaitable — reads .value
 })

@@ -48,7 +48,7 @@ test('a signal stores a Promise value as-is (no auto-resolve)', async () => {
   expect(await s()).toBe(42)
 })
 
-import { Awaitable } from '../src/awaitable'
+import { type Awaitable } from '../src/awaitable'
 
 test('a signal written a promise reads back as an Awaitable (no write-back)', async () => {
   const [s, setS] = signal<number | Promise<number>>(0)

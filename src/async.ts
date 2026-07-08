@@ -19,11 +19,16 @@ const lastResolved = new WeakMap<object, unknown>()
 export function latest<T>(s: Accessor<T>): Awaited<T> | undefined {
   const value = s()
   if (isPromise(value)) {
-    const state = track(value)
+    const state = track(value as Promise<unknown>) // Awaitable-aware (returns live object)
     if (state.status === 'fulfilled') {
       lastResolved.set(s, state.value)
       return state.value as Awaited<T>
     }
+    // pending: prefer the Awaitable's SWR .value, else the lastResolved cache.
+    // For raw promises (computeds during two-home window), .value is undefined
+    // so the fallback to lastResolved still applies.
+    const swr = (value as { value?: unknown }).value
+    if (swr !== undefined) return swr as Awaited<T>
     return lastResolved.get(s) as Awaited<T> | undefined
   }
   lastResolved.set(s, value)
@@ -49,9 +54,9 @@ export function isGeneratorFunction(f: unknown): f is (...args: unknown[]) => Ge
 }
 
 export type PromiseState =
-  | { status: 'pending' }
-  | { status: 'fulfilled'; value: unknown }
-  | { status: 'rejected'; reason: unknown }
+  | { status: 'pending'; value?: unknown; reason?: unknown }
+  | { status: 'fulfilled'; value: unknown; reason?: unknown }
+  | { status: 'rejected'; value?: unknown; reason: unknown }
 
 /** Tracks every promise `use` has seen, so later calls can resolve synchronously. */
 const states = new WeakMap<Promise<unknown>, PromiseState>()
