@@ -361,7 +361,9 @@ function optimistic(committedSignal) {
 		// remove + re-add to bump insertion order
 		overlays.delete(handle)
 		overlays.set(handle, v)
-		onScopeClose(() => overlays.delete(handle))
+		// clear on either face — only one fires, so the teardown runs exactly once
+		onCommit(() => overlays.delete(handle))
+		onDiscard(() => overlays.delete(handle))
 	}
 
 	const reader = compute(() => {
@@ -381,9 +383,14 @@ function optimistic(committedSignal) {
 
 This is library code — no engine-level support is needed. The overlay's writes don't go through the action's writeSet or the chain-match; they're side-channel state managed by the wrapper.
 
-The cleanup-on-scope-close uses the standard `onCleanup` / scope-close machinery from [Q6](./questions.md#q6--what-is-a-scope-as-a-value) ([Q12](./questions.md#q12--body-cleanups-vs-scope-cleanups-composition-and-re-entrancy) covers when cleanups fire — discard only by default, but the optimistic wrapper wants its cleanup to fire on *both* commit and discard, so the wrapper registers the cleanup via the appropriate hook).
+The cleanup-on-scope-close uses the body-local lifecycle hooks from [Q6](./questions.md#q6--what-is-a-scope-as-a-value) / [Q12](./questions.md#q12--body-cleanups-vs-scope-cleanups-composition-and-re-entrancy). The overlay must clear on *both* commit and discard, which is the symmetric pair proposed in [`failure.md`](./failure.md#5-body-local-lifecycle-hooks-oncommit-and-ondiscard):
 
-A small open sub-question: pulse's scope cleanups currently fire on discard only (Q12). The optimistic wrapper's cleanup needs to fire on both commit and discard. Either the wrapper uses a different hook (a hypothetical `onScopeClose` distinct from `onCleanup`), or the wrapper registers both an `onCleanup` (for discard) and an on-commit hook (TBD). This is a small library-side wiring decision that surfaces a real gap in pulse's current cleanup primitives.
+```ts
+onCommit(() => overlays.delete(key)) // real value arrived
+onDiscard(() => overlays.delete(key)) // rolled back
+```
+
+Both register the same teardown; only one path fires (commit XOR discard), so it runs exactly once. This is the both-faces case that `failure.md` weighed a dedicated "any close" hook against and decided didn't earn one — two lines is acceptable here.
 
 ## Sub-questions still open
 
@@ -392,7 +399,7 @@ The wrapper shape is the load-bearing decision. Other sub-questions can be settl
 - **Auto-promotion variant.** Should `setOptimisticValue(v)` auto-queue a commit-promotion of `v` to the canonical signal on action success, eliminating the "forgot to call `setValue`" footgun? Default: explicit dual-setter (Solid-style discipline). Sugar layer: `setOptimisticValue(v, { autoCommit: true })` or a separate variant for the auto-commit case.
 - **Reader API richness.** Should the reader return bare value, with the wrapper's third tuple slot (`isOptimistic`) carrying the status query? Or should the reader return a tagged value `{value, status}`? Lean: bare reader + closure-bound query in the tuple (matches pulse's existing pattern of "destructured tuple has the node + closure-bound things" and keeps the reader's value type unwrapped for binding).
 - **Naming.** `optimistic` / `preview` / `tentative` / `speculative` / `pending`? Cosmetic; defer until ergonomic feedback.
-- **Cleanup-on-commit-and-discard.** The wrapper needs its cleanup to fire on both. Pulse's scope cleanups currently fire on discard only ([Q12](./questions.md#q12--body-cleanups-vs-scope-cleanups-composition-and-re-entrancy)). Solving this surfaces a small gap that other library patterns (auto-save indicators, progress UI) may also need.
+- **Cleanup-on-commit-and-discard.** *Resolved.* The wrapper needs its cleanup to fire on both faces; the symmetric body-local pair `onCommit`/`onDiscard` ([`failure.md`](./failure.md#5-body-local-lifecycle-hooks-oncommit-and-ondiscard)) covers it by registering the same teardown on each. `failure.md` weighed a dedicated "any close" hook for this and decided the two-line registration didn't justify one.
 - **Multiple action-handle representation.** Should `getOptimisticSource(optimisticValue)` return the action handle that wrote the current top-of-stack overlay? Useful for UI that wants to surface which action is in flight (e.g., a list of pending operations). Defer.
 - **Local-first / long-lived optimism.** The "patterns" survey includes local-first apps where optimistic state might live for minutes or indefinitely (waiting for connectivity). Does the same wrapper shape work, or does long-lived optimism need a different mechanism? Defer; revisit when local-first patterns are concretely in scope.
 - **Per-record vs per-collection optimism.** The patterns survey notes per-record optimism is more common than per-collection. The wrapper applies to a single signal; per-record patterns build composite structures (a collection where each record is its own optimistic signal). No framework change needed; library patterns on top.

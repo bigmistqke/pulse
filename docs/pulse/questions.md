@@ -489,18 +489,17 @@ Policy α is what the storage shape produces; Policy β would require explicit o
 
 Status: **resolved.** Two distinct cleanup mechanisms with clear homes, sealed by [Q6](#q6--what-is-a-scope-as-a-value)'s scope shape.
 
-- *Scope cleanups* — `onCleanup(fn)` registered to `scope.cleanups`. Fires on scope **discard only** (per Q6's `closeScope` logic: commit is success, no cleanup needed). For "rollback discipline" — release this resource if the action didn't commit.
-- *Body-local `onSettle(fn)`* — fires on **any** scope close (commit or discard). Distinct from `onCleanup`; for "the action is over regardless of outcome" cleanup (in-flight machinery teardown, optimistic-overlay clearing). Sketched in [`failure.md`](./failure.md#6-body-local-onsettle-for-any-close-cleanup). Two body-local hooks total: `onCleanup` (discard-only) and `onSettle` (any close); both useful; neither subsumes the other.
+- *Scope cleanups* — registered to `scope.cleanups`, fired on scope **discard** (per Q6's `closeScope` logic). For "rollback discipline" — release this resource if the action didn't commit. [`failure.md`](./failure.md#5-body-local-lifecycle-hooks-oncommit-and-ondiscard) proposes the body-local hook spelling for this be `onDiscard(fn)` (renamed from `onCleanup` to pair with a symmetric commit-side `onCommit(fn)`), so the body-local API mirrors P1's two faces. Naming the action-scope hook `onDiscard` also frees `onCleanup` to mean *effect-body* cleanup unambiguously (next bullet).
 - *Body cleanups* — `onCleanup(fn)` registered inside an effect body to `effectNode.bodyCleanups`. Fires before next body invocation or on effect disposal. Distinct mechanism from scope cleanups because the lifecycle is per-body-run, not per-scope-close.
 
 **Resolved sub-questions:**
 
-- *Commit vs discard:* discard only. Q6 made this explicit (`if (mode === 'discard') S.cleanups.forEach(fn => fn())`).
+- *Commit vs discard:* the scope-cleanup list fires on discard only. Q6 made this explicit (`if (mode === 'discard') S.cleanups.forEach(fn => fn())`). [`failure.md`](./failure.md#5-body-local-lifecycle-hooks-oncommit-and-ondiscard) proposes adding a symmetric commit-side hook (`onCommit(fn)`, for finalize-on-commit patterns like promoting a provisional resource), which would fire a parallel list on the commit path — extending this, not contradicting it.
 - *Re-entrancy during cleanup:* covered by [Q10](#q10--commit-semantics-ordering-atomicity-deferred-fires)'s deferred-fires region. Writes inside a cleanup queue onto the region; outermost drain handles them. No special-case.
 - *Nested-scope ordering:* children-first. Scope discard recursively closes children before firing own cleanups. Standard tree-disposal invariant; falls out of `S.children: Set<Scope>` traversal in `closeScope`.
 - *H3b — bodyCleanups on commit (surfaced by trace audit).* **Dissolved by [Q3](#q3--consumer-patterns)'s restriction:** effects are forbidden inside speculative scopes, so there are no body cleanups to fire on commit. The cleanup-vehicle ambiguity disappears with the use case.
 
-**Related:** [Q2](#q2--scopeowner-unification) (scope/owner unification carries cleanup composition), [Q6](#q6--what-is-a-scope-as-a-value) (the scope shape that pins the cleanup home), [Q10](#q10--commit-semantics-ordering-atomicity-deferred-fires) (re-entrant cleanups deferred via the same mechanism as commit fires), [`failure.md`](./failure.md#6-body-local-onsettle-for-any-close-cleanup) (adds body-local `onSettle` as a complement to `onCleanup`; doesn't change Q12 — extends the body-local hook family).
+**Related:** [Q2](#q2--scopeowner-unification) (scope/owner unification carries cleanup composition), [Q6](#q6--what-is-a-scope-as-a-value) (the scope shape that pins the cleanup home), [Q10](#q10--commit-semantics-ordering-atomicity-deferred-fires) (re-entrant cleanups deferred via the same mechanism as commit fires), [`failure.md`](./failure.md#5-body-local-lifecycle-hooks-oncommit-and-ondiscard) (proposes the symmetric body-local pair `onCommit`/`onDiscard` — renames this scope-cleanup hook to `onDiscard` and adds a commit-side `onCommit`; extends the body-local hook family).
 
 ### Q13 — Optimistic surface ergonomics (sugar over speculation)
 
