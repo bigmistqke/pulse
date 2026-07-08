@@ -199,6 +199,12 @@ export function writeValue<T>(node: Node<T>, value: T): void {
   writeSpeculative(node, scope, value)
 }
 
+/** Speculative write: install a slot in `scope`, then mark every matching
+ *  downstream speculative slot dirty (drop cached) so the next read recomputes
+ *  (pull). Synchronous dirty-marking honors K1 Position C. */
 function writeSpeculative<T>(node: Node<T>, scope: Scope, value: T): void {
   writeSlot(node, scope, { recipe: () => value, cached: value, deps: [] })
+  for (const edge of edgesToFire(node, scope)) {
+    edge.target.cached = undefined
+  }
 }

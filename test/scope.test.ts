@@ -174,3 +174,23 @@ test('read/write with no active speculation go through r3 (committed)', () => {
   writeValue(n, 5)
   expect(readValue(n)).toBe(5)      // committed value updated via r3
 })
+
+test('a speculative write is isolated from committed state and visible under its scope', () => {
+  const n = signalNode('foo')
+  const s = createScope(ROOT_SCOPE, 'speculative')
+  runInScope(s, undefined, () => writeValue(n, 'bar'))
+  // committed untouched:
+  expect(readValue(n)).toBe('foo')
+  // visible under S:
+  expect(runInScope(s, undefined, () => readValue(n))).toBe('bar')
+})
+
+test('a speculative write marks matching downstream speculative slots dirty', () => {
+  const name = signalNode('foo')
+  const s = createScope(ROOT_SCOPE, 'speculative')
+  // a downstream slot in S that depends on `name`:
+  const derivedSlot: Slot = { recipe: undefined, cached: 'stale', deps: [] }
+  linkEdge(name, derivedSlot, s)
+  runInScope(s, undefined, () => writeValue(name, 'bar'))
+  expect(derivedSlot.cached).toBeUndefined() // dirtied (cached dropped)
+})
