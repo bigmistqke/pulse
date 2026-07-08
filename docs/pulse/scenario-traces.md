@@ -9,7 +9,7 @@ End-to-end traces of architecturally-distinct cases through pulse's engine
 - [scenarios.md](./scenarios.md) — the catalog itself (TDD basis).
 - [README.md](./README.md) — framings, falsified hypotheses, engine / library sketches, open questions, threads.
 
-**All ten traces below pass.** No framings falsified. Two scenarios forced deliberate design calls into the open (K1 → resolved to Position (C); H3 → Policy α for effect chains, lean). Q14 validates the action-prereq structure and leaves only API surface open; D1 validates the `'reject'` conflict policy and corrects its check to `readSet`-only.
+**All eleven traces below pass.** No framings falsified. Two scenarios forced deliberate design calls into the open (K1 → resolved to Position (C); H3 → Policy α for effect chains, lean). Q14 validates the action-prereq structure and leaves only API surface open; D1 validates the `'reject'` conflict policy and corrects its check to `readSet`-only; CC1 shows the single-body invariants compose across genuinely interleaved concurrent async, resting on one requirement — the driver restores the ambient scope per resume.
 
 > **Note on terminology.** Traces use the resolved
 > [Q1](./questions.md#q1--fall-through-and-edge-policy) framing — **Model 1
@@ -36,6 +36,7 @@ End-to-end traces of architecturally-distinct cases through pulse's engine
 - [H1d — effect-body coherence on commit](#h1d--effect-body-coherence-on-commit) — exercises H1d.
 - [Q14 — action prereqs and standing states](#q14--action-prereqs-and-standing-states-ready--pending--error) — traces `ready` / `pending` / `error`.
 - [D1 — read-dependent write under `'reject'`](#d1--read-dependent-write-under-reject) — traces the class-D conflict policy.
+- [CC1 — two concurrent async speculations, interleaved](#cc1--two-concurrent-async-speculations-interleaved-resumptions) — the interleaving trace.
 
 ---
 
@@ -2477,5 +2478,106 @@ The structural claim in [Q14](./questions.md#q14--action-prereqs--standing-state
 All four framings hold. The trace leans on [P4](./framings.md#p4--explicit-boundaries-over-implicit-pervasiveness) (the status skirt is an explicit boundary around the action, not pervasive signal state) and [P5](./framings.md#p5--compose-dont-proliferate-in-either-direction) (the three states compose from `compute` + `signal` + the existing discard-cause hooks — no new primitive). It reuses [Q1](./questions.md#q1--fall-through-and-edge-policy) chain-match to argue *why* status cannot be speculative, [Q10](./questions.md#q10--commit-semantics-ordering-atomicity-deferred-fires) for the ordering check, and [C2](#c2--action-body-with-async-read) for the parked-body snapshot behaviour.
 
 **No falsifications. No new design calls** — only API-surface sub-questions (shared with Q13's bucket). Q14 is a structural-validation trace: it pins the shape and locates the three states, leaving the naming/inlining surface open.
+
+---
+
+## CC1 — two concurrent async speculations, interleaved resumptions
+
+The [D1](#d1--read-dependent-write-under-reject) and [Q14](#q14--action-prereqs-and-standing-states-ready--pending--error) traces put *one* action in flight and let a **synchronous** sibling event perturb committed state. This trace closes the gap [`scenarios.md`](./scenarios.md) leaves open — **two** action bodies both parked on async work, resuming **interleaved**, each racing to commit. It discharges the catalog's D-class (concurrence), E2 (coexisting scopes), and F1/F2 (overlap), and answers the reachability question `scenarios.md` G1b flags outright: *can two actions interleave, and if so what happens?*
+
+The reachability answer is **yes** — two actions each parked on `yield*` resume in promise-resolution order, which need not match start order. But the observation that makes it tractable:
+
+> Interleaving happens **only at suspension points**. Between two `yield*`s an action body runs **synchronously to its next await**. JavaScript's single thread therefore *serializes* the resumptions — the engine never does two actions' work at once; it does one slice, fully, then another. Every invariant proved for a *sequential* action holds **per slice** — provided the async driver **restores the ambient scope on each resume** rather than reading a global another slice has overwritten.
+
+That proviso is the whole ballgame, and the one thing this trace probes.
+
+### Setup — disjoint state (D-class)
+
+```ts
+const [x, setX] = signal(0)
+const [y, setY] = signal(0)
+
+const A = action(function* () {          // writes x, slow (resolves @100)
+	setX(1); yield* delay(100); setX(2)
+})
+const B = action(function* () {          // writes y, fast (resolves @50)
+	setY(1); yield* delay(50);  setY(2)
+})
+// Both opened in the same synchronous tick, A before B.
+```
+
+### Tick 0 — both open, both park
+
+- `openScope` → `A`; `currentScope: ROOT→A`. `setX(1)`: `writeSlot(x, A)` → `A.slots{x:1}`, `A.writeSet{x}`. Chain-match `x.subs`: `writeScope=A`, `chainFor(ROOT)=[ROOT]`, `A ∉` → **no fire** (speculative x invisible). `yield* delay(100)`: body parks; the driver captures a resume-thunk **closing over `scope=A`**; `currentScope` restored to `ROOT`.
+- `openScope` → `B`; `currentScope: ROOT→B`. `setY(1)`: `writeSlot(y, B)` → `B.slots{y:1}`. `yield* delay(50)`: parks, closure over `scope=B`; `currentScope→ROOT`.
+
+```
+ROOT.slots={x:0,y:0}  versions={x:0,y:0}
+A (open, parked→100, closure scope=A): slots{x:1} writeSet{x}
+B (open, parked→50,  closure scope=B): slots{y:1} writeSet{y}
+currentScope = ROOT       ← two live sibling speculations, mutually invisible
+```
+
+### Tick 50 — B resumes first (the interleave: started second, resumes first)
+
+- Driver **restores `currentScope=B`** from B's closure; `status(B)==='open'` ✓ (discard-guard).
+- `setY(2)`: `writeSlot(y, B)` → `B.slots{y:2}`. Body returns → `closeScope(B,'commit')`: deferred-fires region; promote `writeSet{y}` → `writeSlot(y, ROOT, 2)`, `ROOT.versions[y] 0→1`, fire `y.subs` (`writeScope=ROOT ∈ [ROOT]` → fire); drop `B.slots`; drain; `status='committed'`; `currentScope→ROOT`.
+
+```
+ROOT.slots={x:0,y:2}  versions={x:0,y:1}
+A still open, parked, slots{x:1}   |   B committed & gone
+```
+
+### Tick 100 — A resumes (the probe)
+
+- The global `currentScope` is `ROOT`. Driver **restores `currentScope=A`** from A's suspension closure; `status(A)==='open'` ✓.
+- `setX(2)`: `writeSlot(x, **A**)` → lands in `A.slots` **because the driver restored A**, not because it trusted the ambient. Returns → `closeScope(A,'commit')`: promote `x` → `ROOT`, `versions[x]→1`, fire.
+
+```
+ROOT.slots={x:2,y:2}  versions={x:1,y:1}   ✓ both committed, zero interaction
+```
+
+### The falsification it dodges
+
+If the driver **read a global `currentScope`** on resume instead of restoring from the suspension: at tick 100 the global is whatever the last slice left — `ROOT` here, but in a three-action interleave it could be *another still-open action `C`*. `setX(2)` would then `writeSlot(x, C)` — A's write lands in **C's writeSet**, commits with `C`, and A commits *nothing*. Silent cross-action corruption. The single-body isolation D1/Q14 proved composes across concurrent bodies **only because the driver re-establishes `(scope, tracker)` per resume** — the [C2](#c2--action-body-with-async-read) mechanism, load-bearing here for a second reason.
+
+### Part 2 — overlapping state (F-class): reject under real concurrency
+
+Now B *reads* `x` as a premise while A *commits* `x` during B's flight:
+
+```ts
+const B = action(function* () {
+	const seen = get(x)        // read x → B.readSet={x}; snapshot versions[x]; NO edge (bare read)
+	yield* delay(80); setZ(seen + 1)
+}, { onConflict: 'reject' })
+const A = action(function* () { setX(5); yield* delay(40) })   // commits x first
+```
+
+- **t0:** B reads `x` → fall-through to `ROOT` (`x=0`); `B.readSet={x}`; `B.snapshotVersions[x]=0`. B parks (80). A opens, `setX(5)`→`A.slots`, parks (40).
+- **Snapshot isolation between two *live* siblings:** while both are open, B's premise is `seen=0` (captured local); A's `x=5` sits in `A.slots`. A re-read of `x` under B would still fall through to `ROOT(0)` — `chainFor(B)=[B,ROOT]`, `A ∉` chain. Isolation holds against a concurrent live sibling, not merely against a synchronous one.
+- **t40:** A resumes (restore `scope=A`), commits → promote `x=5` to `ROOT`, **`versions[x] 0→1`**, fire.
+- **t80:** B resumes (restore `scope=B`), `setZ(1)` (`seen=0`), returns → `closeScope(B,'commit')` with reject: check `B.readSet={x}`: snapshot `0` vs current **`1`** → **conflict** → discard, `discardCause.kind='conflict'`; `B.retry()` re-runs against `x=5`.
+
+This is D1 — but A is now a genuinely concurrent parked-then-committed action, not a synchronous stand-in. The mechanism is **identical**, because the version bump fires at A's *commit* regardless of whether A was sync or async. **D1's reject generalizes to true concurrency with no new machinery.**
+
+### Architecture exposed
+
+1. **Interleaving is real but serialized.** Resolution order ≠ start order, but interleaving occurs only at `yield*`; each slice runs synchronously, so the engine never overlaps work. Per slice, the sequential-action invariants apply unchanged.
+2. **The driver's ambient restore is load-bearing for *concurrency*, not just for one body.** [C2](#c2--action-body-with-async-read) introduced `(scope,tracker)` re-establishment for the discard-guard; here it is what prevents cross-action write corruption when a resume lands in a tick whose global ambient belongs to a different live action. **Restore-from-suspension, never read-the-global.**
+3. **Snapshot isolation composes across N live siblings** by the same [Q1](./questions.md#q1--fall-through-and-edge-policy) chain-match firewall that isolates one action from committed state — nothing added for the many-live-scopes case.
+4. **Commit regions are temporally disjoint by construction.** Each `closeScope` opens, drains, and closes its [Q10](./questions.md#q10--commit-semantics-ordering-atomicity-deferred-fires) deferred-fires region *within one synchronous slice*, so two actions' commit regions never nest or interleave.
+5. **D1's reject is commit-anchored,** and commits are slice-serialized, so a concurrent async committer and a synchronous one are indistinguishable to the check.
+
+### Sub-questions surfaced
+
+- **Three-plus-way interleaving.** The serialization argument is N-independent, but a 3-action trace where the middle action's resume lands in a tick whose global ambient is *another open action* would fully exercise the corruption path Part 1 only argues. A short follow-up if the driver implementation is ever in doubt.
+- **Two commits in the same microtask drain.** Here resumes fell in different ticks (50, 100). If two promises resolve in one drain, commit order is promise-callback order; still serialized, but the collision is untraced.
+- **Fairness / starvation.** Repeated `retry()`-on-conflict against a fast repeat-committer could livelock (the grill's parked livelock branch). A policy question, not a coherence one.
+
+### Framings status after CC1
+
+All four hold. The trace adds **no engine machinery** — it shows the existing mechanisms (C2 ambient restore, Q1 chain-match, Q10 deferred-fires, D1 version compare) compose across genuine concurrency *because JavaScript serializes the slices*. It resolves `scenarios.md` G1b's reachability question (interleaving is reachable; behavior is per-slice-sequential) and discharges D-class / E2 / F1 / F2.
+
+**No falsifications** — one load-bearing requirement made explicit (restore the ambient per resume), and D1's reject shown to generalize to true concurrency.
 
 ---
