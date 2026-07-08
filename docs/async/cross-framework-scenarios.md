@@ -269,6 +269,30 @@ action(function* () {
 
 ---
 
+## Cross-cutting: how each framework represents an in-flight speculation
+
+The scenarios above turn on a distinction the per-scenario view hides: **how a framework keeps a paused, not-yet-committed operation, and how it continues it when the async settles.** Two camps.
+
+**The resume camp — pulse, Solid, Svelte.** A body suspends at an `await` / `yield*` and later *resumes from where it paused*. This is cheaper (no re-run) but carries one hazard: the body runs under an *ambient* context (which scope / transition / batch am I in?), and when it resumes, another paused operation may have run in between and left the global ambient pointing elsewhere. So the ambient must be **captured before the suspend and restored on resume** — otherwise a resumed body writes into the wrong workspace. All three independently arrived at the same safeguard:
+
+- **pulse** restores `(scope, tracker)` per resume — the single load-bearing requirement in the [CC1 trace](../pulse/scenario-traces.md#cc1--two-concurrent-async-speculations-interleaved-resumptions).
+- **Solid** re-enters "under the original transition via `restoreTransition`" on each step (`solid-2x.md:112`).
+- **Svelte**'s compiler emits a `save()` that snapshots `active_effect, active_reaction, component_context, current_batch` before the await and restores them on resume (`svelte-5.md:119`).
+
+**The re-execute camp — React.** Suspense is "a re-execution mechanism, not a continuation-resumption mechanism" (`react-modern.md:58`); `use(promise)` re-runs the component body from the top on resolution (`:130`). There is no ambient to restore because there is no resume — so React structurally *avoids* the hazard, at the cost of re-running work (relying on render-time caching to avoid re-fetching) and not preserving state for renders suspended before first mount (`:116`).
+
+| | in-flight representation | continuation model | restore safeguard |
+|---|---|---|---|
+| **pulse** | sibling `Scope` (slots / writeSet) | suspend + resume (generator) | restore `(scope, tracker)` per resume |
+| **Solid** | per-write `OptimisticLane` + `Transition` | suspend + resume (generator) | `restoreTransition` → `initTransition` |
+| **Svelte** | `Batch` (`current` / `previous` / `batch_values`) | suspend + resume (compiler-driven) | `save()` snapshots ambient set |
+| **React** | work-in-progress fiber tree | re-execute from the top | none needed (no resume) |
+
+Two consequences worth carrying into the scenarios above:
+
+- **The CC1 "restore your workspace" requirement is a property of the whole resume camp,** not a pulse quirk — Solid and Svelte face and solve the identical problem. It is the price of continuation-resumption; React pays a different price (re-execution) to avoid it.
+- **Atomicity granularity converges for the generator designs.** Solid confirms "the unit of atomicity is the whole action, not the run between `yield`s — a three-yield action commits exactly once" (`solid-2x.md:123`) — identical to pulse, where an action commits once at `closeScope` regardless of how many times it parked.
+
 ## Coverage at a glance
 
 Ratings synthesized from the deep-dive scenario mappings; ✓ solved, ~ partial, ✗ not handled, ⚠ unverified.
