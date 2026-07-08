@@ -55,3 +55,14 @@ export function createScope(parent: Scope | undefined, kind: ScopeKind): Scope {
   if (parent !== undefined) parent.children.add(scope)
   return scope
 }
+
+/** The scope chain from `scope` (most specific) up to its parentless terminal. */
+export function chainFor(scope: Scope): Scope[] {
+  const chain: Scope[] = []
+  let s: Scope | undefined = scope
+  while (s !== undefined) {
+    chain.push(s)
+    s = s.parent
+  }
+  return chain
+}

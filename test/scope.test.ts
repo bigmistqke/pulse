@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { createScope, ROOT_KIND, type Scope } from '../src/scope'
+import { createScope, chainFor, ROOT_KIND, type Scope } from '../src/scope'
 
 test('createScope produces an open scope with empty bags', () => {
   const s = createScope(undefined, 'speculative')
@@ -18,4 +18,12 @@ test('a child scope links to its parent and registers in the parent children', (
   const child = createScope(root, 'speculative')
   expect(child.parent).toBe(root)
   expect(root.children.has(child)).toBe(true)
+})
+
+test('chainFor walks parents most-specific to terminal', () => {
+  const root = createScope(undefined, 'owner')
+  const outer = createScope(root, 'speculative')
+  const inner = createScope(outer, 'speculative')
+  expect(chainFor(inner)).toEqual([inner, outer, root])
+  expect(chainFor(root)).toEqual([root])
 })
