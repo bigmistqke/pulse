@@ -19,16 +19,20 @@ Plan 1 already stores them separately, so it is already an overlay.
 
 - **Speculative reads/writes** never touch r3's `value`. A read under scope `S`
   walks the slot chain (`readSlot`); a computed miss runs its recipe under `S`
-  on a pulse-side path, forming pulse edges and caching in `S`'s slot. A write
-  under `S` updates `scope.slots` and marks affected slots dirty; the next read
-  recomputes (pull). Effects are forbidden inside speculative scopes (Q3), so
-  there are no async consumers to schedule — pull suffices, and K1's Position-C
-  freshness holds via synchronous dirty-marking at write time.
+  on a pulse-side path — **with r3's context nulled (`untrack`)** so the recipe's
+  inner reads cannot form stray r3 links — forming pulse edges and caching in
+  `S`'s slot. A write under `S` updates `scope.slots` and marks affected slots
+  dirty; the next read recomputes (pull). Effects are forbidden inside
+  speculative scopes (Q3), so there are no async consumers to schedule — pull
+  suffices, and K1's Position-C freshness holds via synchronous dirty-marking at
+  write time.
 - **Committed reads/writes** are plain r3 (`read` / `setSignal`), untouched.
-- **The commit bridge** is the only crossing: `closeScopeEdges(S)` first (tear
-  down S's pulse edges, drop S's slots), *then* for each `writeSet` node
-  `setSignal(node, promotedValue)`, *then* one `stabilize()`. Ordering (edges
-  down before promote) is what keeps the two edge systems from double-firing.
+- **The commit bridge** is the only crossing, in this order: **snapshot** each
+  `writeSet` node's promoted value; `closeScopeEdges(S)` (tear down S's pulse
+  edges, drop S's slots — note this *clears* `writeSet`, hence the snapshot
+  first); then `setSignal(node, snapshotValue)` for each; then one `stabilize()`.
+  Edges-down-before-`setSignal` is what keeps the two edge systems from
+  double-firing.
 
 ## Considered alternatives
 
@@ -57,6 +61,13 @@ Plan 1 already stores them separately, so it is already an overlay.
 - **A parallel speculative compute path** — the overlay reruns recipes under a
   scope itself rather than through r3's `recompute`. This is duplication, but
   bounded (recipe + pulse-edge dep tracking) and the price of not forking.
+- **Speculative recipes must run under `untrack` (correctness, not polish).**
+  r3 has a module-global `context` (index.ts:47). If a speculative recipe runs
+  while it is non-null — e.g. a speculative miss triggered from inside a running
+  r3 computation — inner `r3.read`s would form stale r3 `Link`s on the wrong
+  subscriber and silently corrupt the committed graph. The pulse-side compute
+  path must null r3's context (`untrack`, index.ts:444) around every speculative
+  recipe run. Plan 3 must enforce and test this.
 - **Q10 batching is inherited, not built** — commit gets one-invalidation-per-
   slot from r3's height heap, *provided* the commit path promotes all writes
   then stabilizes once. `src/signal.ts`'s current per-write `requestFlush()`
