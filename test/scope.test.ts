@@ -241,3 +241,11 @@ test('recompute does not accumulate edges across cycles', () => {
     expect(s.slots.get(doubleName)!.deps.length).toBe(after1)
   })
 })
+
+test('a committed computed reacts to a committed signal write (no speculation)', () => {
+  const name = signalNode('foo')
+  const doubleName = computedNode(() => readValue(name) + readValue(name))
+  expect(readValue(doubleName)).toBe('foofoo')
+  writeValue(name, 'bar')          // committed write (ambient is ROOT_SCOPE)
+  expect(readValue(doubleName)).toBe('barbar') // committed computed recomputed
+})

@@ -1,5 +1,6 @@
 import {
   computed as r3Computed,
+  getContext,
   read as r3Read,
   setSignal as r3SetSignal,
   signal as r3Signal,
@@ -198,9 +199,13 @@ export function readValue<T>(node: Node<T>): T {
     trackRead(node, scope)
     return newSlot.cached as T
   }
-  // committed leaf
-  stabilize()
+  // committed leaf: inside an r3 recompute, read through r3 so the dependency
+  // link forms (committed reactivity); outside, stabilize then read the value.
   trackRead(node, scope)
+  if (getContext() !== null) {
+    return r3Read(node.backing as R3Signal<T>)
+  }
+  stabilize()
   return (node.backing as R3Signal<T>).value
 }
 
