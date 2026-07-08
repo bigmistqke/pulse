@@ -14,6 +14,8 @@ The research isn't "find the right model." It's:
 
 This is a slow research process. Time-box per session, not per-domain. Don't draw conclusions before the evidence supports them. Trade-offs are local; insights are cumulative.
 
+> **Scenario-major companion:** [`cross-framework-scenarios.md`](./cross-framework-scenarios.md) — the canonical async scenarios (S1–S8) with each framework's *actual API* side by side and a two-track (mechanism / on-screen) trace of behavior. Where the taxonomy below is system-major, that doc is scenario-major.
+
 ---
 
 ## Taxonomy
