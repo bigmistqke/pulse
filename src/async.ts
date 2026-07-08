@@ -2,6 +2,7 @@ import { isPromise } from './is-promise'
 import { isPending, promiseOf } from './pending'
 import { NODE, type Accessor, type Signal } from './signal'
 import { markUsedInBinding } from './transition-tracker'
+import { AWAITABLE } from './awaitable'
 
 /**
  * Records the most recent resolved value observed for each signal. Keyed on the
@@ -56,6 +57,7 @@ export type PromiseState =
 const states = new WeakMap<Promise<unknown>, PromiseState>()
 
 export function track(promise: Promise<unknown>): PromiseState {
+  if (AWAITABLE in promise) return promise as unknown as PromiseState
   const existing = states.get(promise)
   if (existing) return existing
   const state: PromiseState = { status: 'pending' }

@@ -27,3 +27,15 @@ test('a rejected Awaitable records the reason', async () => {
   expect(a.status).toBe('rejected')
   expect(a.reason).toBeInstanceOf(Error)
 })
+
+import { track } from '../src/async'
+
+test("track returns an Awaitable's own live state", async () => {
+  const a = toAwaitable(Promise.resolve(1))
+  const state = track(a)
+  expect(state.status).toBe('pending')
+  await tick()
+  // reading the Awaitable's fields reflects the settled state
+  expect(track(a).status).toBe('fulfilled')
+  expect(track(a).value).toBe(1)
+})
