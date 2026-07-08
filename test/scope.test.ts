@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { createScope, chainFor, writeSlot, readSlot, chainMatch, linkEdge, edgesToFire, closeScopeEdges, ROOT_KIND, type Scope, type Node, type Slot, type Edge } from '../src/scope'
+import { createScope, chainFor, writeSlot, readSlot, chainMatch, linkEdge, edgesToFire, closeScopeEdges, ROOT_KIND, ROOT_SCOPE, getCurrentScope, getCurrentTracker, runInScope, type Scope, type Node, type Slot, type Edge } from '../src/scope'
 
 test('createScope produces an open scope with empty bags', () => {
   const s = createScope(undefined, 'speculative')
@@ -134,4 +134,22 @@ test('closeScopeEdges unlinks the scope edges from their sources and drops slots
   expect(s.writeSet.has(name)).toBe(false)
   expect(s.readSet.has(name)).toBe(false)
   expect(root.children.has(s)).toBe(false)
+})
+
+test('current scope defaults to ROOT_SCOPE, tracker to undefined', () => {
+  expect(getCurrentScope()).toBe(ROOT_SCOPE)
+  expect(getCurrentTracker()).toBeUndefined()
+})
+
+test('runInScope pushes and restores the scope (and tracker) even on throw', () => {
+  const s = createScope(ROOT_SCOPE, 'speculative')
+  const slot: Slot = { recipe: undefined, cached: undefined, deps: [] }
+  runInScope(s, slot, () => {
+    expect(getCurrentScope()).toBe(s)
+    expect(getCurrentTracker()).toBe(slot)
+  })
+  expect(getCurrentScope()).toBe(ROOT_SCOPE)
+  expect(getCurrentTracker()).toBeUndefined()
+  expect(() => runInScope(s, slot, () => { throw new Error('x') })).toThrow('x')
+  expect(getCurrentScope()).toBe(ROOT_SCOPE) // restored despite throw
 })

@@ -126,3 +126,32 @@ export function closeScopeEdges(scope: Scope): void {
   scope.writeSet.clear()
   scope.parent?.children.delete(scope)
 }
+
+/** The default parentless "outside any speculation" scope. */
+export const ROOT_SCOPE: Scope = createScope(undefined, 'owner')
+
+let currentScope: Scope = ROOT_SCOPE
+let currentTracker: Slot | undefined = undefined
+
+export function getCurrentScope(): Scope {
+  return currentScope
+}
+export function getCurrentTracker(): Slot | undefined {
+  return currentTracker
+}
+
+/** Run `fn` with `scope` as the ambient scope and `tracker` as the ambient
+ *  slot-being-computed (Q8: the two ambients push/pop together). Restores both
+ *  even if `fn` throws. */
+export function runInScope<T>(scope: Scope, tracker: Slot | undefined, fn: () => T): T {
+  const prevScope = currentScope
+  const prevTracker = currentTracker
+  currentScope = scope
+  currentTracker = tracker
+  try {
+    return fn()
+  } finally {
+    currentScope = prevScope
+    currentTracker = prevTracker
+  }
+}
