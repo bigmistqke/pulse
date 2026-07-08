@@ -15,6 +15,8 @@ The research isn't "find the right model." It's:
 This is a slow research process. Time-box per session, not per-domain. Don't draw conclusions before the evidence supports them. Trade-offs are local; insights are cumulative.
 
 > **Scenario-major companion:** [`cross-framework-scenarios.md`](./cross-framework-scenarios.md) — the canonical async scenarios (S1–S8) with each framework's *actual API* side by side and a two-track (mechanism / on-screen) trace of behavior. Where the taxonomy below is system-major, that doc is scenario-major.
+>
+> **Pulse design that came out of this arc:** [`../pulse/async-reads-and-coordination.md`](../pulse/async-reads-and-coordination.md) — the uniform `Awaitable` read model (`s()` async → `Awaitable<T>`; `.value` / `yield*` / `use` faces) and the consumer-side `settled([...])` coordination barrier on stale-while-revalidate. Landed via the entanglement exploration; the pulse answer to the "coordinate overlapping async edits" want that Solid handles with union-lane merge.
 
 ---
 

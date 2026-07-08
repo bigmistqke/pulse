@@ -17,6 +17,7 @@ Exploration of pulse's reactive substrate and speculation machinery. Framings ar
 - **[questions.md](./questions.md)** — open questions ([Q1](./questions.md#q1--fall-through-and-edge-policy) through [Q14](./questions.md#q14--action-prereqs--standing-state-handle)): sub-questions from traces, deliberate design calls, framing gaps.
 - **[scenarios.md](./scenarios.md)** — the catalog (TDD basis): ~83 architecturally-distinct cases the engine + speculation machinery needs to handle.
 - **[scenario-traces.md](./scenario-traces.md)** — end-to-end traces of the scenarios that have been verified (eight so far; all pass).
+- **[async-reads-and-coordination.md](./async-reads-and-coordination.md)** — design that came out of the entanglement exploration: the uniform `Awaitable` read model (`s()` async → `Awaitable<T>`; `.value` / `yield*` / `use` faces; supersedes [ADR 0002](../adr/0002-pending-model.md)'s write-back) and the consumer-side `settled([...])` coordination barrier on stale-while-revalidate.
 
 ## Reading order
 
