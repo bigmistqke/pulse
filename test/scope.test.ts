@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { createScope, chainFor, writeSlot, readSlot, chainMatch, ROOT_KIND, type Scope, type Node, type Slot, type Edge } from '../src/scope'
+import { createScope, chainFor, writeSlot, readSlot, chainMatch, linkEdge, edgesToFire, ROOT_KIND, type Scope, type Node, type Slot, type Edge } from '../src/scope'
 
 test('createScope produces an open scope with empty bags', () => {
   const s = createScope(undefined, 'speculative')
@@ -84,4 +84,37 @@ test('chainMatch does NOT fire when a more-specific scope shadows the write', ()
   const edge: Edge = { source: name, target: consumerSlot, targetScope: s }
   expect(chainMatch(edge, root)).toBe(false)
   expect(chainMatch(edge, s)).toBe(true)
+})
+
+test('linkEdge indexes on the source and records on the target scope', () => {
+  const root = createScope(undefined, 'owner')
+  const name = sigNode()
+  const target: Slot = { recipe: undefined, cached: undefined, deps: [] }
+  const edge = linkEdge(name, target, root)
+  expect(name.subs.has(edge)).toBe(true)
+  expect(root.edges.has(edge)).toBe(true)
+  expect(target.deps).toContain(edge)
+})
+
+test('edgesToFire fixes the doubleName break: write under S fires the S-scoped edge', () => {
+  const root = createScope(undefined, 'owner')
+  const s = createScope(root, 'speculative')
+  const name = sigNode()
+  writeSlot(name, root, { recipe: () => 'foo', cached: 'foo', deps: [] })
+  const doubleNameSlotInS: Slot = { recipe: undefined, cached: 'foofoo', deps: [] }
+  linkEdge(name, doubleNameSlotInS, s)
+  writeSlot(name, s, { recipe: () => 'bar', cached: 'bar', deps: [] })
+  const fired = edgesToFire(name, s)
+  expect(fired.map((e) => e.target)).toContain(doubleNameSlotInS)
+})
+
+test('edgesToFire does not fire consumers outside the write chain', () => {
+  const root = createScope(undefined, 'owner')
+  const s = createScope(root, 'speculative')
+  const name = sigNode()
+  const rootConsumer: Slot = { recipe: undefined, cached: undefined, deps: [] }
+  linkEdge(name, rootConsumer, root)
+  writeSlot(name, s, { recipe: () => 'bar', cached: 'bar', deps: [] })
+  const fired = edgesToFire(name, s)
+  expect(fired.map((e) => e.target)).not.toContain(rootConsumer)
 })

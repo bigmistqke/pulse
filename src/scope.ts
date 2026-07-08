@@ -95,3 +95,22 @@ export function chainMatch(edge: Edge, writeScope: Scope): boolean {
   }
   return true
 }
+
+/** Form a subscription edge during a tracked read: index on the source, record
+ *  on the target scope (cleanup owner) and on the target slot's deps. */
+export function linkEdge(source: Node, target: Slot, targetScope: Scope): Edge {
+  const edge: Edge = { source, target, targetScope }
+  source.subs.add(edge)
+  targetScope.edges.add(edge)
+  target.deps.push(edge)
+  return edge
+}
+
+/** Given a write to `(node, writeScope)`, the edges that should fire. */
+export function edgesToFire(node: Node, writeScope: Scope): Edge[] {
+  const fired: Edge[] = []
+  for (const edge of node.subs) {
+    if (chainMatch(edge, writeScope)) fired.push(edge)
+  }
+  return fired
+}
