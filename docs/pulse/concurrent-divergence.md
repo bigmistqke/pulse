@@ -194,11 +194,11 @@ The read returns the snapshot value (the value at the moment of read, isolated f
 
 **Affordances that serve this:**
 
-- **`'reject'` policy.** At commit, check if any signal in `S.readSet ∪ S.writeSet` has been committed-to since `S` started. If yes, throw. Caller catches; retries with current state, gives up, or surfaces to user.
+- **`'reject'` policy.** At commit, check if any signal in `S.readSet` (the premise — *not* `writeSet`; see [D1](./scenario-traces.md#d1--read-dependent-write-under-reject) and recommendation 2) has been committed-to since `S` started. If yes, throw `ConflictError`. Caller catches; retries with current state (`handle.retry()`), gives up, or surfaces to user.
 - **Rebase policy.** Re-execute the body. Works for D3 (pure compute); risky for D1/D2 (might have other side effects).
 - **Manual version checking.** Action body queries `latest(loggedIn)` at commit time and asserts. Verbose; doable with current primitives but ugly.
 
-**Status:** ✗ not handled by default. Class D is the canonical case for `'reject'` — small, well-understood mechanism, big payoff.
+**Status:** ✗ not handled by default. Class D is the canonical case for `'reject'` — small, well-understood mechanism, big payoff. Traced in [D1](./scenario-traces.md#d1--read-dependent-write-under-reject): the mechanism holds against the sealed engine, checks `readSet` only, and composes with `failure.md`'s discard-cause taxonomy for retry-based recovery.
 
 ---
 
@@ -629,7 +629,7 @@ Serves F. User wires up cancellation when a newer intent arrives.
 action(body, { onConflict: 'reject' })
 ```
 
-Serves D. At commit time, if any signal in `S.readSet ∪ S.writeSet` has been committed-to since `S` started, throw a `ConflictError`. The caller catches and decides what to do. Cheap implementation (per-slot version counter; snapshot version at first read/write; compare at commit).
+Serves D. At commit time, if any signal in `S.readSet` has been committed-to since `S` started, throw a `ConflictError`. The caller catches and decides what to do. Cheap implementation (per-node canonical version counter on the scope; snapshot the version at read; compare at commit — see [D1](./scenario-traces.md#d1--read-dependent-write-under-reject)).
 
 Read-aware (using `S.readSet`) rather than strict-write because the read-aware definition matches actual correctness needs (D's whole point is "my write was based on a read that's now stale").
 
@@ -664,7 +664,7 @@ Per the scenario walk, the *minimum* honest answer is:
 
 **1. Keep current defaults.** Last-wins, snapshot isolation, microtask batching, nested actions for coupling, `.discard()` for supersession. These handle A, E, F, G, H.
 
-**2. Add `'reject'` as the one new policy.** Per-slot version counter (engine, trivial); `S.snapshotVersions: Map<Node, number>` recorded at first read or write (library or engine, small); commit-time check; throws `ConflictError` if any signal's committed version exceeds the snapshot version.
+**2. Add `'reject'` as the one new policy.** Per-node canonical version counter (`scope.versions: Map<Node, number>`, bumped on canonical writes/promotions — engine, trivial); `S.snapshotVersions: Map<Node, number>` recorded at read against the version at the scope the read resolved to; commit-time check that throws `ConflictError` if any read node's current version exceeds its snapshot. **Check `readSet` only, not `readSet ∪ writeSet`** — the premise an action depends on *is* its read set; a blind write (output) is meant to be overwritten (class A last-wins), and a read-modify-write is already covered because the modified node is in `readSet`. Checking `writeSet` over-rejects output races. `ConflictError` is a `discardCause.kind === 'conflict'` in [`failure.md`](./failure.md#1-discard-cause-categorization)'s taxonomy, so `'reject'` + `handle.retry()` composes into optimistic concurrency control with no other new machinery. Traced and hardened in [D1](./scenario-traces.md#d1--read-dependent-write-under-reject).
 
 **3. Document the CRDT-signal-value pattern** as the answer for class B. Provide an example (counter signal, set signal) without making it a framework primitive.
 

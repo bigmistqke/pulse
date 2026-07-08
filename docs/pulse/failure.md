@@ -317,6 +317,7 @@ type DiscardCause =
 	| { kind: 'cancelled' } // user called .discard()
 	| { kind: 'superseded'; by?: ActionHandle } // another action took over
 	| { kind: 'timeout' } // deadline expired
+	| { kind: 'conflict'; conflictingNodes?: Node[] } // reject policy: premise moved (Q15)
 ```
 
 Handle exposure:
@@ -332,7 +333,7 @@ This is the load-bearing addition. Every other pattern depends on the framework 
 
 Implementation cost is tiny — the scope already tracks `status`; add a `discardCause` field populated by whichever code path closed the scope.
 
-**Cause categories: start with the four.** `failure | cancelled | superseded | timeout` is the minimum-viable set. Other plausible categories (`preconditionFailed`, `clientCrashed`, `programmaticError`) can be added as usage forces. Starting small and extending is cheaper than starting wide and pruning. `preconditionFailed` is the most likely first addition (per Q14 — actions with prereqs that didn't hold).
+**Cause categories: start with the four, plus `conflict`.** `failure | cancelled | superseded | timeout` is the minimum-viable set. `conflict` is added by the `onConflict: 'reject'` policy for [Q15](./questions.md#q15--entanglement-dim-4-overlapping-speculations-on-shared-state) class-D read-dependent writes — the [D1 trace](./scenario-traces.md#d1--read-dependent-write-under-reject) shows it composing into this taxonomy so that `retry()` gives optimistic concurrency control for free. Other plausible categories (`preconditionFailed`, `clientCrashed`, `programmaticError`) can be added as usage forces. Starting small and extending is cheaper than starting wide and pruning. `preconditionFailed` is the next likely addition (per Q14 — actions with prereqs that didn't hold).
 
 **Failure-payload shape: preserve thrown value as-is; add a `FailureContext`.** The error inside `discardCause` is whatever the action body threw (an `Error`, a typed domain error, an object the user chose). Pulse doesn't standardize the shape — apps already have their own error categorization (network vs validation vs auth) and forcing a wrapper just adds noise. Alongside, the handle exposes `handle.failureContext: { attempt, startedAt, durationMs, ... }` for framework-tracked metadata that the user couldn't reconstruct themselves.
 

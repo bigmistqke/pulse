@@ -9,7 +9,7 @@ End-to-end traces of architecturally-distinct cases through pulse's engine
 - [scenarios.md](./scenarios.md) — the catalog itself (TDD basis).
 - [README.md](./README.md) — framings, falsified hypotheses, engine / library sketches, open questions, threads.
 
-**All nine traces below pass.** No framings falsified. Two scenarios forced deliberate design calls into the open (K1 → resolved to Position (C); H3 → Policy α for effect chains, lean). Q14 validates the action-prereq structure and leaves only API surface open.
+**All ten traces below pass.** No framings falsified. Two scenarios forced deliberate design calls into the open (K1 → resolved to Position (C); H3 → Policy α for effect chains, lean). Q14 validates the action-prereq structure and leaves only API surface open; D1 validates the `'reject'` conflict policy and corrects its check to `readSet`-only.
 
 > **Note on terminology.** Traces use the resolved
 > [Q1](./questions.md#q1--fall-through-and-edge-policy) framing — **Model 1
@@ -35,6 +35,7 @@ End-to-end traces of architecturally-distinct cases through pulse's engine
 - [C2e — post-yield derived read (async K1b analogue)](#c2e--post-yield-derived-read-async-k1b-analogue) — exercises C2e.
 - [H1d — effect-body coherence on commit](#h1d--effect-body-coherence-on-commit) — exercises H1d.
 - [Q14 — action prereqs and standing states](#q14--action-prereqs-and-standing-states-ready--pending--error) — traces `ready` / `pending` / `error`.
+- [D1 — read-dependent write under `'reject'`](#d1--read-dependent-write-under-reject) — traces the class-D conflict policy.
 
 ---
 
@@ -2160,6 +2161,159 @@ H1d traced cleanly with no new design calls. The trace validates that:
 All four framings still hold. Position C from K1+K1b is reconfirmed at the commit-fire level. [Q10](./questions.md#q10--commit-semantics-ordering-atomicity-deferred-fires)'s deferred-fires region works as designed for deduplication. The "Derivation kind matches reactivity scope" framing is implicit here — `doubled` is a Computed (synchronously fresh on read); if it had been an effect-driven signal (H5), the trace would have returned stale.
 
 **No falsifications. No new design calls.** H1d is a clean validation trace.
+
+---
+
+## D1 — read-dependent write under `'reject'`
+
+Traces the one new affordance [`concurrent-divergence.md`](./concurrent-divergence.md) recommends adding — the opt-in `onConflict: 'reject'` policy for [class D](./concurrent-divergence.md#d--read-dependent-writes) (read-dependent writes) — against the sealed engine (Q6/Q9/Q10). An action reads state to decide a write; a *sibling* commits to that state mid-flight; the action's premise is now stale. `'reject'` should catch this at commit and discard rather than write on a false premise. The trace pins the mechanism, and it corrects the affordance's scope: the conflict check must consult `readSet` only, not `readSet ∪ writeSet`.
+
+### The mechanism under test
+
+- A canonical **version counter per node**: `scope.versions: Map<Node, number>`, incremented on every *canonical* write to that scope (a direct setter at `ROOT_SCOPE`, or a commit-promotion into it). Speculative writes into an open action's own scope do **not** bump it — they bump the canonical version only if/when the action commits.
+- A **snapshot** taken at read: when a body read resolves (via chain-match fall-through) to a slot at scope `R`, record `S.snapshotVersions[node] = R.versions[node]`.
+- A **commit-time check**: for each node in `S.readSet`, compare `S.snapshotVersions[node]` against the current version at the scope it resolved to. If any current exceeds its snapshot, the premise moved — abort the commit and discard with `discardCause.kind === 'conflict'` ([`failure.md`](./failure.md#1-discard-cause-categorization)).
+
+### Setup
+
+```ts
+const [loggedIn, setLoggedIn] = signal(true)   // ROOT.versions: loggedIn → 0
+const [userVisits, setUserVisits] = signal(0)  //               userVisits → 0
+
+// opts into the policy
+const recordVisit = action(function* () {
+	const li = get(loggedIn)              // read #1 — premise
+	yield* serverHandshake()              // parks: in-flight window opens
+	if (li) {
+		const n = get(userVisits)         // read #2 — read-modify-write
+		setUserVisits(n + 1)              // write
+	}
+}, { onConflict: 'reject' })
+
+// Meanwhile, a sibling gesture logs the user out:
+// setLoggedIn(false)   ← commits to ROOT during recordVisit's await window
+```
+
+Expected: `recordVisit` discards with a conflict (its premise `loggedIn === true` no longer holds), `userVisits` is **not** incremented, and the caller can `retry()` against fresh state — where the body correctly does nothing.
+
+### Step 1: open scope, read the premise
+
+`openScope()` → `S = { parent: ROOT, slots: ∅, readSet: ∅, writeSet: ∅, snapshotVersions: ∅, onConflict: 'reject', status: 'open' }`.
+
+`get(loggedIn)` under `S`:
+
+- `invoke(loggedIn, S)`: miss at `S`; chain-match falls through to `loggedIn.slots[ROOT]` → `true`.
+- `loggedIn` added to `S.readSet`. **No edge is formed** — the read happens in the bare action body with no `currentTracker` (per [Q8](./questions.md#q8--tracker-vs-scope-separate-or-unified); the body is imperative, not a recomputable slot). This is the same snapshot-by-capture behaviour the [Q14 trace](#q14--action-prereqs-and-standing-states-ready--pending--error) relied on: the body holds `li` in a local; it will not re-run when `loggedIn` changes.
+- **Reject bookkeeping:** the read resolved at `ROOT`, so `S.snapshotVersions[loggedIn] = ROOT.versions[loggedIn] = 0`.
+- `li = true`.
+
+```
+S.readSet          = { loggedIn }
+S.snapshotVersions = { loggedIn: 0 }
+```
+
+### Step 2: body parks
+
+`yield* serverHandshake()` — the body suspends (per [C2](#c2--action-body-with-async-read)). `S.status = 'open'`. The in-flight window is now open.
+
+### Step 3 (interleaved): sibling commits `setLoggedIn(false)`
+
+The sibling gesture opens its own scope `B`, writes `loggedIn`, and commits. `closeScope(B, 'commit')` promotes `loggedIn` to `ROOT`:
+
+- `writeSlot(loggedIn, ROOT, { cached: false })` — a canonical write. **`ROOT.versions[loggedIn]` bumps `0 → 1`.**
+- Chain-match fires for `loggedIn.subs`. `S`'s read formed **no edge**, so there is nothing to fire into `S`; the parked body is untouched and still holds `li = true`. (Snapshot isolation is automatic here precisely because bare body reads don't subscribe.)
+
+```
+ROOT.slots[loggedIn]    = { cached: false }
+ROOT.versions[loggedIn] = 1          ← moved out from under S's snapshot of 0
+S (parked)              unchanged: li = true, snapshotVersions{ loggedIn: 0 }
+```
+
+### Step 4: body resumes, does the read-dependent write
+
+`serverHandshake()` resolves. Driver guard: `S.status === 'open'` ✓ (conflict is a commit-time check, not a resume-time one). Body resumes:
+
+- `if (li)` → `li === true` → enter. (The body proceeds on its now-stale premise — that is the whole point; `'reject'` catches it at the boundary, not here.)
+- `get(userVisits)` under `S`: miss at `S`, falls through to `ROOT` → `0`. `userVisits` added to `S.readSet`; `S.snapshotVersions[userVisits] = ROOT.versions[userVisits] = 0`.
+- `setUserVisits(1)`: `writeSlot(userVisits, S, { cached: 1 })` — a *speculative* write into `S`, so `userVisits` joins `S.writeSet` and **`ROOT.versions` is not touched**.
+- Body returns.
+
+```
+S.readSet          = { loggedIn, userVisits }   ← userVisits is read-modify-write: in BOTH sets
+S.writeSet         = { userVisits }
+S.snapshotVersions = { loggedIn: 0, userVisits: 0 }
+```
+
+### Step 5: `closeScope(S, 'commit')` runs the conflict check first
+
+Because `S.onConflict === 'reject'`, the check runs *before* any promotion:
+
+For each node in **`S.readSet`** (readSet only — see below):
+
+- `loggedIn`: snapshot `0`, current `ROOT.versions[loggedIn] = 1`. **`1 > 0` → conflict.**
+- `userVisits`: snapshot `0`, current `0` — clean (but a conflict is already found).
+
+Conflict found → **abort the commit; discard instead.** `closeScope(S, 'discard')` with `discardCause = { kind: 'conflict', conflictingNodes: [loggedIn] }`:
+
+- `S.writeSet = { userVisits }` is **dropped, not promoted** — `userVisits` stays `0` at `ROOT`. The false-premise write never lands.
+- `S.edges` unlinked (none here); `S.readSet ∪ S.writeSet` slots dropped; `S.cleanups` (`onDiscard` hooks) fire; `S.status = 'discarded'`.
+
+The completion promise rejects with a `ConflictError` carrying the `discardCause`.
+
+```
+ROOT.slots[userVisits] = { cached: 0 }   ← unchanged; the stale write was rejected
+S.status               = 'discarded'  (cause: conflict)
+```
+
+### Step 6: caller recovery — `'reject'` + retry = optimistic concurrency control
+
+The conflict surfaces through the *same* channel as any other discard cause (this is the [`failure.md`](./failure.md#2-lifecycle-hooks-per-cause) machinery, not a new one):
+
+```ts
+handle.onFailure((err) => {           // or a typed handle.onConflict
+	if (err instanceof ConflictError) handle.retry()   // re-run against fresh state
+})
+```
+
+`handle.retry()` (per [`failure.md`](./failure.md#3-retry--two-distinct-primitives)) re-runs the body in a fresh scope `S'`:
+
+- `get(loggedIn)` → now `false` (current committed value); `S'.snapshotVersions[loggedIn] = 1`.
+- `if (li)` → `false` → no read of `userVisits`, no write.
+- `closeScope(S', 'commit')`: `S'.readSet = { loggedIn }`, snapshot `1`, current `1` — no conflict. Commits (a no-op). **Correct: the visit is not recorded, because the user is logged out.**
+
+Optimistic concurrency control falls out of three parts, only one of them new: `'reject'` (new, this trace) + `discardCause.kind === 'conflict'` (extends `failure.md`'s taxonomy) + `handle.retry()` (already in `failure.md`).
+
+### Why `readSet`, not `readSet ∪ writeSet`
+
+[`concurrent-divergence.md`](./concurrent-divergence.md#d--read-dependent-writes) originally specified the check over `readSet ∪ writeSet`. That over-rejects. Consider the body also stamping a blind output:
+
+```ts
+setLastSeen(Date.now())   // blind write — an OUTPUT, never read; joins writeSet only
+```
+
+If a sibling commits `lastSeen` mid-flight, a `readSet ∪ writeSet` check would throw `ConflictError` — even though the action's *premise* (`loggedIn`, `userVisits`) is untouched. That is a false positive on an output race, which is exactly [class A](./concurrent-divergence.md#a--same-target-replacement-semantics) last-wins territory; a blind write is *meant* to be overwritten, not to reject. Worse, a `writeSet` check would make plain class-A replacement (two "set status" clicks) start rejecting.
+
+The premise an action depends on **is** its read set. A read-modify-write (`setUserVisits(get(userVisits) + 1)`) is still protected, because the modified node lands in `readSet` via the `get`. Pure outputs — written but never read — stay last-wins. The split is clean on `readSet` membership, and `readSet`-only is *more* parsimonious than the doc's original. **Corrects recommendation 2 in `concurrent-divergence.md`.**
+
+### Architecture exposed
+
+1. **Bare action-body reads don't subscribe, and that is what makes `'reject'` cheap.** No edge means the parked body is immune to the sibling's commit (automatic snapshot isolation), so the *only* machinery `'reject'` adds is a version compare — the reads are already snapshotted by capture ([Q14](#q14--action-prereqs-and-standing-states-ready--pending--error) established this; here it is load-bearing for conflict detection too).
+2. **The version counter is a scope-level `Map`, not a per-slot field.** It survives slot-object churn (each promotion installs a *new* slot object) and stays off the uniform `{ recipe, cached, deps }` slot shape — same discipline as [Q9](./questions.md#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally) (state that governs the scope lives on the scope) and [Q7](./questions.md#q7--the-defaultrecipe-mechanism) (don't smear kind/bookkeeping across slots).
+3. **`'reject'` is a commit-time gate layered *before* [Q10](./questions.md#q10--commit-semantics-ordering-atomicity-deferred-fires)'s promotion.** It doesn't touch the deferred-fires region — it either lets the existing commit proceed unchanged or diverts to the existing discard path. No new commit machinery; a guard in front of it.
+4. **`'conflict'` is a discard cause, so recovery is free.** The whole failure model (typed completion, per-cause hooks, `retry()`) applies with no additions beyond one new `kind`. Q15's single new primitive lands *inside* the failure model rather than beside it.
+5. **`readSet`-only is the correct check scope.** Established above; corrects the source doc.
+
+### Sub-questions surfaced
+
+- **Nested actions and the resolved scope.** The version compared is the one at the scope the read *resolved to* (`ROOT` for sibling races on canonical state). Within a nested family, an inner read of an outer-written value resolves at the outer scope, and the outer scope's version only bumps at family-boundary commits — so intra-family coupling (class E, intended) doesn't spuriously self-reject. Not traced here; the sibling-on-`ROOT` case is the one class D is about. Worth a follow-up trace only if a concrete nested-reject scenario appears.
+- **Version bump on direct setters vs. commits.** This trace bumps `ROOT.versions` on any canonical write, including direct outside-action setters. That is the conservative choice (any canonical change counts). If usage shows direct-setter churn causing nuisance conflicts, the bump could be narrowed to commit-promotions only. Defer to usage.
+- **`conflictingNodes` on the cause.** The trace attaches the offending nodes to `discardCause`. Whether that list is worth exposing (for "someone else changed X" UX) or is over-specification is an ergonomic call — same bucket as the rest of the `failure.md` surface.
+
+### Framings status after D1
+
+All four framings hold. The trace leans on [P4](./framings.md#p4--explicit-boundaries-over-implicit-pervasiveness) (`'reject'` is opt-in per action, an explicit boundary, not a pervasive default) and [P5](./framings.md#p5--compose-dont-proliferate-in-either-direction) (it composes with the existing failure model rather than adding a parallel one). It reuses [Q1](./questions.md#q1--fall-through-and-edge-policy) chain-match (fall-through reads), [Q8](./questions.md#q8--tracker-vs-scope-separate-or-unified) (bare reads form no edge), [Q9](./questions.md#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally) (readSet/writeSet), and [Q10](./questions.md#q10--commit-semantics-ordering-atomicity-deferred-fires) (commit path).
+
+**No falsifications. One correction** (readSet-only, not readSet ∪ writeSet) and **one new primitive validated** (`onConflict: 'reject'`, composing into the `failure.md` discard-cause taxonomy). D1 hardens the single affordance Q15 recommends adding.
 
 ---
 
