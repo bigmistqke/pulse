@@ -521,7 +521,7 @@ An action's readiness to run is information that should be queryable *before* th
 
 The principle is structurally forced: a standing `ready()` cannot come from an imperative body that hasn't executed. The prereqs must be hoisted into a *declared, continuously-evaluated* expression. That expression is a `compute`/stage. So the structural pattern is **an action = a reactive prerequisite `compute` → an imperative body invoked on demand**, with the body receiving the *resolved* prereq values.
 
-Not yet traced; this is a future trace target.
+**Traced** — [Q14 scenario trace](./scenario-traces.md#q14--action-prereqs-and-standing-states-ready--pending--error). The structural claim holds with no new engine primitive: `ready` is a forced `compute`; the body's inputs cross in by eager snapshot at invoke (skew-free by closure capture, and the trace exhibits the tear a lazy post-`yield` read would cause); `pending` and `error` are wrapper-managed *committed* side-channel signals — the same deliberately-leaked-status species as [Q13](#q13--optimistic-surface-ergonomics-sugar-over-speculation)'s optimistic overlay, never in the action's speculative writeSet (chain-match would seal `pending` off from consumers, and discard would revert it — both wrong). `error` is the standing-reactive face of [`failure.md`](./failure.md#1-discard-cause-categorization)'s `discardCause`, bridged via `handle.onFailure`. What stays open is API surface only: whether the prereq compute owns the in-flight guard, inline (`action(depsFn, body)`) vs. separately-declared prereqs, and boolean-vs-counter `pending` under action-body-retry — the same ergonomic bucket as Q13.
 
 ### Q15 — Entanglement (Dim 4): overlapping speculations on shared state
 

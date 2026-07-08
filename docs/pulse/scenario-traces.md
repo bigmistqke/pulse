@@ -9,7 +9,7 @@ End-to-end traces of architecturally-distinct cases through pulse's engine
 - [scenarios.md](./scenarios.md) — the catalog itself (TDD basis).
 - [README.md](./README.md) — framings, falsified hypotheses, engine / library sketches, open questions, threads.
 
-**All eight traces below pass.** No framings falsified. Two scenarios forced deliberate design calls into the open (K1 → resolved to Position (C); H3 → Policy α for effect chains, lean).
+**All nine traces below pass.** No framings falsified. Two scenarios forced deliberate design calls into the open (K1 → resolved to Position (C); H3 → Policy α for effect chains, lean). Q14 validates the action-prereq structure and leaves only API surface open.
 
 > **Note on terminology.** Traces use the resolved
 > [Q1](./questions.md#q1--fall-through-and-edge-policy) framing — **Model 1
@@ -34,6 +34,7 @@ End-to-end traces of architecturally-distinct cases through pulse's engine
 - [H3 — cleanup chains across speculative effect runs](#h3--cleanup-chains-across-speculative-effect-runs) — exercises H3 (a, b, b').
 - [C2e — post-yield derived read (async K1b analogue)](#c2e--post-yield-derived-read-async-k1b-analogue) — exercises C2e.
 - [H1d — effect-body coherence on commit](#h1d--effect-body-coherence-on-commit) — exercises H1d.
+- [Q14 — action prereqs and standing states](#q14--action-prereqs-and-standing-states-ready--pending--error) — traces `ready` / `pending` / `error`.
 
 ---
 
@@ -2159,5 +2160,168 @@ H1d traced cleanly with no new design calls. The trace validates that:
 All four framings still hold. Position C from K1+K1b is reconfirmed at the commit-fire level. [Q10](./questions.md#q10--commit-semantics-ordering-atomicity-deferred-fires)'s deferred-fires region works as designed for deduplication. The "Derivation kind matches reactivity scope" framing is implicit here — `doubled` is a Computed (synchronously fresh on read); if it had been an effect-driven signal (H5), the trace would have returned stale.
 
 **No falsifications. No new design calls.** H1d is a clean validation trace.
+
+---
+
+## Q14 — action prereqs and standing states (`ready` / `pending` / `error`)
+
+Traces the standing reactive states an action exposes *around* its body: `ready` (prereqs met, queryable before the body runs), `pending` (body in flight), `error` (last run failed). [Q14](./questions.md#q14--action-prereqs--standing-state-handle) claims these are structurally forced into a specific shape — **an action = a reactive prerequisite `compute` → an imperative body invoked on demand with the *resolved* prereq values**. This trace tests that claim by locating where each of the three states must live, and by stressing the snapshot property with a prereq mutation mid-flight.
+
+### The structural claim under test
+
+A standing `ready()` cannot be produced by the imperative body — the body hasn't run yet when the button needs to know whether to enable. So readiness must be hoisted into a declared, continuously-evaluated expression: a `compute`. The falsifiable consequences:
+
+1. `ready` and the gathered inputs are pure `compute`s over the prereq signals — no engine support, no action scope involved.
+2. The body receives its inputs by an **eager read at invoke** (a snapshot), not by reactive `get()` inside the body. A body that read prereqs lazily after a `yield` would *tear* — pick up a mid-flight mutation.
+3. `pending` and `error` are **wrapper-managed side-channel committed signals**, not speculative writes inside the action scope. A naive "set `pending` inside the body" fails twice over: chain-match ([Q1](./questions.md#q1--fall-through-and-edge-policy)) seals the speculative write off from outside readers (the button never sees it), and discard reverts it (wrong — a failed action must still clear `pending`).
+
+If all three hold, Q14 needs no new engine primitive; it's a library shape over `action` plus the discard-cause machinery from [`failure.md`](./failure.md#1-discard-cause-categorization).
+
+### Setup
+
+A "save profile" action. `name` is the local draft; `serverName` is the canonical committed value the action writes.
+
+```ts
+const [name, setName] = signal("")
+const [serverName, setServerName] = signal("")
+
+// wrapper-managed status signals — ordinary committed state, NOT speculative
+const [inflight, setInflight] = signal(false)
+const [lastError, setLastError] = signal<unknown>(null)
+
+// prereq compute — the gathered inputs, continuously evaluated before any run
+const draft = computed(() => ({ name: get(name) }))
+// readiness — a pure data-validity predicate over the gathered inputs
+const ready = computed(() => get(draft).name.length > 0)
+
+function saveProfile() {
+	if (get(inflight)) return                 // double-submit guard
+	const resolved = get(draft)               // <-- eager snapshot at invoke
+	setLastError(null)
+	setInflight(true)
+	const handle = action(function* () {
+		const saved = yield* postToServer(resolved)   // body uses the SNAPSHOT
+		setServerName(saved.name)                     // speculative write → S.writeSet
+	})
+	handle.onCommit(() => setInflight(false))
+	handle.onFailure((err) => { setLastError(err); setInflight(false) })
+	handle.onCancel(() => setInflight(false))
+	return handle
+}
+
+// consumer (a submit button)
+const enabled = computed(() => get(ready) && !get(inflight))
+```
+
+The three standing states, located:
+
+- `ready` — the `ready` compute. Depends only on `draft` → `name`. Pure derivation.
+- `pending` — the `inflight` signal, written by the wrapper. `enabled` composes `ready && !inflight`.
+- `error` — the `lastError` signal, written from `handle.onFailure` (the reactive face of [`failure.md`](./failure.md#1-discard-cause-categorization)'s `discardCause`).
+
+### Step 1: prereq flips before any run
+
+`name = ""` initially. `ready` recomputes: `get(draft).name.length > 0` → `false`. `enabled` → `false`. Button disabled — and the body has never run. The `ready` value came entirely from the declared compute, not the body. **Claim (1) holds: readiness is hoisted, not body-derived.**
+
+`setName("foo")`:
+
+- Ordinary committed write at `ROOT`. Fires chain-match for `name.subs`; `draft` marked dirty, cascades to `ready` and `enabled`.
+- Next microtask: `ready` recomputes → `true`; `enabled` → `true`. Button enabled.
+
+No action scope exists yet. This is plain Computed propagation ([H1d](#h1d--effect-body-coherence-on-commit)).
+
+### Step 2: invoke — snapshot and `pending`
+
+`saveProfile()` runs synchronously:
+
+- `get(inflight)` → `false`; guard passes.
+- `resolved = get(draft)` → `{ name: "foo" }`. **This is the snapshot** — a plain value captured in the closure, not a reactive edge into the body.
+- `setLastError(null)` — committed write, clears any prior error.
+- `setInflight(true)` — committed write at `ROOT`, *before* `action()` opens the scope. Fires `enabled` dirty → recomputes to `false` (`!inflight`). Button disabled: double-submit is now prevented by the standing state, not by an imperative flag inside the body.
+- `action(function* () { … })` opens scope `S`. The body runs to its first `yield* postToServer(resolved)` and parks (per [C2](#c2--action-body-with-async-read)).
+
+**State after Step 2:**
+
+```
+ROOT.slots:  name → "foo", serverName → "", inflight → true, lastError → null
+             draft → { name: "foo" }, ready → true, enabled → dirty→false
+S = { parent: ROOT, writeSet: ∅, readSet: ∅, status: 'open' }   (body parked on the fetch)
+resolved = { name: "foo" }   (closure-captured snapshot, no edge)
+```
+
+Note `inflight` lives at `ROOT`, fully visible to `enabled`. It is *not* in `S.writeSet`. **Claim (3) holds so far: `pending` is committed side-channel state.**
+
+### Step 3: prereq mutation mid-flight — the skew test
+
+While the body is parked, the user keeps typing: `setName("bar")`.
+
+- Committed write at `ROOT`. `draft` recomputes → `{ name: "bar" }`; `ready` → still `true`.
+- `enabled` recomputes → `ready && !inflight` = `true && !true` = `false`. Button stays disabled — correct, a save is in flight.
+- **The body is unaffected.** It holds `resolved = { name: "foo" }` by value. There is no reactive edge from `name` into the parked body, so the recompute of `draft` cannot reach it.
+
+This is the load-bearing test. Had the body been written to read reactively after the yield —
+
+```ts
+action(function* () {
+	yield* awaitServerHandshake()
+	const saved = yield* postToServer(get(draft))   // ← lazy read, WRONG
+	setServerName(saved.name)
+})
+```
+
+— then `get(draft)` on resume would read `{ name: "bar" }`, saving a value the user never confirmed at submit time. That is the tear Q14's "gather-up-front" property forbids. The eager-snapshot structure dodges it structurally: the value is read once, at invoke, in the same synchronous tick the user acted. **Claim (2) holds — and its failure mode is concrete, not hypothetical.** This is the [C2d](#c2d-writes-during-the-await-window) hazard viewed from the prereq side.
+
+### Step 4a: commit
+
+`postToServer` resolves; body resumes, runs `setServerName("foo")` (speculative write → `S.writeSet`), returns. `closeScope(S, 'commit')` per [Q10](./questions.md#q10--commit-semantics-ordering-atomicity-deferred-fires):
+
+1. Open deferred-fires region.
+2. Promote `S.writeSet = { serverName }` to `ROOT`. Fire chain-match; consumers of `serverName` queue.
+3. Drop `S`'s slots; close children (none).
+4. Drain region → microtasks scheduled for `serverName`'s consumers.
+5. `S.status = 'committed'`; pop ambient.
+
+`closeScope` returns. `handle.onCommit` fires (it is sugar over the completion promise, resolved on commit per [`failure.md`](./failure.md#2-lifecycle-hooks-per-cause)): `setInflight(false)` — an ordinary `ROOT` write, *outside* the deferred-fires region. `enabled` recomputes → `ready && !inflight` = `true && !false` = `true`. Button re-enabled.
+
+**Ordering check.** Two committed writes land in Step 4a: `serverName = "foo"` (during the region drain) and `inflight = false` (after `closeScope` returns). Both complete synchronously before any consumer microtask runs. So when `enabled` (or any button effect) re-runs, it reads both settled values coherently — there is no window where `pending` reads false but the committed data is still stale. The `pending` write sits outside the region precisely because it is *not* action data; it doesn't need atomic promotion, only to fire after the body's outcome is known.
+
+**End state after 4a:** `serverName = "foo"`, `name = "bar"`, `inflight = false`, `lastError = null`, `enabled = true`. That `serverName` ("foo") trails `name` ("bar") is the intended post-save state — the local draft has moved ahead of the last confirmed save — not a tear.
+
+### Step 4b: discard-with-failure (alternate)
+
+`postToServer` rejects. The body throws; `closeScope(S, 'discard')`:
+
+1. `S.writeSet = { serverName }` is **dropped, not promoted** — `serverName` stays `""`. Speculative writes vanish on discard ([H1c](#h1a-c--effect-under-speculation)).
+2. `S.cleanups` fire (`onDiscard` hooks, none here). `S.status = 'discarded'`.
+
+The handle's completion promise rejects with the error, tagged `discardCause.kind = 'failure'` ([`failure.md`](./failure.md#1-discard-cause-categorization)). `handle.onFailure(err)` fires: `setLastError(err)` and `setInflight(false)` — both ordinary `ROOT` writes.
+
+`enabled` recomputes → `true` (prereqs still valid; not in flight). `error` — i.e. `get(lastError)` — now reflects the failure; a toast effect subscribed to `lastError` fires. **Claim: `error` is the standing reactive projection of `discardCause`, cleared on the next invoke by Step 2's `setLastError(null)`.**
+
+Had `pending` been written *inside* the speculative scope, Step 4b would have reverted it to whatever it was pre-action — leaving the button wedged as if still saving. The side-channel placement is what makes failure clear `pending` correctly.
+
+### Architecture exposed
+
+Q14 traces cleanly with **no new engine primitive**. What it validates:
+
+1. **`ready` is a `compute`, forced.** A pre-run standing state cannot originate in the body; it must be a declared expression over the prereq signals. Confirmed structurally — the button read `ready` before the body existed.
+2. **Inputs cross into the body by eager snapshot, not reactive edge.** `resolved = get(draft)` at invoke gives the "gather-up-front / snapshot-consistent / skew-free" property for free — it's closure capture, no machinery. The tear it prevents (Step 3) is real and reachable via the lazy-read anti-pattern.
+3. **`pending` and `error` are side-channel committed signals, same species as the optimistic overlay.** They are deliberately-leaked status state managed by the wrapper — exactly the shape [`optimistic-ui.md`](./optimistic-ui.md#the-framing) settled for the value overlay. The action's *data* writes are speculative (isolated, promoted-or-dropped); its *status* is committed and always visible. The two never share the writeSet.
+4. **`error` is the reactive face of `discardCause`.** The imperative side (`handle.onFailure`, from `failure.md`) and the standing-reactive side (`lastError` signal) are the same information at two altitudes; the wrapper bridges them in three lines.
+5. **The pending writes need no atomic coupling with the commit.** They sit outside [Q10](./questions.md#q10--commit-semantics-ordering-atomicity-deferred-fires)'s deferred-fires region and still read coherently, because synchronous writes settle before consumer microtasks (per [H1d](#h1d--effect-body-coherence-on-commit)).
+
+The structural claim in [Q14](./questions.md#q14--action-prereqs--standing-state-handle) holds: **action = reactive prereq compute → imperative body invoked with resolved values**, with the status states as a thin committed-signal skirt around the scope.
+
+### Sub-questions surfaced
+
+- **Should the prereq compute own the in-flight guard, or the consumer?** This trace kept `ready` a pure data-validity predicate and composed `enabled = ready && !inflight` at the button. The alternative folds it in: `ready = valid && !inflight`. Lean: keep them separate — an action's readiness shouldn't have to know about its own pendingness, and different consumers may compose differently (e.g. a "retry" button wants `error && !inflight`, not `ready`). Cosmetic; defer.
+- **Inline prereqs vs. a separately-declared compute.** [Q14](./questions.md#q14--action-prereqs--standing-state-handle) asks whether prereqs are declared inline (`action(depsFn, body)`) or via a separate compute the action consumes. This trace used the separate-compute form (`draft`). The inline form is sugar that constructs the same compute internally and passes its resolved value as the body's argument — structurally identical. The choice is ergonomic; both preserve the snapshot property. Defer to API-surface feedback (same bucket as [Q13](./questions.md#q13--optimistic-surface-ergonomics-sugar-over-speculation)).
+- **`pending` boolean vs. counter under action-body-retry.** [`failure.md`](./failure.md#3-retry--two-distinct-primitives)'s `handle.retry()` re-runs the body in a fresh scope on the same handle. Should `pending` stay `true` across the whole retry sequence (one logical operation) or blink per attempt? Lean: stay `true` for the sequence — the wrapper sets `inflight = false` only on terminal settle, and `retry()` doesn't pass through terminal settle. A boolean suffices; a counter would only matter if the same handle could run concurrently, which the double-submit guard forbids. Defer.
+
+### Framings status after Q14
+
+All four framings hold. The trace leans on [P4](./framings.md#p4--explicit-boundaries-over-implicit-pervasiveness) (the status skirt is an explicit boundary around the action, not pervasive signal state) and [P5](./framings.md#p5--compose-dont-proliferate-in-either-direction) (the three states compose from `compute` + `signal` + the existing discard-cause hooks — no new primitive). It reuses [Q1](./questions.md#q1--fall-through-and-edge-policy) chain-match to argue *why* status cannot be speculative, [Q10](./questions.md#q10--commit-semantics-ordering-atomicity-deferred-fires) for the ordering check, and [C2](#c2--action-body-with-async-read) for the parked-body snapshot behaviour.
+
+**No falsifications. No new design calls** — only API-surface sub-questions (shared with Q13's bucket). Q14 is a structural-validation trace: it pins the shape and locates the three states, leaving the naming/inlining surface open.
 
 ---
