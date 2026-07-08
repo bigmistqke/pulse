@@ -30,6 +30,7 @@ This doc is exploration, not specification. The goal: build a survey of the conc
 - [A conceptual aside — Scope is doing two jobs](#a-conceptual-aside--scope-is-doing-two-jobs)
 - [Cross-scenario observations](#cross-scenario-observations)
 - [Affordances, derived bottom-up](#affordances-derived-bottom-up)
+- [Prior art](#prior-art)
 - [What we genuinely don't know yet](#what-we-genuinely-dont-know-yet)
 - [Tentative recommendations](#tentative-recommendations)
 
@@ -649,6 +650,48 @@ Sugar over (3) for the common Class C pattern. Optional; the unsugared pattern i
 - **Per-action merge callbacks.** Use cases are better served by signal-value-level merge (CRDT). Per-action callbacks would spread merge logic across the codebase and require per-conflict decisions; the wrong layer.
 - **Auto-detection / dev-time warnings on overlap.** The scenario walk shows that overlap is often *intended* (A, E) and that warnings would create noise. Better to let the user opt into `'reject'` where they care.
 - **Solid-style auto-merge.** Wrong for class G; redundant for E (nested actions cover it explicitly); doesn't solve C or D.
+
+## Prior art
+
+Pulse's answer to concurrent divergence is not novel in its parts. It is a re-derivation of decades-old database and concurrent-programming concurrency control, applied to reactive UI state. Naming the lineage sharpens what is borrowed, what is deliberately dropped, and where the one genuinely-open question (class B, merge-on-commit) sits.
+
+### Databases — optimistic concurrency control and snapshot isolation
+
+The closest ancestor; the mapping is nearly one-to-one:
+
+- **Snapshot isolation between sibling speculations** is multiversion concurrency control's snapshot isolation — each transaction reads a consistent snapshot and does not see others' uncommitted writes. The anomaly this permits is named and analysed in Berenson, Bernstein, Gray, Melton, O'Neil & O'Neil, ["A Critique of ANSI SQL Isolation Levels"](https://dl.acm.org/doi/10.1145/568271.223785) (SIGMOD 1995), which introduced the formal definition of snapshot isolation.
+- **Class D (read-dependent writes)** is that paper's *write skew* / *lost update* anomaly: snapshot isolation alone does not prevent a read-then-write whose read premise is invalidated by a concurrent commit.
+- **`onConflict: 'reject'`** is optimistic concurrency control — Kung & Robinson, ["On Optimistic Methods for Concurrency Control"](https://dl.acm.org/doi/10.1145/319566.319567) (ACM Transactions on Database Systems, 1981): the read / validate / write phases, where validation checks the transaction's *read set* against concurrent commits. This independently confirms the [D1](./scenario-traces.md#d1--read-dependent-write-under-reject) correction — classical optimistic concurrency control validates the read set, not the write set.
+- **Default isolation plus opt-in `'reject'`** is structurally *serializable snapshot isolation*: Cahill, Röhm & Fekete, ["Serializable Isolation for Snapshot Databases"](https://dl.acm.org/doi/10.1145/1376616.1376690) (SIGMOD 2008; adopted by PostgreSQL 9.1), which adds read-write conflict detection on top of snapshot isolation to close precisely the write-skew hole while preserving "readers don't block writers." Pulse's per-node version counter is the row-version / `ETag` / `If-Match` optimistic-lock mechanism.
+
+If one body of prior art is worth reading against Q15, it is snapshot-isolation-plus-serializable-snapshot-isolation: pulse's default-plus-`'reject'` is that pairing transposed onto a reactive engine.
+
+### Software transactional memory — compose and retry
+
+That speculations *compose atomically* (nested actions, class E) and recover by *retry* is the software-transactional-memory lineage: Shavit & Touitou, ["Software Transactional Memory"](https://dl.acm.org/doi/10.1145/224964.224987) (PODC 1995), and especially Harris, Marlow, Peyton Jones & Herlihy, ["Composable Memory Transactions"](https://dl.acm.org/doi/10.1145/1065944.1065952) (PPoPP 2005) — optimistic execution over read/write sets, with atomic composition and `retry` / `orElse`.
+
+Clojure's reference types map onto the scenario classes cleanly: `ref-set` / `alter` is **class A** replacement (last-wins); **`commute`** is **class B** accumulation (order-independent updates the runtime need not serialize) — the same split pulse draws between last-wins signals and merge signals.
+
+### Conflict-free replicated data types — the merge-on-commit case
+
+The one *open* thread — class B, and how a signal expresses merge-on-commit — is the conflict-free-replicated-data-type lineage: Shapiro, Preguiça, Baquero & Zawirski, ["Conflict-free Replicated Data Types"](https://link.springer.com/chapter/10.1007/978-3-642-24550-3_29) (SSS 2011) — counters, sets, registers, and sequences whose concurrent updates converge by construction. Production libraries (Automerge, Yjs) and the framing in Kleppmann, Wiggins, van Hardenberg & McGranaghan, ["Local-first software"](https://www.inkandswitch.com/essay/local-first/) (Onward! 2019) are the shape the doc's "signal value handles composition externally" option points at. Operational transformation (Google Docs, Jupiter) is the older alternative to conflict-free replicated data types for the same convergent-editing problem.
+
+### User-facing frameworks and data layers
+
+The reactive-framework rollback strategies are surveyed above ([Solid / React / Svelte rollback strategies](#solid-react-svelte-rollback-strategies)). Two further data-layer comparisons:
+
+- **React** builds each concurrent transition in a private work-in-progress tree — snapshot isolation by construction, the same "sidestep cascade-discard by refusing shared visibility" choice pulse makes — and exposes per-action optimism via `useOptimistic`.
+- **Replicache / Reflect** is the `'rebase'` policy in its natural habitat: a server-authoritative store replays client mutations against incoming server state. This is exactly the policy the [ship-set](#tentative-recommendations) declines for general speculations, and the contrast explains why — rebase is safe when replay is side-effect-free and the server is the single source of truth, and unsafe when a speculation body has already run effects. **Relay** and **Apollo** optimistic responses, and **TanStack Query**'s optimistic-update-plus-`onError`-rollback, are the mainstream form of the [`optimistic-ui.md`](./optimistic-ui.md) pattern.
+
+### Reactive glitch-freedom
+
+A distinct lineage, worth naming to keep it separate. Pulse's render-coherence guarantee (microtask batching, [Q10](./questions.md#q10--commit-semantics-ordering-atomicity-deferred-fires)) is the *glitch-freedom* problem from functional reactive programming — ensuring consumers never observe a torn intermediate state — as studied in FrTime and in self-adjusting / incremental computation (Adapton and related work). This concerns *coherence within one commit*, not *divergence across speculations*; it is prior art for [H1d](./scenario-traces.md#h1d--effect-body-coherence-on-commit) and Q10, not for the entanglement question itself.
+
+### What pulse borrows, and the one thing it does not
+
+The synthesis: pulse does **multiversion concurrency control plus optimistic concurrency control for reactive UI state**, with conflict-free replicated data types as the mechanism for accumulation and glitch-free reactive programming for render coherence. The database literature is the primary source; the reactive frameworks independently re-derive a subset.
+
+The one deliberate departure: pulse keeps *speculation* and *isolation context* fused 1:1 (the [Scope-does-two-jobs aside](#a-conceptual-aside--scope-is-doing-two-jobs)), where databases separate a transaction from savepoints and nested contexts. Pulse accepts a small expressiveness cost — no shared-visibility-with-independent-commit — to avoid the machinery (lock manager, dependency graph, cascade handling) that the separated design forces. For UI state, where the cross-speculation-sharing case is rare, that is a deliberate simplification, not a limitation.
 
 ## What we genuinely don't know yet
 
