@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { createScope, chainFor, ROOT_KIND, type Scope } from '../src/scope'
+import { createScope, chainFor, writeSlot, readSlot, ROOT_KIND, type Scope, type Node, type Slot } from '../src/scope'
 
 test('createScope produces an open scope with empty bags', () => {
   const s = createScope(undefined, 'speculative')
@@ -26,4 +26,34 @@ test('chainFor walks parents most-specific to terminal', () => {
   const inner = createScope(outer, 'speculative')
   expect(chainFor(inner)).toEqual([inner, outer, root])
   expect(chainFor(root)).toEqual([root])
+})
+
+const sigNode = (): Node => ({ subs: new Set() })
+
+test('writeSlot stores a slot on the scope and records the write', () => {
+  const root = createScope(undefined, 'owner')
+  const name = sigNode()
+  const slot: Slot<string> = { recipe: () => 'foo', cached: 'foo', deps: [] }
+  writeSlot(name, root, slot)
+  expect(root.slots.get(name)).toBe(slot)
+  expect(root.writeSet.has(name)).toBe(true)
+})
+
+test('readSlot falls through the chain to the nearest slot', () => {
+  const root = createScope(undefined, 'owner')
+  const s = createScope(root, 'speculative')
+  const name = sigNode()
+  writeSlot(name, root, { recipe: () => 'foo', cached: 'foo', deps: [] })
+  expect(readSlot(name, s)?.cached).toBe('foo')
+  expect(readSlot(sigNode(), s)).toBeUndefined()
+})
+
+test('a more-specific slot shadows an ancestor slot', () => {
+  const root = createScope(undefined, 'owner')
+  const s = createScope(root, 'speculative')
+  const name = sigNode()
+  writeSlot(name, root, { recipe: () => 'foo', cached: 'foo', deps: [] })
+  writeSlot(name, s, { recipe: () => 'bar', cached: 'bar', deps: [] })
+  expect(readSlot(name, s)?.cached).toBe('bar')
+  expect(readSlot(name, root)?.cached).toBe('foo')
 })

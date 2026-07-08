@@ -66,3 +66,19 @@ export function chainFor(scope: Scope): Scope[] {
   }
   return chain
 }
+
+/** Install a slot for `node` at `scope` and record the write. Pure storage. */
+export function writeSlot(node: Node, scope: Scope, slot: Slot): void {
+  scope.slots.set(node, slot)
+  scope.writeSet.add(node)
+}
+
+/** Resolve `node` by walking the chain from `scope`, returning the first slot
+ *  found (fall-through). Undefined if no slot exists anywhere in the chain. */
+export function readSlot(node: Node, scope: Scope): Slot | undefined {
+  for (const s of chainFor(scope)) {
+    const slot = s.slots.get(node)
+    if (slot !== undefined) return slot
+  }
+  return undefined
+}
