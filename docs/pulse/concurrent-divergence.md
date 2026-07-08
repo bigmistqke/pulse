@@ -705,7 +705,7 @@ The one deliberate departure: pulse keeps *speculation* and *isolation context* 
 
 Per the scenario walk, the *minimum* honest answer is:
 
-**1. Keep current defaults.** Last-wins, snapshot isolation, microtask batching, nested actions for coupling, `.discard()` for supersession. These handle A, E, F, G, H.
+**1. Keep current defaults.** Last-wins, snapshot isolation, microtask batching, nested actions for coupling, `.discard()` for supersession. These handle A, E, F, G, H. Recorded as [ADR 0009](../adr/0009-isolate-speculations-by-default.md) (isolate by default; couple explicitly).
 
 **2. Add `'reject'` as the one new policy.** Per-node canonical version counter (`scope.versions: Map<Node, number>`, bumped on canonical writes/promotions — engine, trivial); `S.snapshotVersions: Map<Node, number>` recorded at read against the version at the scope the read resolved to; commit-time check that throws `ConflictError` if any read node's current version exceeds its snapshot. **Check `readSet` only, not `readSet ∪ writeSet`** — the premise an action depends on *is* its read set; a blind write (output) is meant to be overwritten (class A last-wins), and a read-modify-write is already covered because the modified node is in `readSet`. Checking `writeSet` over-rejects output races. `ConflictError` is a `discardCause.kind === 'conflict'` in [`failure.md`](./failure.md#1-discard-cause-categorization)'s taxonomy, so `'reject'` + `handle.retry()` composes into optimistic concurrency control with no other new machinery. Traced and hardened in [D1](./scenario-traces.md#d1--read-dependent-write-under-reject).
 

@@ -39,7 +39,6 @@ Roughly priority-ordered. The earlier engine-shape threads are now resolved and 
 - _CRDT signal-values (class B / [Q15](./questions.md#q15--entanglement-dim-4-overlapping-speculations-on-shared-state))._ The one genuinely-open design item from entanglement: how a signal expresses "merge, don't replace" on commit. Design-shaped, not yet pinned; CRDT / local-first prior art in [concurrent-divergence.md](./concurrent-divergence.md#prior-art).
 - _Preview / what-if._ The [Scope-does-two-jobs aside](./concurrent-divergence.md#a-conceptual-aside--scope-is-doing-two-jobs)'s lifecycle overload — "a speculation that never commits" is expressible but overloads the commit/discard lifecycle. The one conceptual gap flagged across the scenario work (S8).
 - _Implementation edges for [`async-reads-and-coordination.md`](./async-reads-and-coordination.md)._ Whether a settled `Awaitable` is cached per read; confirming `settled([...])` reaches a refetching input's in-flight promise; naming (`settled` / `stable` / `frame`).
-- _ADR for isolate-by-default._ Record the core [Q15](./questions.md#q15--entanglement-dim-4-overlapping-speculations-on-shared-state) architectural decision (isolate speculations by default; couple explicitly via nested actions) as an ADR, if wanted.
 - _Take the design to `src/`._ The read model + `settled` + `'reject'` are designed against the sealed engine; implementing against the actual r3-forked engine is the next build step.
 
 ---
