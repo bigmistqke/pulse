@@ -414,7 +414,7 @@ The wrapper shape is the load-bearing decision. Other sub-questions can be settl
 
 **4. Explicit dual-setter pattern by default.** Action author writes both `setOptimisticValue` (overlay) and `setValue` (canonical). Accepts the "forgot to write canonical" footgun for v1; ship auto-promote variant later if usage shows it's needed.
 
-**5. No engine-level changes required.** The wrapper, the overlay stack, and the query primitive are all library code on top of pulse's existing scope + cleanup primitives. The one small dependency: a cleanup hook that fires on *both* commit and discard (which pulse doesn't currently have; small addition to the scope API).
+**5. No engine-level changes required.** The wrapper, the overlay stack, and the query primitive are all library code on top of pulse's existing scope + cleanup primitives. The one dependency — clearing the overlay on *both* commit and discard — is covered by the symmetric body-local pair `onCommit`/`onDiscard` proposed in [`failure.md`](./failure.md#5-body-local-lifecycle-hooks-oncommit-and-ondiscard): register the same teardown on each face, and it runs exactly once (commit XOR discard).
 
 **6. Revisit when usage data exists.** These recommendations are informed by scenario reasoning and existing-framework survey, not by usage data. Once pulse ships and apps are built, the wrapper's ergonomics may need refinement (the auto-promotion variant, richer queries, naming) but the architectural commitment (optimistic as a wrapper, not a base-signal feature) is the load-bearing one.
 

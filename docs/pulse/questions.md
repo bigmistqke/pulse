@@ -503,9 +503,15 @@ Status: **resolved.** Two distinct cleanup mechanisms with clear homes, sealed b
 
 ### Q13 — Optimistic surface ergonomics (sugar over speculation)
 
+Status: **open — exploration in progress.** The deep dive lives in [`optimistic-ui.md`](./optimistic-ui.md), which frames optimistic UI as speculation that deliberately leaks its value outside the scope, tagged as provisional. That doc is exploration, not specification; its recommendations are current leans, not pinned answers. This stub records the question and where the exploration currently stands.
+
 Mechanism: an optimistic write is one use of speculation (a predicted `setX(...)` inside an action body is held in that action's write-set; auto-discard reverts on failure; commit promotes). No new primitive at the engine level.
 
-**Open:** does pulse ship a named ergonomic sugar — `optimistic(...)` / `createOptimistic` — as a thin wrapper over `action`? Per [P5](./framings.md#p5--compose-dont-proliferate-in-either-direction), this is decided on whether the bare action shape is awkward enough for the optimistic case to warrant a named wrapper. Lean: yes for the single-predicted-write case (the most common one — predict, await, either promote or roll back). The API surface is genuinely undecided beyond that.
+**Firmed up (current lean).** The architectural direction — optimistic UI is a *wrapper* over the base signal, not a feature baked into every signal's API — has settled as the exploration's load-bearing commitment. Per [P4](./framings.md#p4--explicit-boundaries-over-implicit-pervasiveness) + [P5](./framings.md#p5--compose-dont-proliferate-in-either-direction), keeping the layering explicit (`optimistic(committedSignal)` as opt-in sugar) keeps the base primitive minimal and the UI affordance opt-in. See [Why the wrapper shape — a layering argument](./optimistic-ui.md#why-the-wrapper-shape--a-layering-argument).
+
+**Still open (the surface).** The wrapper's API shape is a lean, not a lock: the 3-tuple destructure `[optimisticValue, setOptimisticValue, isOptimistic]` ([Tentative recommendations](./optimistic-ui.md#tentative-recommendations)), the explicit dual-setter vs. an auto-promote variant, reader-richness (bare value vs. tagged `{value, status}`), and naming (`optimistic` / `preview` / `tentative`) all stay undecided pending ergonomic feedback. These are surface details layered on the firmed-up wrapper direction, not the direction itself.
+
+**Resolved sub-question:** the wrapper's overlay must clear on *both* commit and discard. Closed by the symmetric body-local pair `onCommit`/`onDiscard` in [`failure.md`](./failure.md#5-body-local-lifecycle-hooks-oncommit-and-ondiscard) (see [Q12](#q12--body-cleanups-vs-scope-cleanups-composition-and-re-entrancy)) — the wrapper registers the same teardown on each face; only one fires, so it runs exactly once.
 
 ### Q14 — Action prereqs / standing-state handle
 
