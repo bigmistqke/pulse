@@ -412,15 +412,31 @@ S.parent?.children.delete(S)
 
 ### Q7 — The `defaultRecipe` mechanism
 
-The Node has an optional `defaultRecipe` used by `invoke` when no slot exists for the requested scope. Is this:
+Status: **resolved — (i): the recipe lives on the Node, as [Q6](#q6--what-is-a-scope-as-a-value)'s shape already has it.** The exercise below is preserved as historical exploration; the resolution turned out *not* to be cosmetic — options (ii) and (iii) each break on a concrete case.
 
-- *(i) The right shape.* A convenient "fallback recipe for fresh slots."
-- *(ii) Folded into the root-scope slot.* The slot the library tags with `ROOT_SCOPE` *is* the default; `invoke` with no slot for `S` falls through along the walk's chain and creates a slot for `S` using that slot's recipe.
+**When a default recipe is even consulted.** `invoke(node, S)` walks `chainFor(S)` for a slot; the recipe question only arises on a read-miss at `S` that must *populate* a fresh slot. Two node kinds diverge there:
+
+- *Computed* (`doubleName`): a read-miss at `S` populates a fresh `S`-slot by running the defining expression *under `S`* — that is what gives scope-isolated recomputation (if `name` is later written in `S`, `doubleName` must re-derive within `S`). Needs a recipe to run.
+- *Signal* (`name`): a read-miss at `S` *falls through* to the nearest cached value and forms an edge — no `S`-slot, no recipe run. Populating one would seal the signal at its first-read value and break snapshot semantics (the [C2d](./scenario-traces.md#c2d-writes-during-the-await-window) concern).
+
+So the real question is: where does a computed's defining expression live, and how does `invoke` distinguish a computed (populate-and-isolate) from a leaf signal (fall-through)?
+
+**Why (i).** A `defaultRecipe?` field on the Node answers both at once: its *optionality is the discriminant* — present ⇒ computed ⇒ run-and-isolate under `S`; absent ⇒ signal ⇒ fall-through. It carries the recipe *and* encodes node kind in one field, homes the recipe on the node (present from definition, so slots populate lazily anywhere, including the first read under `ROOT_SCOPE`), and it is already the Node shape [Q6](#q6--what-is-a-scope-as-a-value) resolved to. Consistent with the grain of [Q1](#q1--fall-through-and-edge-policy) (engine-interpreted data, not per-edge closures) and [Q9](#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally) (kind lives on the node / scope, not smeared across uniform slots).
+
+**Why not (ii) — "the `ROOT_SCOPE` slot is the default; borrow its recipe via fall-through."** Two concrete breaks, not cosmetic:
+
+- *Root population is impossible.* The first `get(doubleName)` misses at `ROOT_SCOPE`, which has no ancestor to borrow a recipe from. To make (ii) work you must *eagerly* seed `doubleName.slots[ROOT_SCOPE]` with the recipe at `compute()` time — forcing a `ROOT_SCOPE` slot on every computed whether or not it is ever read there, defeating lazy population and mis-homing computeds only ever read under some owner scope.
+- *The discriminant does not disappear.* (ii) still needs the computed-vs-signal distinction at read-miss. Reintroducing it as a separate node-kind bit saves nothing over (i); populating an `S`-slot on *every* read-miss instead (signals included) is not cosmetic — it changes signal snapshot semantics, and is wrong per [C2d](./scenario-traces.md#c2d-writes-during-the-await-window).
+
+**Why not (iii) — per-`invoke` callback.** Adds caller-supplied control-flow where every adjacent resolution went the other way: [Q1](#q1--fall-through-and-edge-policy) rejected per-edge callbacks for engine-interpreted data; [Q9](#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally) rejected per-slot flags for scope-level sets. No demonstrated use case justifies the flexibility.
+
+**Historical framing — the three candidates:**
+
+- *(i) The right shape.* A recipe field on the Node; `invoke` runs it to populate a fresh slot.
+- *(ii) Folded into the root-scope slot.* The slot the library tags with `ROOT_SCOPE` *is* the default; `invoke` with no slot for `S` falls through the chain and creates a slot for `S` using that slot's recipe.
 - *(iii) Walk-defined.* `invoke` takes a callback that says what to do when no slot matches — return undefined, fall through, invoke a fallback recipe.
 
-(ii) is most parsimonious but loses the explicit "this is the default recipe" intent and pushes more convention into the library; (iii) is most flexible. Probably a cosmetic question, but worth deciding.
-
-**Sub-question (surfaced by [doubleName trace](./scenario-traces.md#doublename-under-scope-s)):** what `cached` does a *promoted* slot carry? Three sub-positions: (a) preserve `cached` + carry over old deps (but old deps were registered with edges into a slot at the old scope; the chain-match logic at the new scope would re-resolve from scratch anyway); (b) preserve `cached`, drop deps, let next recompute rebuild; (c) drop `cached`, force recompute on next read. *Lean (b)*: preserves the work done in the scope without carrying stale edge structure forward. Related to [Q1](#q1--fall-through-and-edge-policy) (edge re-formation across scope transitions).
+**Sub-question (surfaced by [doubleName trace](./scenario-traces.md#doublename-under-scope-s)) — resolved (b), and largely dissolved by [Q9](#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally).** What `cached`/deps does a *promoted* slot carry? Candidates: (a) preserve `cached` + carry old deps; (b) preserve `cached`, drop deps, let the next recompute rebuild; (c) drop `cached`, force recompute. Lean (b) — but note only `writeSet` slots promote ([Q9](#q9--read-populated-vs-write-populated-slots-do-they-differ-structurally)), and `writeSet` slots are signals, whose deps are *already empty*. So "drop deps" is a no-op and "preserve `cached`" keeps the written value; (a) would carry `S`-scoped edges that `closeScope` is tearing down ([Q6](#q6--what-is-a-scope-as-a-value)); (c) discards a known value for nothing. The sub-question only had teeth if a slot with non-empty deps could promote, which Q9 forbids.
 
 ### Q8 — Tracker vs Scope: separate or unified?
 
