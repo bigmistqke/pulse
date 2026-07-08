@@ -280,3 +280,12 @@ export function commit(scope: Scope): void {
   }
   scope.status = 'committed'
 }
+
+/** Discard a scope: tear down edges + drop slots (no promotion), then fire
+ *  cleanups in LIFO order. Speculative writes simply vanish. */
+export function discard(scope: Scope): void {
+  closeScopeEdges(scope)
+  for (let i = scope.cleanups.length - 1; i >= 0; i--) scope.cleanups[i]()
+  scope.cleanups.length = 0
+  scope.status = 'discarded'
+}

@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { createScope, chainFor, writeSlot, readSlot, chainMatch, linkEdge, edgesToFire, closeScopeEdges, ROOT_KIND, ROOT_SCOPE, getCurrentScope, getCurrentTracker, runInScope, signalNode, computedNode, readValue, writeValue, commit, type Scope, type Node, type Slot, type Edge } from '../src/scope'
+import { createScope, chainFor, writeSlot, readSlot, chainMatch, linkEdge, edgesToFire, closeScopeEdges, ROOT_KIND, ROOT_SCOPE, getCurrentScope, getCurrentTracker, runInScope, signalNode, computedNode, readValue, writeValue, commit, discard, type Scope, type Node, type Slot, type Edge } from '../src/scope'
 import { read as r3Read } from 'r3'
 
 test('createScope produces an open scope with empty bags', () => {
@@ -266,4 +266,19 @@ test('commit promotes a speculative signal write to committed (doubleName step 5
   expect(readValue(doubleName)).toBe('barbar')
   expect(s.status).toBe('committed')
   expect(s.slots.size).toBe(0) // slots dropped
+})
+
+test('discard drops speculative writes, fires cleanups, leaves committed intact (step 5b)', () => {
+  const name = signalNode('foo')
+  const s = createScope(ROOT_SCOPE, 'speculative')
+  const fired: string[] = []
+  s.cleanups.push(() => fired.push('a'))
+  s.cleanups.push(() => fired.push('b'))
+  runInScope(s, undefined, () => writeValue(name, 'bar'))
+
+  discard(s)
+  expect(readValue(name)).toBe('foo')   // committed never moved
+  expect(s.slots.size).toBe(0)          // speculative slots dropped
+  expect(s.status).toBe('discarded')
+  expect(fired).toEqual(['b', 'a'])     // cleanups fire LIFO
 })
