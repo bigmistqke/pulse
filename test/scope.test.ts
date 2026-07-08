@@ -204,6 +204,7 @@ test('reading a computed under a speculation runs its recipe into an S-slot and 
   // an S-slot was created for doubleName, and name got a pulse edge into it:
   expect(s.slots.has(doubleName)).toBe(true)
   expect([...name.subs].some((e) => e.targetScope === s)).toBe(true)
+  expect([...name.subs].some((e) => e.target === s.slots.get(doubleName))).toBe(true)
 })
 
 test('doubleName trace steps 1-4: speculative recompute is isolated and reactive', () => {
@@ -221,4 +222,22 @@ test('doubleName trace steps 1-4: speculative recompute is isolated and reactive
   // committed world never moved:
   expect(readValue(name)).toBe('foo')
   expect(readValue(doubleName)).toBe('foofoo')
+})
+
+test('recompute does not accumulate edges across cycles', () => {
+  const name = signalNode('foo')
+  const doubleName = computedNode(() => readValue(name) + readValue(name))
+  const s = createScope(ROOT_SCOPE, 'speculative')
+  runInScope(s, undefined, () => {
+    expect(readValue(doubleName)).toBe('foofoo')
+    const after1 = name.subs.size
+    writeValue(name, 'bar')
+    expect(readValue(doubleName)).toBe('barbar')
+    writeValue(name, 'baz')
+    expect(readValue(doubleName)).toBe('bazbaz')
+    // edges must not grow across recomputes:
+    expect(name.subs.size).toBe(after1)
+    // and the slot's own deps list must not grow either:
+    expect(s.slots.get(doubleName)!.deps.length).toBe(after1)
+  })
 })

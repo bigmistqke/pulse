@@ -182,6 +182,7 @@ export function readValue<T>(node: Node<T>): T {
   const slot = readSlot(node, scope)
   if (slot !== undefined) {
     if (slot.cached === undefined && slot.recipe !== undefined) {
+      resetSlotDeps(slot)
       slot.cached = runRecipe(slot.recipe, scope, slot) // dirtied → recompute
     }
     // record a dep edge into the currently-computing slot (Q8 tracker)
@@ -201,6 +202,16 @@ export function readValue<T>(node: Node<T>): T {
   stabilize()
   trackRead(node, scope)
   return (node.backing as R3Signal<T>).value
+}
+
+/** Unlink a slot's existing dependency edges before it is recomputed, so edges
+ *  don't accumulate across recomputes (mirrors r3's recompute clearing deps). */
+function resetSlotDeps(slot: Slot): void {
+  for (const edge of slot.deps) {
+    edge.source.subs.delete(edge)
+    edge.targetScope.edges.delete(edge)
+  }
+  slot.deps = []
 }
 
 /** Run a recipe under `scope` with `slot` as the tracker, r3 context nulled so
