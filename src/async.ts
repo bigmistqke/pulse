@@ -2,7 +2,7 @@ import { isPromise } from './is-promise'
 import { isPending, promiseOf } from './pending'
 import { NODE, type Accessor, type Signal } from './signal'
 import { markUsedInBinding } from './transition-tracker'
-import { AWAITABLE } from './awaitable'
+import { AWAITABLE, AWAITABLE_SOURCE, type Awaitable } from './awaitable'
 
 /**
  * Records the most recent resolved value observed for each signal. Keyed on the
@@ -102,6 +102,15 @@ export function use<T>(x: T | Promise<T> | (() => T | Promise<T>)): Awaited<T> {
     }
   }
   if (!isPromise(x)) return x as Awaited<T>
+  // Awaitable fast-path: read live status fields directly; throw NotReadyYet
+  // on the SOURCE (not the awaitable wrapper) so the binding catcher subscribes
+  // to the source and reruns in the same microtask batch as it settles.
+  if (AWAITABLE in (x as object)) {
+    const a = x as unknown as Awaitable<unknown>
+    if (a.status === 'fulfilled') return a.value as Awaited<T>
+    if (a.status === 'rejected') throw a.reason
+    throw new NotReadyYet((x as any)[AWAITABLE_SOURCE] as Promise<unknown>)
+  }
   const state = track(x)
   if (state.status === 'fulfilled') return state.value as Awaited<T>
   if (state.status === 'rejected') throw state.reason

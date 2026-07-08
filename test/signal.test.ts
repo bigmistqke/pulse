@@ -47,3 +47,26 @@ test('a signal stores a Promise value as-is (no auto-resolve)', async () => {
   expect(s()).toBeInstanceOf(Promise)
   expect(await s()).toBe(42)
 })
+
+import { Awaitable } from '../src/awaitable'
+
+test('a signal written a promise reads back as an Awaitable (no write-back)', async () => {
+  const [s, setS] = signal<number | Promise<number>>(0)
+  setS(Promise.resolve(42))
+  const v = s()
+  expect(v).toBeInstanceOf(Promise) // Awaitable is a Promise
+  expect((v as Awaitable<number>).status).toBe('pending')
+  await tick()
+  expect((s() as Awaitable<number>).status).toBe('fulfilled')
+  expect((s() as Awaitable<number>).value).toBe(42)
+})
+
+test('SWR: while a refetch is pending the prior resolved value stays in .value', async () => {
+  const [s, setS] = signal<number | Promise<number>>(0)
+  setS(Promise.resolve(1))
+  await tick()
+  setS(new Promise(() => {})) // never settles
+  const v = s() as Awaitable<number>
+  expect(v.status).toBe('pending')
+  expect(v.value).toBe(1) // prior held (seeded from the current node value)
+})

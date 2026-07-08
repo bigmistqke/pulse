@@ -12,6 +12,7 @@ import { requestFlush } from './scheduler'
 import { isPromise } from './is-promise'
 import { track } from './async'
 import { readValue, signalNode, writeValue } from './scope'
+import { toAwaitable, AWAITABLE, type Awaitable } from './awaitable'
 
 /** The underlying r3 node behind any pulse signal or computed accessor. */
 type R3Node<T> = R3Signal<T> | R3Computed<T>
@@ -66,8 +67,22 @@ export function signal<T>(initial: T): [Accessor<T>, Setter<T>] {
       typeof next === 'function'
         ? (next as (prev: T) => T)(untrack(() => readValue(node)))
         : next
-    if (isPromise(value)) track(value)
-    writeValue(node, value)
+    let toWrite: T = value
+    // Only wrap at the top-level (outside any r3 computation). When called
+    // from within a computed body (e.g. computed.ts's internal setPublishedValue),
+    // getContext() is non-null — skip wrapping so internal signals in computed
+    // continue to store raw promises during the two-home window (ADR 0011).
+    if (isPromise(value) && getContext() === null) {
+      // SWR: seed the prior from the node's current value (ADR 0011 — the
+      // setter has no lastResolvedValue closure; the prior is the current value).
+      const cur = untrack(() => readValue(node)) as unknown
+      const prior =
+        cur instanceof Promise
+          ? AWAITABLE in (cur as object) ? (cur as Awaitable<unknown>).value : undefined
+          : (cur as unknown)
+      toWrite = toAwaitable(value as Promise<unknown>, prior as T | undefined) as unknown as T
+    }
+    writeValue(node, toWrite)
     requestFlush()
   }
 
