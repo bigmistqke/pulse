@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { createScope, chainFor, writeSlot, readSlot, chainMatch, linkEdge, edgesToFire, closeScopeEdges, ROOT_KIND, ROOT_SCOPE, getCurrentScope, getCurrentTracker, runInScope, signalNode, computedNode, readValue, writeValue, commit, discard, type Scope, type Node, type Slot, type Edge } from '../src/scope'
+import { createScope, chainFor, writeSlot, readSlot, chainMatch, linkEdge, edgesToFire, closeScopeEdges, ROOT_KIND, ROOT_SCOPE, getCurrentScope, getCurrentTracker, runInScope, signalNode, computedNode, readValue, writeValue, commit, discard, action, type Scope, type Node, type Slot, type Edge } from '../src/scope'
 import { read as r3Read } from 'r3'
 
 test('createScope produces an open scope with empty bags', () => {
@@ -281,4 +281,21 @@ test('discard drops speculative writes, fires cleanups, leaves committed intact 
   expect(s.slots.size).toBe(0)          // speculative slots dropped
   expect(s.status).toBe('discarded')
   expect(fired).toEqual(['b', 'a'])     // cleanups fire LIFO
+})
+
+test('action commits its writes on normal return', () => {
+  const name = signalNode('foo')
+  action(() => writeValue(name, 'bar'))
+  expect(readValue(name)).toBe('bar')
+})
+
+test('action discards its writes when the body throws (and rethrows)', () => {
+  const name = signalNode('foo')
+  expect(() =>
+    action(() => {
+      writeValue(name, 'bar')
+      throw new Error('boom')
+    }),
+  ).toThrow('boom')
+  expect(readValue(name)).toBe('foo') // rolled back
 })

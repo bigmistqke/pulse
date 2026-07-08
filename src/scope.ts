@@ -289,3 +289,18 @@ export function discard(scope: Scope): void {
   scope.cleanups.length = 0
   scope.status = 'discarded'
 }
+
+/** Open a speculative child of the current scope, run `body` under it, then
+ *  commit on normal return or discard on throw (rethrowing). Nested actions
+ *  parent to the enclosing scope, so their commit promotes to it (two-stage). */
+export function action(body: () => void): void {
+  const scope = createScope(getCurrentScope(), 'speculative')
+  let ok = false
+  try {
+    runInScope(scope, undefined, body)
+    ok = true
+  } finally {
+    if (ok) commit(scope)
+    else discard(scope)
+  }
+}
