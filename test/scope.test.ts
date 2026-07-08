@@ -299,3 +299,49 @@ test('action discards its writes when the body throws (and rethrows)', () => {
   ).toThrow('boom')
   expect(readValue(name)).toBe('foo') // rolled back
 })
+
+test('G2: inner action promotes to outer, outer promotes to ROOT', () => {
+  const x = signalNode('x0')
+  const y = signalNode('y0')
+  action(() => {
+    writeValue(x, 'x1')                 // outer speculative write
+    action(() => writeValue(y, 'y1'))   // inner commits → promotes y to OUTER
+    // still inside outer: both x and y are the outer scope's speculative state
+    expect(readValue(x)).toBe('x1')
+    expect(readValue(y)).toBe('y1')
+    // committed world not yet touched:
+    // (readValue outside the action would show x0/y0)
+  })
+  // outer committed → both reach ROOT
+  expect(readValue(x)).toBe('x1')
+  expect(readValue(y)).toBe('y1')
+})
+
+test('G3: inner commits, outer discards → nothing reaches committed', () => {
+  const y = signalNode('y0')
+  expect(() =>
+    action(() => {
+      action(() => writeValue(y, 'y1')) // inner commits to outer
+      throw new Error('outer fails')     // outer discards → y1 dropped with it
+    }),
+  ).toThrow('outer fails')
+  expect(readValue(y)).toBe('y0')
+})
+
+test('G4: inner discards, outer continues and commits', () => {
+  const x = signalNode('x0')
+  const y = signalNode('y0')
+  action(() => {
+    try {
+      action(() => {
+        writeValue(y, 'y1')
+        throw new Error('inner fails')  // inner discards → y1 dropped
+      })
+    } catch {
+      // swallow inner failure; outer continues
+    }
+    writeValue(x, 'x1')
+  })
+  expect(readValue(x)).toBe('x1') // outer committed
+  expect(readValue(y)).toBe('y0') // inner's write never survived
+})
