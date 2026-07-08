@@ -1,5 +1,7 @@
 # Pending model: pending is a value, errors throw, write-back on settle
 
+> **Revised in part by [`../pulse/async-reads-and-coordination.md`](../pulse/async-reads-and-coordination.md).** The *write-back on settle* mechanism below is superseded by a **uniform `Awaitable`** read model: an async read stays `Awaitable<T>` (settlement fills in `.value`/`.status`) rather than flipping to a bare `T`; purely-synchronous reads stay bare `T`. The rest of this ADR — pending-is-a-value, `use` as the opt-in throw, errors-throw-to-boundaries — stands.
+
 pulse keeps Solid's "uncolored async" goal but rejects its mechanism (every
 accessor implicitly throws a `NotReadyError`, caught by `<Loading>` boundaries).
 Instead:
