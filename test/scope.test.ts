@@ -345,3 +345,19 @@ test('G4: inner discards, outer continues and commits', () => {
   expect(readValue(x)).toBe('x1') // outer committed
   expect(readValue(y)).toBe('y0') // inner's write never survived
 })
+
+test('committing a scope where a computed was only read does not promote/corrupt the computed', () => {
+  const name = signalNode('foo')
+  const doubleName = computedNode(() => readValue(name) + readValue(name))
+  const s = createScope(ROOT_SCOPE, 'speculative')
+  runInScope(s, undefined, () => {
+    readValue(doubleName)       // speculative READ of the computed → read-populated slot
+    writeValue(name, 'bar')     // speculative WRITE of the signal → writeSet
+  })
+  // doubleName must NOT be in the writeSet (read-populated → readSet only):
+  expect(s.writeSet.has(doubleName as unknown as Node)).toBe(false)
+  commit(s)
+  // signal promoted, computed intact and reactive (not overwritten by r3SetSignal):
+  expect(readValue(name)).toBe('bar')
+  expect(readValue(doubleName)).toBe('barbar')
+})

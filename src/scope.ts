@@ -193,7 +193,7 @@ export function readValue<T>(node: Node<T>): T {
   if (scope !== ROOT_SCOPE && node.defaultRecipe !== undefined) {
     // speculative computed miss: run the recipe into a fresh S-slot
     const newSlot: Slot<T> = { recipe: node.defaultRecipe, cached: undefined, deps: [] }
-    writeSlot(node, scope, newSlot)
+    scope.slots.set(node, newSlot)
     newSlot.cached = runRecipe(node.defaultRecipe, scope, newSlot)
     scope.readSet.add(node)
     trackRead(node, scope)
