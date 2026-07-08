@@ -11,7 +11,7 @@ The pairing is the point. A visible glitch — a torn heart, a spinner flash —
 - **Failure-mode tags.** FM1 torn state · FM2 spinner flash · FM3 lost interactivity · FM4 uncommittable speculation. A ✗ marks where a framework hits one; ✓ marks a clean outcome.
 - **`(proposed)` on pulse.** pulse is a design, not a shipping library — its cells show the *designed* API from [`../pulse/`](../pulse/README.md). The others show real shipping APIs.
 - **Source of truth = our deep dives** ([`./deep-dives/`](./deep-dives/)), as researched 2026-05, with source line refs. Cells drawn from them are firm; cells I could not ground are marked **⚠ unverified** and are candidates for a verification pass.
-- **⚠ Svelte 5.** Its deep dive uses the four-dimensions framing, not S1–S8, and its async path is experimental (opt-in `experimental.async`). Svelte cells are mechanism-level and flagged ⚠ except S8, where `fork()` has direct grounding.
+- **Svelte 5** cells are now verified against [`./deep-dives/svelte-5.md`](./deep-dives/svelte-5.md) (async path is experimental, opt-in `experimental.async`). The load-bearing finding: Svelte has **no optimistic-UI primitive** (no `useOptimistic` / `createOptimistic` equivalent), so the optimism-centric scenarios (S1, S2, S7) are hand-rolled, while the coherence scenarios (S3, S4, S5, S8) are first-class. One remaining thin spot: `getAbortSignal`'s exact signature is an open question in the Svelte dive.
 
 ---
 
@@ -67,12 +67,14 @@ const toggle = () => startTransition(async () => { setLiked(v => !v); await api.
         👁  ♥ ON           ♥ OFF            ♥ OFF            ♥ ON  ✗ FM1 torn state
 ```
 
-**Verdict.** pulse's supersession (`.discard()` binds outcome to *tap* order) and Solid's last-write-wins on the merged lane hold user intent under reordering. React resolves by *server-arrival* order with no conflict detection (`react-modern.md:211`), so out-of-order arrival can snap the heart back against the last tap — **FM1**. Svelte ⚠: batch-merge/rebase applies, tick-by-tick unverified.
+**Svelte 5** — no optimistic primitive. The optimistic flip is hand-rolled: a sync state write commits immediately (its batch has no pending async derived to defer), fire-and-forget fetch, manual revert-on-error. If the toggle state instead flows through tracked async deriveds, two overlapping writes to the same source collapse via **whole-batch merge** (`svelte-5.md:208`) — last-write-wins — but the visible flip then *defers until the server settles* (no optimism). Svelte forces the choice: optimistic-but-manual, or coherent-but-not-optimistic.
+
+**Verdict.** pulse's supersession (`.discard()` binds outcome to *tap* order) and Solid's last-write-wins on the merged lane hold user intent under reordering. React resolves by *server-arrival* order with no conflict detection (`react-modern.md:211`), so out-of-order arrival can snap the heart back against the last tap — **FM1**. Svelte hand-rolls the optimism, so out-of-order safety is whatever the developer builds.
 
 | | pulse | Solid | React | Svelte |
 |---|---|---|---|---|
-| overlap policy | supersede (discard older) | union-find lane merge | coalesce; server-order | merge/rebase ⚠ |
-| out-of-order safe | ✓ | ✓ | ✗ FM1 | ⚠ |
+| overlap policy | supersede (discard older) | union-find lane merge | coalesce; server-order | whole-batch merge (if tracked) |
+| out-of-order safe | ✓ | ✓ | ✗ FM1 | manual (no primitive) |
 
 ---
 
@@ -92,7 +94,7 @@ function save(explicit) {
 ```
 **Solid 2.x** — both as `action()`s; generator yields step the transition; closure captures the payload at action-call time (`solid-2x.md:201`).
 **React 19** — both as Actions, lane-scheduled; explicit save in a higher-priority lane; `useOptimistic` shows the latest committed payload; payload snapshot via closure capture (`react-modern.md:212`).
-**Svelte 5** — ⚠ batches; explicit vs auto ordering via batch commit order (unverified).
+**Svelte 5** — both writes to the same `text` source collapse via whole-batch merge (last-write-wins by batch order); there are **no priority lanes** (Dim 3 is punted, `svelte-5.md:255`), so "explicit save wins over auto-save" isn't expressible except through ordering.
 
 ```
             t0 edit       t300 auto-save▲    t400 Save▲          t600 auto✓ / t700 save✓
@@ -123,7 +125,7 @@ action(function* () {                     // outer = the atomic unit
 ```
 **Solid 2.x** — multi-step `action()` with `yield api.step1(); yield api.step2()`; failures via thrown errors; `createOptimistic` state auto-reverts (`solid-2x.md:202`). Ergonomic — the generator *is* the dependent chain.
 **React 19** — Server Action `await`s each step; failure via throw; **no automatic compensation — manual try/catch + state restoration** (`react-modern.md:213`).
-**Svelte 5** — ⚠ batch commit-together within one batch; cross-step rollback unverified.
+**Svelte 5** — a `<svelte:boundary>` gives commit-together: a multi-step tree stays deferred until it settles, and if step₂ throws, the boundary catches it and step₁'s deferred DOM never swaps in — effectively atomic (`svelte-5.md:137,184`). External / server-side compensation is still manual, as everywhere.
 
 ```
  step1✓ ────────────── step2✗
@@ -150,18 +152,20 @@ action(function* () { setCart(c);    yield* api.saveCart(c)    })  // scope B �
 ```
 **Solid 2.x** — independent optimistic writes get independent lanes; union-find merges *only* on shared subscribers, so disjoint flows never merge (`solid-2x.md:203`). Not batched.
 **React 19** — independent transitions get independent lanes *in principle*, but are **currently batched** in practice (`react-modern.md:214`); the batching limitation is acknowledged and to be lifted.
-**Svelte 5** — ⚠ handles Dim 2 *by merging* (`svelte-5.md:6`); may couple concurrent batches — needs verification whether disjoint flows stay independent.
+**Svelte 5** — two batches on *disjoint* sources have non-intersecting source-sets, so they **do not merge** and commit independently in settle order; `batch_values` gives each a consistent snapshot (`svelte-5.md:248,270`). Merge kicks in *only* on shared-source overlap — so disjoint concurrent flows stay independent.
 
 ```
- pulse  ⚙  scope A, scope B — disjoint slots, disjoint version state
-        👁  A's spinner and B's spinner independent                ✓
- Solid  ⚙  lane A, lane B — no shared sub → no union → no merge
-        👁  independent                                            ✓
- React  ⚙  transitions batched today
-        👁  A and B may share a pending boundary                   ✗ FM3 risk (today)
+ pulse   ⚙  scope A, scope B — disjoint slots, disjoint version state
+         👁  A's spinner and B's spinner independent               ✓
+ Solid   ⚙  lane A, lane B — no shared sub → no union → no merge
+         👁  independent                                           ✓
+ React   ⚙  transitions batched today
+         👁  A and B may share a pending boundary                  ✗ FM3 risk (today)
+ Svelte  ⚙  batch A, batch B — source-sets disjoint → no merge
+         👁  independent                                           ✓
 ```
 
-**Verdict.** This is pulse's headline: isolate-by-default means unrelated flows *cannot* couple, so no false coupling and no shared pending. Solid matches it (union-find only merges on real overlap). React's current batching can bleed A's pending into B (**FM3** lost-interactivity risk) until the limitation is lifted. Svelte's merge-based Dim-2 handling is the one to verify here.
+**Verdict.** This is pulse's headline: isolate-by-default means unrelated flows *cannot* couple, so no false coupling and no shared pending. Solid matches it (union-find only merges on real overlap), and — correcting this doc's earlier pessimism — so does Svelte: its batch merge triggers *only* on shared-source overlap, so disjoint flows commit independently. React's current batching can bleed A's pending into B (**FM3** lost-interactivity risk) until the acknowledged limitation is lifted, making it the odd one out here.
 
 ---
 
@@ -172,17 +176,18 @@ action(function* () { setCart(c);    yield* api.saveCart(c)    })  // scope B �
 **pulse (proposed)** — falls out of chain-match ([Q1](../pulse/questions.md#q1--fall-through-and-edge-policy)) for free. A consumer under a scope that read a fall-through-to-committed value is fired when that value is later committed at the root; microtask batching + the commit deferred-fires region keep the read coherent (see [H1d](../pulse/scenario-traces.md#h1d--effect-body-coherence-on-commit)). No dedicated primitive.
 **Solid 2.x** — the `_gatedSubs` "entanglement gate" (`solid-2x.md:204`): subscribers that read a plain signal's *committed* value while recomputing under a lane are recorded and rescheduled at commit. Real machinery, no formal MVCC.
 **React 19** — `useDeferredValue` keeps the old value visible while the new prepares — analogous, but no formal cross-transaction primitive; the WIP tree is invisible to other transitions (`react-modern.md:215`).
-**Svelte 5** — ⚠ `batch_values` "time-travel" (`svelte-5.md:39`) snapshots per batch; coherence mechanism unverified.
+**Svelte 5** — `batch_values` "time-travel" (`svelte-5.md:190`) gives each in-flight batch a consistent snapshot; on commit, the **rebase** loop re-runs async effects in other batches that depended on the just-committed sources (`svelte-5.md:204`). Real cross-batch coherence, analogous to Solid's gated-subs.
 
 ```
  ⚙  consumer reads committed X    speculation commits X'    consumer re-fires
  👁  shows f(X)                    →                         shows f(X') coherently
- pulse: chain-match auto-fires; no (X', f(X)) tear (microtask + deferred-fires) ✓
- Solid: gated-subs replay at commit                                            ✓
- React: useDeferredValue holds old value; no cross-transition read            ~ partial
+ pulse : chain-match auto-fires; no (X', f(X)) tear (microtask + deferred-fires) ✓
+ Solid : gated-subs replay at commit                                            ✓
+ Svelte: batch_values snapshot in flight; rebase re-runs on commit              ✓
+ React : useDeferredValue holds old value; no cross-transition read             ~ partial
 ```
 
-**Verdict.** pulse subsumes Solid's `_gatedSubs` via chain-match — same guarantee, no extra machinery. Both avoid the torn read (**FM1**). React's answer is the weaker "hold the old value" rather than a true cross-transaction read.
+**Verdict.** pulse subsumes Solid's `_gatedSubs` via chain-match — same guarantee, no extra machinery. Solid and Svelte (batch snapshot + rebase-on-commit) both give real cross-transaction coherence and avoid the torn read (**FM1**). React's answer is the weaker "hold the old value" rather than a true cross-transaction read.
 
 ---
 
@@ -202,7 +207,7 @@ const h = action(function* () {
 ```
 **Solid 2.x** — owner disposal cancels async iterables (`it.return()`); promise fetches use identity-based stale-discard; no fetch cancellation without a manual `AbortController` (`solid-2x.md:205`).
 **React 19** — WIP discard cancels cleanly at the render layer; I/O cancellation needs explicit `AbortController` wiring (`react-modern.md:216`).
-**Svelte 5** — ⚠ `OBSOLETE` deferred rejection cancels the *deferred*, does not abort the underlying fetch (`svelte-5.md:259`).
+**Svelte 5** — two-channel cancellation: `OBSOLETE` rejects a superseded derived's deferred, `STALE_REACTION` aborts a stale effect (`svelte-5.md:259,278`); neither aborts the underlying fetch — I/O abort is opt-in via `getAbortSignal`. `fork().discard()` cancels an explicit speculation.
 
 ```
  ⚙  spec open, I/O in flight   →  discard: revert slots + (if wired) abort
@@ -230,7 +235,7 @@ action(function* () {
 ```
 **Solid 2.x** — `createOptimistic` + `action()`; lane override-with-pending-value converges in the same render; canonical, **mechanically more powerful than React** (lanes merge) (`solid-2x.md:206`).
 **React 19** — `useOptimistic`, the textbook case: convergence in the same render commit, no flash; failure handled by the parent not updating `value` (`react-modern.md:217`).
-**Svelte 5** — ⚠ overlay via batch/fork; single-commit handoff unverified.
+**Svelte 5** — no optimistic primitive. Its transitional model is *wait-then-swap*: a boundary defers the DOM until async settles, then swaps old-coherent→new-coherent with no flash (`svelte-5.md:184`) — FM2 is avoided, but by *waiting*, not by showing a prediction. True optimistic reconciliation is hand-rolled (a `fork()` or a manual source).
 
 ```
  ⚙  overlay shown   →  server returns   →  canonical write + overlay clear (SAME commit)
@@ -270,18 +275,19 @@ Ratings synthesized from the deep-dive scenario mappings; ✓ solved, ~ partial,
 
 | Scenario | pulse (proposed) | Solid 2.x | React 19 | Svelte 5 |
 |---|---|---|---|---|
-| S1 like/unlike race | ✓ supersede | ✓ lane merge | ~ FM1 out-of-order | ⚠ |
-| S2 auto vs explicit save | ✓ discard-supersede | ✓ | ✓ (arrival caveat) | ⚠ |
-| S3 multi-step partial failure | ✓ nested actions | ✓ auto-revert | ~ manual compensation | ⚠ |
-| S4 concurrent independent | ✓ isolate | ✓ independent lanes | ~ batched today | ⚠ merges |
-| S5 cross-transaction read | ✓ chain-match | ✓ gated-subs | ~ deferred value | ⚠ |
-| S6 cancellable | ✓ onDiscard (I/O manual) | ~ (I/O manual) | ✓ render / ~ I/O | ⚠ |
-| S7 optimistic reconciliation | ✓ single-commit | ✓ canonical | ✓ canonical | ⚠ |
+| S1 like/unlike race | ✓ supersede | ✓ lane merge | ~ FM1 out-of-order | ~ hand-rolled (no primitive) |
+| S2 auto vs explicit save | ✓ discard-supersede | ✓ | ✓ (arrival caveat) | ~ merge, no priority |
+| S3 multi-step partial failure | ✓ nested actions | ✓ auto-revert | ~ manual compensation | ~ boundary-atomic |
+| S4 concurrent independent | ✓ isolate | ✓ independent lanes | ~ batched today | ✓ independent (disjoint) |
+| S5 cross-transaction read | ✓ chain-match | ✓ gated-subs | ~ deferred value | ✓ snapshot + rebase |
+| S6 cancellable | ✓ onDiscard (I/O manual) | ~ (I/O manual) | ✓ render / ~ I/O | ~ 2-channel; I/O manual |
+| S7 optimistic reconciliation | ✓ single-commit | ✓ canonical | ✓ canonical | ~ wait-then-swap; no optimism |
 | S8 preview / what-if | ~ exposable, lifecycle-overloaded | ✗ | ✗ invisible WIP | ✓ fork() leads |
 
 ## Sources & verification status
 
-- **Firm** (grounded in deep dives with source refs): all Solid and React cells ([`./deep-dives/solid-2x.md`](./deep-dives/solid-2x.md), [`./deep-dives/react-modern.md`](./deep-dives/react-modern.md)); pulse cells (from [`../pulse/`](../pulse/README.md) — designed, not shipped).
-- **⚠ Unverified** — **all Svelte cells except S8.** `svelte-5.md` uses the four-dimensions framing, not S1–S8, and its async path is experimental. A dedicated Svelte verification pass (mapping `fork()` / `Batch` semantics onto S1–S7 tick-by-tick) is the top open task for this document.
+- **Firm** (grounded in deep dives with source refs): all Solid, React, and Svelte cells ([`./deep-dives/solid-2x.md`](./deep-dives/solid-2x.md), [`./deep-dives/react-modern.md`](./deep-dives/react-modern.md), [`./deep-dives/svelte-5.md`](./deep-dives/svelte-5.md)); pulse cells (from [`../pulse/`](../pulse/README.md) — designed, not shipped).
+- **Svelte verification pass (done).** Mapped `Batch` / `fork()` semantics onto S1–S8. Headline: Svelte has **no optimistic-UI primitive**, so S1/S2/S7 are hand-rolled, while coherence scenarios (S3 boundary-atomic, S4 independent-on-disjoint, S5 snapshot+rebase, S8 `fork()`) are first-class. **Correction:** this doc's earlier "S4 merges/couples" pessimism was wrong — Svelte's batch merge triggers *only* on shared-source overlap, so disjoint concurrent flows stay independent.
+- **Remaining thin spots:** `getAbortSignal`'s exact signature (an open question in `svelte-5.md`); `fork()`'s S8 behavior is a designed API tested by the deep dive rather than by a runnable S8 example here.
 - **Scenario definitions:** [`../scenarios/concurrent-flows.md`](../scenarios/concurrent-flows.md) (S1–S8, policy questions Q1–Q5).
 - **Failure modes:** [`./transitions-problem-space.md`](./transitions-problem-space.md#the-four-failure-modes) (FM1–FM4).
