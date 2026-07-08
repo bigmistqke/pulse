@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { createScope, chainFor, writeSlot, readSlot, chainMatch, linkEdge, edgesToFire, closeScopeEdges, ROOT_KIND, ROOT_SCOPE, getCurrentScope, getCurrentTracker, runInScope, signalNode, computedNode, type Scope, type Node, type Slot, type Edge } from '../src/scope'
+import { createScope, chainFor, writeSlot, readSlot, chainMatch, linkEdge, edgesToFire, closeScopeEdges, ROOT_KIND, ROOT_SCOPE, getCurrentScope, getCurrentTracker, runInScope, signalNode, computedNode, readValue, writeValue, type Scope, type Node, type Slot, type Edge } from '../src/scope'
 import { read as r3Read } from 'r3'
 
 test('createScope produces an open scope with empty bags', () => {
@@ -166,4 +166,11 @@ test('computedNode carries the recipe as defaultRecipe and an r3 computed backin
   const n = computedNode(() => 7)
   expect(n.defaultRecipe).toBeDefined()
   expect(r3Read(n.backing!)).toBe(7)
+})
+
+test('read/write with no active speculation go through r3 (committed)', () => {
+  const n = signalNode(0)
+  expect(readValue(n)).toBe(0)      // ambient scope is ROOT_SCOPE
+  writeValue(n, 5)
+  expect(readValue(n)).toBe(5)      // committed value updated via r3
 })

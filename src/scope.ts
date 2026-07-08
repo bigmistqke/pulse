@@ -1,6 +1,9 @@
 import {
   computed as r3Computed,
+  read as r3Read,
+  setSignal as r3SetSignal,
   signal as r3Signal,
+  stabilize,
   type Computed as R3Computed,
   type Signal as R3Signal,
 } from 'r3'
@@ -171,4 +174,31 @@ export function signalNode<T>(initial: T): Node<T> {
 }
 export function computedNode<T>(recipe: () => T): Node<T> {
   return { subs: new Set(), defaultRecipe: recipe, backing: r3Computed(recipe) }
+}
+
+/** Scope-aware read. Committed (no speculative slot in the chain) delegates to
+ *  r3; speculative slots are handled in Tasks 4–6. */
+export function readValue<T>(node: Node<T>): T {
+  const scope = getCurrentScope()
+  const slot = readSlot(node, scope)
+  if (slot !== undefined) return slot.cached as T // speculative (Tasks 4–6)
+  // committed: pull r3 up to date, then read the backing value
+  stabilize()
+  return (node.backing as R3Signal<T>).value
+}
+
+/** Scope-aware write. Committed (ambient scope is ROOT_SCOPE) delegates to r3;
+ *  speculative writes are handled in Task 4. */
+export function writeValue<T>(node: Node<T>, value: T): void {
+  const scope = getCurrentScope()
+  if (scope === ROOT_SCOPE) {
+    r3SetSignal(node.backing as R3Signal<T>, value)
+    return
+  }
+  // speculative — Task 4
+  writeSpeculative(node, scope, value)
+}
+
+function writeSpeculative<T>(node: Node<T>, scope: Scope, value: T): void {
+  writeSlot(node, scope, { recipe: () => value, cached: value, deps: [] })
 }
