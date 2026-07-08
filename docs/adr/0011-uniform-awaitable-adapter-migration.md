@@ -24,11 +24,18 @@ delta moves that state onto one object rather than rewriting the pipeline.
   a prior-value seed for SWR); `[Symbol.iterator]` for `yield*` stays.
 - `toAwaitable(promise, prior?)` wraps at the `signal()` setter and the
   `computed.ts` stage-pending / `NotReadyYet` boundaries. One wrap point each.
+  **The setter seeds the prior from the node's current value** (`v instanceof
+  Awaitable ? v.value : v`) — it has no `lastResolvedValue` closure to borrow
+  (that exists only in `computed.ts`); this is a distinct seeding path, and it
+  makes the new SWR strictly better than the old `latest()` (no missed-stale
+  window).
 - `s()` async returns the `Awaitable` uniformly (no write-back to bare `T`).
-- `.value` is the SWR read; `latest(s)` is kept as a thin **alias of `.value`**
-  (it has no `src/` callers — only tests + the public export — so aliasing
-  preserves compatibility without a breaking removal). `committed(s)` (isolation,
-  from the scope overlay) is new.
+- `.value` is the SWR read; `latest(s)` is kept for backward-compat (it has no
+  `src/` callers — only tests + the public export). The compat shim reads
+  `.value` *only when the value is an `Awaitable`* (`const v = s(); return v
+  instanceof Awaitable ? v.value : v`) — not a naïve `s().value`, which would
+  break for plain-value signals. `committed(s)` (isolation, from the scope
+  overlay) is new.
 - `use(x)` unchanged in behavior; reads `x.status === 'pending'` (not the
   `states` WeakMap). `isPending`/`promiseOf` derive from `.status` / the
   `Awaitable`.
