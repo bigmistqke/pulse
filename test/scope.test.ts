@@ -1,5 +1,6 @@
 import { expect, test } from 'vitest'
-import { createScope, chainFor, writeSlot, readSlot, chainMatch, linkEdge, edgesToFire, closeScopeEdges, ROOT_KIND, ROOT_SCOPE, getCurrentScope, getCurrentTracker, runInScope, type Scope, type Node, type Slot, type Edge } from '../src/scope'
+import { createScope, chainFor, writeSlot, readSlot, chainMatch, linkEdge, edgesToFire, closeScopeEdges, ROOT_KIND, ROOT_SCOPE, getCurrentScope, getCurrentTracker, runInScope, signalNode, computedNode, type Scope, type Node, type Slot, type Edge } from '../src/scope'
+import { read as r3Read } from 'r3'
 
 test('createScope produces an open scope with empty bags', () => {
   const s = createScope(undefined, 'speculative')
@@ -152,4 +153,17 @@ test('runInScope pushes and restores the scope (and tracker) even on throw', () 
   expect(getCurrentTracker()).toBeUndefined()
   expect(() => runInScope(s, slot, () => { throw new Error('x') })).toThrow('x')
   expect(getCurrentScope()).toBe(ROOT_SCOPE) // restored despite throw
+})
+
+test('signalNode wraps an r3 signal holding the committed value', () => {
+  const n = signalNode(5)
+  expect(n.subs.size).toBe(0)
+  expect(n.backing).toBeDefined()
+  expect(r3Read(n.backing!)).toBe(5)
+})
+
+test('computedNode carries the recipe as defaultRecipe and an r3 computed backing', () => {
+  const n = computedNode(() => 7)
+  expect(n.defaultRecipe).toBeDefined()
+  expect(r3Read(n.backing!)).toBe(7)
 })

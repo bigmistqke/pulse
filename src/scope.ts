@@ -1,3 +1,10 @@
+import {
+  computed as r3Computed,
+  signal as r3Signal,
+  type Computed as R3Computed,
+  type Signal as R3Signal,
+} from 'r3'
+
 /** Graph identity wrapping a recipe. Value is not in the Node — it is produced
  *  by handing the Node to a read walk. Per Q6. */
 export interface Node<T = unknown> {
@@ -6,6 +13,9 @@ export interface Node<T = unknown> {
   defaultRecipe?: () => T | Promise<T>
   /** Who subscribes to me — the fast write-fire index. */
   subs: Set<Edge>
+  /** Committed state lives in this r3 node (ADR 0010). Absent = pure-overlay
+   *  node (test-only until the public API is rewired in Plan 4). */
+  backing?: R3Signal<T> | R3Computed<T>
 }
 
 /** A per-(Node, scope) cache cell. Uniform shape per Q9 — no `wasWritten` flag. */
@@ -154,4 +164,11 @@ export function runInScope<T>(scope: Scope, tracker: Slot | undefined, fn: () =>
     currentScope = prevScope
     currentTracker = prevTracker
   }
+}
+
+export function signalNode<T>(initial: T): Node<T> {
+  return { subs: new Set(), backing: r3Signal(initial) }
+}
+export function computedNode<T>(recipe: () => T): Node<T> {
+  return { subs: new Set(), defaultRecipe: recipe, backing: r3Computed(recipe) }
 }
