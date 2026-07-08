@@ -131,5 +131,7 @@ test('closeScopeEdges unlinks the scope edges from their sources and drops slots
   expect(name.subs.has(edge)).toBe(false)
   expect(s.edges.size).toBe(0)
   expect(s.slots.has(name)).toBe(false)
+  expect(s.writeSet.has(name)).toBe(false)
+  expect(s.readSet.has(name)).toBe(false)
   expect(root.children.has(s)).toBe(false)
 })

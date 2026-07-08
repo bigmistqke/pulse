@@ -121,6 +121,8 @@ export function closeScopeEdges(scope: Scope): void {
   for (const edge of scope.edges) edge.source.subs.delete(edge)
   scope.edges.clear()
   for (const node of scope.readSet) scope.slots.delete(node)
+  scope.readSet.clear()
   for (const node of scope.writeSet) scope.slots.delete(node)
+  scope.writeSet.clear()
   scope.parent?.children.delete(scope)
 }
