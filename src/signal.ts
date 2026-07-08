@@ -11,6 +11,7 @@ import {
 import { requestFlush } from './scheduler'
 import { isPromise } from './is-promise'
 import { track } from './async'
+import { readValue, signalNode, writeValue } from './scope'
 
 /** The underlying r3 node behind any pulse signal or computed accessor. */
 type R3Node<T> = R3Signal<T> | R3Computed<T>
@@ -50,21 +51,23 @@ export function makeAccessor<T>(node: R3Node<T>): Signal<T> {
  *  auto-resolved. For async derivations use `computed(() => fetchX())` or
  *  read a Promise-valued signal at the leaf via `use(signal())`. */
 export function signal<T>(initial: T): [Accessor<T>, Setter<T>] {
-  const r3Node = r3Signal(initial)
-  const accessor = makeAccessor(r3Node)
+  const node = signalNode(initial)
 
-  // Eagerly install the .then listener on Promise values via `track`, so
-  // `latest`/`isPending`/`use` consumers see the settled state once the
-  // microtask queue drains, without anyone having to call `track` themselves.
+  // Eagerly install the .then listener on Promise values (unchanged behavior).
   if (isPromise(initial)) track(initial)
+
+  const accessor = (() => readValue(node)) as Signal<T>
+  // NODE stays the r3 backing node — async.ts's presence check and any
+  // r3-node consumer keep working; the scope Node is closure-captured.
+  accessor[NODE] = node.backing!
 
   const setter: Setter<T> = (next) => {
     const value =
       typeof next === 'function'
-        ? (next as (prev: T) => T)(untrack(() => accessor()))
+        ? (next as (prev: T) => T)(untrack(() => readValue(node)))
         : next
     if (isPromise(value)) track(value)
-    r3SetSignal(r3Node, value)
+    writeValue(node, value)
     requestFlush()
   }
 
