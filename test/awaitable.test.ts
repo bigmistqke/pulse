@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { type Awaitable, toAwaitable } from '../src/awaitable'
+import { type Awaitable, toAwaitable, resolvedAwaitable } from '../src/awaitable'
 
 const tick = () => new Promise<void>((r) => setTimeout(r))
 
@@ -26,6 +26,14 @@ test('a rejected Awaitable records the reason', async () => {
   await tick()
   expect(a.status).toBe('rejected')
   expect(a.reason).toBeInstanceOf(Error)
+})
+
+test('resolvedAwaitable is an already-fulfilled Awaitable', async () => {
+  const a = resolvedAwaitable(42)
+  expect(a.status).toBe('fulfilled')
+  expect(a.value).toBe(42)
+  expect(a).toBeInstanceOf(Promise)
+  expect(await a).toBe(42)
 })
 
 import { track } from '../src/async'

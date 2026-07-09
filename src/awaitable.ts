@@ -47,3 +47,13 @@ export function toAwaitable<T>(source: Promise<T>, prior?: T): Awaitable<T> {
   )
   return a
 }
+
+/** A pre-fulfilled Awaitable carrying `value`. Used when an async computed view settles:
+ *  publishing a FRESH fulfilled Awaitable (distinct object) re-fires consumers
+ *  while keeping the view an Awaitable (no write-back to bare T). */
+export function resolvedAwaitable<T>(value: T): Awaitable<T> {
+  const a = toAwaitable(Promise.resolve(value), value)
+  a.status = 'fulfilled'
+  a.value = value
+  return a
+}
