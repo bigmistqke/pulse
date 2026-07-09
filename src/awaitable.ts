@@ -27,6 +27,9 @@ export interface Awaitable<T> extends Promise<T> {
  *  `NotReadyYet(source)` see the updated status when they rerun. */
 export function toAwaitable<T>(source: Promise<T>, prior?: T): Awaitable<T> {
   const a = source.then((v) => v) as Awaitable<T>
+  // Suppress unhandled rejection on the chained Awaitable: rejection is tracked
+  // via `a.reason` (set below); callers read `a.status`/`a.reason`, not `await a`.
+  a.catch(() => {})
   a.status = 'pending'
   a.value = prior
   a.reason = undefined

@@ -635,9 +635,11 @@ describe('computed — NotReadyYet absorbed as suspension (Plan B)', () => {
     const p = new Promise<number>((r) => (resolve = r))
     const c = computed(() => use(p) + 1)
     // First read: stage body throws NotReadyYet → absorbed as suspension.
-    // The accessor's published value on first load is the in-flight Promise.
-    const first = c()
-    expect(first).toBe(p)
+    // The accessor's published value on first load is a pending Awaitable wrapping
+    // the in-flight Promise (uniform-Awaitable read model, ADR 0011 Task 2).
+    const first = c() as unknown
+    expect(first).toBeInstanceOf(Promise)
+    expect((first as any).status).toBe('pending')
     expect(isPending(c)()).toBe(true)
     resolve(41)
     await new Promise<void>((r) => queueMicrotask(() => r()))

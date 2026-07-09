@@ -1,5 +1,6 @@
 import { computed as r3Computed, read as r3Read, unwatched, type Computed as R3Computed } from 'r3'
 import { isGeneratorFunction, NotReadyYet, track, type PromiseState, type Resolved } from './async'
+import { AWAITABLE, AWAITABLE_SOURCE, toAwaitable, resolvedAwaitable, type Awaitable } from './awaitable'
 import { runStage } from './driver'
 import { isPromise } from './is-promise'
 import { getOwner, routeError, registerWithOwner } from './owner'
@@ -158,9 +159,11 @@ function makeStageNode(
     suspendedInput = input
     setPendingSig(true)
     if (lastResolvedValue === UNRESOLVED) {
-      setPublishedValue(p)
+      setPublishedValue(toAwaitable(p, undefined))
     }
-    // else: stale-while-revalidate — prior value stays visible
+    // else: stale-while-revalidate — prior value stays published (no Awaitable update
+    // during SWR: publishing a fresh object would fire downstream unnecessarily, breaking
+    // the Object.is change-gate tests)
     const rerun = () => {
       if (suspendedOn !== p) return // superseded
       onSettle(track(p))
@@ -179,15 +182,24 @@ function makeStageNode(
       if (inputAccessor !== null) {
         input = inputAccessor()
         if (isPromise(input)) {
-          // Upstream stage suspended; mirror its state.
-          stashedResolution = null
-          suspendedOn = null
-          setPendingSig(true)
-          if (lastResolvedValue === UNRESOLVED) {
-            setPublishedValue(input)
+          // Fulfilled Awaitable from an upstream migrated stage: unwrap to the bare
+          // resolved value and fall through to normal stage execution.
+          if (AWAITABLE in (input as object) && (input as Awaitable<unknown>).status === 'fulfilled') {
+            input = (input as Awaitable<unknown>).value
+          } else {
+            // Raw promise OR pending Awaitable: mirror upstream suspension.
+            const source = (AWAITABLE in (input as object))
+              ? (input as any)[AWAITABLE_SOURCE] as Promise<unknown>
+              : input as Promise<unknown>
+            stashedResolution = null
+            suspendedOn = null
+            setPendingSig(true)
+            if (lastResolvedValue === UNRESOLVED) {
+              setPublishedValue(toAwaitable(source, undefined))
+            }
+            // else: stale-while-revalidate — prior value stays published
+            return null
           }
-          // else: stale-while-revalidate
-          return null
         }
       }
 
