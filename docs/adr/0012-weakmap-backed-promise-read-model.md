@@ -52,6 +52,34 @@ returns the last stage's raw return — `Promise<T>` if async, bare `T` if sync.
 So `Resolved<>` keeps unwrapping for inter-stage inputs; the accessor type
 stops unwrapping. That is what holds `Promise<T>` without a union.
 
+## Refinement — the read is runtime-honest; the verbs resolve it
+
+Implementation sharpened this. The async colour folds across the *whole*
+pipeline, not just the last stage, and the read reflects what `c()` can be at
+runtime rather than being coerced to a single shape:
+
+- a **definitely-async** pipeline (some stage returns a promise or is a
+  generator) reads as a single `Promise<T>`;
+- a **conditionally-async** stage — its type a union containing a promise, e.g.
+  `computed(() => cond ? fetch() : 'ok')` — reads as the honest union
+  `Promise<T> | U`, because `c()` genuinely is one or the other per evaluation;
+- an **all-sync** pipeline reads as bare `T`.
+
+So "reads are always uniform, never a union" is refined to: **the raw read is
+honest to the runtime; the view utilities resolve it.** This is pulse's own "a
+node is a graph relation, not a value; a walk produces the value" applied to
+async colour — the raw `c()` carries the honest shape, and the read verbs
+(`use`, `latest`, `isPending`, `settled`) are the walks that resolve it. Every
+verb is total over the union (`use(c)` / `latest(c)` return `T | U`); a
+hand-narrowed raw read is the rarely-needed escape hatch. `use` is two overloads
+so an accessor's own return type resolves through `Awaited` even when it is a
+union.
+
+The type helper `PipelineRead<Upstream, Last>` folds the upstream stages' colour
+with the last stage's surface type; it replaces the last-stage-only `ReadOf`.
+The runtime matches: a synchronous stage fed by an async upstream publishes a
+promise, and the change-gate re-publishes on a bare/promise shape flip.
+
 ## Considered alternatives
 
 - **Keep the `Awaitable` subclass ([ADR 0011][adr11]).** Rejected: it is the
