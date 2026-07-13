@@ -24,9 +24,10 @@ export function latest<T>(s: Accessor<T>): Awaited<T> | undefined {
       lastResolved.set(s, state.value)
       return state.value as Awaited<T>
     }
-    // pending: prefer the Awaitable's SWR .value, else the lastResolved cache.
-    // For raw promises (computeds during two-home window), .value is undefined
-    // so the fallback to lastResolved still applies.
+    // Still pending. A promise that pulse created carries its own last resolved
+    // value on `.value`, so prefer that. A plain promise handed in by the caller
+    // — the initial value passed to signal(), or a promise they built by hand —
+    // does not, so fall back to the value cached below.
     const swr = (value as { value?: unknown }).value
     if (swr !== undefined) return swr as Awaited<T>
     return lastResolved.get(s) as Awaited<T> | undefined
@@ -58,10 +59,20 @@ export type PromiseState =
   | { status: 'fulfilled'; value: unknown; reason?: unknown }
   | { status: 'rejected'; value?: unknown; reason: unknown }
 
-/** Tracks every promise `use` has seen, so later calls can resolve synchronously. */
+/**
+ * Remembers the status of every promise `track` has seen that does not already
+ * carry its own status, so a later read of the same promise can report its
+ * result without waiting again. An Awaitable carries its own status and skips
+ * this map (see the check at the top of `track`). What is stored here is every
+ * other promise: one a caller hands in directly — the initial value passed to
+ * signal(), or a promise they built by hand — and the plain promise an async or
+ * generator stage returns internally, which the driver watches for settlement.
+ */
 const states = new WeakMap<Promise<unknown>, PromiseState>()
 
 export function track(promise: Promise<unknown>): PromiseState {
+  // A promise pulse created already carries its own status, value, and reason,
+  // so return it directly instead of tracking it a second time.
   if (AWAITABLE in promise) return promise as unknown as PromiseState
   const existing = states.get(promise)
   if (existing) return existing

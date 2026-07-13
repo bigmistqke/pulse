@@ -80,7 +80,22 @@ Read-model first; speculation-in-computed second.
   `Awaitable`'s `.value`/`.status`; the signal no longer flips `Promise<T>` → `T`.
 - **Unblocks speculation-in-computed** (Plan 8): a computed's `Awaitable` view is
   what the overlay's `runRecipe` can produce speculatively per scope.
-- **A transient two-home window during Plan 7** — old WeakMaps/`publishedValue`
-  and the new `Awaitable` may coexist mid-migration; Plan 7 must land the
-  relocation completely (retire the old homes) rather than leaving both, or it
-  regresses into rejected option C.
+- **Signals and computeds now both publish `Awaitable`s, and `track` returns
+  any `Awaitable` unchanged.** So the value a consumer reads — the published
+  `Awaitable` — has a single home; it is never copied into `async.ts`'s
+  WeakMaps. Those maps keep two kinds of bookkeeping that sit beside the read
+  model rather than duplicating it. `states` records the status of any promise
+  that does not carry its own: one a caller passes in (the initial value given
+  to `signal()`, or a promise built by hand and read through `use()`), and the
+  plain promise an async or generator stage returns internally for the driver to
+  watch. `lastResolved` is `latest()`'s own cache of the last resolved value it
+  returned for a signal, so `latest()` can keep returning that value while a
+  newer promise is pending.
+- **`computed.ts` keeps its private `lastResolvedValue`.** It looks like a
+  leftover but is not: the published value can be a settled value, a promise
+  still in flight, an error, or an initial "nothing yet" sentinel, whereas
+  `lastResolvedValue` is only ever the last real resolved value — read to tell a
+  first load from a refresh and to skip re-publishing a value that has not
+  changed (the deduplication decided in
+  [ADR 0008](./0008-signals-dedupe-writes-by-object-is.md)). Folding it into the
+  published value would rebuild that distinction less safely, so it stays.
