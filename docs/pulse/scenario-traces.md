@@ -1,5 +1,7 @@
 # Pulse — scenario traces
 
+> **Note — the async carrier changed.** These traces describe the async read as an `Awaitable` `Promise` subclass whose `status` / `value` fields flip on settle. That carrier was later replaced: an async read is now a plain `Promise<T>` with its state in one WeakMap, read through verbs (`latest` / `use` / `isPending` / `yield* read`). The engine behaviour the traces establish is unchanged — the engine still does nothing on resolution, and a consumer still holds the promise and drives its own resumption; only "an `Awaitable` whose fields flip" becomes "a promise whose WeakMap state flips." See [ADR 0012](../adr/0012-weakmap-backed-promise-read-model.md).
+
 End-to-end traces of architecturally-distinct cases through pulse's engine
 
 - library. Each trace walks every engine call and state change for one scenario from the [catalog](./scenarios.md), verifying the framings (or falsifying them when they break).

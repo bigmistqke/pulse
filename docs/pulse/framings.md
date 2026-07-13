@@ -1,5 +1,7 @@
 # Pulse — principles, framings, and architecture sketches
 
+> **Note — the async carrier changed.** The `Awaitable<T>` framing below describes the async read as a `Promise` subclass carrying `status` / `value` / `reason` fields. That carrier was later replaced: an async read is now a plain `Promise<T>` with its state in one WeakMap, read through verbs (`latest` / `use` / `isPending` / `yield* read`) rather than fields on the object. See [ADR 0012](../adr/0012-weakmap-backed-promise-read-model.md) and [`async-reads-and-coordination.md`](./async-reads-and-coordination.md). The framing is kept as the exploration record.
+
 The current understanding of pulse's design: foundational principles ([P1](#p1--speculation-is-one-concept-with-two-faces)–[P5](#p5--compose-dont-proliferate-in-either-direction)), operational framings (current best-guesses for how to honour the principles), falsified hypotheses (dead ends to avoid), and engine - library sketches.
 
 **Companion documents:**

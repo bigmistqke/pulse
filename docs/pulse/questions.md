@@ -1,5 +1,7 @@
 # Pulse — open questions
 
+> **Note — the async carrier changed.** Parts of this document work out the async read model as an `Awaitable` `Promise` subclass. That carrier was later replaced: an async read is now a plain `Promise<T>` with its state in one WeakMap, read through verbs (`latest` / `use` / `isPending` / `yield* read`) rather than `.value` / `.status` fields. See [ADR 0012](../adr/0012-weakmap-backed-promise-read-model.md) and [`async-reads-and-coordination.md`](./async-reads-and-coordination.md). The `Awaitable` framing below is kept as the exploration record.
+
 Sub-questions and design calls that aren't (yet) settled by the [framings](./framings.md) or the [traces](./scenario-traces.md). Each is either:
 
 - a *sub-question* surfaced by a trace that doesn't gate the architecture but is part of the next-level resolution work,

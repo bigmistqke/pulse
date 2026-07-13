@@ -1,5 +1,7 @@
 # Read-model migration notes — shipped model vs uniform `Awaitable`
 
+> **Note — superseded.** These notes study the migration to the `Awaitable` `Promise` subclass ([ADR 0011](../adr/0011-uniform-awaitable-adapter-migration.md)). That carrier was later replaced by a plain `Promise<T>` with state in one WeakMap, read through verbs ([ADR 0012](../adr/0012-weakmap-backed-promise-read-model.md)). The notes are kept as the record of that earlier migration.
+
 Study for [Plan 6](../superpowers/plans/2026-07-08-speculation-engine-06-read-model-study.md): what the async read model looks like in code today (`src/computed.ts`, `src/async.ts`, `src/signal.ts`, `src/pending.ts`), and what migrating to the uniform-`Awaitable` model ([`async-reads-and-coordination.md`](./async-reads-and-coordination.md), superseding [ADR 0002](../adr/0002-pending-model.md)) actually touches. Decision: [ADR 0011](../adr/0011-uniform-awaitable-adapter-migration.md).
 
 ## The shipped model in one paragraph

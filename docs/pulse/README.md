@@ -12,7 +12,7 @@ Exploration of pulse's reactive substrate and speculation machinery. Framings ar
 
 ## Documents
 
-- **[CONTEXT.md](./CONTEXT.md)** — the lexicon: canonical definitions of pulse-specific terms (speculation, action, scope, node / slot / edge, the read walks, and `Awaitable`).
+- **[CONTEXT.md](./CONTEXT.md)** — the lexicon: canonical definitions of pulse-specific terms (speculation, action, scope, node / slot / edge, the read walks, and the async read model).
 - **[prior-art.md](./prior-art.md)** — cross-framework analysis: comparison of React / Svelte / Solid mechanics, seven-concerns decomposition, the signal=node+value-bag recasting, and the empirical pattern across studied frameworks (including Solid's transition-machinery trajectory).
 - **[framings.md](./framings.md)** — the current understanding: foundational principles ([P1](./framings.md#p1--speculation-is-one-concept-with-two-faces)–[P5](./framings.md#p5--compose-dont-proliferate-in-either-direction)), operational framings, falsified hypotheses, engine + library sketches.
 - **[questions.md](./questions.md)** — open questions ([Q1](./questions.md#q1--fall-through-and-edge-policy) through [Q15](./questions.md#q15--entanglement-dim-4-overlapping-speculations-on-shared-state)): sub-questions from traces, deliberate design calls, framing gaps.
@@ -22,7 +22,7 @@ Exploration of pulse's reactive substrate and speculation machinery. Framings ar
   - **[failure.md](./failure.md)** — failure & discard: the discard-cause taxonomy, per-cause lifecycle hooks, the two retry primitives, and the body-local `onCommit`/`onDiscard` pair.
   - **[optimistic-ui.md](./optimistic-ui.md)** — optimistic UI as tagged-leakage speculation; the `optimistic()` wrapper shape.
   - **[concurrent-divergence.md](./concurrent-divergence.md)** — entanglement (Dim 4): scenario classes A–H, isolate-by-default, `onConflict: 'reject'`, and the prior-art lineage (OCC / SSI / STM / CRDT).
-  - **[async-reads-and-coordination.md](./async-reads-and-coordination.md)** — the uniform `Awaitable` read model (`.value` / `yield*` / `use` faces; supersedes [ADR 0002](../adr/0002-pending-model.md)'s write-back) and the consumer-side `settled([...])` coordination barrier on stale-while-revalidate.
+  - **[async-reads-and-coordination.md](./async-reads-and-coordination.md)** — the plain-`Promise` read model, read through verbs (`latest` / `yield* read` / `use`; supersedes [ADR 0002](../adr/0002-pending-model.md)'s write-back, per [ADR 0012](../adr/0012-weakmap-backed-promise-read-model.md)) and the consumer-side `settled([...])` coordination barrier on stale-while-revalidate.
 
 ## Reading order
 
@@ -38,7 +38,7 @@ Roughly priority-ordered. The earlier engine-shape threads are now resolved and 
 
 - _CRDT signal-values (class B / [Q15](./questions.md#q15--entanglement-dim-4-overlapping-speculations-on-shared-state))._ The one genuinely-open design item from entanglement: how a signal expresses "merge, don't replace" on commit. Design-shaped, not yet pinned; CRDT / local-first prior art in [concurrent-divergence.md](./concurrent-divergence.md#prior-art).
 - _Preview / what-if._ The [Scope-does-two-jobs aside](./concurrent-divergence.md#a-conceptual-aside--scope-is-doing-two-jobs)'s lifecycle overload — "a speculation that never commits" is expressible but overloads the commit/discard lifecycle. The one conceptual gap flagged across the scenario work (S8).
-- _Implementation edges for [`async-reads-and-coordination.md`](./async-reads-and-coordination.md)._ Whether a settled `Awaitable` is cached per read; confirming `settled([...])` reaches a refetching input's in-flight promise; naming (`settled` / `stable` / `frame`).
+- _Implementation edges for [`async-reads-and-coordination.md`](./async-reads-and-coordination.md)._ Confirming `settled([...])` reaches a refetching input's in-flight promise; naming (`settled` / `stable` / `frame`).
 - _Take the design to `src/`._ The read model + `settled` + `'reject'` are designed against the sealed engine; implementing against the actual r3-forked engine is the next build step.
 
 ---
