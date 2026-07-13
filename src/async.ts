@@ -70,19 +70,29 @@ export type PromiseState =
  */
 const states = new WeakMap<Promise<unknown>, PromiseState>()
 
-export function track(promise: Promise<unknown>): PromiseState {
+export function track(promise: Promise<unknown>, prior?: unknown): PromiseState {
   // A promise pulse created already carries its own status, value, and reason,
   // so return it directly instead of tracking it a second time.
   if (AWAITABLE in promise) return promise as unknown as PromiseState
   const existing = states.get(promise)
   if (existing) return existing
-  const state: PromiseState = { status: 'pending' }
+  const state: PromiseState = { status: 'pending', value: prior }
   states.set(promise, state)
   promise.then(
     (value) => states.set(promise, { status: 'fulfilled', value }),
     (reason) => states.set(promise, { status: 'rejected', reason }),
   )
   return state
+}
+
+/** A fresh already-fulfilled promise carrying `value`, recorded fulfilled in the
+ *  state map so a synchronous read sees it settled at once. Used when an async
+ *  computed's view settles: publishing a fresh promise re-fires consumers, and
+ *  the map entry lets `use`/`latest` read the value without waiting a microtask. */
+export function resolvedPromise<T>(value: T): Promise<T> {
+  const p = Promise.resolve(value)
+  states.set(p, { status: 'fulfilled', value })
+  return p
 }
 
 /**

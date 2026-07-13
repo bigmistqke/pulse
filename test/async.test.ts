@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { latest, use, NotReadyYet, read } from '../src/async'
+import { latest, use, NotReadyYet, read, track, resolvedPromise } from '../src/async'
 import type { Awaitable } from '../src/awaitable'
 import { isPending } from '../src/pending'
 import { effect } from '../src/effect'
@@ -59,6 +59,18 @@ test('latest is reactive — updates when the signal is written to a new value',
   // latest will see 'pending' synchronously (state not yet drained), so still undefined
   expect(seen).toEqual([undefined, undefined])
   setScheduler(microtaskScheduler(flush))
+})
+
+test('track seeds the stale prior on a pending promise', () => {
+  const p = new Promise<number>(() => {}) // never settles
+  expect(track(p, 7).value).toBe(7)
+  expect(track(p).status).toBe('pending')
+})
+
+test('resolvedPromise reads as fulfilled synchronously', () => {
+  const p = resolvedPromise(42)
+  expect(track(p).status).toBe('fulfilled')
+  expect(track(p).value).toBe(42)
 })
 
 test('use returns a plain (non-promise) value unchanged', () => {
