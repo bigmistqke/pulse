@@ -75,6 +75,21 @@ test('an async stage suspends the pipeline; the value flips to the resolved valu
   expect(latest(c)).toBe(11)
 })
 
+test('a sync final stage fed by an async upstream reads as a Promise, not bare', async () => {
+  const c = computed(
+    async () => 1,
+    (n: number) => n + 1,
+  )
+  await tick()
+  // The pipeline is async (stage 0), so the read stays a Promise even though the
+  // last stage is synchronous — the raw read is honest to the async colour, and
+  // the verbs resolve it.
+  expect(c()).toBeInstanceOf(Promise)
+  expect(isPending(c)()).toBe(false)
+  expect(use(c)).toBe(2)
+  expect(latest(c)).toBe(2)
+})
+
 test('a generator stage with yield* read of a settled value runs synchronously', () => {
   const [s] = signal(3)
   const c = computed(function* () {
@@ -531,7 +546,9 @@ test('multi-stage: stage 1 returning Promise still works (regression check)', as
       (r) => r.results,
     )
     effect(() => {
-      try { observed.push(list()) } catch { /* pending */ }
+      // The pipeline is async (stage 1 returns a Promise), so the read is a
+      // Promise; use() resolves it (and suspends — caught — while pending).
+      try { observed.push(use(list)) } catch { /* pending */ }
     })
 
     resolvers[0]({ results: [10, 20] })

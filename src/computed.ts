@@ -134,6 +134,11 @@ function makeStageNode(
   // first load apart from a refresh, and to skip re-publishing when a stage
   // resolves to the same value it had before.
   let lastResolvedValue: unknown = UNRESOLVED
+  // Whether the last publish wrapped the value in a promise. The change-gate
+  // keys on the resolved value alone, so without this a shape flip at the same
+  // value (bare<->promise, e.g. a downstream stage settling to a bare input
+  // after briefly seeing a fulfilled upstream promise) would be suppressed.
+  let lastPublishedShapeIsPromise = false
   let suspendedOn: Promise<unknown> | null = null
   let suspendedInput: unknown = undefined
   let stashedResolution: StashedResolution | null = null
@@ -149,6 +154,7 @@ function makeStageNode(
   // redundant here anyway — resolvedPromise has already recorded the state. A
   // fresh promise object each settle is what re-fires consumers.
   const publishResolvedPromise = (value: unknown): void => {
+    lastPublishedShapeIsPromise = true
     r3SetSignal((publishedValue as Signal<unknown>)[NODE] as R3Signal<unknown>, resolvedPromise(value))
     requestFlush()
   }
@@ -197,9 +203,14 @@ function makeStageNode(
       kick() // dep so generator stash-rerun can force body re-run
 
       let input: unknown = undefined
+      // Did this evaluation's input arrive as a promise (an async upstream)? If
+      // so, a synchronous final stage still publishes a promise, so the read
+      // stays honest to the pipeline's async colour instead of flipping to bare.
+      let inputWasAsync = false
       if (inputAccessor !== null) {
         input = inputAccessor()
         if (isPromise(input)) {
+          inputWasAsync = true
           const st = track(input as Promise<unknown>)
           if (st.status === 'fulfilled') {
             // Settled upstream: unwrap to the bare resolved value and fall
@@ -289,14 +300,20 @@ function makeStageNode(
       // Sync result.
       suspendedOn = null
       setPendingSig(false)
+      // Publish a promise when the stage is async-coloured — a generator, or a
+      // synchronous stage fed by an async upstream — so the read stays a Promise.
+      // A purely synchronous stage (sync input, sync body) publishes the bare
+      // value. Re-publish when the value changes OR the shape flips at the same
+      // value (the change-gate keys on value alone).
+      const asPromise = resumeKind === 'fast-forward' || inputWasAsync
       if (
         lastResolvedValue === UNRESOLVED ||
-        !Object.is(lastResolvedValue, outcome.value)
+        !Object.is(lastResolvedValue, outcome.value) ||
+        asPromise !== lastPublishedShapeIsPromise
       ) {
         lastResolvedValue = outcome.value
-        // A generator stage publishes its settled value as a resolved promise;
-        // a plain synchronous stage publishes the bare value unchanged.
-        if (resumeKind === 'fast-forward') {
+        lastPublishedShapeIsPromise = asPromise
+        if (asPromise) {
           setPublishedValue(resolvedPromise(outcome.value))
         } else {
           setPublishedValue(outcome.value)
@@ -327,7 +344,11 @@ function makeStageNode(
             ) {
               lastResolvedValue = state.value
               deferredError = null
-              publishResolvedPromise(state.value)
+              // Publish the prior as a BARE value, not a promise: a use()-suspended
+              // stage is sync-typed (use erases the async colour), so it must not
+              // look async to a downstream stage. The kick below re-runs the body
+              // and publishes the stage's real result.
+              setPublishedValue(state.value)
             }
             setKick(++kickCount)
           } else if (state.status === 'rejected') {
