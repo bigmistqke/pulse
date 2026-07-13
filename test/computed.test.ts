@@ -69,8 +69,8 @@ test('an async stage suspends the pipeline; the value flips to the resolved valu
   expect(beforeSettle).toBeInstanceOf(Promise)
   release(10)
   await tick()
-  // After settle: the view stays an Awaitable (uniform-Awaitable read model,
-  // ADR 0011) — now a fresh FULFILLED Awaitable carrying the resolved value.
+  // After settle: the view is a fresh fulfilled promise carrying the resolved
+  // value; read it through the verbs.
   expect(isPending(c)()).toBe(false)
   expect(latest(c)).toBe(11)
 })
@@ -636,8 +636,9 @@ describe('computed — NotReadyYet absorbed as suspension (Plan B)', () => {
     const p = new Promise<number>((r) => (resolve = r))
     const c = computed(() => use(p) + 1)
     // First read: stage body throws NotReadyYet → absorbed as suspension.
-    // The accessor's published value on first load is a pending Awaitable wrapping
-    // the in-flight Promise (uniform-Awaitable read model, ADR 0011 Task 2).
+    // On first load the published value is the in-flight Promise itself (the body
+    // suspended via use()); it reads as pending. After settle a sync stage
+    // publishes the bare resolved value.
     const first = c() as unknown
     expect(first).toBeInstanceOf(Promise)
     expect(isPending(c)()).toBe(true)
@@ -670,9 +671,9 @@ describe('computed — NotReadyYet absorbed as suspension (Plan B)', () => {
     await new Promise<void>((r) => queueMicrotask(() => r()))
     activeResolve(10)
     await new Promise<void>((r) => queueMicrotask(() => r()))
-    // Uniform-Awaitable read model: the settled view is a fulfilled Awaitable.
-    // Read via latest() — during SWR-refetch isPending is true, so use(c)
-    // would throw NotReadyYet rather than return the stale value.
+    // Plain-promise read model: the settled view reads as fulfilled via latest().
+    // During the SWR refetch below, isPending is true, so use(c) would throw
+    // NotReadyYet rather than return the stale value — latest() gives it.
     expect(latest(c)).toBe(10)
     setSrc(2)
     await new Promise<void>((r) => queueMicrotask(() => r()))

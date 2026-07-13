@@ -68,7 +68,10 @@ export function signal<T>(initial: T): [Accessor<T>, Setter<T>] {
         : next
     // Register a promise write and seed the stale-while-revalidate prior from the
     // current value, so latest()/use() can read the previous value while the new
-    // one is pending. The stored value is the plain promise — no wrapper.
+    // one is pending. The stored value is the plain promise — no wrapper. The
+    // getContext()===null guard skips this for a promise written from inside an
+    // effect/computed body: it is not prior-seeded (no SWR stale value in that
+    // narrow case), though use()/isPending() still work via lazy track() on read.
     if (isPromise(value) && getContext() === null) {
       const cur = untrack(() => readValue(node)) as unknown
       const prior = isPromise(cur) ? track(cur as Promise<unknown>).value : cur

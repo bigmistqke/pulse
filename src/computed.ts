@@ -143,10 +143,11 @@ function makeStageNode(
   // so body doesn't re-run on settle. Consumers reading the accessor get this.
   const [publishedValue, setPublishedValue] = signal<unknown>(UNRESOLVED as unknown)
 
-  // The signal setter re-wraps any Promise value when called from outside an r3
-  // computation (getContext()===null). onSettle callbacks run in promise .then
-  // handlers — async context — so setPublishedValue(resolvedPromise(v)) would
-  // re-register the promise. Write directly to the r3 backing node instead.
+  // Publish a fresh fulfilled promise straight to the r3 backing node. This runs
+  // in an onSettle .then handler (async context, getContext()===null); writing
+  // directly skips the signal setter's promise-tracking branch, which is
+  // redundant here anyway — resolvedPromise has already recorded the state. A
+  // fresh promise object each settle is what re-fires consumers.
   const publishResolvedPromise = (value: unknown): void => {
     r3SetSignal((publishedValue as Signal<unknown>)[NODE] as R3Signal<unknown>, resolvedPromise(value))
     requestFlush()

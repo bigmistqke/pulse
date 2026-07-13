@@ -205,7 +205,7 @@ describe('use(accessor) — Plan B: throws on isPending', () => {
     await new Promise<void>((r) => queueMicrotask(r))
     activeResolve('v1')
     await new Promise<void>((r) => queueMicrotask(r))
-    // Uniform-Awaitable read model: settled view is a fulfilled Awaitable.
+    // Plain-promise read model: after settle the view reads as fulfilled via latest().
     expect(latest(c)).toBe('v1')
 
     // Trigger refetch.
