@@ -404,9 +404,22 @@ function makeStageNode(
   // changes propagate AND to trigger lazy first eval) and publishedValue
   // (the actual view value). Surfaces parked errors.
   const accessor = (() => {
-    if (deferredError !== null) throw deferredError.error
+    // Subscribe to BOTH before any throw, even on the error path:
+    //  - depTracker triggers the lazy first eval (its own value is always null, so
+    //    it never fires on its own),
+    //  - publishedValue is the signal that actually changes when this computed
+    //    produces a new value — including the error path, which publishes the
+    //    reason precisely to dirty consumers.
+    // Throwing before reading publishedValue would leave a consumer that catches
+    // the error with no subscription to the value, so a later successful refetch
+    // could never reach it and a single transient failure would be permanent.
+    // (Same reasoning as `use()`, which already calls the accessor before its
+    // pending check.) Reading depTracker can also SET or CLEAR deferredError via
+    // the lazy eval, so the check belongs after, not before.
     r3Read(depTracker as R3Computed<unknown>)
-    return publishedValue()
+    const value = publishedValue()
+    if (deferredError !== null) throw deferredError.error
+    return value
   }) as Signal<unknown>
   accessor[NODE] = depTracker as R3Computed<unknown>
 

@@ -2,7 +2,7 @@ import { expect, test } from 'vitest'
 import { computed } from '../src/computed'
 import { effect } from '../src/effect'
 import { signal } from '../src/signal'
-import { latest, read, use } from '../src/async'
+import { latest, NotReadyYet, read, use } from '../src/async'
 import { isPending, promiseOf } from '../src/pending'
 import { flush, microtaskScheduler, setScheduler, syncScheduler } from '../src/scheduler'
 import { createRoot, catchError } from '../src/owner'
@@ -246,6 +246,41 @@ test('after a caught throw, the computed is frozen at its previous good value', 
     setTrigger(2) // recovers
     expect(observed).toEqual([0, 20])
   }, () => {})
+})
+
+test('a consumer recovers after a computed fails once and later succeeds', async () => {
+  const [id, setId] = signal(1)
+  const seen: string[] = []
+  // id=1 rejects; id=2 succeeds.
+  const c = computed(() =>
+    id() === 1 ? Promise.reject(new Error('boom')) : Promise.resolve('recovered'),
+  )
+  createRoot(() => {
+    effect(() => {
+      try {
+        seen.push(use(c))
+      } catch (e) {
+        if (e instanceof NotReadyYet) return
+        seen.push(`ERR:${(e as Error).message}`)
+      }
+    })
+  })
+  await tick()
+  // Failed: the consumer has seen the error and nothing else.
+  expect(seen.length).toBeGreaterThan(0)
+  expect(seen.every((s) => s === 'ERR:boom')).toBe(true)
+
+  // Fixing the input must REACH the consumer. A read that threw still has to
+  // subscribe, or a later success can never propagate and the failure is permanent
+  // — before the fix, 'recovered' never arrived at all and this stayed 'ERR:boom'.
+  //
+  // (The error may be re-emitted while the refetch is in flight: the computed keeps
+  // presenting its previous outcome until the new one settles — stale-while-
+  // revalidate applied to an error rather than a value. The exact number of those
+  // is scheduling-dependent, so only the final outcome is asserted.)
+  setId(2)
+  await tick()
+  expect(seen.at(-1)).toBe('recovered')
 })
 
 test('a computed throw outside any catchError still propagates uncaught', () => {
