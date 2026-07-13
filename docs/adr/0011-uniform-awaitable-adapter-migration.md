@@ -1,5 +1,12 @@
 # Migrate to the uniform `Awaitable` read model via a state-relocation adapter
 
+> **Superseded by [ADR 0012](./0012-weakmap-backed-promise-read-model.md).** The
+> uniform read surface stands, but the carrier changed: an async read is a plain
+> `Promise<T>` with state in one WeakMap, not an `Awaitable` `Promise` subclass.
+> The `Awaitable` subclass, its branding symbols, and `toAwaitable` /
+> `resolvedAwaitable` are removed; `.value` / `.status` become the verbs `latest`
+> / `isPending`. The rest below is kept for the record.
+
 The async read model migrates to the uniform `Awaitable`
 ([`async-reads-and-coordination.md`](../pulse/async-reads-and-coordination.md),
 superseding [ADR 0002](./0002-pending-model.md)'s write-back) by the **adapter**
