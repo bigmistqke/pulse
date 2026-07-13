@@ -24,11 +24,11 @@ export function latest<T>(s: Accessor<T>): Awaited<T> | undefined {
       lastResolved.set(s, state.value)
       return state.value as Awaited<T>
     }
-    // Still pending. A promise that pulse created carries its own last resolved
-    // value on `.value`, so prefer that. A plain promise handed in by the caller
-    // — the initial value passed to signal(), or a promise they built by hand —
-    // does not, so fall back to the value cached below.
-    const swr = (value as { value?: unknown }).value
+    // Still pending. The stale-while-revalidate prior is seeded onto the tracked
+    // state by track(promise, prior) — from the signal setter, and from computed —
+    // so read it from there. Fall back to the per-accessor cache below for a raw
+    // promise that was never seeded (an initial promise passed to signal()).
+    const swr = state.value
     if (swr !== undefined) return swr as Awaited<T>
     return lastResolved.get(s) as Awaited<T> | undefined
   }

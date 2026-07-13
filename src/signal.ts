@@ -12,7 +12,6 @@ import { requestFlush } from './scheduler'
 import { isPromise } from './is-promise'
 import { track } from './async'
 import { readValue, signalNode, writeValue } from './scope'
-import { toAwaitable, AWAITABLE, type Awaitable } from './awaitable'
 
 /** The underlying r3 node behind any pulse signal or computed accessor. */
 type R3Node<T> = R3Signal<T> | R3Computed<T>
@@ -67,28 +66,15 @@ export function signal<T>(initial: T): [Accessor<T>, Setter<T>] {
       typeof next === 'function'
         ? (next as (prev: T) => T)(untrack(() => readValue(node)))
         : next
-    let toWrite: T = value
-    // Wrap only outside any r3 computation. Inside an r3 computed body —
-    // which is BOTH computed.ts's internal setPublishedValue AND any user
-    // pulse.effect() body (effects run under r3Computed too) — getContext() is
-    // non-null and we skip wrapping. This preserves the two-home window
-    // (ADR 0011): computed's internal signals stay raw promises until Plan 7b.
-    // Known limitation of the broad guard: a promise written to a signal from
-    // *inside* an effect/computed body is not Awaitable-wrapped, so it gets no
-    // SWR `.value` seeding — `use()`/`isPending()` still work via track's
-    // raw-promise fallback. Unusual usage (writing a signal from an effect);
-    // revisit with a narrower guard if it bites.
+    // Register a promise write and seed the stale-while-revalidate prior from the
+    // current value, so latest()/use() can read the previous value while the new
+    // one is pending. The stored value is the plain promise — no wrapper.
     if (isPromise(value) && getContext() === null) {
-      // SWR: seed the prior from the node's current value (ADR 0011 — the
-      // setter has no lastResolvedValue closure; the prior is the current value).
       const cur = untrack(() => readValue(node)) as unknown
-      const prior =
-        cur instanceof Promise
-          ? AWAITABLE in (cur as object) ? (cur as Awaitable<unknown>).value : undefined
-          : (cur as unknown)
-      toWrite = toAwaitable(value as Promise<unknown>, prior as T | undefined) as unknown as T
+      const prior = isPromise(cur) ? track(cur as Promise<unknown>).value : cur
+      track(value as Promise<unknown>, prior)
     }
-    writeValue(node, toWrite)
+    writeValue(node, value)
     requestFlush()
   }
 

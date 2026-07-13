@@ -2,6 +2,7 @@ import { expect, test } from 'vitest'
 import { signal } from '../src/signal'
 import { computed } from '../src/computed'
 import { isPending } from '../src/pending'
+import { latest } from '../src/async'
 
 /** Resolve after all microtasks have drained (a macrotask boundary). */
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
@@ -48,25 +49,22 @@ test('a signal stores a Promise value as-is (no auto-resolve)', async () => {
   expect(await s()).toBe(42)
 })
 
-import { type Awaitable } from '../src/awaitable'
-
-test('a signal written a promise reads back as an Awaitable (no write-back)', async () => {
+test('a signal written a promise reads back as the plain promise it was given', async () => {
   const [s, setS] = signal<number | Promise<number>>(0)
-  setS(Promise.resolve(42))
-  const v = s()
-  expect(v).toBeInstanceOf(Promise) // Awaitable is a Promise
-  expect((v as Awaitable<number>).status).toBe('pending')
+  const p = Promise.resolve(42)
+  setS(p)
+  expect(s()).toBe(p) // the plain promise, not a wrapper
+  expect(isPending(s)()).toBe(true)
   await tick()
-  expect((s() as Awaitable<number>).status).toBe('fulfilled')
-  expect((s() as Awaitable<number>).value).toBe(42)
+  expect(isPending(s)()).toBe(false)
+  expect(latest(s)).toBe(42)
 })
 
-test('SWR: while a refetch is pending the prior resolved value stays in .value', async () => {
+test('SWR: while a refetch is pending the prior resolved value stays available via latest', async () => {
   const [s, setS] = signal<number | Promise<number>>(0)
   setS(Promise.resolve(1))
   await tick()
   setS(new Promise(() => {})) // never settles
-  const v = s() as Awaitable<number>
-  expect(v.status).toBe('pending')
-  expect(v.value).toBe(1) // prior held (seeded from the current node value)
+  expect(isPending(s)()).toBe(true)
+  expect(latest(s)).toBe(1) // prior held (seeded from the current node value)
 })
