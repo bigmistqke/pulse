@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Read(//Users/bigmistqke/.agents/skills/grill-with-docs/**)",
+      "Bash(cat CONTEXT-FORMAT.md)",
+      "Bash(cat ADR-FORMAT.md)",
+      "Bash(git add *)",
+      "Bash(git commit -q -m 'docs\\(pulse\\): design — uniform Awaitable read model + settled\\([...]\\) barrier *)",
+      "Bash(CI=true pnpm exec *)",
+      "Bash(pnpm exec *)",
+      "Bash(git commit *)"
+    ]
+  }
+}

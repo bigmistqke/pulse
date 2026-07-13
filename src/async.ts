@@ -2,7 +2,6 @@ import { isPromise } from './is-promise'
 import { isPending, promiseOf } from './pending'
 import { NODE, type Accessor, type Signal } from './signal'
 import { markUsedInBinding } from './transition-tracker'
-import { AWAITABLE, AWAITABLE_SOURCE, type Awaitable } from './awaitable'
 
 /**
  * Records the most recent resolved value observed for each signal. Keyed on the
@@ -19,7 +18,7 @@ const lastResolved = new WeakMap<object, unknown>()
 export function latest<T>(s: Accessor<T>): Awaited<T> | undefined {
   const value = s()
   if (isPromise(value)) {
-    const state = track(value as Promise<unknown>) // Awaitable-aware (returns live object)
+    const state = track(value as Promise<unknown>) // current state for this promise (re-read each call; track replaces the entry on settle)
     if (state.status === 'fulfilled') {
       lastResolved.set(s, state.value)
       return state.value as Awaited<T>
@@ -60,20 +59,17 @@ export type PromiseState =
   | { status: 'rejected'; value?: unknown; reason: unknown }
 
 /**
- * Remembers the status of every promise `track` has seen that does not already
- * carry its own status, so a later read of the same promise can report its
- * result without waiting again. An Awaitable carries its own status and skips
- * this map (see the check at the top of `track`). What is stored here is every
- * other promise: one a caller hands in directly — the initial value passed to
- * signal(), or a promise they built by hand — and the plain promise an async or
- * generator stage returns internally, which the driver watches for settlement.
+ * Records the status of every promise `track` has seen, seeded with an optional
+ * stale-while-revalidate prior, so a later read of the same promise can report
+ * its result without waiting again. There is no longer any promise type that
+ * bypasses this map. What is stored here: a promise a caller hands in directly —
+ * the initial value passed to signal(), or a promise they built by hand — and
+ * the plain promise an async or generator stage returns internally, which the
+ * driver watches for settlement.
  */
 const states = new WeakMap<Promise<unknown>, PromiseState>()
 
 export function track(promise: Promise<unknown>, prior?: unknown): PromiseState {
-  // A promise pulse created already carries its own status, value, and reason,
-  // so return it directly instead of tracking it a second time.
-  if (AWAITABLE in promise) return promise as unknown as PromiseState
   const existing = states.get(promise)
   if (existing) return existing
   const state: PromiseState = { status: 'pending', value: prior }
@@ -128,15 +124,6 @@ export function use<T>(x: T | Promise<T> | (() => T | Promise<T>)): Awaited<T> {
     }
   }
   if (!isPromise(x)) return x as Awaited<T>
-  // Awaitable fast-path: read live status fields directly; throw NotReadyYet
-  // on the SOURCE (not the awaitable wrapper) so the binding catcher subscribes
-  // to the source and reruns in the same microtask batch as it settles.
-  if (AWAITABLE in (x as object)) {
-    const a = x as unknown as Awaitable<unknown>
-    if (a.status === 'fulfilled') return a.value as Awaited<T>
-    if (a.status === 'rejected') throw a.reason
-    throw new NotReadyYet((x as any)[AWAITABLE_SOURCE] as Promise<unknown>)
-  }
   const state = track(x)
   if (state.status === 'fulfilled') return state.value as Awaited<T>
   if (state.status === 'rejected') throw state.reason
