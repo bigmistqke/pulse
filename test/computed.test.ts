@@ -2,8 +2,7 @@ import { expect, test } from 'vitest'
 import { computed } from '../src/computed'
 import { effect } from '../src/effect'
 import { signal } from '../src/signal'
-import { read, use } from '../src/async'
-import type { Awaitable } from '../src/awaitable'
+import { latest, read, use } from '../src/async'
 import { isPending, promiseOf } from '../src/pending'
 import { flush, microtaskScheduler, setScheduler, syncScheduler } from '../src/scheduler'
 import { createRoot, catchError } from '../src/owner'
@@ -72,9 +71,8 @@ test('an async stage suspends the pipeline; the value flips to the resolved valu
   await tick()
   // After settle: the view stays an Awaitable (uniform-Awaitable read model,
   // ADR 0011) — now a fresh FULFILLED Awaitable carrying the resolved value.
-  const settled = c() as unknown as Awaitable<number>
-  expect(settled.status).toBe('fulfilled')
-  expect(settled.value).toBe(11)
+  expect(isPending(c)()).toBe(false)
+  expect(latest(c)).toBe(11)
 })
 
 test('a generator stage with yield* read of a settled value runs synchronously', () => {
@@ -642,7 +640,6 @@ describe('computed — NotReadyYet absorbed as suspension (Plan B)', () => {
     // the in-flight Promise (uniform-Awaitable read model, ADR 0011 Task 2).
     const first = c() as unknown
     expect(first).toBeInstanceOf(Promise)
-    expect((first as any).status).toBe('pending')
     expect(isPending(c)()).toBe(true)
     resolve(41)
     await new Promise<void>((r) => queueMicrotask(() => r()))
@@ -674,16 +671,16 @@ describe('computed — NotReadyYet absorbed as suspension (Plan B)', () => {
     activeResolve(10)
     await new Promise<void>((r) => queueMicrotask(() => r()))
     // Uniform-Awaitable read model: the settled view is a fulfilled Awaitable.
-    // Read .value directly — during SWR-refetch isPending is true, so use(c)
+    // Read via latest() — during SWR-refetch isPending is true, so use(c)
     // would throw NotReadyYet rather than return the stale value.
-    expect((c() as unknown as Awaitable<number>).value).toBe(10)
+    expect(latest(c)).toBe(10)
     setSrc(2)
     await new Promise<void>((r) => queueMicrotask(() => r()))
-    expect((c() as unknown as Awaitable<number>).value).toBe(10) // SWR-stale
+    expect(latest(c)).toBe(10) // SWR-stale
     expect(isPending(c)()).toBe(true)
     activeResolve(20)
     await new Promise<void>((r) => queueMicrotask(() => r()))
-    expect((c() as unknown as Awaitable<number>).value).toBe(20)
+    expect(latest(c)).toBe(20)
   })
 })
 

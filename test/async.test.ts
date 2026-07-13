@@ -195,12 +195,12 @@ describe('use(accessor) — Plan B: throws on isPending', () => {
     activeResolve('v1')
     await new Promise<void>((r) => queueMicrotask(r))
     // Uniform-Awaitable read model: settled view is a fulfilled Awaitable.
-    expect((c() as unknown as Awaitable<string>).value).toBe('v1')
+    expect(latest(c)).toBe('v1')
 
     // Trigger refetch.
     setPage(2)
     await new Promise<void>((r) => queueMicrotask(r))
-    expect((c() as unknown as Awaitable<string>).value).toBe('v1') // SWR-stale
+    expect(latest(c)).toBe('v1') // SWR-stale
 
     // BUT use(c) must throw NotReadyYet now, carrying the in-flight promise.
     expect(isPending(c)()).toBe(true)
@@ -230,12 +230,12 @@ describe('read — post-Plan-A (no brand suspension)', () => {
     await new Promise<void>((r) => queueMicrotask(r))
     activeResolve('v1')
     await new Promise<void>((r) => queueMicrotask(r))
-    expect((c() as unknown as Awaitable<string>).value).toBe('v1')
+    expect(latest(c)).toBe('v1')
 
     // Trigger refetch — accessor goes SWR-stale, suspendedOn becomes new Promise.
     setPage(2)
     await new Promise<void>((r) => queueMicrotask(r))
-    expect((c() as unknown as Awaitable<string>).value).toBe('v1') // SWR-stale
+    expect(latest(c)).toBe('v1') // SWR-stale
 
     // Plan A: read yields the stale value directly. Under the uniform-Awaitable
     // read model (ADR 0011) the view is a FULFILLED Awaitable carrying the stale
