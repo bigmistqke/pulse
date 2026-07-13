@@ -233,18 +233,31 @@ export function* settled<T extends readonly unknown[]>(
   const inflight: Promise<unknown>[] = []
   for (const x of inputs) {
     if (isSignalAccessor(x)) {
-      x() // establish the dependency (re-run when this input changes)
+      const v = x() // establish the dependency (re-run when this input changes)
       const p = isPending(x)() ? promiseOf(x)() : null
       if (p) inflight.push(p)
-    } else if (isPromise(x)) {
+      else if (isPromise(v) && track(v as Promise<unknown>).status === 'pending') {
+        inflight.push(v as Promise<unknown>)
+      }
+    } else if (isPromise(x) && track(x as Promise<unknown>).status === 'pending') {
+      // Only await a promise that has NOT settled yet. `Promise.all` builds a FRESH
+      // promise every run, and a fresh promise is always initially pending — so the
+      // driver cannot fast-forward it (its fast-forward is keyed on promise
+      // identity). Re-adding an already-settled promise on each re-run would make
+      // the stage suspend, kick, re-run and suspend again forever, starving the
+      // event loop. Filtering settled promises out keeps it converging.
       inflight.push(x as Promise<unknown>)
     }
   }
   // Suspend until every in-flight input has settled — then the frame is coherent.
   if (inflight.length > 0) yield Promise.all(inflight)
-  // Read the fresh resolved values.
+  // Read the fresh resolved values. A rejected input THROWS (as `read`/`use` do)
+  // rather than reading `.value` off a rejected state, which is always undefined.
   return inputs.map((x) => {
     const v = isSignalAccessor(x) ? (x as () => unknown)() : x
-    return isPromise(v) ? track(v as Promise<unknown>).value : v
+    if (!isPromise(v)) return v
+    const state = track(v as Promise<unknown>)
+    if (state.status === 'rejected') throw state.reason
+    return state.value
   }) as { [K in keyof T]: Resolved<T[K]> }
 }
