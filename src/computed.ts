@@ -1,5 +1,5 @@
 import { computed as r3Computed, read as r3Read, setSignal as r3SetSignal, unwatched, type Computed as R3Computed, type Signal as R3Signal } from 'r3'
-import { isGeneratorFunction, NotReadyYet, resolvedPromise, track, type PromiseState, type Resolved } from './async'
+import { isGeneratorFunction, NotReadyYet, resolvedPromise, track, type PromiseState, type ReadOf, type Resolved } from './async'
 import { runStage } from './driver'
 import { isPromise } from './is-promise'
 import { getOwner, routeError, registerWithOwner } from './owner'
@@ -14,29 +14,29 @@ type Stage<In, Out> = (value: In) => Out
 
 // Overloads: stage N's input is `Resolved<stage N-1's return type>`; the pipeline
 // result is `Resolved<last stage's return type>`.
-export function computed<A>(s0: () => A): Signal<Resolved<A>>
+export function computed<A>(s0: () => A): Signal<ReadOf<A>>
 export function computed<A, B>(
   s0: () => A,
   s1: Stage<Resolved<A>, B>,
-): Signal<Resolved<B>>
+): Signal<ReadOf<B>>
 export function computed<A, B, C>(
   s0: () => A,
   s1: Stage<Resolved<A>, B>,
   s2: Stage<Resolved<B>, C>,
-): Signal<Resolved<C>>
+): Signal<ReadOf<C>>
 export function computed<A, B, C, D>(
   s0: () => A,
   s1: Stage<Resolved<A>, B>,
   s2: Stage<Resolved<B>, C>,
   s3: Stage<Resolved<C>, D>,
-): Signal<Resolved<D>>
+): Signal<ReadOf<D>>
 export function computed<A, B, C, D, E>(
   s0: () => A,
   s1: Stage<Resolved<A>, B>,
   s2: Stage<Resolved<B>, C>,
   s3: Stage<Resolved<C>, D>,
   s4: Stage<Resolved<D>, E>,
-): Signal<Resolved<E>>
+): Signal<ReadOf<E>>
 
 /**
  * Create a derived signal from a pipeline of one or more stages. Each stage may

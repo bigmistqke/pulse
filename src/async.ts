@@ -144,6 +144,17 @@ export type Resolved<T> = T extends Signal<infer U>
       ? Awaited<R>
       : Awaited<T>
 
+/** The public read type of a computed/derived stage: a synchronous return stays
+ *  bare T; an async or generator return reads as Promise<T> (async colour stays
+ *  visible in the type). Contrast Resolved<>, which unwraps for the NEXT stage's
+ *  input. */
+export type ReadOf<A> =
+  A extends Promise<infer U>
+    ? Promise<Awaited<U>>
+    : A extends Generator<unknown, infer R, unknown>
+      ? Promise<Awaited<R>>
+      : A
+
 /** True if `x` looks like a pulse signal accessor (a function carrying NODE). */
 function isSignalAccessor(x: unknown): x is Signal<unknown> {
   return typeof x === 'function' && NODE in (x as object)

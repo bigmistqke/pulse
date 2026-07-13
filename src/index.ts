@@ -1,4 +1,4 @@
-export { latest, read, use, NotReadyYet, type Resolved } from './async'
+export { latest, read, use, NotReadyYet, type ReadOf, type Resolved } from './async'
 export { isPending, promiseOf } from './pending'
 export { computed } from './computed'
 export { effect } from './effect'

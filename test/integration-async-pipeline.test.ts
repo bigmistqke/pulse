@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { computed, latest, read, signal, use, type Resolved } from '../src/index'
+import { computed, latest, read, signal, use, type ReadOf, type Resolved } from '../src/index'
 
 /** Resolve after all microtasks have drained (a macrotask boundary). */
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
@@ -54,4 +54,14 @@ test('Resolved<T> type unwraps signals, promises, and generators (compile-time)'
   const _b: B = 2
   const _c: C = 3
   expect([_a, _b, _c]).toEqual([1, 2, 3])
+})
+
+test('ReadOf<T> keeps async colour: sync bare, async/generator as Promise (compile-time)', () => {
+  type A = ReadOf<number>                                       // number
+  type B = ReadOf<Promise<number>>                              // Promise<number>
+  type C = ReadOf<Generator<unknown, number, unknown>>          // Promise<number>
+  const a: A = 1
+  const b: B = Promise.resolve(1)
+  const c: C = Promise.resolve(1)
+  expect([a, typeof b.then, typeof c.then]).toEqual([1, 'function', 'function'])
 })
