@@ -290,6 +290,17 @@ export function discard(scope: Scope): void {
   scope.status = 'discarded'
 }
 
+/** The isolation-axis read: the last COMMITTED value, bypassing any active
+ *  speculation. Reads the accessor with the scope forced to root, so `readValue`
+ *  finds no speculative slot and takes the committed path (the r3 backing) —
+ *  which is why this works for a computed too, whose committed value must be
+ *  derived from committed state rather than read off a backing node. Still
+ *  reactive: the r3 dependency forms as normal, so a consumer re-runs when the
+ *  committed value changes. Contrast the readiness-axis `latest`. */
+export function committed<T>(s: () => T): T {
+  return runInScope(ROOT_SCOPE, undefined, s)
+}
+
 /** Open a speculative child of the current scope, run `body` under it, then
  *  commit on normal return or discard on throw (rethrowing). Nested actions
  *  parent to the enclosing scope, so their commit promotes to it (two-stage). */

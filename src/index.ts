@@ -20,4 +20,5 @@ export {
   type Scheduler,
 } from './scheduler'
 export { signal, type Accessor, type Setter, type Signal } from './signal'
+export { action, committed } from './scope'
 export { For, Fragment, h, Loading, Match, render, Show, Switch, useLoading, type Truthy } from './dom'
