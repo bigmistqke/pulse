@@ -100,7 +100,7 @@ Proposed changes to [`CONTEXT.md`](./CONTEXT.md), to apply on approval:
 
 ## Open questions
 
-- **Naming.** `settled` / `stable` / `frame` for the wait-for-all combinator — cosmetic; defer to ergonomic feedback.
+- **Naming — resolved.** Shipped as `settled` (`src/async.ts`), used as `yield* settled([A, B])` inside a generator stage.
 - **Genuine `undefined` vs not-ready — resolved.** `latest(s)` returns `T | undefined` and accepts the ambiguity; `isPending(s)` disambiguates: `latest(s) === undefined` with `isPending(s) === false` is a genuine `undefined`, whereas `isPending(s) === true` is not-ready. So `latest` is the terse read and `isPending` is the disambiguator — no field on the object, no sentinel required.
 - **Carrier allocation — resolved.** An async read is a plain `Promise<T>` with state in one WeakMap; there is no per-read wrapper to cache. The carrier was picked by benchmark ([carrier-benchmark.ts](./carrier-benchmark.ts)); see [ADR 0012](../adr/0012-weakmap-backed-promise-read-model.md). (The related question — do purely-*synchronous* signals wrap? — is resolved: they stay bare `T`; the read type mirrors the body.)
-- **`settled` and refetch promises.** `settled` must await the *in-flight* promise of a refetching input, which under SWR is tracked out-of-band from the stored stale value. Confirm `settled` reaches it (via the node's pending state / the WeakMap, not via a field on the read).
+- **`settled` and refetch promises — resolved.** `settled` awaits each refetching input's *in-flight* promise through the pending registry (`isPending` / `promiseOf`), not the stale value the raw read returns under stale-while-revalidate, so the frame it produces is genuinely fresh. Implemented and covered by `test/settled.test.ts` (a partial settle holds the barrier; a refetch re-coordinates). A settled rejection propagates via `Promise.all`.
