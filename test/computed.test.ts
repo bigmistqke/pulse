@@ -90,6 +90,25 @@ test('a sync final stage fed by an async upstream reads as a Promise, not bare',
   expect(latest(c)).toBe(2)
 })
 
+test('a conditionally-async stage flips its read shape honestly across evaluations', async () => {
+  const [cond, setCond] = signal(true)
+  const c = computed(() => (cond() ? Promise.resolve(5) : 5))
+  await tick()
+  expect(c()).toBeInstanceOf(Promise) // async branch → Promise
+  expect(use(c)).toBe(5)
+
+  setCond(false)
+  await tick()
+  expect(c()).toBe(5) // sync branch → bare
+
+  // Back to the async branch at the SAME value (5): the read must flip back to a
+  // Promise, not stay stuck bare (the change-gate keys on value alone otherwise).
+  setCond(true)
+  await tick()
+  expect(c()).toBeInstanceOf(Promise)
+  expect(use(c)).toBe(5)
+})
+
 test('a generator stage with yield* read of a settled value runs synchronously', () => {
   const [s] = signal(3)
   const c = computed(function* () {

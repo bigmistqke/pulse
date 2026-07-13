@@ -268,16 +268,21 @@ function makeStageNode(
               setKick(++kickCount)
               return
             }
-            // Non-generators: resolved-value-keyed cache. Publish only on change.
+            // Non-generators: resolved-value-keyed cache. Publish on a value
+            // change OR a shape flip — this path always publishes a promise, so
+            // it must re-publish when the last published value was bare (a
+            // conditionally-async stage flipping back to its promise branch at an
+            // unchanged value), which the value-only gate would otherwise suppress.
             if (
               lastResolvedValue === UNRESOLVED ||
-              !Object.is(lastResolvedValue, state.value)
+              !Object.is(lastResolvedValue, state.value) ||
+              !lastPublishedShapeIsPromise
             ) {
               lastResolvedValue = state.value
               deferredError = null
               publishResolvedPromise(state.value)
             }
-            // else: same value, no downstream invalidation
+            // else: same value, already a promise — no downstream invalidation
           } else if (state.status === 'rejected') {
             suspendedOn = null
             setPendingSig(false)
