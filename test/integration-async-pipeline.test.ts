@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { computed, latest, read, signal, use, type ReadOf, type Resolved } from '../src/index'
+import { computed, latest, read, signal, use, type PipelineRead, type Resolved } from '../src/index'
 
 /** Resolve after all microtasks have drained (a macrotask boundary). */
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
@@ -56,12 +56,27 @@ test('Resolved<T> type unwraps signals, promises, and generators (compile-time)'
   expect([_a, _b, _c]).toEqual([1, 2, 3])
 })
 
-test('ReadOf<T> keeps async colour: sync bare, async/generator as Promise (compile-time)', () => {
-  type A = ReadOf<number>                                       // number
-  type B = ReadOf<Promise<number>>                              // Promise<number>
-  type C = ReadOf<Generator<unknown, number, unknown>>          // Promise<number>
-  const a: A = 1
-  const b: B = Promise.resolve(1)
-  const c: C = Promise.resolve(1)
-  expect([a, typeof b.then, typeof c.then]).toEqual([1, 'function', 'function'])
+test('PipelineRead keeps async colour honestly (compile-time)', () => {
+  // Each `const … : T = value` line is the compile-time assertion — a wrong type
+  // would fail to compile.
+  type S1sync = PipelineRead<[], number>                             // number
+  type S1async = PipelineRead<[], Promise<number>>                   // Promise<number>
+  type S1gen = PipelineRead<[], Generator<unknown, number, unknown>> // Promise<number>
+  type S1cond = PipelineRead<[], Promise<number> | string>          // Promise<number> | string (honest union)
+  type S2asyncUp = PipelineRead<[Promise<number>], number>          // Promise<number> (upstream colours it)
+  type S2syncUp = PipelineRead<[number], number>                    // number
+
+  const s1sync: S1sync = 1
+  const s1async: S1async = Promise.resolve(1)
+  const s1gen: S1gen = Promise.resolve(1)
+  const s1condSync: S1cond = 'ok'
+  const s1condAsync: S1cond = Promise.resolve(1)
+  const s2up: S2asyncUp = Promise.resolve(1)
+  const s2sy: S2syncUp = 1
+  // @ts-expect-error an async upstream colours the read a Promise — a bare number is not assignable.
+  const s2bad: S2asyncUp = 1
+  void s2bad
+
+  expect([s1sync, s1condSync, s2sy]).toEqual([1, 'ok', 1])
+  expect([s1async, s1gen, s1condAsync, s2up].every((x) => x instanceof Promise)).toBe(true)
 })

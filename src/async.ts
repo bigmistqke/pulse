@@ -106,12 +106,18 @@ export function resolvedPromise<T>(value: T): Promise<T> {
  * always throws on pipeline-pending — coherent multi-read snapshots inside
  * a `<Loading>` boundary fall out of the boundary's atomic-commit gather.
  */
-export function use<T>(x: T | Promise<T> | (() => T | Promise<T>)): Awaited<T> {
+// Accessor form returns `Awaited<R>` of the accessor's OWN return type, so a
+// runtime-honest union read (`Promise<T> | U`) resolves to `T | U` — a single
+// `() => T | Promise<T>` parameter would instead pin one member and reject the
+// rest. Value form covers a plain value or a bare promise.
+export function use<R>(x: () => R): Awaited<R>
+export function use<T>(x: T): Awaited<T>
+export function use(x: unknown): unknown {
   // Mark unconditionally — even if use() doesn't throw, the binding has
   // opted into transition coordination with the nearest <Loading> boundary.
   markUsedInBinding()
   if (typeof x === 'function') {
-    const accessor = x as () => T | Promise<T>
+    const accessor = x as () => unknown
     // Call accessor() BEFORE the pending check so r3 dep edges are always
     // established, even on the throw path. Otherwise the caller's effect
     // would lose its sub on the accessor's underlying computed, r3 would
@@ -123,9 +129,9 @@ export function use<T>(x: T | Promise<T> | (() => T | Promise<T>)): Awaited<T> {
       throw new NotReadyYet(promiseOf(accessor)()!)
     }
   }
-  if (!isPromise(x)) return x as Awaited<T>
+  if (!isPromise(x)) return x
   const state = track(x)
-  if (state.status === 'fulfilled') return state.value as Awaited<T>
+  if (state.status === 'fulfilled') return state.value
   if (state.status === 'rejected') throw state.reason
   throw new NotReadyYet(x)
 }
@@ -144,16 +150,43 @@ export type Resolved<T> = T extends Signal<infer U>
       ? Awaited<R>
       : Awaited<T>
 
-/** The public read type of a computed/derived stage: a synchronous return stays
- *  bare T; an async or generator return reads as Promise<T> (async colour stays
- *  visible in the type). Contrast Resolved<>, which unwraps for the NEXT stage's
- *  input. */
-export type ReadOf<A> =
-  A extends Promise<infer U>
-    ? Promise<Awaited<U>>
-    : A extends Generator<unknown, infer R, unknown>
-      ? Promise<Awaited<R>>
-      : A
+/** Unwrap a generator return to a promise (a generator stage always reads
+ *  async); leave everything else — bare, a Promise, or a union — as it is. */
+type Surface<S> = S extends Generator<unknown, infer R, unknown> ? Promise<Awaited<R>> : S
+
+/** The whole type is a Promise or Generator (unconditionally async). Wrapped in
+ *  tuples so a union is tested as a whole, not distributed. */
+type DefinitelyAsync<X> =
+  [X] extends [Promise<unknown>]
+    ? true
+    : [X] extends [Generator<unknown, unknown, unknown>]
+      ? true
+      : false
+
+/** The type contains a Promise or Generator (possibly async — e.g. a union with
+ *  a promise member). `Extract` finds it without distributing the conditional. */
+type MaybeAsync<X> =
+  [Extract<X, Promise<unknown> | Generator<unknown, unknown, unknown>>] extends [never] ? false : true
+
+/** Reduce the upstream stages' return types to a single async colour. */
+type UpstreamColor<Ups extends unknown[]> =
+  true extends { [K in keyof Ups]: DefinitelyAsync<Ups[K]> }[number]
+    ? 'def'
+    : true extends { [K in keyof Ups]: MaybeAsync<Ups[K]> }[number]
+      ? 'maybe'
+      : 'sync'
+
+/** The public read type of a computed/derived — runtime-honest. A definitely-
+ *  async upstream forces a single `Promise`; a maybe-async upstream reflects both
+ *  shapes (`Last | Promise<…>`); otherwise the last stage's own surface (which may
+ *  itself be bare, a `Promise`, or a union). Inter-stage inputs unwrap via
+ *  `Resolved<>`; this does not — the async colour stays visible in the read. */
+export type PipelineRead<Ups extends unknown[], Last> =
+  UpstreamColor<Ups> extends 'def'
+    ? Promise<Awaited<Surface<Last>>>
+    : UpstreamColor<Ups> extends 'maybe'
+      ? Surface<Last> | Promise<Awaited<Surface<Last>>>
+      : Surface<Last>
 
 /** True if `x` looks like a pulse signal accessor (a function carrying NODE). */
 function isSignalAccessor(x: unknown): x is Signal<unknown> {
