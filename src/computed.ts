@@ -3,7 +3,7 @@ import { isGeneratorFunction, NotReadyYet, resolvedPromise, track, type PromiseS
 import { runStage } from './driver'
 import { isPromise } from './is-promise'
 import { getOwner, routeError, registerWithOwner } from './owner'
-import { makeAccessor, NODE, signal, type Accessor, type Signal } from './signal'
+import { makeAccessor, NODE, signal, signalWithNode, type Accessor, type Signal } from './signal'
 import { registerPending, lookupPending } from './pending'
 import { requestFlush } from './scheduler'
 
@@ -146,7 +146,33 @@ function makeStageNode(
 
   // Published view value: settle handler updates this DIRECTLY (out-of-band)
   // so body doesn't re-run on settle. Consumers reading the accessor get this.
-  const [publishedValue, setPublishedValue] = signal<unknown>(UNRESOLVED as unknown)
+  const [publishedValue, setPublishedValue, publishedNode] = signalWithNode<unknown>(
+    UNRESOLVED as unknown,
+  )
+
+  // Speculation: give the published node a recipe so the overlay can recompute this
+  // stage INSIDE a speculative scope. `readValue` only takes the defaultRecipe
+  // branch when the scope is not root, so the committed path below is untouched —
+  // but under an action, reading this computed runs the stage into a per-scope slot,
+  // and the upstream reads inside it resolve to their speculative values. That is
+  // what lets a speculative write flow into derived state.
+  publishedNode.defaultRecipe = () => {
+    let input: unknown = undefined
+    if (inputAccessor !== null) {
+      input = inputAccessor()
+      if (isPromise(input)) {
+        const st = track(input as Promise<unknown>)
+        // A settled upstream unwraps, as on the committed path. A still-pending one
+        // is handed back as the promise: the suspend/settle machinery is r3-driven
+        // and does not run inside a speculation (see the note in the speculation
+        // tests) — async under speculation is not supported yet.
+        if (st.status === 'fulfilled') input = st.value
+        else return input
+      }
+    }
+    const outcome = runStage(stage, input)
+    return outcome.pending ? outcome.promise : outcome.value
+  }
 
   // Publish a fresh fulfilled promise straight to the r3 backing node. This runs
   // in an onSettle .then handler (async context, getContext()===null); writing

@@ -11,7 +11,7 @@ import {
 import { requestFlush } from './scheduler'
 import { isPromise } from './is-promise'
 import { track } from './async'
-import { readValue, signalNode, writeValue } from './scope'
+import { readValue, signalNode, writeValue, type Node } from './scope'
 
 /** The underlying r3 node behind any pulse signal or computed accessor. */
 type R3Node<T> = R3Signal<T> | R3Computed<T>
@@ -51,6 +51,15 @@ export function makeAccessor<T>(node: R3Node<T>): Signal<T> {
  *  auto-resolved. For async derivations use `computed(() => fetchX())` or
  *  read a Promise-valued signal at the leaf via `use(signal())`. */
 export function signal<T>(initial: T): [Accessor<T>, Setter<T>] {
+  const [accessor, setter] = signalWithNode(initial)
+  return [accessor, setter]
+}
+
+/** Internal: like `signal()`, but also hands back the scope Node so the caller can
+ *  attach a `defaultRecipe` — which makes the node speculation-aware, since the
+ *  overlay then recomputes it into a per-scope slot instead of reading committed
+ *  state. `computed` uses this for its published value. Not public API. */
+export function signalWithNode<T>(initial: T): [Accessor<T>, Setter<T>, Node<T>] {
   const node = signalNode(initial)
 
   // Eagerly install the .then listener on Promise values (unchanged behavior).
@@ -81,5 +90,5 @@ export function signal<T>(initial: T): [Accessor<T>, Setter<T>] {
     requestFlush()
   }
 
-  return [accessor, setter]
+  return [accessor, setter, node]
 }

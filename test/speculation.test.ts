@@ -40,26 +40,46 @@ test('a computed sees a speculative write commit through', () => {
   expect(committed(doubled)).toBe(10)
 })
 
-// KNOWN GAP — public computeds are not speculation-aware yet.
-//
-// A public `computed()` is an r3 computed (a depTracker plus a publishedValue
-// signal). A speculative write lands in the scope's slot, NOT in the signal's r3
-// backing, so r3 never marks the computed dirty and its body never re-runs under
-// the speculation — `doubled()` inside an action still reads the COMMITTED value.
-//
-// The overlay already has the mechanism (readValue's `defaultRecipe` path
-// recomputes a computed into a fresh per-scope slot), but public computeds never
-// register as scope computedNodes, so they bypass it. Wiring them up is the next
-// piece of work; this test documents the target behaviour and should be unskipped
-// then.
-test.skip('a computed derives from the speculative value inside an action', () => {
+test('a computed derives from the speculative value inside an action', () => {
   const [n, setN] = signal(1)
   const doubled = computed(() => n() * 2)
+  expect(doubled()).toBe(2)
   action(() => {
     setN(5)
     expect(doubled()).toBe(10) // derived from the speculative value
-    expect(committed(doubled)).toBe(2) // derived from committed state
+    expect(committed(doubled)).toBe(2) // derived from committed state — isolated
   })
+  expect(doubled()).toBe(10) // committed through
+})
+
+test('a discarded action leaves derived state untouched', () => {
+  const [n, setN] = signal(1)
+  const doubled = computed(() => n() * 2)
+  expect(doubled()).toBe(2)
+  expect(() =>
+    action(() => {
+      setN(5)
+      expect(doubled()).toBe(10) // speculative derivation
+      throw new Error('nope')
+    }),
+  ).toThrow('nope')
+  expect(doubled()).toBe(2) // the speculative derivation vanished with the scope
+  expect(committed(doubled)).toBe(2)
+})
+
+test('a multi-stage pipeline derives through the speculation', () => {
+  const [n, setN] = signal(1)
+  const pipeline = computed(
+    () => n() + 1,
+    (v: number) => v * 10,
+  )
+  expect(pipeline()).toBe(20)
+  action(() => {
+    setN(4)
+    expect(pipeline()).toBe(50) // (4+1)*10 — recomputed through both stages
+    expect(committed(pipeline)).toBe(20)
+  })
+  expect(pipeline()).toBe(50)
 })
 
 test('committed outside any speculation is just the current value', () => {
