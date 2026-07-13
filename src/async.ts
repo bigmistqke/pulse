@@ -214,3 +214,37 @@ export function* read<T>(x: T): Generator<unknown, Resolved<T>, unknown> {
   }
   return (yield x) as Resolved<T>
 }
+
+/**
+ * Wait-for-all coordination barrier — the plural form of `yield* read(x)`. Use as
+ * `const [a, b] = yield* settled([A, B])` inside a generator stage. Suspends until
+ * EVERY input has settled and resolves to the tuple of fresh values, so a shared
+ * consumer swaps to the new frame atomically (never a half-updated frame).
+ *
+ * Unlike `read`, which is stale-while-revalidate tolerant (it yields the stale
+ * value during a refetch), `settled` awaits each refetching input's IN-FLIGHT
+ * promise — reached through the pending registry (`promiseOf`), not the stale
+ * value the raw read returns — so the frame is genuinely fresh once it resolves.
+ * A settled rejection propagates (via `Promise.all`), routing to the boundary.
+ */
+export function* settled<T extends readonly unknown[]>(
+  inputs: readonly [...T],
+): Generator<unknown, { [K in keyof T]: Resolved<T[K]> }, unknown> {
+  const inflight: Promise<unknown>[] = []
+  for (const x of inputs) {
+    if (isSignalAccessor(x)) {
+      x() // establish the dependency (re-run when this input changes)
+      const p = isPending(x)() ? promiseOf(x)() : null
+      if (p) inflight.push(p)
+    } else if (isPromise(x)) {
+      inflight.push(x as Promise<unknown>)
+    }
+  }
+  // Suspend until every in-flight input has settled — then the frame is coherent.
+  if (inflight.length > 0) yield Promise.all(inflight)
+  // Read the fresh resolved values.
+  return inputs.map((x) => {
+    const v = isSignalAccessor(x) ? (x as () => unknown)() : x
+    return isPromise(v) ? track(v as Promise<unknown>).value : v
+  }) as { [K in keyof T]: Resolved<T[K]> }
+}
