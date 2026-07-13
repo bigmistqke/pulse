@@ -1,4 +1,4 @@
-import { computed as r3Computed, read as r3Read, unwatched, type Computed as R3Computed } from 'r3'
+import { computed as r3Computed, read as r3Read, setSignal as r3SetSignal, unwatched, type Computed as R3Computed, type Signal as R3Signal } from 'r3'
 import { isGeneratorFunction, NotReadyYet, track, type PromiseState, type Resolved } from './async'
 import { AWAITABLE, AWAITABLE_SOURCE, toAwaitable, resolvedAwaitable, type Awaitable } from './awaitable'
 import { runStage } from './driver'
@@ -6,6 +6,7 @@ import { isPromise } from './is-promise'
 import { getOwner, routeError, registerWithOwner } from './owner'
 import { makeAccessor, NODE, signal, type Accessor, type Signal } from './signal'
 import { registerPending, lookupPending } from './pending'
+import { requestFlush } from './scheduler'
 
 /** A pipeline stage of any shape: sync, async, or generator. The return type
  *  is whatever the function returns — sync `R`, async `Promise<R>`, or
@@ -126,6 +127,13 @@ function makeStageNode(
 
   // Sentinel for "first load — no resolved value yet."
   const UNRESOLVED = Symbol('unresolved')
+  // The last value this stage actually resolved to. Kept as a small private
+  // cache even though the published signal already holds a value, because the
+  // two answer different questions: the published value may be a settled value,
+  // a promise still in flight, an error, or the "nothing yet" sentinel above,
+  // while this is only ever the last real resolved value. It is read to tell a
+  // first load apart from a refresh, and to skip re-publishing when a stage
+  // resolves to the same value it had before.
   let lastResolvedValue: unknown = UNRESOLVED
   let suspendedOn: Promise<unknown> | null = null
   let suspendedInput: unknown = undefined
@@ -135,6 +143,15 @@ function makeStageNode(
   // Published view value: settle handler updates this DIRECTLY (out-of-band)
   // so body doesn't re-run on settle. Consumers reading the accessor get this.
   const [publishedValue, setPublishedValue] = signal<unknown>(UNRESOLVED as unknown)
+
+  // The signal setter re-wraps any Promise value when called from outside an r3
+  // computation (getContext()===null). onSettle callbacks run in promise .then
+  // handlers — async context — so setPublishedValue(resolvedAwaitable(v)) would
+  // double-wrap the Awaitable. Write directly to the r3 backing node instead.
+  const publishResolvedAwaitable = (value: unknown): void => {
+    r3SetSignal((publishedValue as Signal<unknown>)[NODE] as R3Signal<unknown>, resolvedAwaitable(value))
+    requestFlush()
+  }
 
   // Reactive pending state. Exposed to `isPending()` via the external
   // registry entry constructed below.
@@ -219,7 +236,7 @@ function makeStageNode(
           }
           lastResolvedValue = r.value
           deferredError = null
-          setPublishedValue(r.value)
+          setPublishedValue(resolvedAwaitable(r.value))
           return null
         }
         stashedResolution = null
@@ -247,7 +264,7 @@ function makeStageNode(
             ) {
               lastResolvedValue = state.value
               deferredError = null
-              setPublishedValue(state.value)
+              publishResolvedAwaitable(state.value)
             }
             // else: same value, no downstream invalidation
           } else if (state.status === 'rejected') {
@@ -277,7 +294,13 @@ function makeStageNode(
         !Object.is(lastResolvedValue, outcome.value)
       ) {
         lastResolvedValue = outcome.value
-        setPublishedValue(outcome.value)
+        // A generator stage keeps its value as an Awaitable after it settles;
+        // a plain synchronous stage publishes the bare value unchanged.
+        if (resumeKind === 'fast-forward') {
+          setPublishedValue(resolvedAwaitable(outcome.value))
+        } else {
+          setPublishedValue(outcome.value)
+        }
       }
       deferredError = null
       return null
@@ -304,7 +327,7 @@ function makeStageNode(
             ) {
               lastResolvedValue = state.value
               deferredError = null
-              setPublishedValue(state.value)
+              publishResolvedAwaitable(state.value)
             }
             setKick(++kickCount)
           } else if (state.status === 'rejected') {

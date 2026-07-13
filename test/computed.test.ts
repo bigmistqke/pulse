@@ -3,6 +3,7 @@ import { computed } from '../src/computed'
 import { effect } from '../src/effect'
 import { signal } from '../src/signal'
 import { read, use } from '../src/async'
+import type { Awaitable } from '../src/awaitable'
 import { isPending, promiseOf } from '../src/pending'
 import { flush, microtaskScheduler, setScheduler, syncScheduler } from '../src/scheduler'
 import { createRoot, catchError } from '../src/owner'
@@ -69,9 +70,11 @@ test('an async stage suspends the pipeline; the value flips to the resolved valu
   expect(beforeSettle).toBeInstanceOf(Promise)
   release(10)
   await tick()
-  // After settle: the rerun stashes the resolved value (reuse-value mode);
-  // the next r3 fn invocation returns it directly without re-invoking the async fn.
-  expect(c()).toBe(11)
+  // After settle: the view stays an Awaitable (uniform-Awaitable read model,
+  // ADR 0011) — now a fresh FULFILLED Awaitable carrying the resolved value.
+  const settled = c() as unknown as Awaitable<number>
+  expect(settled.status).toBe('fulfilled')
+  expect(settled.value).toBe(11)
 })
 
 test('a generator stage with yield* read of a settled value runs synchronously', () => {
@@ -80,7 +83,7 @@ test('a generator stage with yield* read of a settled value runs synchronously',
     const x: number = yield* read(s)
     return x * 2
   })
-  expect(c()).toBe(6)
+  expect(use(c)).toBe(6)
 })
 
 test('a generator stage suspends on a pending promise, resumes on settle', async () => {
@@ -93,7 +96,7 @@ test('a generator stage suspends on a pending promise, resumes on settle', async
   expect(c()).toBeInstanceOf(Promise)
   release(5)
   await tick()
-  expect(c()).toBe(105)
+  expect(use(c)).toBe(105)
 })
 
 test('cross-stage caching: a sync stage downstream of an unchanged stage is not re-run', () => {
@@ -128,7 +131,7 @@ test('a generator stage that try/catches a rejected yield resumes normally', asy
   })
   expect(c()).toBeInstanceOf(Promise)
   await tick()
-  expect(c()).toBe('caught: boom')
+  expect(use(c)).toBe('caught: boom')
 })
 
 test('owned computed is disposed when its root is disposed', () => {
@@ -179,7 +182,7 @@ test('stash is discarded if upstream value changes before kick consumes it', asy
 
   // With the bug: c() === 'first:1' (stale stash consumed despite id=2).
   // With the fix: c() === 'value:2' (stage rerun under the new input).
-  expect(c()).toBe('value:2')
+  expect(use(c)).toBe('value:2')
 })
 
 test('a computed created inside catchError routes its throw to the handler', () => {
@@ -338,7 +341,7 @@ test('refetch with different resolved value: downstream effect re-runs', async (
       return new Promise<number[]>((r) => resolvers.push(r))
     })
     effect(() => {
-      try { observed.push(list()) } catch { /* pending */ }
+      try { observed.push(use(list)) } catch { /* pending */ }
     })
 
     resolvers[0]([1, 2, 3])
@@ -405,7 +408,7 @@ test('stale-while-revalidate: prior value visible during refetch', async () => {
       return new Promise<string>((r) => resolvers.push(r))
     })
     effect(() => {
-      try { valueReads.push(data()) } catch { /* pending */ }
+      try { valueReads.push(use(data)) } catch { /* pending */ }
     })
 
     resolvers[0]('A')
@@ -494,7 +497,7 @@ test('.then-chained Promise identity (unstable per call): no infinite loop, sett
       return fetchPromise.then((r) => r.results)
     })
     effect(() => {
-      try { observed.push(list()) } catch { /* pending */ }
+      try { observed.push(use(list)) } catch { /* pending */ }
     })
 
     underlyingResolvers[0]({ results: [1, 2] })
@@ -561,7 +564,7 @@ test('supersession: stale settle of an old promise is ignored', async () => {
       return new Promise<string>((r) => resolvers.push(r))
     })
     effect(() => {
-      try { observed.push(c()) } catch { /* pending */ }
+      try { observed.push(use(c)) } catch { /* pending */ }
     })
   })
 
@@ -615,7 +618,7 @@ test('promiseOf(computed) returns the in-flight Promise during refetch', async (
     return new Promise<string>((r) => { release = r })
   })
   await tick()
-  expect(list()).toBe('v:1')
+  expect(use(list)).toBe('v:1')
 
   setId(2)
   expect(isPending(list)()).toBe(true)
@@ -670,14 +673,17 @@ describe('computed — NotReadyYet absorbed as suspension (Plan B)', () => {
     await new Promise<void>((r) => queueMicrotask(() => r()))
     activeResolve(10)
     await new Promise<void>((r) => queueMicrotask(() => r()))
-    expect(c()).toBe(10)
+    // Uniform-Awaitable read model: the settled view is a fulfilled Awaitable.
+    // Read .value directly — during SWR-refetch isPending is true, so use(c)
+    // would throw NotReadyYet rather than return the stale value.
+    expect((c() as unknown as Awaitable<number>).value).toBe(10)
     setSrc(2)
     await new Promise<void>((r) => queueMicrotask(() => r()))
-    expect(c()).toBe(10) // SWR-stale
+    expect((c() as unknown as Awaitable<number>).value).toBe(10) // SWR-stale
     expect(isPending(c)()).toBe(true)
     activeResolve(20)
     await new Promise<void>((r) => queueMicrotask(() => r()))
-    expect(c()).toBe(20)
+    expect((c() as unknown as Awaitable<number>).value).toBe(20)
   })
 })
 

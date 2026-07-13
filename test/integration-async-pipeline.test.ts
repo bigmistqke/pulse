@@ -1,5 +1,6 @@
 import { expect, test } from 'vitest'
-import { computed, read, signal, type Resolved } from '../src/index'
+import { computed, read, signal, use, type Resolved } from '../src/index'
+import type { Awaitable } from '../src/awaitable'
 
 /** Resolve after all microtasks have drained (a macrotask boundary). */
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
@@ -22,7 +23,7 @@ test('end-to-end: signal -> sync stage -> async stage -> generator stage', async
 
   await tick()
 
-  expect(pipeline()).toBe('result=FETCHED:10')
+  expect(use(pipeline)).toBe('result=FETCHED:10')
 })
 
 test('pipeline re-runs when its signal input changes', async () => {
@@ -32,15 +33,17 @@ test('pipeline re-runs when its signal input changes', async () => {
     async (n: number) => `value:${n}`,
   )
   await tick()
-  expect(pipeline()).toBe('value:1')
+  expect(use(pipeline)).toBe('value:1')
 
   setId(2)
   // Plan 6: stale-while-revalidate. After the write, the prior resolved value
   // ('value:1') stays visible until the new promise settles. `isPending(pipeline)`
   // would be true during the refetch window for callers that want to observe it.
-  expect(pipeline()).toBe('value:1')
+  // During refetch isPending is true, so read the SWR-stale Awaitable's .value
+  // directly (use() would throw NotReadyYet).
+  expect((pipeline() as unknown as Awaitable<string>).value).toBe('value:1')
   await tick()
-  expect(pipeline()).toBe('value:2')
+  expect(use(pipeline)).toBe('value:2')
 })
 
 test('Resolved<T> type unwraps signals, promises, and generators (compile-time)', () => {
