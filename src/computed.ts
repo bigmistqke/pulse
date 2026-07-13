@@ -1,6 +1,5 @@
 import { computed as r3Computed, read as r3Read, setSignal as r3SetSignal, unwatched, type Computed as R3Computed, type Signal as R3Signal } from 'r3'
-import { isGeneratorFunction, NotReadyYet, track, type PromiseState, type Resolved } from './async'
-import { AWAITABLE, AWAITABLE_SOURCE, toAwaitable, resolvedAwaitable, type Awaitable } from './awaitable'
+import { isGeneratorFunction, NotReadyYet, resolvedPromise, track, type PromiseState, type Resolved } from './async'
 import { runStage } from './driver'
 import { isPromise } from './is-promise'
 import { getOwner, routeError, registerWithOwner } from './owner'
@@ -146,10 +145,10 @@ function makeStageNode(
 
   // The signal setter re-wraps any Promise value when called from outside an r3
   // computation (getContext()===null). onSettle callbacks run in promise .then
-  // handlers — async context — so setPublishedValue(resolvedAwaitable(v)) would
-  // double-wrap the Awaitable. Write directly to the r3 backing node instead.
-  const publishResolvedAwaitable = (value: unknown): void => {
-    r3SetSignal((publishedValue as Signal<unknown>)[NODE] as R3Signal<unknown>, resolvedAwaitable(value))
+  // handlers — async context — so setPublishedValue(resolvedPromise(v)) would
+  // re-register the promise. Write directly to the r3 backing node instead.
+  const publishResolvedPromise = (value: unknown): void => {
+    r3SetSignal((publishedValue as Signal<unknown>)[NODE] as R3Signal<unknown>, resolvedPromise(value))
     requestFlush()
   }
 
@@ -176,11 +175,12 @@ function makeStageNode(
     suspendedInput = input
     setPendingSig(true)
     if (lastResolvedValue === UNRESOLVED) {
-      setPublishedValue(toAwaitable(p, undefined))
+      track(p)
+      setPublishedValue(p)
     }
-    // else: stale-while-revalidate — prior value stays published (no Awaitable update
-    // during SWR: publishing a fresh object would fire downstream unnecessarily, breaking
-    // the Object.is change-gate tests)
+    // else: stale-while-revalidate — prior value stays published (no republish
+    // during SWR: publishing a fresh promise would fire downstream unnecessarily,
+    // breaking the Object.is change-gate tests)
     const rerun = () => {
       if (suspendedOn !== p) return // superseded
       onSettle(track(p))
@@ -199,20 +199,19 @@ function makeStageNode(
       if (inputAccessor !== null) {
         input = inputAccessor()
         if (isPromise(input)) {
-          // Fulfilled Awaitable from an upstream migrated stage: unwrap to the bare
-          // resolved value and fall through to normal stage execution.
-          if (AWAITABLE in (input as object) && (input as Awaitable<unknown>).status === 'fulfilled') {
-            input = (input as Awaitable<unknown>).value
+          const st = track(input as Promise<unknown>)
+          if (st.status === 'fulfilled') {
+            // Settled upstream: unwrap to the bare resolved value and fall
+            // through to normal stage execution.
+            input = st.value
           } else {
-            // Raw promise OR pending Awaitable: mirror upstream suspension.
-            const source = (AWAITABLE in (input as object))
-              ? (input as any)[AWAITABLE_SOURCE] as Promise<unknown>
-              : input as Promise<unknown>
+            // Pending upstream: mirror suspension on the promise itself.
             stashedResolution = null
             suspendedOn = null
             setPendingSig(true)
             if (lastResolvedValue === UNRESOLVED) {
-              setPublishedValue(toAwaitable(source, undefined))
+              track(input as Promise<unknown>)
+              setPublishedValue(input)
             }
             // else: stale-while-revalidate — prior value stays published
             return null
@@ -236,7 +235,7 @@ function makeStageNode(
           }
           lastResolvedValue = r.value
           deferredError = null
-          setPublishedValue(resolvedAwaitable(r.value))
+          setPublishedValue(resolvedPromise(r.value))
           return null
         }
         stashedResolution = null
@@ -264,7 +263,7 @@ function makeStageNode(
             ) {
               lastResolvedValue = state.value
               deferredError = null
-              publishResolvedAwaitable(state.value)
+              publishResolvedPromise(state.value)
             }
             // else: same value, no downstream invalidation
           } else if (state.status === 'rejected') {
@@ -294,10 +293,10 @@ function makeStageNode(
         !Object.is(lastResolvedValue, outcome.value)
       ) {
         lastResolvedValue = outcome.value
-        // A generator stage keeps its value as an Awaitable after it settles;
+        // A generator stage publishes its settled value as a resolved promise;
         // a plain synchronous stage publishes the bare value unchanged.
         if (resumeKind === 'fast-forward') {
-          setPublishedValue(resolvedAwaitable(outcome.value))
+          setPublishedValue(resolvedPromise(outcome.value))
         } else {
           setPublishedValue(outcome.value)
         }
@@ -327,7 +326,7 @@ function makeStageNode(
             ) {
               lastResolvedValue = state.value
               deferredError = null
-              publishResolvedAwaitable(state.value)
+              publishResolvedPromise(state.value)
             }
             setKick(++kickCount)
           } else if (state.status === 'rejected') {
