@@ -9,6 +9,8 @@ import {
   type Computed as R3Computed,
   type Signal as R3Signal,
 } from 'r3'
+import { isGeneratorFunction } from './is-generator-function'
+import { isPromise } from './is-promise'
 
 /** Graph identity wrapping a recipe. Value is not in the Node — it is produced
  *  by handing the Node to a read walk. Per Q6. */
@@ -301,17 +303,96 @@ export function committed<T>(s: () => T): T {
   return runInScope(ROOT_SCOPE, undefined, s)
 }
 
-/** Open a speculative child of the current scope, run `body` under it, then
- *  commit on normal return or discard on throw (rethrowing). Nested actions
- *  parent to the enclosing scope, so their commit promotes to it (two-stage). */
-export function action(body: () => void): void {
+/**
+ * Open a speculative child of the current scope and run `body` under it. Every
+ * write inside is speculative until the action commits; a discard rolls them all
+ * back. Nested actions parent to the enclosing scope, so their commit promotes to
+ * it (two-stage).
+ *
+ * The body may take three shapes:
+ *
+ * - **Sync** — commits on return, discards on throw (rethrowing).
+ *
+ * - **Async** (`async () => …`) — the SYNCHRONOUS PREFIX runs under the scope, and
+ *   the action commits or discards when the returned promise settles. This covers
+ *   the common optimistic shape: write, then await the mutation.
+ *
+ *   SHARP EDGE: only the prefix is scoped. After the first `await` the async
+ *   function returns to us, so the ambient scope unwinds; the continuation is
+ *   scheduled by the engine in a later microtask, where the scope is back to root.
+ *   A write made after an `await` therefore lands in COMMITTED state immediately —
+ *   and the action's later commit can overwrite it. Use a generator body if you
+ *   need to write after awaiting.
+ *
+ * - **Generator** (`function* () { … yield* read(p) … }`) — fully scoped. Pulse
+ *   drives the resumption itself, so it re-enters the scope on every resume and a
+ *   write after a `yield*` is still speculative. Commits when the body completes,
+ *   discards when it throws.
+ */
+export function action(body: () => Generator<unknown, void, unknown>): Promise<void>
+export function action(body: () => Promise<void>): Promise<void>
+export function action(body: () => void): void
+export function action(body: () => unknown): void | Promise<void> {
   const scope = createScope(getCurrentScope(), 'speculative')
-  let ok = false
+
+  if (isGeneratorFunction(body)) {
+    return driveGeneratorAction(scope, body as () => Generator<unknown, void, unknown>)
+  }
+
+  let result: unknown
   try {
-    runInScope(scope, undefined, body)
-    ok = true
-  } finally {
-    if (ok) commit(scope)
-    else discard(scope)
+    result = runInScope(scope, undefined, body)
+  } catch (e) {
+    discard(scope)
+    throw e
+  }
+
+  // Async body: the prefix already ran under the scope; settle decides the fate.
+  if (isPromise(result)) {
+    return (result as Promise<unknown>).then(
+      () => {
+        commit(scope)
+      },
+      (e: unknown) => {
+        discard(scope)
+        throw e
+      },
+    )
+  }
+
+  commit(scope)
+  return undefined
+}
+
+/** Drive a generator action body. The await happens OUTSIDE the scope (nothing
+ *  writes there); every resume happens INSIDE it, which is what keeps writes made
+ *  after a `yield*` speculative. Deliberately not the stage driver: an action body
+ *  is an imperative one-shot with side effects, not a memoized derivation, so it
+ *  must never re-run from the top. */
+async function driveGeneratorAction(
+  scope: Scope,
+  body: () => Generator<unknown, void, unknown>,
+): Promise<void> {
+  try {
+    const gen = runInScope(scope, undefined, body)
+    let step = runInScope(scope, undefined, () => gen.next())
+    while (!step.done) {
+      let resumed: unknown
+      let failure: unknown
+      let failed = false
+      try {
+        resumed = await step.value
+      } catch (e) {
+        failed = true
+        failure = e
+      }
+      step = runInScope(scope, undefined, () =>
+        failed ? gen.throw(failure) : gen.next(resumed),
+      )
+    }
+    commit(scope)
+  } catch (e) {
+    discard(scope)
+    throw e
   }
 }
