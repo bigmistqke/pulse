@@ -50,15 +50,34 @@ export function Failed(props: FailedProps): Accessor<unknown> {
   // controller — so a binding that re-runs and re-reports stays ONE entry.
   const failedSet = new Map<BindingController, FailureReport>()
 
-  const [activeSig, setActiveSig] = signal(false)
-  // The error the fallback is shown. Held in its own signal so the fallback
-  // re-renders when the FIRST error changes while the boundary stays active.
-  const [errorSig, setErrorSig] = signal<unknown>(null)
+  /**
+   * The boundary's collection state, published as ONE signal so that a change is ONE
+   * graph transition. Two signals (active, error) publish two, and under the sync
+   * scheduler the selector re-runs in between — rendering the fallback with an error
+   * that has already been cleared on the way out, or with a stale one on the way in.
+   * Neither write order is safe; the state has to move atomically.
+   */
+  interface Collection {
+    readonly active: boolean
+    readonly error: unknown
+  }
+
+  // Mirrored in a plain variable so `recompute` can skip a no-op write without an
+  // untracked read. The skip is load-bearing: a single rejection re-runs a binding
+  // several times and it re-reports `failed` each time, and the boundary must not
+  // re-render its fallback for reports that change nothing.
+  let current: Collection = { active: false, error: null }
+  const [collection, setCollection] = signal<Collection>(current)
 
   const recompute = () => {
     const first: FailureReport | undefined = failedSet.values().next().value
-    setErrorSig(first === undefined ? null : first.error)
-    setActiveSig(failedSet.size > 0)
+    const next: Collection = {
+      active: failedSet.size > 0,
+      error: first === undefined ? null : first.error,
+    }
+    if (next.active === current.active && Object.is(next.error, current.error)) return
+    current = next
+    setCollection(next)
   }
 
   const reset = (): void => {
@@ -72,7 +91,7 @@ export function Failed(props: FailedProps): Accessor<unknown> {
 
   const scope: FailedScope = {
     kind: 'failed',
-    active: activeSig,
+    active: () => collection().active,
     register(): BindingController {
       const controller: BindingController = {
         report(state): void {
@@ -100,7 +119,8 @@ export function Failed(props: FailedProps): Accessor<unknown> {
   const subtree: unknown = runWithOwner(boundaryOwner, props.children)
 
   return () => {
-    if (!activeSig()) return subtree
-    return props.fallback(errorSig(), reset)
+    const { active, error } = collection()
+    if (!active) return subtree
+    return props.fallback(error, reset)
   }
 }
