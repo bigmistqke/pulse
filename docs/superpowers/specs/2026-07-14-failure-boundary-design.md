@@ -93,7 +93,7 @@ Nearest wins. A `catchError` nested inside a `<Failed>` still intercepts, and `<
 
 **The collection unit is the binding, not the failed node.** This is forced rather than chosen: a computed is frequently created outside `render()` — as it is in the test that prompted this work — so the failed node is not under the boundary at all. Only its consumer is. This also coincides with Solid, where every JSX hole is itself a node, so collecting consumers and collecting nodes are the same act.
 
-### 4. Why this dissolves the triple delivery
+### 4. Why this dissolves the triple delivery — and the limit of that claim
 
 Walking the failing case through the new model:
 
@@ -102,7 +102,23 @@ Walking the failing case through the new model:
 3. Each re-run throws and reports `{ status: 'failed' }` through **the same controller**.
 4. The scope's collection is a set keyed on controller. Three reports, one entry. `active` flips true once. The fallback renders once.
 
-The redundant re-runs still happen. They stop being observable, which is the point of the collection model: idempotence by construction rather than by dedupe.
+**Corrected after implementation. The original claim here — "idempotence by construction" — was too strong, and the code as built does not earn it.**
+
+The collection dedupes the *entry* by controller, but the boundary also has to decide whether a re-report changes what it renders, and it does that by comparing the error with `Object.is`. So the guarantee is idempotence **per distinct error object**, not per rejection.
+
+In the ordinary case they coincide: `use(x)` re-throws the *same* parked `Error` on each of the three re-runs, so the identity is stable and the fallback renders once. But a binding that wraps the error —
+
+```tsx
+<span>{() => { try { return use(c) } catch (e) { throw new Error(`wrapped: ${e.message}`) } }}</span>
+```
+
+— constructs a fresh `Error` on each re-run. Three distinct objects, three renders. Measured: `fallbackRenders === 3`.
+
+Suppressing the overwrite (keeping whichever error arrived first until the binding recovers) does not fix this, it trades one bug for another: a binding *can* legitimately fail with a genuinely different error without recovering in between — a dependency changes and the new request rejects differently — and the boundary would then show a stale error indefinitely.
+
+The honest diagnosis is that this is not a defect in the collection at all. It is a symptom of the **redundant re-runs**, which are a known, tracked follow-up (see "Out of scope"). One settle produces three graph transitions instead of one, and the collection can hide that only when the error's identity happens to be stable across them. Fix the re-runs — make one settle one transition — and the boundary renders once for any error, wrapped or not, by construction rather than by coincidence.
+
+Until then the accurate statement is: **one rejection renders the fallback once, provided the thrown error keeps its identity across the binding's re-runs — which it does unless the binding constructs a new error itself.**
 
 ### 5. What `<Failed>` renders
 
