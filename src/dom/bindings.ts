@@ -53,6 +53,10 @@ function reactiveCommit<T>(
         ensureController()?.report({ status: 'throwing' })
         throw e
       }
+      // A real failure is not a pending state: a binding that fails must leave
+      // the boundary's pending collection, or the boundary can never see its
+      // pending count reach zero and its gate stays shut forever.
+      controller?.report({ status: 'idle' })
       throw e
     }
     const { value, engagedTransition } = result
@@ -166,6 +170,10 @@ export function insertChild(parent: Node, value: unknown): void {
           // bypasses the outer scope registration.
           throw e
         }
+        // A real failure is not a pending state: a binding that fails must
+        // leave the boundary's pending collection, or the boundary can never
+        // see its pending count reach zero and its gate stays shut forever.
+        controller?.report({ status: 'idle' })
         throw e
       }
       // Successful compute. Build the commit. The commit captures oldRunOwner

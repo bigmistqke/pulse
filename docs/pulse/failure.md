@@ -218,7 +218,7 @@ Reference: [`../async/deep-dives/react-modern.md`](../async/deep-dives/react-mod
 - `action()` body is a generator; throws propagate via the iterator; the action's promise rejects.
 - `createOptimistic` reverts unconditionally at transition completion — whether the transition succeeded or failed. (The pattern: write both the overlay and the committed source; on failure, only the overlay reverts.)
 - Identity-based stale-discard for async: `_inFlight !== result` silently drops superseded async resolutions.
-- *Boundary-level retry — and importantly, recipe-targeted:* `<ErrorBoundary>` / `<Errored>` catches; the fallback receives a `reset` callback. Because the reactive runtime catches the throw at the *specific recipe* being recomputed, the framework knows which computation failed. On `reset()`, the framework re-marks that specific recipe (not the whole subtree) for re-evaluation; downstream consumers see the new value through normal invalidation. This is genuinely "self-healing" — the framework owns the provenance, no user code needs to specify what to retry.
+- *Boundary-level retry — and importantly, recipe-targeted:* `<ErrorBoundary>` / `<Failed>` catches; the fallback receives a `reset` callback. Because the reactive runtime catches the throw at the *specific recipe* being recomputed, the framework knows which computation failed. On `reset()`, the framework re-marks that specific recipe (not the whole subtree) for re-evaluation; downstream consumers see the new value through normal invalidation. This is genuinely "self-healing" — the framework owns the provenance, no user code needs to specify what to retry.
 - *No action-level retry primitive:* user re-constructs the action; each invocation is a new transition; no per-handle identity that survives to retry.
 - No first-class failure categorization for ordinary errors; `NotReadyError` is reserved for suspension. `StatusError` exists internally.
 
@@ -250,7 +250,7 @@ Per-framework support:
 | | Boundary retry | Recipe retry | Action-body retry |
 | --- | --- | --- | --- |
 | React modern | ✓ via `<ErrorBoundary>` `reset` | partial (re-mount-based, not recipe-targeted in the reactive sense) | ✗ |
-| Solid 2.x | ✓ | ✓ via `<Errored>` `reset` — framework knows which recipe | ✗ |
+| Solid 2.x | ✓ | ✓ via `<Failed>` `reset` — framework knows which recipe | ✗ |
 | Svelte 5 | ✓ via `<svelte:boundary>` `failed` snippet | partial | ✗ |
 
 **Common patterns across frameworks:**
@@ -358,9 +358,9 @@ The cross-framework survey above showed that "retry" splits into three things (b
 
 #### 3a. Recipe-failure tracking + boundary-driven recipe retry
 
-The Solid `<Errored>` / `reset()` pattern. The framework owns the retry *provenance* — no user code specifies what to retry, because the engine already knows.
+The Solid `<Failed>` / `reset()` pattern. The framework owns the retry *provenance* — no user code specifies what to retry, because the engine already knows.
 
-Mechanism: when a recipe throws during `invoke(node, scope)`, the engine catches at the recipe boundary and records `{ failedNode, failedScope, error, attempt }` on the slot. The error propagates to a containing boundary (similar to `<Loading>` but for errors — call it `<Errored>` provisionally). The boundary's fallback receives `(error, retry)`. Calling `retry()` re-marks the specific failed slot for re-evaluation; the engine re-invokes that recipe; if it succeeds, the value propagates downstream through normal invalidation and the boundary clears.
+Mechanism: when a recipe throws during `invoke(node, scope)`, the engine catches at the recipe boundary and records `{ failedNode, failedScope, error, attempt }` on the slot. The error propagates to a containing boundary (similar to `<Loading>` but for errors — call it `<Failed>` provisionally). The boundary's fallback receives `(error, retry)`. Calling `retry()` re-marks the specific failed slot for re-evaluation; the engine re-invokes that recipe; if it succeeds, the value propagates downstream through normal invalidation and the boundary clears.
 
 What "self-healing" actually means here, precisely: the *retry path is built-in and targeted* — not that the framework auto-retries on its own. The framework provides provenance + targeted re-execution machinery; the user provides the trigger (typically a click handler on a "retry" button in the fallback UI). No auto-execution of code the framework can't verify is safe to re-run.
 
@@ -386,7 +386,7 @@ This differs from 3a in *who triggers* and *what's identified*, not in correctne
 
 - *Identification:* user-held handle (the action's identity) vs framework-tracked recipe (the node + scope).
 - *Trigger source:* user code (`handle.retry()`) vs user UI in the boundary fallback (`reset()`).
-- *Anchored on:* a specific action's identity vs an `<Errored>` boundary's subtree.
+- *Anchored on:* a specific action's identity vs an `<Failed>` boundary's subtree.
 
 Both rely on the same idempotency discipline. The framework provides the targeted retry mechanism; the user is responsible for ensuring the retried body / recipe is safe to re-execute. Same footgun in both cases — re-running re-fires side effects (network POSTs, ID generation, logging, etc.).
 
@@ -407,7 +407,7 @@ Open sub-questions: does retry produce a new handle or reuse the original (with 
 - *Boundary-anchored failure UX:* "an error happened in this subtree; show a fallback with retry." Natural fit for derivations that throw — the user doesn't have a handle to call; the failure manifests in the rendering path. 3a provides the targeted retry built into the boundary.
 - *Handle-anchored failure UX:* "the user clicked save; it failed; click retry." Natural fit for action invocations the user explicitly initiated. 3b provides the retry method on the handle the caller already has.
 
-The split mirrors what Solid does (`<Errored>` for the first, user re-invocation for the second). The improvement pulse can offer over Solid is making *both* first-class — Solid only does the first; the second is hand-rolled by every app.
+The split mirrors what Solid does (`<Failed>` for the first, user re-invocation for the second). The improvement pulse can offer over Solid is making *both* first-class — Solid only does the first; the second is hand-rolled by every app.
 
 #### Boundary-level retry (the third kind)
 
@@ -500,7 +500,7 @@ Genuinely undecided:
 
 Deferred (scope-or-shape blockers):
 
-- **`<Errored>` boundary shape.** If pulse ships recipe-failure tracking (3a), the boundary primitive needs to be designed. JSX boundary (parallel to `<Loading>`)? Non-JSX `errorBoundary(node, fallback)` helper? Effect-level catch? Defer until the broader boundary story (which `<Loading>` also sits inside, and which pulse hasn't designed yet) crystallizes.
+- **`<Failed>` boundary shape.** If pulse ships recipe-failure tracking (3a), the boundary primitive needs to be designed. JSX boundary (parallel to `<Loading>`)? Non-JSX `errorBoundary(node, fallback)` helper? Effect-level catch? Defer until the broader boundary story (which `<Loading>` also sits inside, and which pulse hasn't designed yet) crystallizes.
 - **Persistence for queue-for-later (F5).** Pulse doesn't have a built-in mechanism to serialize a failed action and re-instantiate it later. Library territory; needs persistence integration outside pulse's core.
 - **Timeout primitives.** F14 wants a deadline; current pulse has none. Apps can build with `Promise.race` but it's manual. Worth considering a `withDeadline(action, ms)` library helper or a framework primitive; defer until concrete need.
 - **Failure observability for `Q3` consumers.** Effects subscribing to a signal don't see action failure directly — they just see the signal's value not change (or revert). Should consumers have a way to observe "the last action on this signal failed"? Probably out of scope — application-level concern (wire it explicitly via the handle's `onFailure`).
@@ -517,7 +517,7 @@ Per the application/framework split principle, the minimum-viable ship set:
 
 **4. Two retry primitives.**
 
-- *Recipe retry, boundary-anchored.* Engine catches throws at the recipe boundary; records `{ failedNode, failedScope, error, attempt }` on the slot; an `<Errored>`-style boundary receives `(error, retry)`; `retry()` re-marks just that recipe for re-evaluation. Framework owns the targeting; user triggers via boundary UI. Solid's `<Errored>` model.
+- *Recipe retry, boundary-anchored.* Engine catches throws at the recipe boundary; records `{ failedNode, failedScope, error, attempt }` on the slot; an `<Failed>`-style boundary receives `(error, retry)`; `retry()` re-marks just that recipe for re-evaluation. Framework owns the targeting; user triggers via boundary UI. Solid's `<Failed>` model.
 - *Action-body retry, handle-anchored.* `handle.retry()` re-runs the same body in a fresh scope; preserves handle identity; bumps an attempt counter. Covers F1/F3/F5/F9 directly.
 
 These are different mechanisms for different patterns (boundary-anchored UI recovery vs handle-anchored action retry). Both rely on the same user discipline for idempotency — the framework provides targeted re-execution; correctness on re-execution is the user's. Both fit pulse's existing architecture cleanly.

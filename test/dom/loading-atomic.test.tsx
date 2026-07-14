@@ -764,7 +764,7 @@ test('use(computed) inside binding: two-stage pipeline (async + sync map) propag
 // KNOWN BUG: top-level COMPONENT children in a Loading's Fragment can't reach
 // the Loading scope via useLoading(). Their bindings get wrapped by the OUTER
 // hole's insertChild under the outer's runOwner (not boundaryOwner), so
-// findLoadingScope walks past Loading. Workaround: nest the component in any
+// findBoundaryScope walks past Loading. Workaround: nest the component in any
 // static element (`<div><Show ...>` works fine). Real fix requires either
 // pre-resolving loadedSubtree to DOM under boundaryOwner (snapshot-stale
 // issue) or a marker-based "wrap-under-this-owner" hint on values returned

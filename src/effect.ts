@@ -124,7 +124,12 @@ function stagedEffect(
         ensureController()?.report({ status: 'throwing' })
         return
       }
-      // A real failure. It is graph state, not an event: report it to the nearest
+      // A real failure is not a pending state: this binding registered a
+      // pending controller above when it threw NotReadyYet, and it must
+      // leave that collection now, or the boundary's pending count can never
+      // reach zero and its gate stays shut forever.
+      controller?.report({ status: 'idle' })
+      // It is graph state, not an event: report it to the nearest
       // <Failed> boundary, which collects it and selects its fallback. The same
       // controller reporting repeatedly is one entry, so a single rejection that
       // re-runs this body several times still renders one fallback.
