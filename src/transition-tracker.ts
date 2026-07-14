@@ -18,6 +18,9 @@
  *   throws its parked failure.
  * - `takeFailureSource()`: called by the catch handler after the throw has
  *   unwound, to read and clear the recorded source.
+ * - `clearFailureSource()`: called at the entry of a consumer that does not go
+ *   through `runBindingCompute` (a plain `effect()`), to clear a stale source
+ *   left behind by an earlier, unrelated compute without reading it.
  *
  * The prev/finally restoration in `runBindingCompute` correctly handles nested
  * compute frames (e.g., a reactive child inside a reactive prop) for DOM bindings,
@@ -58,6 +61,18 @@ export function takeFailureSource(): Accessor<unknown> | null {
   const source = failureSourceInCurrentBinding
   failureSourceInCurrentBinding = null
   return source
+}
+
+/**
+ * Clear the recorded failure source without reading it. Called at the ENTRY of a
+ * consumer that does not go through `runBindingCompute` (a plain `effect()`), to
+ * satisfy the invariant that every consumer clears the source on entry rather than
+ * only when a catch handler happens to run. Unlike `takeFailureSource()`, the
+ * caller has no use for the discarded value — it exists purely to prevent a stale
+ * source (set by an earlier, unrelated compute) from being misattributed here.
+ */
+export function clearFailureSource(): void {
+  failureSourceInCurrentBinding = null
 }
 
 /**

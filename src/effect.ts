@@ -13,7 +13,7 @@ import {
   type FailedScope,
 } from './owner'
 import { signal } from './signal'
-import { runBindingCompute, takeFailureSource } from './transition-tracker'
+import { clearFailureSource, runBindingCompute, takeFailureSource } from './transition-tracker'
 
 /** A pipeline stage: takes the prior stage's resolved value, returns sync/Promise/generator. */
 type Stage<In, Out> = (value: In) => Out
@@ -230,7 +230,7 @@ function singleArgEffect(fn: () => void): void {
     // `<Failed>` boundary above it, so `takeFailureSource()` is never reached below)
     // would leave `poisoned`'s accessor parked in module state, and a later,
     // unrelated failure under a real boundary would inherit it as its `source`.
-    takeFailureSource()
+    clearFailureSource()
     try {
       fn()
       suspendedOn = null

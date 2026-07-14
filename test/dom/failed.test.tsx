@@ -390,3 +390,77 @@ test('a stale failure source from a swallowed, unboundaried effect does not leak
   // not have been reset and recomputed.
   expect(poisonedRuns).toBe(2)
 })
+
+/**
+ * The previous test's swallowing effect still enters a catch, so it cannot tell
+ * apart the real fix (the source is cleared at the START of the binding compute)
+ * from a weaker one (the source is cleared only inside the CATCH handler that
+ * follows a throw). This test forces that distinction: the effect below reads a
+ * failing computed inside its OWN `try/catch`, so the source gets marked but the
+ * effect's OWN catch swallows it — the effect body then returns NORMALLY, without
+ * throwing. A clear-in-catch fix never runs at all here, since `singleArgEffect`
+ * never sees a throw to catch, and the marked source would stay parked in module
+ * state. Clear-on-entry does not depend on a throw happening at all.
+ */
+test('a source marked and swallowed by the effect body itself (no throw reaches singleArgEffect) does not leak into an unrelated <Failed> reset', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+
+  let poisonedRuns = 0
+  const poisoned = computed(() => {
+    poisonedRuns++
+    return Promise.reject(new Error('poisoned'))
+  })
+
+  // No <Failed> boundary anywhere near this effect. It reads `poisoned` inside its
+  // OWN try/catch: `use(poisoned)` marks `poisoned` as the failure source and
+  // throws, the effect's own catch swallows that throw, and the effect body
+  // returns normally — `singleArgEffect`'s body never sees a throw at all.
+  effect(() => {
+    try {
+      use(poisoned)
+    } catch {
+      // swallowed here, on purpose — the effect body completes normally
+    }
+  })
+
+  await tick()
+  flush()
+  expect(poisonedRuns).toBe(1)
+
+  // Now something entirely unrelated: a plain effect, under a real <Failed>
+  // boundary, that throws a plain error with no computed involved at all — its
+  // true `source` is `null`.
+  let throwIt = true
+  render(
+    () => (
+      <Failed
+        fallback={(error, reset) => (
+          <button on:click={reset}>{(error as Error).message}</button>
+        )}
+      >
+        {() => {
+          effect(() => {
+            if (throwIt) throw new Error('plain')
+          })
+          return <p>ok</p>
+        }}
+      </Failed>
+    ),
+    target,
+  )
+
+  flush()
+  expect(target.textContent).toBe('plain')
+
+  throwIt = false
+  target.querySelector('button')!.click()
+  flush()
+
+  // The boundary's own binding recovers...
+  expect(target.textContent).toBe('ok')
+  // ...but `poisoned` — which this boundary never had anything to do with, and
+  // which the first effect had already swallowed on its own — must not have been
+  // reset and recomputed.
+  expect(poisonedRuns).toBe(1)
+})
