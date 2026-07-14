@@ -147,11 +147,12 @@ test('an effect re-throwing after a signal change routes the new throw too', () 
   expect((errors[1] as Error).message).toBe('fail 2')
 })
 
-test('effect that suspends increments nearest loadingScope', async () => {
+test('effect that suspends increments nearest pending boundary scope', async () => {
   setScheduler(syncScheduler(flush))
   let count = 0
   const scope: LoadingScope = {
-    pending: () => count > 0,
+    kind: 'pending',
+    active: () => count > 0,
     register: () => ({
       report(state) { count = state.status === 'throwing' ? count + 1 : count > 0 ? count - 1 : 0 },
       unregister() { count = 0 },
@@ -162,7 +163,7 @@ test('effect that suspends increments nearest loadingScope', async () => {
   const p = new Promise<number>((r) => { resolveP = r })
 
   await createRoot(async (dispose) => {
-    getOwner()!.loadingScope = scope
+    getOwner()!.boundaries.pending = scope
     effect(() => { use(p) })
     expect(count).toBe(1) // suspended → throwing reported
     resolveP(42)
@@ -175,11 +176,12 @@ test('effect that suspends increments nearest loadingScope', async () => {
   setScheduler(microtaskScheduler(flush))
 })
 
-test('effect disposal while pending unregisters from loadingScope', () => {
+test('effect disposal while pending unregisters from the pending boundary scope', () => {
   setScheduler(syncScheduler(flush))
   let count = 0
   const scope: LoadingScope = {
-    pending: () => count > 0,
+    kind: 'pending',
+    active: () => count > 0,
     register: () => ({
       report(state) { count = state.status === 'throwing' ? count + 1 : count > 0 ? count - 1 : 0 },
       unregister() { count = 0 },
@@ -189,7 +191,7 @@ test('effect disposal while pending unregisters from loadingScope', () => {
   const p = new Promise<number>(() => {}) // never settles
 
   const dispose = createRoot((d) => {
-    getOwner()!.loadingScope = scope
+    getOwner()!.boundaries.pending = scope
     effect(() => { use(p) })
     return d
   })
@@ -200,11 +202,12 @@ test('effect disposal while pending unregisters from loadingScope', () => {
   setScheduler(microtaskScheduler(flush))
 })
 
-test('effect that never suspends does not touch loadingScope', () => {
+test('effect that never suspends does not touch the pending boundary scope', () => {
   setScheduler(syncScheduler(flush))
   let count = 0
   const scope: LoadingScope = {
-    pending: () => count > 0,
+    kind: 'pending',
+    active: () => count > 0,
     register: () => ({
       report(state) { count = state.status === 'throwing' ? count + 1 : count > 0 ? count - 1 : 0 },
       unregister() { count = 0 },
@@ -212,7 +215,7 @@ test('effect that never suspends does not touch loadingScope', () => {
     deferOrCommit(commit) { commit() },
   }
   createRoot(() => {
-    getOwner()!.loadingScope = scope
+    getOwner()!.boundaries.pending = scope
     effect(() => { /* sync, no use() */ })
     expect(count).toBe(0)
   })

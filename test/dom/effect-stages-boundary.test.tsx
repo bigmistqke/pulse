@@ -8,7 +8,7 @@ import { effect, flush, microtaskScheduler, setScheduler, syncScheduler } from '
 import { Loading } from '../../src/dom/loading'
 import { render } from '../../src/dom/render'
 import { track, use } from '../../src/async'
-import { createSubOwner, disposeOwner, findLoadingScope, getOwner, runWithOwner } from '../../src/owner'
+import { createSubOwner, disposeOwner, findBoundaryScope, getOwner, runWithOwner } from '../../src/owner'
 
 beforeEach(() => setScheduler(syncScheduler(flush)))
 afterEach(() => {
@@ -81,7 +81,7 @@ test('disposal cancels deferred commits queued in scope', async () => {
       <Loading>
         {() => {
           const currentOwner = getOwner()
-          const scope = findLoadingScope(currentOwner)!
+          const scope = findBoundaryScope(currentOwner, 'pending')!
 
           // Put boundary in pending state BEFORE the effect runs.
           const fakeController = scope.register()

@@ -3,7 +3,7 @@ import { effect } from '../effect'
 import {
   createSubOwner,
   disposeOwner,
-  findLoadingScope,
+  findBoundaryScope,
   getOwner,
   onCleanup,
   runWithOwner,
@@ -27,7 +27,7 @@ function reactiveCommit<T>(
   let controller: BindingController | null = null
   const ensureController = (): BindingController | null => {
     if (controller !== null) return controller
-    const scope = findLoadingScope(parentOwner)
+    const scope = findBoundaryScope(parentOwner, 'pending')
     if (scope === null) return null
     controller = scope.register()
     return controller
@@ -70,7 +70,7 @@ function reactiveCommit<T>(
     // sibling binding that will throw in the same flush may not have
     // reported yet, so scope.pending() is a false-negative at this moment.
     if (engagedTransition) {
-      const scope = findLoadingScope(parentOwner)
+      const scope = findBoundaryScope(parentOwner, 'pending')
       if (scope !== null) {
         scope.deferOrCommit(commit)
         return
@@ -124,7 +124,7 @@ export function insertChild(parent: Node, value: unknown): void {
     let controller: BindingController | null = null
     const ensureController = (): BindingController | null => {
       if (controller !== null) return controller
-      const scope = findLoadingScope(parentOwner)
+      const scope = findBoundaryScope(parentOwner, 'pending')
       if (scope === null) return null
       controller = scope.register()
       return controller
@@ -204,7 +204,7 @@ export function insertChild(parent: Node, value: unknown): void {
       // fire immediately or defer; this avoids the false-negative race when
       // a sibling that will throw in the same flush hasn't reported yet.
       if (engagedTransition) {
-        const scope = findLoadingScope(parentOwner)
+        const scope = findBoundaryScope(parentOwner, 'pending')
         if (scope !== null) {
           scope.deferOrCommit(commit)
           return

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, test } from 'vitest'
 import { flush, microtaskScheduler, render, setScheduler, signal, syncScheduler, useLoading } from '../../src/index'
 import { Loading } from '../../src/dom/loading'
-import { findLoadingScope, getOwner, runWithOwner } from '../../src/owner'
+import { findBoundaryScope, getOwner, runWithOwner, type LoadingScope } from '../../src/owner'
 import { use } from '../../src/async'
 import { Show } from '../../src/dom'
 
@@ -15,7 +15,7 @@ test('scope gathers and flushes atomically: two throwing → both succeed → on
   const target = document.createElement('section')
   document.body.append(target)
 
-  let scopeRef: ReturnType<typeof findLoadingScope> = null
+  let scopeRef: LoadingScope | null = null
   const commits: string[] = []
 
   const dispose = render(
@@ -23,7 +23,7 @@ test('scope gathers and flushes atomically: two throwing → both succeed → on
       <Loading>
         {() => {
           // Capture the boundary's scope from inside its owner subtree.
-          scopeRef = findLoadingScope(getOwner())
+          scopeRef = findBoundaryScope(getOwner(), 'pending')
           return <span>child</span>
         }}
       </Loading>
@@ -39,18 +39,18 @@ test('scope gathers and flushes atomically: two throwing → both succeed → on
   a.report({ status: 'throwing' })
   b.report({ status: 'throwing' })
 
-  expect(scope.pending()).toBe(true)
+  expect(scope.active()).toBe(true)
   expect(commits).toEqual([])
 
   // A becomes ready first — no flush yet (B still pending).
   a.report({ status: 'ready', commit: () => commits.push('A') })
-  expect(scope.pending()).toBe(true)
+  expect(scope.active()).toBe(true)
   expect(commits).toEqual([])
 
   // B becomes ready — gate opens, both flush in one pass.
   b.report({ status: 'ready', commit: () => commits.push('B') })
   expect(commits).toEqual(['A', 'B'])
-  expect(scope.pending()).toBe(false)
+  expect(scope.active()).toBe(false)
 
   dispose()
 })
@@ -58,13 +58,13 @@ test('scope gathers and flushes atomically: two throwing → both succeed → on
 test('idle reports do not flush but contribute to pending while throwing', () => {
   const target = document.createElement('section')
   document.body.append(target)
-  let scopeRef: ReturnType<typeof findLoadingScope> = null
+  let scopeRef: LoadingScope | null = null
   const commits: string[] = []
   const dispose = render(
     () => (
       <Loading>
         {() => {
-          scopeRef = findLoadingScope(getOwner())
+          scopeRef = findBoundaryScope(getOwner(), 'pending')
           return <span>child</span>
         }}
       </Loading>
@@ -77,28 +77,28 @@ test('idle reports do not flush but contribute to pending while throwing', () =>
   const b = scope.register() // a reactive hole (commit)
   a.report({ status: 'throwing' })
   b.report({ status: 'throwing' })
-  expect(scope.pending()).toBe(true)
+  expect(scope.active()).toBe(true)
 
   // a succeeds with 'idle' (its body already ran)
   a.report({ status: 'idle' })
-  expect(scope.pending()).toBe(true) // b still throwing
+  expect(scope.active()).toBe(true) // b still throwing
 
   // b becomes ready — gate opens, only b's commit fires
   b.report({ status: 'ready', commit: () => commits.push('B') })
   expect(commits).toEqual(['B'])
-  expect(scope.pending()).toBe(false)
+  expect(scope.active()).toBe(false)
   dispose()
 })
 
 test('unregister removes the binding from both sets', () => {
   const target = document.createElement('section')
   document.body.append(target)
-  let scopeRef: ReturnType<typeof findLoadingScope> = null
+  let scopeRef: LoadingScope | null = null
   const dispose = render(
     () => (
       <Loading>
         {() => {
-          scopeRef = findLoadingScope(getOwner())
+          scopeRef = findBoundaryScope(getOwner(), 'pending')
           return <span>child</span>
         }}
       </Loading>
@@ -111,11 +111,11 @@ test('unregister removes the binding from both sets', () => {
   const b = scope.register()
   a.report({ status: 'throwing' })
   b.report({ status: 'throwing' })
-  expect(scope.pending()).toBe(true)
+  expect(scope.active()).toBe(true)
   a.unregister()
-  expect(scope.pending()).toBe(true) // b still
+  expect(scope.active()).toBe(true) // b still
   b.unregister()
-  expect(scope.pending()).toBe(false)
+  expect(scope.active()).toBe(false)
   dispose()
 })
 

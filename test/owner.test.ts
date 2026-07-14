@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'vitest'
-import { catchError, createRoot, getOwner, onCleanup, runWithOwner, findLoadingScope, type LoadingScope } from '../src/owner'
+import { catchError, createRoot, getOwner, onCleanup, runWithOwner, findBoundaryScope, type LoadingScope } from '../src/owner'
 import { flush, microtaskScheduler, setScheduler } from '../src/scheduler'
 
 afterEach(() => setScheduler(microtaskScheduler(flush)))
@@ -162,35 +162,36 @@ test('catchError throws when called inside a disposed owner', () => {
   })
 })
 
-test('Owner.loadingScope defaults to null', () => {
+test('Owner.boundaries.pending defaults to null', () => {
   createRoot(() => {
     const owner = getOwner()!
-    expect(owner.loadingScope).toBe(null)
+    expect(owner.boundaries.pending).toBe(null)
   })
 })
 
-test('findLoadingScope walks parent chain to find first non-null entry', () => {
+test('findBoundaryScope walks parent chain to find first non-null entry', () => {
   let captured: LoadingScope | null = null
   const scope: LoadingScope = {
-    pending: () => true,
+    kind: 'pending',
+    active: () => true,
     register: () => ({ report() {}, unregister() {} }),
     deferOrCommit(commit) { commit() },
   }
   createRoot(() => {
     const outer = getOwner()!
-    outer.loadingScope = scope
+    outer.boundaries.pending = scope
     catchError(() => {
       // inner owner is a child of outer via createSubOwner inside catchError
-      captured = findLoadingScope(getOwner())
+      captured = findBoundaryScope(getOwner(), 'pending')
     }, () => {})
   })
   expect(captured).toBe(scope)
 })
 
-test('findLoadingScope returns null when no scope on chain', () => {
-  let captured: LoadingScope | null = { pending: () => false, register: () => ({ report() {}, unregister() {} }), deferOrCommit(commit) { commit() } }
+test('findBoundaryScope returns null when no scope on chain', () => {
+  let captured: LoadingScope | null = { kind: 'pending', active: () => false, register: () => ({ report() {}, unregister() {} }), deferOrCommit(commit) { commit() } }
   createRoot(() => {
-    captured = findLoadingScope(getOwner())
+    captured = findBoundaryScope(getOwner(), 'pending')
   })
   expect(captured).toBe(null)
 })

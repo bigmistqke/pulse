@@ -3,7 +3,7 @@ import { NotReadyYet, use } from './async'
 import type { Resolved } from './async'
 import { computed } from './computed'
 import {
-  findLoadingScope,
+  findBoundaryScope,
   getOwner,
   routeError,
   routeErrorFromRerun,
@@ -85,7 +85,7 @@ function stagedEffect(
 
   const ensureController = (): BindingController | null => {
     if (controller !== null) return controller
-    const scope = findLoadingScope(myOwner)
+    const scope = findBoundaryScope(myOwner, 'pending')
     if (scope === null) return null
     controller = scope.register()
     return controller
@@ -132,10 +132,10 @@ function stagedEffect(
       commit(value)
     }
     // Route via existing-controller, deferOrCommit (if engaged + pending), or immediate.
-    const scope = findLoadingScope(myOwner)
+    const scope = findBoundaryScope(myOwner, 'pending')
     if (controller !== null) {
       controller.report({ status: 'ready', commit: userCommitFn })
-    } else if (engagedTransition && scope !== null && scope.pending()) {
+    } else if (engagedTransition && scope !== null && scope.active()) {
       scope.deferOrCommit(userCommitFn)
     } else {
       userCommitFn()
@@ -182,7 +182,7 @@ function singleArgEffect(fn: () => void): void {
 
   const ensureController = (): BindingController | null => {
     if (controller !== null) return controller
-    const scope = findLoadingScope(myOwner)
+    const scope = findBoundaryScope(myOwner, 'pending')
     if (scope === null) return null
     controller = scope.register()
     return controller

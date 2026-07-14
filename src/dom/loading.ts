@@ -1,7 +1,7 @@
 import { effect } from '../effect'
 import {
   createSubOwner,
-  findLoadingScope,
+  findBoundaryScope,
   getOwner,
   runWithOwner,
   type BindingController,
@@ -18,8 +18,8 @@ const CONST_FALSE_ACCESSOR: Accessor<boolean> = () => false
  * a constant-false accessor when called outside any Loading subtree.
  */
 export function useLoading(): Accessor<boolean> {
-  const scope = findLoadingScope(getOwner())
-  return scope === null ? CONST_FALSE_ACCESSOR : scope.pending
+  const scope = findBoundaryScope(getOwner(), 'pending')
+  return scope === null ? CONST_FALSE_ACCESSOR : scope.active
 }
 
 export interface LoadingProps {
@@ -71,7 +71,8 @@ export function Loading(props: LoadingProps): Accessor<unknown> {
   }
 
   const scope: LoadingScope = {
-    pending: pendingSig,
+    kind: 'pending',
+    active: pendingSig,
     register(): BindingController {
       const controller: BindingController = {
         report(state: BindingState): void {
@@ -131,7 +132,7 @@ export function Loading(props: LoadingProps): Accessor<unknown> {
       }
     },
   }
-  boundaryOwner.loadingScope = scope
+  boundaryOwner.boundaries.pending = scope
 
   // Construct loaded subtree once, inside boundaryOwner.
   const loadedSubtree: unknown = runWithOwner(boundaryOwner, props.children)

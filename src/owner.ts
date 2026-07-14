@@ -24,26 +24,52 @@ export interface BindingController {
   unregister(): void
 }
 
+/** The statuses a binding reports to a boundary. One boundary collects one status. */
+export type BindingStatus = 'pending' | 'failed'
+
 /**
- * Reactive pending-state handle attached to an `Owner` by `<Loading>`.
- * Inner binding-effects that catch `NotReadyYet` register and report state
- * changes; the boundary tracks pending and ready sets, flushing all ready
- * commits in one pass once nothing else is pending.
+ * A boundary that collects the bindings beneath it carrying one status, and
+ * exposes whether that collection is non-empty.
+ *
+ * This is the part that generalises. `<Loading>` layers atomic-commit
+ * coordination on top of it (see `LoadingScope.deferOrCommit`); a failure
+ * boundary has nothing to commit atomically, so it uses the collection alone.
  */
-export interface LoadingScope {
-  /** `true` while at least one binding is pending OR has a deferred commit waiting. */
-  readonly pending: Accessor<boolean>
-  /** Obtain a controller for a new binding. Each binding registers ONCE lazily
-   *  on its first `NotReadyYet`; the controller persists across re-runs. */
+export interface BoundaryScope {
+  /** Which status this boundary collects. */
+  readonly kind: BindingStatus
+  /** `true` while this boundary's collection is non-empty. */
+  readonly active: Accessor<boolean>
+  /** Obtain a controller for a new binding. Each binding registers ONCE lazily;
+   *  the controller persists across re-runs, so repeated reports of the same
+   *  status are one entry, not many. */
   register(): BindingController
+}
+
+/** The pending collection, plus `<Loading>`'s atomic-commit gate. */
+export interface LoadingScope extends BoundaryScope {
+  readonly kind: 'pending'
   /**
-   * If the boundary is currently pending (pendingSet.size > 0), queue `commit`
-   * to run when the gate opens. If nothing is pending, run `commit` immediately.
-   * This is the coordination point for bindings that called `use()` but did NOT
-   * throw — they still need to defer their DOM commit until all sibling pending
+   * If the boundary is currently pending, queue `commit` to run when the gate
+   * opens. If nothing is pending, run `commit` immediately. This is the
+   * coordination point for bindings that called `use()` but did NOT throw —
+   * they still need to defer their DOM commit until all sibling pending
    * bindings have settled.
    */
   deferOrCommit(commit: () => void): void
+}
+
+/** The failed collection. */
+export interface FailedScope extends BoundaryScope {
+  readonly kind: 'failed'
+  /** Clear the collection and retry every binding in it. */
+  reset(): void
+}
+
+/** Maps a status to the scope interface that collects it. */
+interface ScopeOfKind {
+  pending: LoadingScope
+  failed: FailedScope
 }
 
 /** A lifecycle scope. Owns reactive nodes created within it and their cleanup callbacks. */
@@ -60,8 +86,9 @@ export interface Owner {
   readonly cleanups: Disposable[]
   /** True once this owner has been disposed. Use-after-dispose throws. */
   disposed: boolean
-  /** Optional loading scope (set by `<Loading>`). Used by binding-effects on `NotReadyYet` to register pending. */
-  loadingScope: LoadingScope | null
+  /** Boundary scopes installed on this owner, keyed by the status each collects.
+   *  Set by `<Loading>` and `<Failed>` on their own boundary owner. */
+  boundaries: { pending: LoadingScope | null; failed: FailedScope | null }
 }
 
 let currentOwner: Owner | null = null
@@ -70,7 +97,14 @@ function newOwner(
   parent: Owner | null = null,
   errorHandler: ((error: unknown) => void) | null = null,
 ): Owner {
-  return { parent, errorHandler, children: [], cleanups: [], disposed: false, loadingScope: null }
+  return {
+    parent,
+    errorHandler,
+    children: [],
+    cleanups: [],
+    disposed: false,
+    boundaries: { pending: null, failed: null },
+  }
 }
 
 /**
@@ -278,14 +312,19 @@ export function onCleanup(fn: Disposable): Disposable {
 }
 
 /**
- * Walk up the parent chain from `start` (inclusive) and return the first
- * non-null `loadingScope`. Returns `null` if none found. Internal helper
- * used by `useLoading()` and by binding-effects on `NotReadyYet`.
+ * Walk up the parent chain from `start` (inclusive) and return the first boundary
+ * scope collecting `kind`. Returns `null` if none is found.
+ *
+ * Internal: used by `useLoading()`, and by bindings reporting their status.
  */
-export function findLoadingScope(start: Owner | null): LoadingScope | null {
+export function findBoundaryScope<K extends BindingStatus>(
+  start: Owner | null,
+  kind: K,
+): ScopeOfKind[K] | null {
   let owner = start
   while (owner !== null) {
-    if (owner.loadingScope !== null) return owner.loadingScope
+    const scope = owner.boundaries[kind]
+    if (scope !== null) return scope as ScopeOfKind[K]
     owner = owner.parent
   }
   return null
