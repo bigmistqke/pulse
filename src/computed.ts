@@ -5,6 +5,7 @@ import { isPromise } from './is-promise'
 import { getOwner, routeError, registerWithOwner } from './owner'
 import { makeAccessor, NODE, signal, signalWithNode, type Accessor, type Signal } from './signal'
 import { registerPending, lookupPending } from './pending'
+import { registerFailure, lookupFailure } from './failure'
 import { requestFlush } from './scheduler'
 
 /** A pipeline stage of any shape: sync, async, or generator. The return type
@@ -142,7 +143,14 @@ function makeStageNode(
   let suspendedOn: Promise<unknown> | null = null
   let suspendedInput: unknown = undefined
   let stashedResolution: StashedResolution | null = null
-  let deferredError: { error: unknown } | null = null
+
+  // The parked failure, as reactive graph state — the mirror of pendingSig. A
+  // consumer subscribes to it through the accessor, so it re-runs when this node
+  // fails or recovers. Crucially the failure lives HERE and not in publishedValue:
+  // the published value keeps holding the last resolved value, so a tolerant read
+  // (`latest`) can degrade to it instead of blowing up. Pending already works this
+  // way — it holds the prior value and tracks the in-flight promise out of band.
+  const [failureSig, setFailureSig] = signal<unknown>(null)
 
   // Published view value: settle handler updates this DIRECTLY (out-of-band)
   // so body doesn't re-run on settle. Consumers reading the accessor get this.
@@ -267,12 +275,13 @@ function makeStageNode(
           suspendedOn = null
           setPendingSig(false)
           if (r.kind === 'rejected') {
-            deferredError = { error: r.reason }
-            setPublishedValue(r.reason)
+            // Park the failure as graph state; leave publishedValue holding the
+            // stale value so a tolerant read can still degrade to it.
+            setFailureSig(r.reason)
             return null
           }
           lastResolvedValue = r.value
-          deferredError = null
+          setFailureSig(null)
           setPublishedValue(resolvedPromise(r.value))
           return null
         }
@@ -305,7 +314,7 @@ function makeStageNode(
               !lastPublishedShapeIsPromise
             ) {
               lastResolvedValue = state.value
-              deferredError = null
+              setFailureSig(null)
               publishResolvedPromise(state.value)
             }
             // else: same value, already a promise — no downstream invalidation
@@ -319,9 +328,11 @@ function makeStageNode(
               setKick(++kickCount)
               return
             }
-            deferredError = { error: state.reason }
-            // Bump publishedValue to dirty consumers so they re-read and throw.
-            setPublishedValue(state.reason)
+            // Park the failure as graph state. Do NOT publish the reason over the
+            // value: that used to destroy the last resolved value, which is what a
+            // tolerant read (`latest`) needs to degrade to. Consumers are dirtied
+            // by the failure signal instead, which the accessor reads.
+            setFailureSig(state.reason)
           }
         })
         // No body return value — view is via publishedValue.
@@ -350,7 +361,7 @@ function makeStageNode(
           setPublishedValue(outcome.value)
         }
       }
-      deferredError = null
+      setFailureSig(null)
       return null
     } catch (e) {
       if (e instanceof NotReadyYet) {
@@ -374,7 +385,7 @@ function makeStageNode(
               !Object.is(lastResolvedValue, state.value)
             ) {
               lastResolvedValue = state.value
-              deferredError = null
+              setFailureSig(null)
               // Publish the prior as a BARE value, not a promise: a use()-suspended
               // stage is sync-typed (use erases the async colour), so it must not
               // look async to a downstream stage. The kick below re-runs the body
@@ -385,7 +396,7 @@ function makeStageNode(
           } else if (state.status === 'rejected') {
             suspendedOn = null
             setPendingSig(false)
-            deferredError = { error: state.reason }
+            setFailureSig(state.reason)
             setKick(++kickCount)
           }
         })
@@ -394,7 +405,7 @@ function makeStageNode(
       try {
         routeError(myOwner, e)
       } catch (rethrown) {
-        deferredError = { error: rethrown }
+        setFailureSig(rethrown)
       }
       return null
     }
@@ -404,21 +415,24 @@ function makeStageNode(
   // changes propagate AND to trigger lazy first eval) and publishedValue
   // (the actual view value). Surfaces parked errors.
   const accessor = (() => {
-    // Subscribe to BOTH before any throw, even on the error path:
+    // Subscribe to ALL THREE before any throw, even on the error path:
     //  - depTracker triggers the lazy first eval (its own value is always null, so
     //    it never fires on its own),
-    //  - publishedValue is the signal that actually changes when this computed
-    //    produces a new value — including the error path, which publishes the
-    //    reason precisely to dirty consumers.
-    // Throwing before reading publishedValue would leave a consumer that catches
-    // the error with no subscription to the value, so a later successful refetch
-    // could never reach it and a single transient failure would be permanent.
-    // (Same reasoning as `use()`, which already calls the accessor before its
-    // pending check.) Reading depTracker can also SET or CLEAR deferredError via
-    // the lazy eval, so the check belongs after, not before.
+    //  - publishedValue changes when this computed produces a new value,
+    //  - failureSig changes when it fails or recovers.
+    // Throwing before those reads would leave a consumer that catches the error
+    // with no subscription, so a later successful refetch could never reach it and
+    // a single transient failure would be permanent. (Same reasoning as `use()`,
+    // which calls the accessor before its pending check.) Reading depTracker can
+    // also set or clear the failure via the lazy eval, so the check belongs after.
+    //
+    // This is the STRICT view of the failure state: the raw read throws. The
+    // tolerant view (`latest`) reads publishedValue directly and degrades to it;
+    // the query view is `failure(x)`.
     r3Read(depTracker as R3Computed<unknown>)
     const value = publishedValue()
-    if (deferredError !== null) throw deferredError.error
+    const err = failureSig()
+    if (err !== null) throw err
     return value
   }) as Signal<unknown>
   accessor[NODE] = depTracker as R3Computed<unknown>
@@ -433,6 +447,24 @@ function makeStageNode(
     pending: pendingSig,
     promise: () => suspendedOn,
     upstream: upstreamEntry,
+  })
+
+  // Register with the failure tracker — the same shape, walked the same way.
+  // `value` is the raw, non-throwing read of the published value, which is what
+  // lets a tolerant read degrade to the stale value instead of throwing.
+  registerFailure(accessor, {
+    error: failureSig,
+    // The raw read: the same subscriptions the accessor makes (lazy first eval via
+    // depTracker, plus the value) but WITHOUT the throw. Reading publishedValue
+    // alone would not trigger the lazy eval, so a never-read node would hand back
+    // the "nothing yet" sentinel.
+    value: () => {
+      r3Read(depTracker as R3Computed<unknown>)
+      return publishedValue()
+    },
+    upstream: inputAccessor
+      ? lookupFailure(inputAccessor as Accessor<unknown>)
+      : undefined,
   })
 
   return { accessor, r3Node: depTracker as R3Computed<unknown> }

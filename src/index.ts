@@ -1,5 +1,6 @@
 export { latest, read, settled, use, NotReadyYet, type PipelineRead, type Resolved } from './async'
 export { isPending, promiseOf } from './pending'
+export { failure } from './failure'
 export { computed } from './computed'
 export { effect } from './effect'
 export {

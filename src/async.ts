@@ -1,5 +1,6 @@
 import { isPromise } from './is-promise'
 import { isPending, promiseOf } from './pending'
+import { rawValueOf } from './failure'
 import { NODE, type Accessor, type Signal } from './signal'
 import { markUsedInBinding } from './transition-tracker'
 
@@ -16,12 +17,21 @@ const lastResolved = new WeakMap<object, unknown>()
  * Reactive: reads `s()`, so it re-evaluates when the signal changes.
  */
 export function latest<T>(s: Accessor<T>): Awaited<T> | undefined {
-  const value = s()
+  // The TOLERANT read: it NEVER throws. A failed node still holds the value it
+  // last resolved to, so read it raw — bypassing the accessor's error conversion —
+  // and degrade to it. (The raw accessor throws; that is the strict view, and it is
+  // what feeds an error boundary through `use`. The failure itself is queried with
+  // `failure(s)`, so degrading here is not the same as ignoring it.)
+  const value = rawValueOf(s)
   if (isPromise(value)) {
     const state = track(value as Promise<unknown>) // current state for this promise (re-read each call; track replaces the entry on settle)
     if (state.status === 'fulfilled') {
       lastResolved.set(s, state.value)
       return state.value as Awaited<T>
+    }
+    if (state.status === 'rejected') {
+      // A rejected promise carries no value — fall back to the last one we saw.
+      return lastResolved.get(s) as Awaited<T> | undefined
     }
     // Still pending. The stale-while-revalidate prior is seeded onto the tracked
     // state by track(promise, prior) — from the signal setter, and from computed —
@@ -31,7 +41,7 @@ export function latest<T>(s: Accessor<T>): Awaited<T> | undefined {
     if (swr !== undefined) return swr as Awaited<T>
     return lastResolved.get(s) as Awaited<T> | undefined
   }
-  lastResolved.set(s, value)
+  lastResolved.set(s, value as T)
   return value as Awaited<T>
 }
 
