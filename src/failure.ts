@@ -19,6 +19,8 @@ import type { Accessor } from './signal'
 export interface FailureEntry {
   error: Accessor<unknown>
   value: Accessor<unknown>
+  /** Clear this node's parked failure and recompute it. */
+  reset: () => void
   upstream?: FailureEntry
 }
 
@@ -63,4 +65,26 @@ export function failure<T>(x: Accessor<T>): unknown {
 export function rawValueOf<T>(x: Accessor<T>): T {
   const entry = registry.get(x as Accessor<unknown>)
   return (entry !== undefined ? (entry.value() as T) : x())
+}
+
+/**
+ * Clear the failure at the ROOT of this node's upstream chain and recompute it.
+ *
+ * A downstream stage only propagates its upstream's failure. Resetting it alone
+ * would leave the real source parked, and the retry would fail identically. So walk
+ * the chain the way `failure()` does and reset the deepest stage that is actually
+ * failed — the one the failure originated in.
+ *
+ * A no-op if nothing in the chain is failed, or the node is not registered (a plain
+ * signal, which never parks a failure).
+ */
+export function resetFailure<T>(x: Accessor<T>): void {
+  let cur = registry.get(x as Accessor<unknown>)
+  let root: FailureEntry | undefined
+  while (cur !== undefined) {
+    const e = cur.error()
+    if (e !== null && e !== undefined) root = cur
+    cur = cur.upstream
+  }
+  root?.reset()
 }

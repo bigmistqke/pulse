@@ -192,3 +192,124 @@ test('a pending read reaches <Loading>, never <Failed>', async () => {
 
   expect(target.textContent).toBe('done')
 })
+
+/** The retry button. Nothing in the graph changed, so nothing will re-run on its
+ *  own: reset() must clear the parked failure on the node that failed and recompute
+ *  it — even though that node was created outside the boundary entirely. */
+test('reset() retries with unchanged inputs', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+
+  let attempt = 0
+  const c = computed(() => {
+    attempt++
+    return attempt === 1 ? Promise.reject(new Error('boom')) : Promise.resolve('ok')
+  })
+
+  render(
+    () => (
+      <Failed
+        fallback={(error, reset) => (
+          <button on:click={reset}>{(error as Error).message}</button>
+        )}
+      >
+        {() => <span>{() => use(c)}</span>}
+      </Failed>
+    ),
+    target,
+  )
+
+  await tick()
+  flush()
+  expect(target.textContent).toBe('boom')
+
+  target.querySelector('button')!.click()
+  await tick()
+  flush()
+
+  expect(target.textContent).toBe('ok')
+  expect(attempt).toBe(2)
+})
+
+/** A downstream stage only PROPAGATES its upstream's failure. Resetting it alone
+ *  would leave the real source parked and the retry would fail identically, so
+ *  reset() walks the upstream chain to the root failed stage. */
+test('reset() recomputes the root failed stage of a pipeline, not the leaf', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+
+  let sourceRuns = 0
+  const c = computed(
+    () => {
+      sourceRuns++
+      return sourceRuns === 1
+        ? Promise.reject(new Error('boom'))
+        : Promise.resolve('raw')
+    },
+    (v: string) => `${v}-derived`,
+  )
+
+  render(
+    () => (
+      <Failed
+        fallback={(error, reset) => (
+          <button on:click={reset}>{(error as Error).message}</button>
+        )}
+      >
+        {() => <span>{() => use(c)}</span>}
+      </Failed>
+    ),
+    target,
+  )
+
+  await tick()
+  flush()
+  expect(target.textContent).toBe('boom')
+
+  target.querySelector('button')!.click()
+  await tick()
+  flush()
+
+  // Stage 0 re-ran (the root), and the derived stage rebuilt on top of it.
+  expect(sourceRuns).toBe(2)
+  expect(target.textContent).toBe('raw-derived')
+})
+
+/** A binding that threw a plain error has no failed node behind it (`source` is
+ *  null). reset() simply re-runs the binding. */
+test('reset() re-runs a binding that threw a plain error', () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+
+  let throwIt = true
+
+  render(
+    () => (
+      <Failed
+        fallback={(error, reset) => (
+          <button on:click={reset}>{(error as Error).message}</button>
+        )}
+      >
+        {() => (
+          <span>
+            {() => {
+              if (throwIt) throw new Error('plain')
+              return 'recovered'
+            }}
+          </span>
+        )}
+      </Failed>
+    ),
+    target,
+  )
+
+  flush()
+  expect(target.textContent).toBe('plain')
+
+  // No signal changed — only reset() can bring this binding back.
+  throwIt = false
+  target.querySelector('button')!.click()
+  flush()
+
+  expect(target.textContent).toBe('recovered')
+})

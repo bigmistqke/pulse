@@ -7,6 +7,7 @@ import { makeAccessor, NODE, signal, signalWithNode, type Accessor, type Signal 
 import { registerPending, lookupPending } from './pending'
 import { registerFailure, lookupFailure } from './failure'
 import { requestFlush } from './scheduler'
+import { markFailureSource } from './transition-tracker'
 
 /** A pipeline stage of any shape: sync, async, or generator. The return type
  *  is whatever the function returns — sync `R`, async `Promise<R>`, or
@@ -432,7 +433,13 @@ function makeStageNode(
     r3Read(depTracker as R3Computed<unknown>)
     const value = publishedValue()
     const err = failureSig()
-    if (err !== null) throw err
+    if (err !== null) {
+      // Tell the binding that catches this WHICH node failed, so it can reset the
+      // right one. The failure may be parked on a computed created far outside the
+      // boundary that ends up collecting the binding.
+      markFailureSource(accessor)
+      throw err
+    }
     return value
   }) as Signal<unknown>
   accessor[NODE] = depTracker as R3Computed<unknown>
@@ -461,6 +468,13 @@ function makeStageNode(
     value: () => {
       r3Read(depTracker as R3Computed<unknown>)
       return publishedValue()
+    },
+    // Clear the parked failure and re-run the body. The kick is a dep of the body,
+    // so the stage re-executes from the top and suspends on a fresh promise —
+    // a genuine retry with unchanged inputs.
+    reset: () => {
+      setFailureSig(null)
+      setKick(++kickCount)
     },
     upstream: inputAccessor
       ? lookupFailure(inputAccessor as Accessor<unknown>)

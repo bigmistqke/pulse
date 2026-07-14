@@ -14,8 +14,15 @@ export type BindingState =
   | { readonly status: 'throwing' }
   | { readonly status: 'ready'; readonly commit: () => void }
   | { readonly status: 'idle' }
-  /** The binding threw a real error (not a suspension). `retry` re-runs it. */
-  | { readonly status: 'failed'; readonly error: unknown; readonly retry: () => void }
+  /** The binding threw a real error (not a suspension). `source` is the node whose
+   *  parked failure was thrown, if the throw came from one; `retry` re-runs the
+   *  binding. */
+  | {
+      readonly status: 'failed'
+      readonly error: unknown
+      readonly source: Accessor<unknown> | null
+      readonly retry: () => void
+    }
 
 /**
  * A per-binding controller obtained from `LoadingScope.register()`.

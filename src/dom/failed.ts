@@ -6,11 +6,14 @@ import {
   type FailedScope,
   type Owner,
 } from '../owner'
+import { resetFailure } from '../failure'
 import { signal, type Accessor } from '../signal'
 
-/** What a failed binding reported: the error, and how to re-run it. */
+/** What a failed binding reported: the error, the node whose parked failure it
+ *  threw (if any), and how to re-run it. */
 interface FailureReport {
   error: unknown
+  source: Accessor<unknown> | null
   retry: () => void
 }
 
@@ -84,9 +87,12 @@ export function Failed(props: FailedProps): Accessor<unknown> {
     const reports = Array.from(failedSet.values())
     failedSet.clear()
     recompute()
-    // Re-run each failed binding. If it fails again it reports again, refilling the
-    // collection and bringing the fallback straight back — which is correct.
-    for (const report of reports) report.retry()
+    for (const report of reports) {
+      // Clear the parked failure at its root first — otherwise the binding just
+      // re-reads a still-failed node and throws again.
+      if (report.source !== null) resetFailure(report.source)
+      report.retry()
+    }
   }
 
   const scope: FailedScope = {
@@ -96,9 +102,15 @@ export function Failed(props: FailedProps): Accessor<unknown> {
       const controller: BindingController = {
         report(state): void {
           if (state.status === 'failed') {
-            failedSet.set(controller, { error: state.error, retry: state.retry })
+            failedSet.set(controller, {
+              error: state.error,
+              source: state.source,
+              retry: state.retry,
+            })
           } else {
-            // Any other status means this binding is no longer failed.
+            // Any other status means this binding is no longer failed. In
+            // practice only 'idle' is ever sent to a failed-scope controller
+            // (see src/effect.ts) — 'throwing'/'ready' go to a pending scope.
             failedSet.delete(controller)
           }
           recompute()

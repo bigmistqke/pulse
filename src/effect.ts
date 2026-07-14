@@ -13,7 +13,7 @@ import {
   type FailedScope,
 } from './owner'
 import { signal } from './signal'
-import { runBindingCompute } from './transition-tracker'
+import { runBindingCompute, takeFailureSource } from './transition-tracker'
 
 /** A pipeline stage: takes the prior stage's resolved value, returns sync/Promise/generator. */
 type Stage<In, Out> = (value: In) => Out
@@ -133,6 +133,7 @@ function stagedEffect(
         ensureFailedController(failedScope).report({
           status: 'failed',
           error: e,
+          source: takeFailureSource(),
           retry: () => setKick(++kickCount),
         })
         return
@@ -254,6 +255,7 @@ function singleArgEffect(fn: () => void): void {
         ensureFailedController(failedScope).report({
           status: 'failed',
           error: e,
+          source: takeFailureSource(),
           retry: () => setKick(++kickCount),
         })
         return
