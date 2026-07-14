@@ -20,7 +20,14 @@
  *   unwound, to read and clear the recorded source.
  *
  * The prev/finally restoration in `runBindingCompute` correctly handles nested
- * compute frames (e.g., a reactive child inside a reactive prop).
+ * compute frames (e.g., a reactive child inside a reactive prop) for DOM bindings,
+ * which all route their compute through `runBindingCompute`. The invariant this
+ * whole module depends on is broader than that one function, though: EVERY
+ * consumer of the failure source must clear it on entry, not just read it —
+ * otherwise a source set by one binding's throw can survive past that binding and
+ * be picked up by a later, unrelated one. `runBindingCompute` is what satisfies
+ * this invariant for bindings; a plain `effect()` does not go through it (it calls
+ * its body directly), so it clears the source itself at the start of its own body.
  */
 
 import type { Accessor } from './signal'

@@ -222,6 +222,15 @@ function singleArgEffect(fn: () => void): void {
 
   const body = () => {
     kick()
+    // Invariant: every consumer of the module-level failure source clears it on
+    // entry, so a source can never survive past the binding compute that set it.
+    // `runBindingCompute` does this for DOM bindings; a plain effect calls `fn()`
+    // directly instead of going through `runBindingCompute`, so it has to clear the
+    // source itself here. Without this, a failure this effect swallows (no
+    // `<Failed>` boundary above it, so `takeFailureSource()` is never reached below)
+    // would leave `poisoned`'s accessor parked in module state, and a later,
+    // unrelated failure under a real boundary would inherit it as its `source`.
+    takeFailureSource()
     try {
       fn()
       suspendedOn = null

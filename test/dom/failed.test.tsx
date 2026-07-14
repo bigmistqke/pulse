@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, test } from 'vitest'
 import {
   catchError,
   computed,
+  effect,
   Failed,
   flush,
   Loading,
@@ -312,4 +313,80 @@ test('reset() re-runs a binding that threw a plain error', () => {
   flush()
 
   expect(target.textContent).toBe('recovered')
+})
+
+/**
+ * Failure provenance ("which node failed") lives in module state, set right before a
+ * computed's accessor throws its parked failure and read by whichever binding catches
+ * that throw. The invariant that keeps it from outliving the binding that set it: every
+ * consumer of the source clears it on entry. A plain `effect()` with no `<Failed>`
+ * boundary above it never reaches a consumer at all — its failure is swallowed (routed
+ * through `routeErrorFromRerun`, which only logs) — so if the effect does not clear the
+ * source itself, it is left dangling in module state indefinitely. A LATER, completely
+ * unrelated plain error under a real `<Failed>` boundary must not inherit that stale
+ * source: its own `source` is `null` (it never touched a failed computed), and
+ * `reset()` must not recompute the computed the first effect happened to leave behind.
+ */
+test('a stale failure source from a swallowed, unboundaried effect does not leak into an unrelated <Failed> reset', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+
+  const [id, setId] = signal(1)
+  let poisonedRuns = 0
+  const poisoned = computed(() => {
+    poisonedRuns++
+    return id() === 1 ? Promise.resolve('ok') : Promise.reject(new Error('poisoned'))
+  })
+
+  // No <Failed> boundary anywhere near this effect. Its first run succeeds; flipping
+  // `id` makes it fail on a re-run, which is swallowed silently by
+  // `routeErrorFromRerun` — `takeFailureSource()` is never called, so `poisoned`'s
+  // accessor is left parked as the module-level failure source.
+  effect(() => {
+    use(poisoned)
+  })
+
+  await tick()
+  flush()
+  expect(poisonedRuns).toBe(1)
+
+  setId(2)
+  await tick()
+  flush()
+  expect(poisonedRuns).toBe(2)
+
+  // Now something entirely unrelated: a plain effect, under a real <Failed> boundary,
+  // that throws a plain error with no computed involved at all — its true `source`
+  // is `null`.
+  let throwIt = true
+  render(
+    () => (
+      <Failed
+        fallback={(error, reset) => (
+          <button on:click={reset}>{(error as Error).message}</button>
+        )}
+      >
+        {() => {
+          effect(() => {
+            if (throwIt) throw new Error('plain')
+          })
+          return <p>ok</p>
+        }}
+      </Failed>
+    ),
+    target,
+  )
+
+  flush()
+  expect(target.textContent).toBe('plain')
+
+  throwIt = false
+  target.querySelector('button')!.click()
+  flush()
+
+  // The boundary's own binding recovers...
+  expect(target.textContent).toBe('ok')
+  // ...but `poisoned` — which this boundary never had anything to do with — must
+  // not have been reset and recomputed.
+  expect(poisonedRuns).toBe(2)
 })
