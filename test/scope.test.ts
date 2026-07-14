@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { createScope, chainFor, writeSlot, readSlot, chainMatch, linkEdge, edgesToFire, closeScopeEdges, ROOT_KIND, ROOT_SCOPE, getCurrentScope, getCurrentTracker, runInScope, signalNode, computedNode, readValue, writeValue, commit, discard, action, type Scope, type Node, type Slot, type Edge } from '../src/scope'
+import { createScope, chainFor, writeSlot, readSlot, chainMatch, linkEdge, edgesToFire, closeScopeEdges, ROOT_KIND, ROOT_SCOPE, DIRTY, getCurrentScope, getCurrentTracker, runInScope, signalNode, computedNode, readValue, writeValue, commit, discard, action, type Scope, type Node, type Slot, type Edge } from '../src/scope'
 import { read as r3Read } from 'r3'
 
 test('createScope produces an open scope with empty bags', () => {
@@ -192,7 +192,42 @@ test('a speculative write marks matching downstream speculative slots dirty', ()
   const derivedSlot: Slot = { recipe: undefined, cached: 'stale', deps: [], node: sigNode() }
   linkEdge(name, derivedSlot, s)
   runInScope(s, undefined, () => writeValue(name, 'bar'))
-  expect(derivedSlot.cached).toBeUndefined() // dirtied (cached dropped)
+  expect(derivedSlot.cached).toBe(DIRTY) // dirtied (cached dropped)
+})
+
+test('a slot whose recipe returns undefined is cached, not recomputed on each read', () => {
+  let runs = 0
+  const node = computedNode(() => {
+    runs++
+    return undefined
+  })
+  runs = 0 // ignore any eager evaluation at node creation
+  const s = createScope(ROOT_SCOPE, 'speculative')
+  runInScope(s, undefined, () => {
+    readValue(node)
+    readValue(node)
+    readValue(node)
+  })
+  expect(runs).toBe(1) // undefined is a real value; the slot memoizes it
+})
+
+test('a slot holding undefined still recomputes after a write dirties it', () => {
+  const src = signalNode(1)
+  let runs = 0
+  const node = computedNode(() => {
+    runs++
+    readValue(src)
+    return undefined
+  })
+  runs = 0
+  const s = createScope(ROOT_SCOPE, 'speculative')
+  runInScope(s, undefined, () => {
+    readValue(node) // runs -> 1
+    readValue(node) // memoized, still 1
+    writeValue(src, 2) // dirties node's slot
+    readValue(node) // dirty -> recompute, runs -> 2
+  })
+  expect(runs).toBe(2)
 })
 
 test('reading a computed under a speculation runs its recipe into an S-slot and links deps', () => {

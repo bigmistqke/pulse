@@ -25,10 +25,17 @@ export interface Node<T = unknown> {
   backing?: R3Signal<T> | R3Computed<T>
 }
 
+/** Marks a slot whose cached value is stale (or not yet computed) and must be
+ *  recomputed on the next read. A distinct symbol rather than `undefined`, so a
+ *  recipe that legitimately evaluates to `undefined` is a real cached value and
+ *  is told apart from a dirty slot — otherwise such a slot never memoizes and
+ *  re-runs its recipe on every read. */
+export const DIRTY = Symbol('dirty')
+
 /** A per-(Node, scope) cache cell. Uniform shape per Q9 — no `wasWritten` flag. */
 export interface Slot<T = unknown> {
   recipe: (() => T | Promise<T>) | undefined
-  cached: T | undefined
+  cached: T | typeof DIRTY
   deps: Edge[]
   /** The node this slot caches a value for. Lets a write walk on from a dirtied
    *  slot to that node's own subscribers, so invalidation propagates transitively. */
@@ -187,7 +194,7 @@ export function readValue<T>(node: Node<T>): T {
   const scope = getCurrentScope()
   const slot = readSlot(node, scope)
   if (slot !== undefined) {
-    if (slot.cached === undefined && slot.recipe !== undefined) {
+    if (slot.cached === DIRTY && slot.recipe !== undefined) {
       resetSlotDeps(slot)
       slot.cached = runRecipe(slot.recipe, scope, slot) // dirtied → recompute
     }
@@ -197,7 +204,7 @@ export function readValue<T>(node: Node<T>): T {
   }
   if (scope !== ROOT_SCOPE && node.defaultRecipe !== undefined) {
     // speculative computed miss: run the recipe into a fresh S-slot
-    const newSlot: Slot<T> = { recipe: node.defaultRecipe, cached: undefined, deps: [], node }
+    const newSlot: Slot<T> = { recipe: node.defaultRecipe, cached: DIRTY, deps: [], node }
     scope.slots.set(node, newSlot)
     newSlot.cached = runRecipe(node.defaultRecipe, scope, newSlot)
     scope.readSet.add(node)
@@ -272,8 +279,8 @@ function invalidateDownstream(node: Node, writeScope: Scope): void {
     const current = stack.pop()!
     for (const edge of edgesToFire(current, writeScope)) {
       const slot = edge.target
-      if (slot.cached === undefined) continue // already dirty ⇒ downstream already dropped
-      slot.cached = undefined
+      if (slot.cached === DIRTY) continue // already dirty ⇒ downstream already dropped
+      slot.cached = DIRTY
       stack.push(slot.node)
     }
   }
