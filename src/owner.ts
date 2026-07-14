@@ -14,6 +14,8 @@ export type BindingState =
   | { readonly status: 'throwing' }
   | { readonly status: 'ready'; readonly commit: () => void }
   | { readonly status: 'idle' }
+  /** The binding threw a real error (not a suspension). `retry` re-runs it. */
+  | { readonly status: 'failed'; readonly error: unknown; readonly retry: () => void }
 
 /**
  * A per-binding controller obtained from `LoadingScope.register()`.
@@ -133,6 +135,26 @@ export function routeError(start: Owner | null, error: unknown): void {
   }
   // No handler caught — re-throw the final error.
   throw error
+}
+
+/**
+ * The nearest `<Failed>` boundary — or `null` if a `catchError` handler is nearer,
+ * or if there is neither.
+ *
+ * `<Failed>` and `catchError` are peers in ONE walk up the owner chain, and the
+ * nearest wins. Returning `null` when a handler is nearer is what lets the caller
+ * fall through to `routeError`, which walks the same chain and finds that handler.
+ * So a `catchError` nested inside a `<Failed>` intercepts first, and the boundary
+ * catches whatever the inner handler does not.
+ */
+export function findNearestFailedScope(start: Owner | null): FailedScope | null {
+  let owner = start
+  while (owner !== null) {
+    if (owner.boundaries.failed !== null) return owner.boundaries.failed
+    if (owner.errorHandler !== null) return null // a nearer catchError wins
+    owner = owner.parent
+  }
+  return null
 }
 
 /**

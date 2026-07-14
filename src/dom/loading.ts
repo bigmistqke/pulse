@@ -24,7 +24,7 @@ export function useLoading(): Accessor<boolean> {
 
 export interface LoadingProps {
   /** Function child REQUIRED — defers JSX construction until inside the
-   *  boundary owner so descendants register with the right loadingScope. */
+   *  boundary owner so descendants register with the right `boundaries.pending`. */
   children: () => unknown
   fallback?: unknown
   initial?: unknown

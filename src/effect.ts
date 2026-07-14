@@ -4,11 +4,13 @@ import type { Resolved } from './async'
 import { computed } from './computed'
 import {
   findBoundaryScope,
+  findNearestFailedScope,
   getOwner,
   routeError,
   routeErrorFromRerun,
   registerWithOwner,
   type BindingController,
+  type FailedScope,
 } from './owner'
 import { signal } from './signal'
 import { runBindingCompute } from './transition-tracker'
@@ -77,6 +79,7 @@ function stagedEffect(
   let disposed = false
   let suspendedOn: Promise<unknown> | null = null
   let controller: BindingController | null = null
+  let failedController: BindingController | null = null
   const UNSET = Symbol('unset')
   let lastCommitted: unknown = UNSET
   // See the identical flag in `singleArgEffect`: throw out of the caller's own
@@ -89,6 +92,11 @@ function stagedEffect(
     if (scope === null) return null
     controller = scope.register()
     return controller
+  }
+
+  const ensureFailedController = (scope: FailedScope): BindingController => {
+    if (failedController === null) failedController = scope.register()
+    return failedController
   }
 
   const body = () => {
@@ -116,11 +124,26 @@ function stagedEffect(
         ensureController()?.report({ status: 'throwing' })
         return
       }
+      // A real failure. It is graph state, not an event: report it to the nearest
+      // <Failed> boundary, which collects it and selects its fallback. The same
+      // controller reporting repeatedly is one entry, so a single rejection that
+      // re-runs this body several times still renders one fallback.
+      const failedScope = findNearestFailedScope(myOwner)
+      if (failedScope !== null) {
+        ensureFailedController(failedScope).report({
+          status: 'failed',
+          error: e,
+          retry: () => setKick(++kickCount),
+        })
+        return
+      }
       if (isFirstRun) routeError(myOwner, e)
       else routeErrorFromRerun(myOwner, e)
       return
     }
     suspendedOn = null
+    // Recovered: leave the failed collection, so the boundary can unlatch.
+    failedController?.report({ status: 'idle' })
     // Dedupe: if the resolved value is the same as what we last committed,
     // skip — this guards against double-fire from use()'s pendingSig + value
     // signals both triggering re-runs under syncScheduler when a promise settles.
@@ -150,6 +173,8 @@ function stagedEffect(
       unwatched(node as R3Computed<unknown>)
       controller?.unregister()
       controller = null
+      failedController?.unregister()
+      failedController = null
     },
   })
 }
@@ -174,6 +199,7 @@ function singleArgEffect(fn: () => void): void {
   let kickCount = 0
   let suspendedOn: Promise<unknown> | null = null
   let controller: BindingController | null = null
+  let failedController: BindingController | null = null
   // r3 runs the body eagerly on creation, so the first run happens inside the
   // caller's own stack: an error nobody handles is theirs to see, and is thrown.
   // Every later run is driven by a graph write, where throwing would unwind the
@@ -188,12 +214,19 @@ function singleArgEffect(fn: () => void): void {
     return controller
   }
 
+  const ensureFailedController = (scope: FailedScope): BindingController => {
+    if (failedController === null) failedController = scope.register()
+    return failedController
+  }
+
   const body = () => {
     kick()
     try {
       fn()
       suspendedOn = null
       controller?.report({ status: 'idle' })
+      // Recovered: leave the failed collection, so the boundary can unlatch.
+      failedController?.report({ status: 'idle' })
     } catch (e) {
       if (e instanceof NotReadyYet) {
         const alreadySuspendedOnSame = suspendedOn === e.promise
@@ -211,6 +244,20 @@ function singleArgEffect(fn: () => void): void {
         ensureController()?.report({ status: 'throwing' })
         return
       }
+      // A real failure. It is graph state, not an event: report it to the nearest
+      // <Failed> boundary, which collects it and selects its fallback. The same
+      // controller reporting repeatedly is one entry, so a single rejection that
+      // re-runs this body several times still renders one fallback.
+      controller?.report({ status: 'idle' }) // failed is not pending
+      const failedScope = findNearestFailedScope(myOwner)
+      if (failedScope !== null) {
+        ensureFailedController(failedScope).report({
+          status: 'failed',
+          error: e,
+          retry: () => setKick(++kickCount),
+        })
+        return
+      }
       if (isFirstRun) routeError(myOwner, e)
       else routeErrorFromRerun(myOwner, e)
     }
@@ -223,6 +270,8 @@ function singleArgEffect(fn: () => void): void {
       unwatched(node as R3Computed<unknown>)
       controller?.unregister()
       controller = null
+      failedController?.unregister()
+      failedController = null
     },
   })
 }
