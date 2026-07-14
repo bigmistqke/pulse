@@ -71,17 +71,21 @@ test('a pending use() is NOT reported to an error boundary', async () => {
   expect(caught).toEqual([])
 })
 
-// KNOWN BUG — a real failure never reaches the error boundary from a binding.
+// KNOWN BUG — a real failure never reaches the error boundary from a DOM binding.
 //
-// Probe: the binding re-runs (3x, so it is alive), but `failure(c)` stays null even
-// though the promise rejected — the computed never parks the failure, so there is
-// nothing to throw and nothing routes to catchError. The likely cause: the stage
-// `() => Promise.reject(...)` mints a FRESH rejected promise on every evaluation,
-// so each re-run creates a new one and the supersession guard (`suspendedOn !== p`)
-// discards the settle before it can park the failure.
+// The COMPUTED is not at fault. The identical computed behaves correctly everywhere
+// else:
+//   - read directly            -> failure(c) === boom   (test/failure.test.ts)
+//   - read via use() in an effect -> the effect sees "PENDING" then "ERR:boom",
+//                                    and failure(c) === boom
+//   - read via use() in a BINDING -> failure(c) === null, nothing reaches catchError
 //
-// Note this is the async-rejection path only — a rejected computed read directly
-// (see test/failure.test.ts) parks and reports correctly.
+// So the failure is being lost on the binding path specifically. The likely cause is
+// teardown: the binding's catch does `disposeOwner(nextRunOwner)` before re-throwing
+// the NotReadyYet, and the computed is registered under that owner — disposing it
+// unwatches the computed's r3 nodes, so the later rejection never parks.
+//
+// (An earlier note here blamed the supersession guard; a trace disproved that.)
 test.skip('an error boundary still catches a real failure', async () => {
   const target = document.createElement('section')
   document.body.append(target)
