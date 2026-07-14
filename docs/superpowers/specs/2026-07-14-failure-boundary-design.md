@@ -69,13 +69,15 @@ type BindingState =
   | { status: 'idle' }
 ```
 
-### 2. One registration per binding
+### 2. Registration — and why the double-registration is left alone
 
-Today `insertChild` and `bindProp` each call `scope.register()`, and the `effect()` underneath them registers its own controller with the same scope. Both controllers report the same lifecycle. This double-registration is already recorded in `docs/follow-ups.md` ("insertChild / bindProp double-register with `<Loading>` scope"), where the suggested cleanup is a binding-effect primitive that drives reactive re-runs without owning a scope controller.
+**Corrected during planning. This section originally proposed collapsing the per-binding double registration, on the grounds that two boundary kinds would mean four controllers per binding. That premise is false.**
 
-With two boundary kinds, two registrations per binding would become four. So this design collapses them rather than multiplying them: a binding calls `registerBinding(owner)` once and gets one controller, which routes each reported status to the scope of the matching kind.
+`insertChild` and `bindProp` do not route their own failures. On a non-`NotReadyYet` throw they rethrow (`src/dom/bindings.ts:167`, `:169`) into the `effect()` beneath them, and that effect is what routes. So failure reporting lives in exactly one place, `src/effect.ts`, and a binding never registers a failed controller at all.
 
-This is the highest-risk part of the change. See "Risks" below.
+Adding `<Failed>` therefore adds one controller per binding, owned by the effect. The existing pending double-registration — `insertChild`/`bindProp` registering one controller, and the `effect()` beneath them registering another — stays at two, exactly as it is today. It is unchanged, not multiplied.
+
+So the reason to collapse it *inside this change*, which is what would have put `<Loading>`'s atomic-commit gate at risk, does not exist. The duplication remains a standalone cleanup (the binding-effect primitive already proposed in `docs/follow-ups.md`), to be done on its own, gated on the `<Loading>` gate tests. `src/dom/bindings.ts` is not modified by this work at all.
 
 ### 3. Routing a failure
 
@@ -166,7 +168,9 @@ The full `<Loading>` suite (`test/dom/loading.test.tsx`, `test/dom/loading-atomi
 
 ## Risks
 
-The single-registration cleanup in section 2 is the part most likely to disturb `<Loading>`. It is the right fix and this is the right moment for it, since two boundary kinds would otherwise mean four registrations per binding. But the commit gate is subtle. If the `<Loading>` gate tests begin failing during implementation, that is the signal to land the collection scope **without** the deduplication and do the deduplication as its own change.
+The risk this design originally carried — collapsing the per-binding double registration, which would have reached into `<Loading>`'s atomic-commit gate — turned out to rest on a false premise and has been removed. See section 2. `src/dom/bindings.ts` is not touched, the gate is not touched, and `test/dom/loading.test.tsx` / `test/dom/loading-atomic.test.tsx` must pass unmodified throughout.
+
+What remains is a rename (section 1) and additive work (`<Failed>`, provenance, `reset`). The rename is the only change that touches `<Loading>` at all, and it is mechanical: if a `<Loading>` test fails during it, semantics have been changed by accident.
 
 ## Background
 
