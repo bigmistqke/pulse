@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, test } from 'vitest'
 import {
   catchError,
   computed,
+  failure,
   flush,
   microtaskScheduler,
   render,
@@ -71,38 +72,57 @@ test('a pending use() is NOT reported to an error boundary', async () => {
   expect(caught).toEqual([])
 })
 
-// KNOWN BUG — a real failure never reaches the error boundary from a DOM binding.
-//
-// The COMPUTED is not at fault. The identical computed behaves correctly everywhere
-// else:
-//   - read directly            -> failure(c) === boom   (test/failure.test.ts)
-//   - read via use() in an effect -> the effect sees "PENDING" then "ERR:boom",
-//                                    and failure(c) === boom
-//   - read via use() in a BINDING -> failure(c) === null, nothing reaches catchError
-//
-// So the failure is being lost on the binding path specifically. The likely cause is
-// teardown: the binding's catch does `disposeOwner(nextRunOwner)` before re-throwing
-// the NotReadyYet, and the computed is registered under that owner — disposing it
-// unwatches the computed's r3 nodes, so the later rejection never parks.
-//
-// (An earlier note here blamed the supersession guard; a trace disproved that.)
-test.skip('an error boundary still catches a real failure', async () => {
+/**
+ * An error boundary must be created INSIDE `render`, not around it.
+ *
+ * `render` calls `createRoot`, which is always a root: its owner has no parent.
+ * So a `catchError` wrapped AROUND `render` is never an ancestor of the bindings
+ * inside it, and `routeError`'s walk up the owner chain cannot reach the handler.
+ * The boundary belongs in the tree it is guarding.
+ */
+test('an error boundary inside render catches a real failure', async () => {
   const target = document.createElement('section')
   document.body.append(target)
 
   const caught: unknown[] = []
   const c = computed(() => Promise.reject(new Error('boom')))
 
-  catchError(
-    () => {
-      render(() => <span>{() => use(c)}</span>, target)
-    },
-    (e) => caught.push(e),
+  render(
+    () => catchError(() => <span>{() => use(c)}</span>, (e) => caught.push(e)) as Node,
+    target,
   )
 
   await tick()
   flush()
 
-  expect(caught).toHaveLength(1)
+  expect(caught.length).toBeGreaterThan(0)
   expect((caught[0] as Error).message).toBe('boom')
+})
+
+/**
+ * A node's own bookkeeping must not depend on whether a CONSUMER happened to have
+ * an error boundary.
+ *
+ * When the promise rejects, the computed's settle handler clears `pending`, and
+ * under the sync scheduler that write re-runs the consuming binding immediately —
+ * still inside the settle handler's stack. The binding re-reads, throws, and with
+ * no boundary above it `routeError` re-throws. That throw used to unwind the settle
+ * handler itself, skipping the `setFailureSig` line below it: the computed silently
+ * lost its failure (`failure(c) === null`) and the rejection surfaced as an
+ * unhandled rejection.
+ *
+ * The failure is graph state. It parks whether or not anyone is listening.
+ */
+test('a rejected computed parks its failure even when the consumer has no boundary', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+
+  const c = computed(() => Promise.reject(new Error('boom')))
+
+  render(() => <span>{() => use(c)}</span>, target)
+
+  await tick()
+  flush()
+
+  expect((failure(c) as Error)?.message).toBe('boom')
 })

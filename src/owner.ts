@@ -101,6 +101,33 @@ export function routeError(start: Owner | null, error: unknown): void {
   throw error
 }
 
+/**
+ * Route an error that surfaced on a RE-RUN — one driven by a graph write rather
+ * than by the caller's own synchronous run.
+ *
+ * `routeError` re-throws when nothing handles the error. That is right on a node's
+ * first run: the caller created the node, so the throw belongs to them. It is wrong
+ * on a re-run. A re-run is triggered by a write, and that write may come from inside
+ * another node's settle handler — so an un-handled throw would unwind the writer
+ * mid-update, aborting bookkeeping that has nothing to do with the failing consumer.
+ * (This is precisely how a rejected computed used to lose its parked failure: its
+ * consumer had no boundary, and the re-throw unwound the settle handler before it
+ * could record the failure.)
+ *
+ * A node's state must not depend on whether its consumers have error boundaries. So
+ * on a re-run we route as usual, and an error nobody handled is reported rather than
+ * thrown into whoever happened to trigger the flush.
+ *
+ * Internal: called by `effect` on any run after the first.
+ */
+export function routeErrorFromRerun(start: Owner | null, error: unknown): void {
+  try {
+    routeError(start, error)
+  } catch (unhandled) {
+    console.error(unhandled)
+  }
+}
+
 /** Returns the current ambient owner, or `null` if outside any root. */
 export function getOwner(): Owner | null {
   return currentOwner

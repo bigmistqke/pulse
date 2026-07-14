@@ -6,6 +6,7 @@ import {
   findLoadingScope,
   getOwner,
   routeError,
+  routeErrorFromRerun,
   registerWithOwner,
   type BindingController,
 } from './owner'
@@ -78,6 +79,9 @@ function stagedEffect(
   let controller: BindingController | null = null
   const UNSET = Symbol('unset')
   let lastCommitted: unknown = UNSET
+  // See the identical flag in `singleArgEffect`: throw out of the caller's own
+  // first run, report out of a write-driven re-run.
+  let isFirstRun = true
 
   const ensureController = (): BindingController | null => {
     if (controller !== null) return controller
@@ -112,7 +116,8 @@ function stagedEffect(
         ensureController()?.report({ status: 'throwing' })
         return
       }
-      routeError(myOwner, e)
+      if (isFirstRun) routeError(myOwner, e)
+      else routeErrorFromRerun(myOwner, e)
       return
     }
     suspendedOn = null
@@ -138,6 +143,7 @@ function stagedEffect(
   }
 
   const node = r3Computed(body)
+  isFirstRun = false
   registerWithOwner({
     dispose: () => {
       disposed = true
@@ -168,6 +174,11 @@ function singleArgEffect(fn: () => void): void {
   let kickCount = 0
   let suspendedOn: Promise<unknown> | null = null
   let controller: BindingController | null = null
+  // r3 runs the body eagerly on creation, so the first run happens inside the
+  // caller's own stack: an error nobody handles is theirs to see, and is thrown.
+  // Every later run is driven by a graph write, where throwing would unwind the
+  // writer — see `routeErrorFromRerun`.
+  let isFirstRun = true
 
   const ensureController = (): BindingController | null => {
     if (controller !== null) return controller
@@ -200,11 +211,13 @@ function singleArgEffect(fn: () => void): void {
         ensureController()?.report({ status: 'throwing' })
         return
       }
-      routeError(myOwner, e)
+      if (isFirstRun) routeError(myOwner, e)
+      else routeErrorFromRerun(myOwner, e)
     }
   }
 
   const node = r3Computed(body)
+  isFirstRun = false
   registerWithOwner({
     dispose: () => {
       unwatched(node as R3Computed<unknown>)
