@@ -82,6 +82,54 @@ test('a multi-stage pipeline derives through the speculation', () => {
   expect(pipeline()).toBe(50)
 })
 
+test('a speculative write propagates through a chain of separate computeds', () => {
+  const [a, setA] = signal(1)
+  const b = computed(() => a() * 2) // 2
+  const c = computed(() => b() + 1) // 3
+  expect(c()).toBe(3)
+  action(() => {
+    // Read c FIRST, so its slot is cached in the scope while a is still 1.
+    // The bug only bites a slot that was cached before the write.
+    expect(c()).toBe(3)
+    setA(10)
+    expect(b()).toBe(20) // one-hop control — the direct subscriber recomputes
+    expect(c()).toBe(21) // transitive — c must recompute too, not return stale 3
+    expect(committed(c)).toBe(3) // isolation from committed state is intact
+  })
+  expect(c()).toBe(21) // committed through
+})
+
+test('a discarded action rolls back a transitively-derived value', () => {
+  const [a, setA] = signal(1)
+  const b = computed(() => a() * 2)
+  const c = computed(() => b() + 1)
+  expect(c()).toBe(3)
+  expect(() =>
+    action(() => {
+      expect(c()).toBe(3)
+      setA(10)
+      expect(c()).toBe(21) // speculative derivation two hops down
+      throw new Error('rollback')
+    }),
+  ).toThrow('rollback')
+  expect(c()).toBe(3) // the transitive derivation vanished with the scope
+  expect(committed(c)).toBe(3)
+})
+
+test('a speculative write propagates through a longer computed chain', () => {
+  const [a, setA] = signal(1)
+  const b = computed(() => a() + 1) // 2
+  const c = computed(() => b() * 2) // 4
+  const d = computed(() => c() + 3) // 7
+  expect(d()).toBe(7)
+  action(() => {
+    expect(d()).toBe(7) // cache the whole chain's slots at a = 1
+    setA(10)
+    expect(d()).toBe(25) // ((10+1)*2)+3, recomputed three hops down
+  })
+  expect(d()).toBe(25)
+})
+
 test('committed outside any speculation is just the current value', () => {
   const [n, setN] = signal(1)
   expect(committed(n)).toBe(1)

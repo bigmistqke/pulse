@@ -34,7 +34,7 @@ const sigNode = (): Node => ({ subs: new Set() })
 test('writeSlot stores a slot on the scope and records the write', () => {
   const root = createScope(undefined, 'owner')
   const name = sigNode()
-  const slot: Slot<string> = { recipe: () => 'foo', cached: 'foo', deps: [] }
+  const slot: Slot = { recipe: () => 'foo', cached: 'foo', deps: [], node: name }
   writeSlot(name, root, slot)
   expect(root.slots.get(name)).toBe(slot)
   expect(root.writeSet.has(name)).toBe(true)
@@ -44,7 +44,7 @@ test('readSlot falls through the chain to the nearest slot', () => {
   const root = createScope(undefined, 'owner')
   const s = createScope(root, 'speculative')
   const name = sigNode()
-  writeSlot(name, root, { recipe: () => 'foo', cached: 'foo', deps: [] })
+  writeSlot(name, root, { recipe: () => 'foo', cached: 'foo', deps: [], node: name })
   expect(readSlot(name, s)?.cached).toBe('foo')
   expect(readSlot(sigNode(), s)).toBeUndefined()
 })
@@ -53,8 +53,8 @@ test('a more-specific slot shadows an ancestor slot', () => {
   const root = createScope(undefined, 'owner')
   const s = createScope(root, 'speculative')
   const name = sigNode()
-  writeSlot(name, root, { recipe: () => 'foo', cached: 'foo', deps: [] })
-  writeSlot(name, s, { recipe: () => 'bar', cached: 'bar', deps: [] })
+  writeSlot(name, root, { recipe: () => 'foo', cached: 'foo', deps: [], node: name })
+  writeSlot(name, s, { recipe: () => 'bar', cached: 'bar', deps: [], node: name })
   expect(readSlot(name, s)?.cached).toBe('bar')
   expect(readSlot(name, root)?.cached).toBe('foo')
 })
@@ -62,7 +62,7 @@ test('a more-specific slot shadows an ancestor slot', () => {
 test('chainMatch fires when writeScope is in the target chain and unshadowed', () => {
   const root = createScope(undefined, 'owner')
   const name = sigNode()
-  const consumerSlot: Slot = { recipe: undefined, cached: undefined, deps: [] }
+  const consumerSlot: Slot = { recipe: undefined, cached: undefined, deps: [], node: sigNode() }
   const edge: Edge = { source: name, target: consumerSlot, targetScope: root }
   expect(chainMatch(edge, root)).toBe(true)
 })
@@ -71,7 +71,7 @@ test('chainMatch does NOT fire when writeScope is outside the target chain', () 
   const root = createScope(undefined, 'owner')
   const s = createScope(root, 'speculative')
   const name = sigNode()
-  const consumerSlot: Slot = { recipe: undefined, cached: undefined, deps: [] }
+  const consumerSlot: Slot = { recipe: undefined, cached: undefined, deps: [], node: sigNode() }
   const edge: Edge = { source: name, target: consumerSlot, targetScope: root }
   expect(chainMatch(edge, s)).toBe(false)
 })
@@ -80,8 +80,8 @@ test('chainMatch does NOT fire when a more-specific scope shadows the write', ()
   const root = createScope(undefined, 'owner')
   const s = createScope(root, 'speculative')
   const name = sigNode()
-  writeSlot(name, s, { recipe: () => 'bar', cached: 'bar', deps: [] })
-  const consumerSlot: Slot = { recipe: undefined, cached: undefined, deps: [] }
+  writeSlot(name, s, { recipe: () => 'bar', cached: 'bar', deps: [], node: name })
+  const consumerSlot: Slot = { recipe: undefined, cached: undefined, deps: [], node: sigNode() }
   const edge: Edge = { source: name, target: consumerSlot, targetScope: s }
   expect(chainMatch(edge, root)).toBe(false)
   expect(chainMatch(edge, s)).toBe(true)
@@ -90,7 +90,7 @@ test('chainMatch does NOT fire when a more-specific scope shadows the write', ()
 test('linkEdge indexes on the source and records on the target scope', () => {
   const root = createScope(undefined, 'owner')
   const name = sigNode()
-  const target: Slot = { recipe: undefined, cached: undefined, deps: [] }
+  const target: Slot = { recipe: undefined, cached: undefined, deps: [], node: sigNode() }
   const edge = linkEdge(name, target, root)
   expect(name.subs.has(edge)).toBe(true)
   expect(root.edges.has(edge)).toBe(true)
@@ -101,10 +101,10 @@ test('edgesToFire fixes the doubleName break: write under S fires the S-scoped e
   const root = createScope(undefined, 'owner')
   const s = createScope(root, 'speculative')
   const name = sigNode()
-  writeSlot(name, root, { recipe: () => 'foo', cached: 'foo', deps: [] })
-  const doubleNameSlotInS: Slot = { recipe: undefined, cached: 'foofoo', deps: [] }
+  writeSlot(name, root, { recipe: () => 'foo', cached: 'foo', deps: [], node: name })
+  const doubleNameSlotInS: Slot = { recipe: undefined, cached: 'foofoo', deps: [], node: sigNode() }
   linkEdge(name, doubleNameSlotInS, s)
-  writeSlot(name, s, { recipe: () => 'bar', cached: 'bar', deps: [] })
+  writeSlot(name, s, { recipe: () => 'bar', cached: 'bar', deps: [], node: name })
   const fired = edgesToFire(name, s)
   expect(fired.map((e) => e.target)).toContain(doubleNameSlotInS)
 })
@@ -113,9 +113,9 @@ test('edgesToFire does not fire consumers outside the write chain', () => {
   const root = createScope(undefined, 'owner')
   const s = createScope(root, 'speculative')
   const name = sigNode()
-  const rootConsumer: Slot = { recipe: undefined, cached: undefined, deps: [] }
+  const rootConsumer: Slot = { recipe: undefined, cached: undefined, deps: [], node: sigNode() }
   linkEdge(name, rootConsumer, root)
-  writeSlot(name, s, { recipe: () => 'bar', cached: 'bar', deps: [] })
+  writeSlot(name, s, { recipe: () => 'bar', cached: 'bar', deps: [], node: name })
   const fired = edgesToFire(name, s)
   expect(fired.map((e) => e.target)).not.toContain(rootConsumer)
 })
@@ -124,9 +124,9 @@ test('closeScopeEdges unlinks the scope edges from their sources and drops slots
   const root = createScope(undefined, 'owner')
   const s = createScope(root, 'speculative')
   const name = sigNode()
-  const targetInS: Slot = { recipe: undefined, cached: 'x', deps: [] }
+  const targetInS: Slot = { recipe: undefined, cached: 'x', deps: [], node: sigNode() }
   const edge = linkEdge(name, targetInS, s)
-  writeSlot(name, s, { recipe: () => 'bar', cached: 'bar', deps: [] })
+  writeSlot(name, s, { recipe: () => 'bar', cached: 'bar', deps: [], node: name })
   s.readSet.add(name)
   closeScopeEdges(s)
   expect(name.subs.has(edge)).toBe(false)
@@ -144,7 +144,7 @@ test('current scope defaults to ROOT_SCOPE, tracker to undefined', () => {
 
 test('runInScope pushes and restores the scope (and tracker) even on throw', () => {
   const s = createScope(ROOT_SCOPE, 'speculative')
-  const slot: Slot = { recipe: undefined, cached: undefined, deps: [] }
+  const slot: Slot = { recipe: undefined, cached: undefined, deps: [], node: sigNode() }
   runInScope(s, slot, () => {
     expect(getCurrentScope()).toBe(s)
     expect(getCurrentTracker()).toBe(slot)
@@ -189,7 +189,7 @@ test('a speculative write marks matching downstream speculative slots dirty', ()
   const name = signalNode('foo')
   const s = createScope(ROOT_SCOPE, 'speculative')
   // a downstream slot in S that depends on `name`:
-  const derivedSlot: Slot = { recipe: undefined, cached: 'stale', deps: [] }
+  const derivedSlot: Slot = { recipe: undefined, cached: 'stale', deps: [], node: sigNode() }
   linkEdge(name, derivedSlot, s)
   runInScope(s, undefined, () => writeValue(name, 'bar'))
   expect(derivedSlot.cached).toBeUndefined() // dirtied (cached dropped)

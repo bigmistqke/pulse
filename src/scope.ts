@@ -30,6 +30,9 @@ export interface Slot<T = unknown> {
   recipe: (() => T | Promise<T>) | undefined
   cached: T | undefined
   deps: Edge[]
+  /** The node this slot caches a value for. Lets a write walk on from a dirtied
+   *  slot to that node's own subscribers, so invalidation propagates transitively. */
+  node: Node<T>
 }
 
 /** A subscription edge. Engine-managed chains (Q1 Model 1): plain source/target
@@ -194,7 +197,7 @@ export function readValue<T>(node: Node<T>): T {
   }
   if (scope !== ROOT_SCOPE && node.defaultRecipe !== undefined) {
     // speculative computed miss: run the recipe into a fresh S-slot
-    const newSlot: Slot<T> = { recipe: node.defaultRecipe, cached: undefined, deps: [] }
+    const newSlot: Slot<T> = { recipe: node.defaultRecipe, cached: undefined, deps: [], node }
     scope.slots.set(node, newSlot)
     newSlot.cached = runRecipe(node.defaultRecipe, scope, newSlot)
     scope.readSet.add(node)
@@ -247,13 +250,32 @@ export function writeValue<T>(node: Node<T>, value: T): void {
   writeSpeculative(node, scope, value)
 }
 
-/** Speculative write: install a slot in `scope`, then mark every matching
- *  downstream speculative slot dirty (drop cached) so the next read recomputes
- *  (pull). Synchronous dirty-marking honors K1 Position C. */
+/** Speculative write: install a slot in `scope`, then mark every downstream
+ *  speculative slot dirty (drop cached) so the next read recomputes (pull).
+ *  Synchronous dirty-marking honors K1 Position C. */
 function writeSpeculative<T>(node: Node<T>, scope: Scope, value: T): void {
-  writeSlot(node, scope, { recipe: () => value, cached: value, deps: [] })
-  for (const edge of edgesToFire(node, scope)) {
-    edge.target.cached = undefined
+  writeSlot(node, scope, { recipe: () => value, cached: value, deps: [], node })
+  invalidateDownstream(node, scope)
+}
+
+/** Drop the cached value of every speculative slot reachable downstream of
+ *  `node`, not just its direct subscribers: a slot that derives from a slot that
+ *  derives from the written node must recompute too. Walks the subscriber graph
+ *  from the written node, using each dirtied slot's own node to reach the next
+ *  hop. A slot already dirty has, by this same walk, already had its downstream
+ *  dropped, so it is not re-walked — which also terminates the walk. `writeScope`
+ *  stays fixed across hops: it is the origin of the change, and `chainMatch`
+ *  decides per edge whether a consumer sees a write from that scope. */
+function invalidateDownstream(node: Node, writeScope: Scope): void {
+  const stack: Node[] = [node]
+  while (stack.length > 0) {
+    const current = stack.pop()!
+    for (const edge of edgesToFire(current, writeScope)) {
+      const slot = edge.target
+      if (slot.cached === undefined) continue // already dirty ⇒ downstream already dropped
+      slot.cached = undefined
+      stack.push(slot.node)
+    }
   }
 }
 
