@@ -48,11 +48,11 @@ test('failure() reports the error, and null while healthy', async () => {
     /* prime */
   }
   await tick()
-  expect(failure(c)()).toBe(null) // healthy
+  expect(failure(c)).toBe(null) // healthy
 
   setId(2)
   await tick()
-  expect((failure(c)() as Error).message).toBe('boom')
+  expect((failure(c) as Error).message).toBe('boom')
 })
 
 test('use() still throws on failure — the fatal read is unchanged', async () => {
@@ -75,7 +75,7 @@ test('latest returns undefined (not a throw) when a node fails with no prior val
   }
   await tick()
   expect(latest(c)).toBeUndefined() // nothing to degrade to — but still no throw
-  expect((failure(c)() as Error).message).toBe('boom')
+  expect((failure(c) as Error).message).toBe('boom')
 })
 
 test('a recovery clears the failure', async () => {
@@ -89,11 +89,11 @@ test('a recovery clears the failure', async () => {
     /* prime */
   }
   await tick()
-  expect((failure(c)() as Error).message).toBe('boom')
+  expect((failure(c) as Error).message).toBe('boom')
 
   setId(2)
   await tick()
-  expect(failure(c)()).toBe(null)
+  expect(failure(c)).toBe(null)
   expect(latest(c)).toBe('ok')
 })
 
@@ -110,5 +110,5 @@ test('failure propagates downstream along the pipeline', async () => {
   await tick()
   // The downstream stage is failed because its upstream is — the same upstream
   // walk isPending already does.
-  expect((failure(c)() as Error).message).toBe('upstream boom')
+  expect((failure(c) as Error).message).toBe('upstream boom')
 })

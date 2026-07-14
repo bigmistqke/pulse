@@ -35,23 +35,26 @@ export function lookupFailure(accessor: Accessor<unknown>): FailureEntry | undef
 }
 
 /**
- * Reactive accessor: has this node — or anything upstream — failed? Returns the
- * error, or `null` when healthy. Read inside a tracking context to subscribe.
+ * Has this node — or anything upstream — failed? Returns the error, or `null` when
+ * healthy. Reactive: it reads the underlying failure signals, so calling it inside
+ * a tracking context subscribes, and it re-fires on failure or recovery.
  *
- * This is the *query* view of a failure. The other views of the same state:
- * `use(x)` throws it (the fatal read, which an error boundary catches), and
- * `latest(x)` ignores it and returns the stale value (the tolerant read).
+ * Reads DIRECTLY, like `latest` — not as an accessor-returning factory. (`isPending`
+ * still has that older shape; it is the odd one out.)
+ *
+ * This is the *query* projection of the failure state. The others: `latest(x)`
+ * projects the value (and so never throws), and `use(x)` is the strict combinator
+ * that treats "unavailable" as fatal and throws — which is what feeds an error
+ * boundary.
  */
-export function failure<T>(x: Accessor<T>): Accessor<unknown> {
-  return () => {
-    let cur = registry.get(x as Accessor<unknown>)
-    while (cur !== undefined) {
-      const e = cur.error()
-      if (e !== null && e !== undefined) return e
-      cur = cur.upstream
-    }
-    return null
+export function failure<T>(x: Accessor<T>): unknown {
+  let cur = registry.get(x as Accessor<unknown>)
+  while (cur !== undefined) {
+    const e = cur.error()
+    if (e !== null && e !== undefined) return e
+    cur = cur.upstream
   }
+  return null
 }
 
 /** The node's published value read WITHOUT the error conversion, so a tolerant
