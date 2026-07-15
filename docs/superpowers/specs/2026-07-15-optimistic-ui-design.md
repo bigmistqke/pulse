@@ -97,6 +97,7 @@ Explicit dual-setter is the pattern for this version. The known cost is forgetti
 - Auto-promotion of the overlay into the canonical signal is deferred.
 - Surfacing which action produced the current top overlay (an action-handle accessor for a "pending operations" list) is deferred, and the action handle stays internal.
 - Long-lived, local-first optimism that outlives its action is deferred; the lifetime here is bounded by the action.
+- Optimistic writes inside an action nested within another action are out of scope. The inner action's overlay clears on its own commit while its canonical promotion has only reached the parent speculative scope, so the reader briefly falls back to the root-committed value until the outer action commits.
 
 ## Testing
 

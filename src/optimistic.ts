@@ -1,4 +1,3 @@
-import { computed } from './computed'
 import { committed, getCurrentScope, onSettle, ROOT_SCOPE, type Scope } from './scope'
 import { signal, type Accessor } from './signal'
 
@@ -58,16 +57,11 @@ export function optimistic<T>(
     }
   }
 
-  const overlayReader = computed(() => {
+  const optimisticValue: Accessor<T> = () => {
     const current = top()
-    return current === EMPTY ? source() : (current as T)
-  })
-  const overlayFlag = computed(() => top() !== EMPTY)
-
-  // Thin typed forwarders: `computed` returns a Signal of a pipeline-read type,
-  // so wrap it to present the plain Accessor shape this API promises.
-  const optimisticValue: Accessor<T> = () => overlayReader() as T
-  const isOptimistic: Accessor<boolean> = () => overlayFlag() as boolean
+    return current === EMPTY ? source() : current
+  }
+  const isOptimistic: Accessor<boolean> = () => top() !== EMPTY
 
   return [optimisticValue, setOptimisticValue, isOptimistic]
 }
