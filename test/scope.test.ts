@@ -427,3 +427,18 @@ test('onSettle fires each callback once, in last-in-first-out order', () => {
 test('onSettle throws when called with no active speculative scope', () => {
   expect(() => onSettle(() => {})).toThrow()
 })
+
+test('a throwing settle callback does not strand the scope or block siblings', () => {
+  const s = createScope(ROOT_SCOPE, 'speculative')
+  const fired: string[] = []
+  runInScope(s, undefined, () => {
+    onSettle(() => fired.push('a'))
+    onSettle(() => {
+      throw new Error('boom')
+    })
+    onSettle(() => fired.push('c'))
+  })
+  expect(() => commit(s)).not.toThrow()
+  expect(fired).toEqual(['c', 'a']) // LIFO; the throwing middle callback is isolated
+  expect(s.status).toBe('committed') // commit completed despite the throw
+})

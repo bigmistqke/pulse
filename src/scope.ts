@@ -293,11 +293,20 @@ function invalidateDownstream(node: Node, writeScope: Scope): void {
 }
 
 /** Drain a scope's close callbacks once, in last-in-first-out order, passing
- *  how the scope closed. */
+ *  how the scope closed. The list is emptied before firing and each callback
+ *  is isolated, so a throwing callback neither re-fires on a later close nor
+ *  strands the caller's own close bookkeeping (an unflushed commit) or its
+ *  sibling callbacks. Mirrors the best-effort cleanup firing in owner.ts. */
 function fireSettle(scope: Scope, outcome: SettleOutcome): void {
   const callbacks = scope.cleanups
-  for (let i = callbacks.length - 1; i >= 0; i--) callbacks[i](outcome)
-  callbacks.length = 0
+  scope.cleanups = []
+  for (let i = callbacks.length - 1; i >= 0; i--) {
+    try {
+      callbacks[i](outcome)
+    } catch {
+      // swallow per-callback errors — best-effort teardown
+    }
+  }
 }
 
 /** Commit a scope (ADR 0010 order): snapshot the writeSet's promoted values
