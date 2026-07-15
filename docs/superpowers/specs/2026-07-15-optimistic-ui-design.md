@@ -41,10 +41,10 @@ The action handle itself — the identity of the scope that closed — is delibe
 
 Today a `Scope` carries a `cleanups` array that `discard()` drains but `commit()` does not, and nothing anywhere registers into it. So the success path currently runs no close-time code at all. This is recorded as an open follow-up (`commit()` does not fire scope cleanups; `discard()` does). `onSettle` is the first registrar, and it needs to fire on both faces, so this design closes that follow-up.
 
-A `Scope` gains a `settleCallbacks` list carrying functions of the outcome. Both closing paths drain it in last-in-first-out order:
+The scope already carries a `cleanups` list that `discard()` drains; this design reuses it rather than adding a parallel list. It is retyped from `Array<() => void>` to `Array<(outcome: 'committed' | 'discarded') => void>` so a close callback learns how the scope closed, and both closing paths drain it in last-in-first-out order. A plain zero-argument callback stays valid, because a function that takes no arguments is assignable to one that receives the outcome.
 
-- `commit(scope)` applies its promotions as it does today, then drains `settleCallbacks` with `'committed'`, then performs the final `stabilize()`.
-- `discard(scope)` drains `settleCallbacks` with `'discarded'` alongside its existing teardown.
+- `commit(scope)` applies its promotions as it does today, then drains `cleanups` with `'committed'`, then performs the final `stabilize()`.
+- `discard(scope)` drains `cleanups` with `'discarded'` — the same teardown it already ran, now told the scope was discarded.
 
 The ordering inside `commit` is load-bearing. Callbacks fire after the promotions are applied but before the single `stabilize()`. An optimistic overlay's close callback clears the overlay by writing its backing signal; the action's own `setValue` promotion writes the canonical signal. Both writes are ordinary committed writes, so both are absorbed into the one `stabilize()` that closes the commit, and a consumer of `optimisticValue` recomputes once against a coherent frame: the overlay is gone and the canonical value already holds the predicted value. There is no intermediate frame in which the overlay has cleared but the canonical promotion has not yet landed, so the user interface does not flicker back to the prior value on success.
 
