@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { createScope, chainFor, writeSlot, readSlot, chainMatch, linkEdge, edgesToFire, closeScopeEdges, ROOT_KIND, ROOT_SCOPE, DIRTY, getCurrentScope, getCurrentTracker, runInScope, signalNode, computedNode, readValue, writeValue, commit, discard, action, type Scope, type Node, type Slot, type Edge } from '../src/scope'
+import { createScope, chainFor, writeSlot, readSlot, chainMatch, linkEdge, edgesToFire, closeScopeEdges, ROOT_KIND, ROOT_SCOPE, DIRTY, getCurrentScope, getCurrentTracker, runInScope, signalNode, computedNode, readValue, writeValue, commit, discard, action, onSettle, type Scope, type Node, type Slot, type Edge } from '../src/scope'
 import { read as r3Read } from 'r3'
 
 test('createScope produces an open scope with empty bags', () => {
@@ -395,4 +395,35 @@ test('committing a scope where a computed was only read does not promote/corrupt
   // signal promoted, computed intact and reactive (not overwritten by r3SetSignal):
   expect(readValue(name)).toBe('bar')
   expect(readValue(doubleName)).toBe('barbar')
+})
+
+test('onSettle fires with committed when the scope commits', () => {
+  const s = createScope(ROOT_SCOPE, 'speculative')
+  const seen: string[] = []
+  runInScope(s, undefined, () => onSettle((outcome) => seen.push(outcome)))
+  commit(s)
+  expect(seen).toEqual(['committed'])
+})
+
+test('onSettle fires with discarded when the scope is discarded', () => {
+  const s = createScope(ROOT_SCOPE, 'speculative')
+  const seen: string[] = []
+  runInScope(s, undefined, () => onSettle((outcome) => seen.push(outcome)))
+  discard(s)
+  expect(seen).toEqual(['discarded'])
+})
+
+test('onSettle fires each callback once, in last-in-first-out order', () => {
+  const s = createScope(ROOT_SCOPE, 'speculative')
+  const order: number[] = []
+  runInScope(s, undefined, () => {
+    onSettle(() => order.push(1))
+    onSettle(() => order.push(2))
+  })
+  commit(s)
+  expect(order).toEqual([2, 1])
+})
+
+test('onSettle throws when called with no active speculative scope', () => {
+  expect(() => onSettle(() => {})).toThrow()
 })

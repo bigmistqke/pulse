@@ -52,6 +52,9 @@ export interface Edge {
 
 export type ScopeKind = 'owner' | 'speculative'
 
+/** How a speculative scope closed, reported to its close callbacks. */
+export type SettleOutcome = 'committed' | 'discarded'
+
 /** The ambient context primitive. Owns its slots/edges/sets/cleanups. Per Q6. */
 export interface Scope {
   parent: Scope | undefined
@@ -60,7 +63,10 @@ export interface Scope {
   edges: Set<Edge>
   writeSet: Set<Node>
   readSet: Set<Node>
-  cleanups: Array<() => void>
+  /** Callbacks fired once when the scope closes, receiving how it closed.
+   *  Registered via `onSettle`; drained by both `commit` and `discard`. A plain
+   *  zero-argument callback is fine — it simply ignores the outcome. */
+  cleanups: Array<(outcome: SettleOutcome) => void>
   status: 'open' | 'committed' | 'discarded'
   kind: ScopeKind
 }
@@ -286,12 +292,23 @@ function invalidateDownstream(node: Node, writeScope: Scope): void {
   }
 }
 
+/** Drain a scope's close callbacks once, in last-in-first-out order, passing
+ *  how the scope closed. */
+function fireSettle(scope: Scope, outcome: SettleOutcome): void {
+  const callbacks = scope.cleanups
+  for (let i = callbacks.length - 1; i >= 0; i--) callbacks[i](outcome)
+  callbacks.length = 0
+}
+
 /** Commit a scope (ADR 0010 order): snapshot the writeSet's promoted values
  *  (before closeScopeEdges clears writeSet + drops slots), tear down the
  *  scope's pulse edges (edges-down-before-promote → no double-fire), then
  *  promote to the parent. Promoting to ROOT_SCOPE bridges to r3 via setSignal
  *  + a single stabilize (r3's InHeap-deduped heap gives Q10 batching). A
- *  speculative parent (nested actions) receives the value as a parent slot. */
+ *  speculative parent (nested actions) receives the value as a parent slot.
+ *  Settle callbacks fire after promotions but before the final stabilize, so a
+ *  callback's committed write (e.g. clearing an optimistic overlay) batches into
+ *  the same flush as the promotions and consumers see one coherent frame. */
 export function commit(scope: Scope): void {
   const promotions: Array<{ node: Node; value: unknown }> = []
   for (const node of scope.writeSet) {
@@ -303,21 +320,23 @@ export function commit(scope: Scope): void {
     for (const { node, value } of promotions) {
       r3SetSignal(node.backing as R3Signal<unknown>, value)
     }
+    fireSettle(scope, 'committed')
     stabilize()
   } else {
     for (const { node, value } of promotions) {
       writeSpeculative(node, parent, value)
     }
+    fireSettle(scope, 'committed')
   }
   scope.status = 'committed'
 }
 
 /** Discard a scope: tear down edges + drop slots (no promotion), then fire
- *  cleanups in LIFO order. Speculative writes simply vanish. */
+ *  close callbacks in LIFO order with 'discarded'. Speculative writes simply
+ *  vanish. */
 export function discard(scope: Scope): void {
   closeScopeEdges(scope)
-  for (let i = scope.cleanups.length - 1; i >= 0; i--) scope.cleanups[i]()
-  scope.cleanups.length = 0
+  fireSettle(scope, 'discarded')
   scope.status = 'discarded'
 }
 
@@ -330,6 +349,18 @@ export function discard(scope: Scope): void {
  *  committed value changes. Contrast the readiness-axis `latest`. */
 export function committed<T>(s: () => T): T {
   return runInScope(ROOT_SCOPE, undefined, s)
+}
+
+/** Register a callback fired once when the current speculative scope closes:
+ *  with 'committed' when it commits, 'discarded' when it is discarded. A caller
+ *  that does not care which face closed the scope ignores the argument. Throws
+ *  outside an action, where the callback would never fire. */
+export function onSettle(callback: (outcome: SettleOutcome) => void): void {
+  const scope = getCurrentScope()
+  if (scope === ROOT_SCOPE) {
+    throw new Error('onSettle requires an active speculative scope')
+  }
+  scope.cleanups.push(callback)
 }
 
 /**
