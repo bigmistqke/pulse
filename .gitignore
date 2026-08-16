@@ -5,3 +5,4 @@ examples/*/node_modules
 examples/*/dist
 examples/*/test-results/
 examples/*/playwright-report/
+.superpowers
