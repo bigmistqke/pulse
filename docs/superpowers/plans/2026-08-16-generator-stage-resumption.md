@@ -1242,6 +1242,10 @@ over rather than resuming a computation that failed part-way through."
   - `export function currentGeneratorCleanups(): Disposable[] | null`
   - `export function takeGeneratorCleanups(gen: Generator<unknown, unknown, unknown>): Disposable[]` (from `src/driver.ts`)
 
+**The generator must be tracked from creation, not from its first pause.** Steps 6 and 7 key teardown off the retained-generator field, which earlier tasks populate only when a stage pauses. A generator that completes or throws without ever pausing therefore never reaches teardown, and its registered callbacks are dropped permanently — where before this change they fired on the next recompute or on disposal. That is a regression, not an uncovered edge, and it contradicts the decision record, which says the callbacks run when the generator ends, whether it completes, is discarded, or its owner is disposed.
+
+Have the stage record its generator as soon as the driver creates one, so a single mechanism covers all three endings. Give `runStage` an optional callback that reports the generator at creation and have `makeStageNode` assign the field there. The existing checks then work unchanged: a completed run finds it and ends it, a throw reaches the catch and discards it, and a pause leaves it retained for the next run.
+
 **Why this is needed.** `onCleanup` registers on the r3 node (`src/owner.ts:334`), and r3 runs a node's callbacks at the start of every recompute and then clears them (`../r3/src/index.ts:162` calls `runDisposal`, defined at `:421`). Re-executing the body from the top kept that balanced. Resuming does not: the code before the pause runs once, so the callback registers once, but the settle still triggers a recompute — so r3 fires it *before* the generator resumes. A generator that acquires a resource before its pause would have it torn down at the moment its first result arrives.
 
 - [ ] **Step 1: Write the failing tests**
