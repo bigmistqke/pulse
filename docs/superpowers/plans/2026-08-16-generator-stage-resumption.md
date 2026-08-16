@@ -758,15 +758,25 @@ First, expose the `kick` signal's underlying node, which Step 8 needs. Change
 to:
 
 ```ts
-  // `kickNode` is handed to `snapshotDeps` so this signal is left out of the
-  // recorded dependencies. The settle handler bumps it deliberately to force a
-  // run, so recording it would make every settle look like someone else's
-  // change — and the stage would restart every time instead of resuming.
-  const [kick, setKick, kickNode] = signalWithNode(0)
+  const [kick, setKick] = signal(0)
+  // Handed to `snapshotDeps` so this signal is left out of the recorded
+  // dependencies. The settle handler bumps it deliberately to force a run, so
+  // recording it would make every settle look like someone else's change — and
+  // the stage would restart every time instead of resuming.
+  const kickNode = kick[NODE]
 ```
 
-`signalWithNode` is already imported (`src/computed.ts:6`) and already used for
-`publishedValue` (`src/computed.ts:158`).
+Take the node off the accessor, not from `signalWithNode`. `signalWithNode`
+returns pulse's own scope `Node<T>` as its third element, whereas the object r3
+places in a dependency list is the r3 backing node — which is what `accessor[NODE]`
+holds (`src/signal.ts:62-71`). Excluding the scope `Node` would never match
+anything in the list, and the exclusion would silently do nothing. `NODE` is
+already imported (`src/computed.ts:6`), and this mirrors how the file already
+reaches the backing node elsewhere.
+
+The first test in Step 1 is the canary for getting this wrong: it asserts exactly
+one promise is created, and a failed exclusion shows up as a promise count in the
+tens.
 
 Then, immediately after `let stashedResolution: StashedResolution | null = null` (currently `src/computed.ts:146`), add:
 
