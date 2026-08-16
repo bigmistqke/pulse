@@ -3,6 +3,7 @@ import { computed } from '../src/computed'
 import { signal } from '../src/signal'
 import { latest, read } from '../src/async'
 import { createRoot } from '../src/owner'
+import { failure, resetFailure } from '../src/failure'
 
 /** Resolve after all microtasks have drained (a macrotask boundary). */
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
@@ -221,6 +222,47 @@ test('a finally block reading a signal during a discard adds no dependency', asy
   await ticks(3)
 
   expect(runs).toBe(runsWhilePaused)
+})
+
+test('resetting a parked failure discards a generator that has since re-paused', async () => {
+  // Covers the `discardGen()` call in the failure entry's `reset`. Reaching a
+  // live generator there takes three steps: the stage fails and parks the
+  // failure (which leaves no retained generator); an unrelated dependency
+  // change then reruns the body, which starts a fresh generator and pauses,
+  // without clearing the stale parked failure; and only then does a reset
+  // arrive, landing on a generator that is genuinely mid-pause.
+  const [a, setA] = signal(1)
+  let attempt = 0
+  let closed = 0
+
+  const c = computed(function* () {
+    attempt++
+    const mine = attempt
+    const av: number = yield* read(a)
+    try {
+      if (mine === 1) {
+        yield* read(Promise.reject(new Error('boom')))
+      }
+      const p: number = yield* read(
+        new Promise<number>((resolve) => setTimeout(() => resolve(10), 100)),
+      )
+      return av + p
+    } finally {
+      closed++
+    }
+  })
+
+  c()
+  await ticks(5)
+  expect(failure(c)).toBeInstanceOf(Error) // parked, no generator retained
+  const closedAfterFailure = closed
+
+  setA(2) // unrelated change: a fresh generator starts and pauses
+  await tick()
+  expect(closed).toBe(closedAfterFailure) // still paused, finally has not run
+
+  resetFailure(c) // must tear down the live generator
+  expect(closed).toBe(closedAfterFailure + 1)
 })
 
 test('disposing the owner runs a paused generator finally block', async () => {
