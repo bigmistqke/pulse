@@ -2,6 +2,7 @@ import { expect, test } from 'vitest'
 import { computed } from '../src/computed'
 import { signal } from '../src/signal'
 import { latest, read } from '../src/async'
+import { createRoot } from '../src/owner'
 
 /** Resolve after all microtasks have drained (a macrotask boundary). */
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
@@ -154,4 +155,95 @@ test('a rejected inline promise reaches the generator try/catch', async () => {
   await ticks(10)
 
   expect(latest(c)).toBe('caught: boom')
+})
+
+test('a discarded generator runs its finally block', async () => {
+  const [a, setA] = signal(1)
+  let opened = 0
+  let closed = 0
+
+  const c = computed(function* () {
+    const av: number = yield* read(a)
+    opened++
+    try {
+      const p: number = yield* read(
+        new Promise<number>((resolve) => setTimeout(() => resolve(10), 5)),
+      )
+      return av + p
+    } finally {
+      closed++
+    }
+  })
+
+  c()
+  await tick() // let the first run reach its pause, but not settle
+  setA(2) // dependency read before the pause changed -> discard and restart
+
+  await ticks(10)
+
+  expect(opened).toBe(2)
+  expect(closed).toBe(2) // the discarded generator's finally ran, and the second one's
+  expect(latest(c)).toBe(12)
+})
+
+test('a finally block reading a signal during a discard adds no dependency', async () => {
+  // Scoped deliberately to the discard path. `untrack` wraps `gen.return()`,
+  // not the whole generator — a `finally` that runs because the generator
+  // completed normally runs inside the tracked body, and its reads SHOULD be
+  // tracked like any other body code. So this asserts before the replacement
+  // generator has had a chance to settle.
+  const [a, setA] = signal(1)
+  const [unrelated, setUnrelated] = signal(0)
+  let runs = 0
+
+  const c = computed(function* () {
+    runs++
+    const av: number = yield* read(a)
+    try {
+      const p: number = yield* read(
+        new Promise<number>((resolve) => setTimeout(() => resolve(10), 50)),
+      )
+      return av + p
+    } finally {
+      unrelated() // read during the discard; must not become a dependency
+    }
+  })
+
+  c()
+  await tick()
+  setA(2) // discards the first generator, running its finally untracked
+  await tick()
+
+  // The replacement is paused on its own 50ms promise and has not run its
+  // finally. If the discard leaked a dependency, this write restarts the stage.
+  const runsWhilePaused = runs
+  setUnrelated(99)
+  await ticks(3)
+
+  expect(runs).toBe(runsWhilePaused)
+})
+
+test('disposing the owner runs a paused generator finally block', async () => {
+  let closed = 0
+  let dispose!: () => void
+
+  createRoot((d) => {
+    dispose = d
+    const c = computed(function* () {
+      try {
+        return yield* read(
+          new Promise<number>((resolve) => setTimeout(() => resolve(1), 50)),
+        )
+      } finally {
+        closed++
+      }
+    })
+    c()
+  })
+
+  await tick()
+  expect(closed).toBe(0) // still paused
+
+  dispose()
+  expect(closed).toBe(1)
 })

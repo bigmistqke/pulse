@@ -184,6 +184,10 @@ function makeStageNode(
     }
   }
 
+  // Owner disposal must reach a paused generator, not just unlink the r3 node,
+  // so that a generator holding something across its pause releases it.
+  registerWithOwner({ dispose: discardGen })
+
   // The parked failure, as reactive graph state — the mirror of pendingSig. A
   // consumer subscribes to it through the accessor, so it re-runs when this node
   // fails or recovers. Crucially the failure lives HERE and not in publishedValue:
@@ -564,6 +568,9 @@ function makeStageNode(
     // so the stage re-executes from the top and suspends on a fresh promise —
     // a genuine retry with unchanged inputs.
     reset: () => {
+      // A retry starts the computation over rather than resuming a generator
+      // that failed part-way through.
+      discardGen()
       setFailureSig(null)
       setKick(++kickCount)
     },
