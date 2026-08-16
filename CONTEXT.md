@@ -69,20 +69,30 @@ boundaries**, with two distinct granularities of re-entry:
   continuation with different values. Pulse achieves multi-shot at the
   stage boundary on top of single-shot JavaScript generators by decomposition,
   so re-entry needs no generator-state preservation.
-- **Within a single stage, pulse re-executes from the top.** A binding-effect
-  or single-stage computed that suspends on `use(x)` does NOT truly resume on
-  settle — it re-runs the body from the start. The kick-on-settle mechanism
-  just marks the effect dirty; the body restarts. Same model as React Suspense
-  ("re-execute on settle," not true continuation resumption). Generator stages
-  do approximate multi-shot WITHIN a stage's yields via restart-from-top +
-  WeakMap fast-forward (cached yielded values replay synchronously on re-run),
-  but the body still re-executes from the top.
+- **A generator stage resumes, once per pause.** The paused generator is
+  retained and re-entered with `gen.next(value)`, so the code before the pause
+  does not run again. This is genuine continuation resumption, but only
+  forward: a JavaScript generator cannot be re-entered at an earlier point, so
+  a change to any dependency the generator already read discards it and runs a
+  fresh one from the top — reissuing any asynchronous work an earlier segment
+  had completed. Because resuming runs only the code after the pause, and r3
+  rebuilds a dependency list from the reads a run makes, the stage replays the
+  dependencies recorded before the pause so they stay linked.
+- **Everything else within a stage re-executes from the top.** A
+  binding-effect, or a sync or async-function stage, that suspends on `use(x)`
+  does NOT resume — it re-runs the body from the start. The kick-on-settle
+  mechanism just marks the node dirty; the body restarts. Same model as React
+  Suspense ("re-execute on settle," not true continuation resumption).
 
-So pulse is true delimited continuations at the **stage-decomposition**
-granularity; re-execution-with-cache at the **within-stage** granularity. This
-distinction matters: the stage boundary is where pulse gets genuine "rest of
-the computation runs with a different value" semantics; everything within a
-single stage runs from the top each time.
+So pulse has three levels. **Stage boundaries** are multi-shot: a stage is
+re-invoked with a new input any number of times, without re-running upstream
+stages. **Within a generator stage** is single-shot resumption: the
+continuation runs forward once per pause, and a dependency change replaces it
+rather than rewinding it. **Everywhere else within a stage** is re-execution
+from the top. The distinction matters: the stage boundary is the only place
+pulse gets genuine "rest of the computation runs with a *different* value"
+semantics, which is why a stage boundary is where work that should not
+be redone belongs.
 
 See [Bauer & Pretnar's "Programming with Algebraic Effects and Handlers"](https://arxiv.org/abs/1203.1539)
 for the formal theory; [Dan Abramov's "Algebraic Effects for the Rest of Us"](https://overreacted.io/algebraic-effects-for-the-rest-of-us/)

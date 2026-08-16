@@ -50,11 +50,11 @@ export function computed<A, B, C, D, E>(
  * r3 value becomes that in-flight `Promise<T>` — async color flows downstream).
  *
  * Resumption is two-mode, discriminated by stage type:
- * - Generator stage → 'fast-forward': the paused generator is retained, not
- *   rebuilt. On settle, the body re-runs, replays the dependencies it had
- *   recorded up to the pause to keep them linked, and resumes the generator
- *   forward from where it yielded — so the code before the pause runs once,
- *   not once per settle. Stage value = the generator's true return.
+ * - Generator stage → 'fast-forward': the paused generator is retained and re-entered
+ *   with the settled value, so the code before the pause does not run again.
+ *   The dependencies r3 recorded before the pause are replayed first, both to
+ *   keep them linked and to detect a change — a changed dependency discards the
+ *   generator (running its `finally` blocks) and runs a fresh one from the top.
  * - Non-generator stage (sync/async) that returned a promise → 'reuse-value':
  *   on settle, the rerun callback stashes the resolved value; the next r3 fn
  *   invocation returns it directly WITHOUT re-invoking the stage. This is
