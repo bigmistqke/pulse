@@ -427,7 +427,17 @@ test('replayDeps reads every record even after finding a change', () => {
   r3SetSignal(a, 99) // first record changes — a naive loop would stop here
   r3SetSignal(source, 5) // `derived` is now stale: still 30, should be 50
 
-  expect(replayDeps(records)).toBe(true)
+  // `replayDeps` must run inside a reactive context. r3's `read` only refreshes
+  // a stale computed when there is a context to link into (`../r3/src/index.ts`,
+  // the `if (context)` guard in `read`), and the real caller invokes this from
+  // inside its own computed body, so the test reproduces that.
+  let changed: boolean | undefined
+  r3Computed(() => {
+    changed = replayDeps(records)
+    return null
+  })
+
+  expect(changed).toBe(true)
   // Only true if the walk continued past the first change and read `derived`.
   expect(derived.value).toBe(50)
 })
