@@ -51,11 +51,19 @@
 
 - [ ] **Step 1: Write the failing tests**
 
-Append to `test/driver.test.ts`:
+In `test/driver.test.ts`, change the existing import on line 2 from
+`import { runStage } from '../src/driver'` to:
 
 ```ts
-import { resumeStage, runStage, type Resumption } from '../src/driver'
+import { resumeStage, runStage } from '../src/driver'
+```
 
+Do not add a second import statement, and do not import `Resumption` — the
+tests below build the seed objects inline and never name the type.
+
+Then append:
+
+```ts
 test('a suspended generator stage hands its generator back in the outcome', () => {
   const p = new Promise<number>(() => {})
   const outcome = runStage(function* () {
@@ -297,8 +305,10 @@ its first resumption, so both paths share one loop."
 - Consumes: nothing from earlier tasks.
 - Produces:
   - `export type DepRecord = { dep: R3Signal<unknown> | R3Computed<unknown>; value: unknown }`
-  - `export function snapshotDeps(node: R3Computed<unknown>): DepRecord[]`
+  - `export function snapshotDeps(node: R3Computed<unknown>, exclude: object | null): DepRecord[]`
   - `export function replayDeps(records: readonly DepRecord[]): boolean` — returns `true` if any recorded dependency's value changed.
+
+**Why `exclude` exists.** The caller in Task 3 records the dependencies of a stage body that reads an internal `kick` signal at its top, and the settle handler bumps that signal to force the body to run. Recording it would make every settle look like a dependency change, so the stage would restart every time instead of resuming. The caller passes that signal's node here to leave it out.
 
 **Background the implementer needs.** r3 stores a computed's dependencies as a singly linked list of `Link` objects reachable from `node.deps` via `nextDep`. `node.depsTail` is a cursor: `recompute` sets it to `null` before invoking the body, each read advances it, and everything past it is unlinked afterwards. So while a run is in progress, the list from `deps` up to and including `depsTail` is what this run has read, and anything past `depsTail` is stale leftovers from the previous run. `deps`, `depsTail`, `Link`, and `read` are all part of r3's public interface.
 
@@ -322,7 +332,7 @@ test('snapshotDeps records every dependency a run read, with its value', () => {
   const b = r3Signal(2)
   const node = r3Computed(() => r3Read(a) + r3Read(b))
 
-  const records = snapshotDeps(node as R3Computed<unknown>)
+  const records = snapshotDeps(node as R3Computed<unknown>, null)
 
   expect(records.length).toBe(2)
   expect(records.map((r) => r.value)).toEqual([1, 2])
@@ -330,13 +340,43 @@ test('snapshotDeps records every dependency a run read, with its value', () => {
 
 test('snapshotDeps records nothing for a run that read no dependencies', () => {
   const node = r3Computed(() => 42)
-  expect(snapshotDeps(node as R3Computed<unknown>)).toEqual([])
+  expect(snapshotDeps(node as R3Computed<unknown>, null)).toEqual([])
+})
+
+test('snapshotDeps leaves out the excluded dependency', () => {
+  const a = r3Signal(1)
+  const control = r3Signal(0)
+  const node = r3Computed(() => {
+    r3Read(control)
+    return r3Read(a)
+  })
+
+  const records = snapshotDeps(node as R3Computed<unknown>, control)
+
+  expect(records.length).toBe(1)
+  expect(records[0]!.value).toBe(1)
+})
+
+test('an excluded control signal does not make replayDeps report a change', () => {
+  // The failure this guards against: a caller that bumps its own control signal
+  // to force a run would see every run as someone else's change.
+  const a = r3Signal(1)
+  const control = r3Signal(0)
+  const node = r3Computed(() => {
+    r3Read(control)
+    return r3Read(a)
+  })
+  const records = snapshotDeps(node as R3Computed<unknown>, control)
+
+  r3SetSignal(control, 1)
+
+  expect(replayDeps(records)).toBe(false)
 })
 
 test('replayDeps reports false when nothing changed', () => {
   const a = r3Signal(1)
   const node = r3Computed(() => r3Read(a))
-  const records = snapshotDeps(node as R3Computed<unknown>)
+  const records = snapshotDeps(node as R3Computed<unknown>, null)
 
   expect(replayDeps(records)).toBe(false)
 })
@@ -345,7 +385,7 @@ test('replayDeps reports true when a recorded dependency changed', () => {
   const a = r3Signal(1)
   const b = r3Signal(2)
   const node = r3Computed(() => r3Read(a) + r3Read(b))
-  const records = snapshotDeps(node as R3Computed<unknown>)
+  const records = snapshotDeps(node as R3Computed<unknown>, null)
 
   r3SetSignal(a, 99)
 
@@ -355,19 +395,25 @@ test('replayDeps reports true when a recorded dependency changed', () => {
 test('replayDeps reads every record even after finding a change', () => {
   // Each recorded dependency has to be read so r3 keeps it linked. A loop that
   // returned early on the first change would drop the rest.
+  //
+  // The last dependency is a computed rather than a signal, because a computed
+  // holds a stale `.value` until something reads it. Asserting on a signal's
+  // `.value` here would prove nothing: setSignal writes it directly, so it
+  // would hold the new value whether or not replayDeps ever looked.
   const a = r3Signal(1)
-  const b = r3Signal(2)
-  const c = r3Signal(3)
-  const node = r3Computed(() => r3Read(a) + r3Read(b) + r3Read(c))
-  const records = snapshotDeps(node as R3Computed<unknown>)
+  const source = r3Signal(3)
+  const derived = r3Computed(() => r3Read(source) * 10)
+  const node = r3Computed(() => r3Read(a) + r3Read(derived))
+  const records = snapshotDeps(node as R3Computed<unknown>, null)
+  expect(records.length).toBe(2)
+  expect(derived.value).toBe(30)
 
-  r3SetSignal(a, 99)
-  r3SetSignal(c, 100)
+  r3SetSignal(a, 99) // first record changes — a naive loop would stop here
+  r3SetSignal(source, 5) // `derived` is now stale: still 30, should be 50
 
   expect(replayDeps(records)).toBe(true)
-  // Both changed values are now visible on the records' deps, which is only
-  // true if every record was visited.
-  expect(records.map((r) => r.dep.value)).toEqual([99, 2, 100])
+  // Only true if the walk continued past the first change and read `derived`.
+  expect(derived.value).toBe(50)
 })
 ```
 
@@ -405,13 +451,22 @@ export type DepRecord = {
  * and is about to be discarded, which is why the walk stops at the cursor.
  *
  * A null cursor means the run has read nothing yet, so nothing is recorded.
+ *
+ * `exclude` names one dependency to leave out — a caller's own control signal,
+ * which it changes deliberately to force a run and must therefore not mistake
+ * for someone else's change. Pass null to record everything.
  */
-export function snapshotDeps(node: R3Computed<unknown>): DepRecord[] {
+export function snapshotDeps(
+  node: R3Computed<unknown>,
+  exclude: object | null,
+): DepRecord[] {
   const records: DepRecord[] = []
   const stop = node.depsTail
   if (stop === null) return records
   for (let link: Link | null = node.deps; link !== null; link = link.nextDep) {
-    records.push({ dep: link.dep, value: link.dep.value })
+    if (link.dep !== exclude) {
+      records.push({ dep: link.dep, value: link.dep.value })
+    }
     if (link === stop) break
   }
   return records
@@ -631,7 +686,27 @@ import { replayDeps, snapshotDeps, type DepRecord } from './dep-replay'
 
 - [ ] **Step 4: Add the retained-generator state to `makeStageNode`**
 
-Immediately after `let stashedResolution: StashedResolution | null = null` (currently `src/computed.ts:146`), add:
+First, expose the `kick` signal's underlying node, which Step 8 needs. Change
+(currently `src/computed.ts:204`):
+
+```ts
+  const [kick, setKick] = signal(0)
+```
+
+to:
+
+```ts
+  // `kickNode` is handed to `snapshotDeps` so this signal is left out of the
+  // recorded dependencies. The settle handler bumps it deliberately to force a
+  // run, so recording it would make every settle look like someone else's
+  // change — and the stage would restart every time instead of resuming.
+  const [kick, setKick, kickNode] = signalWithNode(0)
+```
+
+`signalWithNode` is already imported (`src/computed.ts:6`) and already used for
+`publishedValue` (`src/computed.ts:158`).
+
+Then, immediately after `let stashedResolution: StashedResolution | null = null` (currently `src/computed.ts:146`), add:
 
 ```ts
   // A generator stage that pauses is retained here rather than rebuilt, so the
@@ -778,7 +853,9 @@ Change to:
           // invokes the body while `const depTracker = r3Computed(...)` is still
           // being initialised.
           const self = r3GetContext()
-          depRecords = self === null ? [] : snapshotDeps(self)
+          // `kickNode` is excluded: the settle handler bumps it to force this
+          // run, so recording it would report a change on every settle.
+          depRecords = self === null ? [] : snapshotDeps(self, kickNode)
         }
         suspendOn(outcome.promise, input, (state) => {
 ```
@@ -865,7 +942,12 @@ test('a discarded generator runs its finally block', async () => {
   expect(latest(c)).toBe(12)
 })
 
-test('a finally block that reads a signal does not add a dependency', async () => {
+test('a finally block reading a signal during a discard adds no dependency', async () => {
+  // Scoped deliberately to the discard path. `untrack` wraps `gen.return()`,
+  // not the whole generator — a `finally` that runs because the generator
+  // completed normally runs inside the tracked body, and its reads SHOULD be
+  // tracked like any other body code. So this asserts before the replacement
+  // generator has had a chance to settle.
   const [a, setA] = signal(1)
   const [unrelated, setUnrelated] = signal(0)
   let runs = 0
@@ -875,7 +957,7 @@ test('a finally block that reads a signal does not add a dependency', async () =
     const av: number = yield* read(a)
     try {
       const p: number = yield* read(
-        new Promise<number>((resolve) => setTimeout(() => resolve(10), 5)),
+        new Promise<number>((resolve) => setTimeout(() => resolve(10), 50)),
       )
       return av + p
     } finally {
@@ -885,14 +967,16 @@ test('a finally block that reads a signal does not add a dependency', async () =
 
   c()
   await tick()
-  setA(2)
-  await ticks(10)
+  setA(2) // discards the first generator, running its finally untracked
+  await tick()
 
-  const runsAfterRestart = runs
+  // The replacement is paused on its own 50ms promise and has not run its
+  // finally. If the discard leaked a dependency, this write restarts the stage.
+  const runsWhilePaused = runs
   setUnrelated(99)
-  await ticks(10)
+  await ticks(3)
 
-  expect(runs).toBe(runsAfterRestart)
+  expect(runs).toBe(runsWhilePaused)
 })
 
 test('disposing the owner runs a paused generator finally block', async () => {
@@ -1500,7 +1584,12 @@ Expected: the `computed` JSDoc summary near the Computed entry may still describ
 - [ ] **Step 3: Verify the same for the `computed` JSDoc**
 
 Run: `grep -n "fast-forward\|restarts from\|re-invoked from scratch" src/computed.ts`
-Expected: the `computed` JSDoc block (currently `src/computed.ts:51-60`) describes generator resumption as "the stage is re-invoked from scratch; the driver fast-forwards through the WeakMap-cached settled yield". Replace that bullet with:
+
+Locate every hit by content, not by line number — Tasks 3, 4, and 5 all edit
+`src/computed.ts` before this task runs, so any line number quoted here would
+be stale.
+
+Expected: the `computed` JSDoc block describes generator resumption as "the stage is re-invoked from scratch; the driver fast-forwards through the WeakMap-cached settled yield". Replace that bullet with:
 
 ```ts
  * - Generator stage → 'resume': the paused generator is retained and re-entered
@@ -1510,7 +1599,7 @@ Expected: the `computed` JSDoc block (currently `src/computed.ts:51-60`) describ
  *   generator (running its `finally` blocks) and runs a fresh one from the top.
 ```
 
-The `ResumeKind` type name `'fast-forward'` may stay as-is or be renamed to `'resume'`; if renamed, update all four uses (`src/computed.ts:95`, `:127`, `:299`, `:325`, `:351`).
+The `ResumeKind` type name `'fast-forward'` may stay as-is or be renamed to `'resume'`. If renamed, find every use with `grep -n "fast-forward" src/computed.ts` and change them all — again by content, since earlier tasks have moved them.
 
 - [ ] **Step 4: Run the whole suite**
 
