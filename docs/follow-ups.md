@@ -14,15 +14,19 @@ Severity: **(small)** trivial cleanups · **(worth)** worth doing soon · **(lat
   Source: Plan 1 final review (I2); reinforced by Plan 2b final review.
 - **(small) Decide whether `isPromise` should be exported from the public barrel.** Plan 3 (DOM layer) will likely need it for binding-effect logic the user might want to inline. Currently internal-only. Defer the decision to when Plan 3 actually needs it.
   Source: Plan 2a final review (I2).
+- **(small) `stashedResolution` in `computed.ts` is never assigned a value.** The field is declared (`src/computed.ts:146`) and cleared in three places, and the branch that reads it (`src/computed.ts:272`) tests for a non-null value that nothing ever writes, so that branch is unreachable. The async-function resumption path it was meant to serve publishes the settled value directly from the settle handler instead. Its doc comment also describes it as serving generator stages, which was never true of the code. Either delete the field and its dead branch, or make the async-function path use it. Note that generator resumption added a separate field, `resumeWith`, rather than reviving this one.
+  Source: generator resumption work.
+- **(small) A discarded generator whose `finally` block contains a `yield`.** Teardown calls the generator's `return` method without checking whether the generator reported itself done. If a `finally` block itself contains a `yield`, `return` reports not-done and the code neither checks that nor drives the generator further, so it is left half-disposed and any promise yielded from that `finally` is dropped. This was deliberate: driving a generator onward during teardown has no coherent meaning, because it would have to suspend on a promise nothing is waiting for. Severity: small.
+  Source: generator resumption work.
+- **(small) Cleanup callbacks registered from inside a discarded generator's `finally` block.** While a generator stage is being driven, `onCleanup` registers on that generator rather than on the node. But the teardown path's call to the generator's `return` method is not itself wrapped by that collector, so a cleanup registered from inside a `finally` during a discard routes to the node instead of joining the generator's own list. It fires later than the others, at the node's next recompute, rather than being dropped. Closing it needs a way to read a generator's pending cleanup list without consuming it.
+  Source: generator resumption work.
+- **(later) The ambient slot spans a whole synchronous segment.** The mechanism that routes `onCleanup` to the generator being driven is a module-level slot set around each step of the generator. It covers the entire synchronous span of that step, not only direct calls in the generator's own body. So a generator stage body that itself called `effect(...)` or one of the document-object-model binding helpers would have those functions' own cleanup registrations misrouted onto the generator's lifetime. No current code path does this — `src/effect.ts`, `src/dom/render.ts` and `src/dom/bindings.ts` were all checked — so this is recorded as structural fragility rather than a live defect.
+  Source: generator resumption work.
 
 ### Test coverage gaps
 
-- **(worth) No test for within-generator restart-from-top with multiple `yield*` points, and the untested case is broken.** This entry previously recorded the behaviour as correct but undertested. A probe has since shown it is correct only when the yielded promises are created outside the generator body, which is what every existing test does (`test/computed.test.ts:123`, `test/computed.test.ts:155`).
-
-  A generator stage that creates its promise inside the body never converges. Resumption re-invokes the stage function, producing a fresh generator that runs from the first line, and the driver skips past an earlier yield only when that yield produces a promise object it has already recorded as settled. An expression such as `yield* read(fetchSomething())` builds a new promise on every run, so it is never a recorded one: the stage suspends, settles, re-runs, and suspends again indefinitely. Measured at thirty-one body runs and thirty-one promises created over thirty-one settles, with the value never resolving.
-
-  This blocks giving stages an abort signal, because a request that must be cancelled is created inside the body by definition — its URL generally depends on a value the generator computed earlier, so it cannot be hoisted out.
-  Source: Plan 2b final review; falsified by a probe during the generator-resumption design discussion.
+- **(small) `settled`'s already-settled filter is no longer load-bearing.** `settled` (`src/async.ts:236`) yields a `Promise.all` built inline, which is the shape that used to loop forever, and it works today because it excludes promises that have already settled (`src/async.ts:248-254`) so a re-run yields nothing. Generator stages now resume instead of re-running, so there is no re-run to filter. The filter is harmless and was left in place rather than removed alongside the resumption change. Removing it needs its own pass over `test/settled.test.ts`.
+  Source: generator resumption work.
 - **(later) Integration tests are minimal.** Plan 2a and 2b each have a couple of integration tests; scenarios like nested pipelines, transitions across multiple signals, and the `signal-set-mid-flight` path could be deepened. Not a correctness gap — just thin coverage on real-world shapes.
   Source: Plan 2a final review.
 
@@ -79,6 +83,8 @@ Severity: **(small)** trivial cleanups · **(worth)** worth doing soon · **(lat
 
 ### Speculation / scope findings
 
+- **(later) The speculative recompute path does not fire its generator's cleanups.** A stage node carries a recipe used to recompute it inside a speculation, and that recipe runs a stage without recording the generator it creates, so any cleanup that generator registers is never fired. Wiring it to the committed node's retained-generator field would be worse: a speculative run would then overwrite the field the next real run reads to decide whether to resume or restart. Closing it needs somewhere per-speculation to hold that state. Speculation of asynchronous stages is already unsupported and recorded as such.
+  Source: generator resumption work.
 - **(later) `Scope.status` is a write-only field — the lifecycle is recorded but never enforced.** `status: 'open' | 'committed' | 'discarded'` is assigned by `commit()` and `discard()` and read **nowhere** in `src/`. Nothing rejects `commit()` on a discarded scope, `discard()` on a committed one, or a double-`commit()`. (A double-`discard()` is safe only because `cleanups.length = 0` empties the array first — safe by accident, not by design.) Either gate the transitions on `status` — and decide deliberately whether an invalid transition throws or no-ops — or drop the field. As written it reads like a guarantee the code doesn't make.
   Source: as above.
 
@@ -132,6 +138,21 @@ Severity: **(small)** trivial cleanups · **(worth)** worth doing soon · **(lat
 - ~~Transitions Plan B (atomic-commit boundary): `<Loading>` gathers and flushes contributing bindings atomically via a `BindingController` API; `use(accessor)` throws `NotReadyYet` on pipeline-pending and ALSO marks the binding as transition-engaged so non-throwing reads defer too; sync `computed` stages absorb `NotReadyYet` thrown by `use(...)` as suspension (symmetric with effect); reactive `insertChild` and `bindProp` branches split into compute+commit; pokemon demo migrated.~~ Landed in commits `109935a` (`BindingController` + gather/flush), `6e54ed9` (effect adopts), `994e56f` (computed absorbs `NotReadyYet`), `8c357c4` (insertChild compute/commit split), `38bcc50` (bindProp split + insertChild `onCleanup` fix), `6bcd907` (`use(accessor)` throws on isPending), `9290653` (pokemon demo migration), `743e2a5` (`use()` marks transition engagement + `scope.deferOrCommit` for non-throwers), `98badab` (mid-flight mount tests). See `docs/superpowers/specs/2026-05-17-pulse-transitions-redesign.md` and `docs/superpowers/plans/2026-05-18-transitions-plan-b-boundary-atomic-commit.md`.
 - ~~Drop signal write-back (`signal<T | Promise<T>>` auto-resolve).~~ Removed in commit `13dbf9b` — `signal` now stores values as-is; `signal<T>` no longer widens to `Awaited<T> | T`. `latest`/`isPending` consult `track()` so they still report settled state on Promise-valued signals. Eager `track(value)` registration in `signal()` and the setter preserves the "settled by next tick without explicit `use` call" UX. For dep-driven async derivations, use `computed(() => p)` (Plan 6).
 - ~~`'reuse-value'` stash consumption in `src/computed.ts` loses dep tracking — sync computeds returning Promises freeze on first settle.~~ Fixed in commit `bea4b1c` (Plan 6) — rewrote `makeStageNode` to always run the body for r3 dep tracking and publish settle values out-of-band via an internal signal. Added stale-while-revalidate semantics and resolved-value (Object.is) caching; `isPending(computed)` exposes the refetch window via a `[PENDING]` accessor brand. Pokemon demo migrated back to the natural `computed(() => fetchList(page()).then(...))` pattern in commit `cf7230e`.
+
+---
+
+## Resolved
+
+### Test coverage gaps
+
+- **(worth) No test for within-generator restart-from-top with multiple `yield*` points, and the untested case is broken.** **Resolved.** Generator stages now resume rather than restart; see [ADR 0013](./adr/0013-generator-stages-resume-with-dependency-replay.md) and `test/generator-resume.test.ts`.
+
+  This entry previously recorded the behaviour as correct but undertested. A probe had shown it was correct only when the yielded promises are created outside the generator body, which is what every existing test does (`test/computed.test.ts:123`, `test/computed.test.ts:155`).
+
+  A generator stage that creates its promise inside the body never converges. Resumption re-invokes the stage function, producing a fresh generator that runs from the first line, and the driver skips past an earlier yield only when that yield produces a promise object it has already recorded as settled. An expression such as `yield* read(fetchSomething())` builds a new promise on every run, so it is never a recorded one: the stage suspends, settles, re-runs, and suspends again indefinitely. Measured at thirty-one body runs and thirty-one promises created over thirty-one settles, with the value never resolving.
+
+  This blocked giving stages an abort signal, because a request that must be cancelled is created inside the body by definition — its URL generally depends on a value the generator computed earlier, so it cannot be hoisted out.
+  Source: Plan 2b final review; falsified by a probe during the generator-resumption design discussion.
 
 ---
 
