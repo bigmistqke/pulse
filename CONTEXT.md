@@ -59,7 +59,7 @@ registers with the external pending tracker; `isPending(downstream)()` walks
 the chain (pipeline-OR).
 
 Conceptually, **pipelines are delimited continuations split at user-chosen
-boundaries**, with two distinct granularities of re-entry:
+boundaries**, with three distinct levels of re-entry:
 
 - **Stage boundaries are genuinely multi-shot.** Each stage is a separate r3
   computed with its own cached result; when stage N produces a new value, the
