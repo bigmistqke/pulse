@@ -314,8 +314,10 @@ function makeStageNode(
       }
 
       // Non-generator stages can stash a resolved value to consume on next
-      // body invocation. (Generators don't stash — they re-invoke from the top
-      // and the driver's WeakMap fast-forwards through settled yields.)
+      // body invocation. (Generators have their own stash, `resumeWith` —
+      // handled separately below, in the `retainedGen` branch — because a
+      // generator resumes forward from its pause rather than re-invoking from
+      // the top.)
       if (resumeKind === 'reuse-value' && stashedResolution !== null) {
         if (Object.is(input, suspendedInput)) {
           const r = stashedResolution
