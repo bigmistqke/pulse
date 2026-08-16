@@ -336,12 +336,14 @@ Create `test/dep-replay.test.ts`:
 import { expect, test } from 'vitest'
 import {
   computed as r3Computed,
+  getContext as r3GetContext,
   read as r3Read,
   setSignal as r3SetSignal,
   signal as r3Signal,
+  stabilize as r3Stabilize,
   type Computed as R3Computed,
 } from 'r3'
-import { replayDeps, snapshotDeps } from '../src/dep-replay'
+import { replayDeps, snapshotDeps, type DepRecord } from '../src/dep-replay'
 
 test('snapshotDeps records every dependency a run read, with its value', () => {
   const a = r3Signal(1)
@@ -357,6 +359,40 @@ test('snapshotDeps records every dependency a run read, with its value', () => {
 test('snapshotDeps records nothing for a run that read no dependencies', () => {
   const node = r3Computed(() => 42)
   expect(snapshotDeps(node as R3Computed<unknown>, null)).toEqual([])
+})
+
+test('snapshotDeps records nothing when the cursor is null but stale entries remain', () => {
+  // The case the null-cursor guard actually exists for. r3 resets the cursor to
+  // null at the start of every run but leaves the list pointing at the previous
+  // run's entries until that run finishes. A walk that ignored the cursor would
+  // record the stale list as though this run had read it.
+  //
+  // The test above cannot catch that: a node that never read anything has an
+  // empty list too, so it passes with the guard deleted.
+  const a = r3Signal(1)
+  let self: R3Computed<unknown> | null = null
+  let capturedOnSecondRun: DepRecord[] | null = null
+  let runs = 0
+
+  const node = r3Computed(() => {
+    runs++
+    if (self === null) self = r3GetContext() as R3Computed<unknown>
+    if (runs === 2) {
+      // Nothing has been read yet on this run, so the cursor is null while the
+      // list still holds run 1's entry for `a`.
+      capturedOnSecondRun = snapshotDeps(self, null)
+    }
+    return r3Read(a)
+  })
+
+  expect(runs).toBe(1)
+  expect(node.deps).not.toBe(null) // run 1 recorded `a`
+
+  r3SetSignal(a, 2)
+  r3Stabilize()
+
+  expect(runs).toBe(2)
+  expect(capturedOnSecondRun).toEqual([])
 })
 
 test('snapshotDeps leaves out the excluded dependency', () => {
