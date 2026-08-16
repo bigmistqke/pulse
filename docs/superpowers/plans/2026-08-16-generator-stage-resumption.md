@@ -61,6 +61,22 @@ import { resumeStage, runStage } from '../src/driver'
 Do not add a second import statement, and do not import `Resumption` — the
 tests below build the seed objects inline and never name the type.
 
+One pre-existing test must also change. `'generator stage yielding a pending
+promise -> suspended'` asserts `expect(r).toEqual({ pending: true, promise: p })`.
+`toEqual` is full deep equality, so once the pending outcome carries a defined
+`gen` for generator stages that assertion fails. Replace it with an equally
+strict form that also covers the new field:
+
+```ts
+  expect(r.pending).toBe(true)
+  if (!r.pending) throw new Error('expected pending')
+  expect(r.promise).toBe(p)
+  expect(r.gen).toBeDefined()
+```
+
+`toBe` on the promise keeps the original reference-equality check. No other
+pre-existing test changes.
+
 Then append:
 
 ```ts
