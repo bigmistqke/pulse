@@ -1,6 +1,6 @@
 import { computed as r3Computed, getContext as r3GetContext, read as r3Read, setSignal as r3SetSignal, untrack as r3Untrack, unwatched, type Computed as R3Computed, type Signal as R3Signal } from 'r3'
 import { isGeneratorFunction, NotReadyYet, resolvedPromise, track, type PromiseState, type PipelineRead, type Resolved } from './async'
-import { runStage, resumeStage, type StageOutcome } from './driver'
+import { runStage, resumeStage, takeGeneratorCleanups, type StageOutcome } from './driver'
 import { replayDeps, snapshotDeps, type DepRecord } from './dep-replay'
 import { isPromise } from './is-promise'
 import { getOwner, routeError, registerWithOwner } from './owner'
@@ -163,18 +163,28 @@ function makeStageNode(
   let depRecords: DepRecord[] = []
   let resumeWith: StashedResolution | null = null
 
-  // Dispose a retained generator by running it to completion through its own
-  // `finally` blocks, so a generator that acquired something before its pause
-  // releases it. Untracked, because a `finally` body's reads must not join this
-  // node's dependency list.
-  const discardGen = (): void => {
-    const gen = retainedGen
+  /**
+   * End a generator: run its `finally` blocks if it has not already finished,
+   * then its registered cleanups, most recently registered first. Untracked,
+   * because teardown reads must not join this node's dependency list.
+   *
+   * `viaReturn` is true when the generator is being abandoned part-way and
+   * false when it has already run to completion, in which case its `finally`
+   * blocks have run and returning it again would be a no-op.
+   */
+  const endGen = (
+    gen: Generator<unknown, unknown, unknown>,
+    viaReturn: boolean,
+  ): void => {
     retainedGen = null
     depRecords = []
     resumeWith = null
-    if (gen === null) return
+    const cleanups = takeGeneratorCleanups(gen)
     try {
-      r3Untrack(() => gen.return(undefined))
+      r3Untrack(() => {
+        if (viaReturn) gen.return(undefined)
+        for (let i = cleanups.length - 1; i >= 0; i--) cleanups[i]()
+      })
     } catch (e) {
       try {
         routeError(myOwner, e)
@@ -182,6 +192,15 @@ function makeStageNode(
         setFailureSig(rethrown)
       }
     }
+  }
+
+  /** Abandon a generator that has not finished. */
+  const discardGen = (): void => {
+    const gen = retainedGen
+    retainedGen = null
+    depRecords = []
+    resumeWith = null
+    if (gen !== null) endGen(gen, true)
   }
 
   // Owner disposal must reach a paused generator, not just unlink the r3 node,
@@ -362,7 +381,6 @@ function makeStageNode(
           return null
         } else {
           const gen = retainedGen
-          retainedGen = null
           depRecords = []
           outcome =
             resumption.kind === 'fulfilled'
@@ -371,6 +389,12 @@ function makeStageNode(
         }
       } else {
         outcome = runStage(stage, input)
+      }
+
+      // A resumed generator that did not pause again has run to completion. Its
+      // `finally` blocks have already run, so only its registered cleanups fire.
+      if (!outcome.pending && retainedGen !== null) {
+        endGen(retainedGen, false)
       }
 
       if (outcome.pending) {
@@ -499,6 +523,7 @@ function makeStageNode(
         return null
       }
       try {
+        discardGen()
         routeError(myOwner, e)
       } catch (rethrown) {
         setFailureSig(rethrown)

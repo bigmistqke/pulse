@@ -1,5 +1,7 @@
+import type { Disposable } from 'r3'
 import { isPromise } from './is-promise'
 import { isGeneratorFunction, track } from './async'
+import { collectGeneratorCleanups } from './generator-cleanup'
 
 /** Outcome of running a single stage: either a settled value, or pending on a
  *  promise. A generator stage additionally hands back the paused generator, so
@@ -46,6 +48,23 @@ function settle(value: unknown): StageOutcome {
  * generator is seeded with `undefined`, which a generator ignores on its first
  * resumption; a retained one is seeded with what its pending promise settled to.
  */
+/** Cleanups registered through `onCleanup` while a generator was being driven.
+ *  Held against the generator rather than the stage node, because the callbacks
+ *  belong to that generator's lifetime and the node recomputes more often than
+ *  the generator restarts. */
+const cleanupsByGen = new WeakMap<Generator<unknown, unknown, unknown>, Disposable[]>()
+
+/** Hand over a generator's registered cleanups and forget them. Returns an
+ *  empty array when it registered none. */
+export function takeGeneratorCleanups(
+  gen: Generator<unknown, unknown, unknown>,
+): Disposable[] {
+  const list = cleanupsByGen.get(gen)
+  if (list === undefined) return []
+  cleanupsByGen.delete(gen)
+  return list
+}
+
 function driveGenerator(
   gen: Generator<unknown, unknown, unknown>,
   seed: Resumption,
@@ -54,7 +73,15 @@ function driveGenerator(
   let nextThrow: unknown = seed.throw ? seed.reason : undefined
   let hasThrow = seed.throw
   while (true) {
-    const result = hasThrow ? gen.throw(nextThrow) : gen.next(nextValue)
+    let list = cleanupsByGen.get(gen)
+    if (list === undefined) {
+      list = []
+      cleanupsByGen.set(gen, list)
+    }
+    // Wrap only the generator's own execution. `settle` below must not collect.
+    const result = collectGeneratorCleanups(list, () =>
+      hasThrow ? gen.throw(nextThrow) : gen.next(nextValue),
+    )
     hasThrow = false
     if (result.done) return settle(result.value)
     let outcome: StageOutcome

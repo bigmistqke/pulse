@@ -1,5 +1,6 @@
 import { getContext, type Disposable, onCleanup as r3OnCleanup } from 'r3'
 import type { Accessor } from './signal'
+import { currentGeneratorCleanups } from './generator-cleanup'
 
 /**
  * Per-binding state reports flow into a Loading boundary via this shape.
@@ -324,6 +325,11 @@ export function registerWithOwner(disposable: { dispose: () => void }): void {
 
 /**
  * Register a cleanup function. Routing rules:
+ * - Inside a generator stage being driven: registers on that generator — fires
+ *   when the generator ends, whether it completes, is discarded because a
+ *   dependency changed, or its owner is disposed. Per-run cleanup has no
+ *   coherent meaning in a body that resumes rather than re-running, so the
+ *   generator's lifetime is used instead.
  * - Inside an r3 context (a running computed/effect body): registers per-run
  *   cleanup via r3 — fires before the next re-run of that node.
  * - Outside r3 context, inside a `createRoot` callback: registers on the
@@ -331,6 +337,13 @@ export function registerWithOwner(disposable: { dispose: () => void }): void {
  * - Outside both: silently no-op (permissive).
  */
 export function onCleanup(fn: Disposable): Disposable {
+  // Checked before the r3 context, because driving a generator happens inside
+  // an r3 context and the generator's lifetime is the more specific answer.
+  const generatorCleanups = currentGeneratorCleanups()
+  if (generatorCleanups !== null) {
+    generatorCleanups.push(fn)
+    return fn
+  }
   if (getContext() !== null) {
     return r3OnCleanup(fn)
   }
