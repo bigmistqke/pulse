@@ -1,6 +1,7 @@
-import { computed as r3Computed, read as r3Read, setSignal as r3SetSignal, unwatched, type Computed as R3Computed, type Signal as R3Signal } from 'r3'
+import { computed as r3Computed, getContext as r3GetContext, read as r3Read, setSignal as r3SetSignal, untrack as r3Untrack, unwatched, type Computed as R3Computed, type Signal as R3Signal } from 'r3'
 import { isGeneratorFunction, NotReadyYet, resolvedPromise, track, type PromiseState, type PipelineRead, type Resolved } from './async'
-import { runStage } from './driver'
+import { runStage, resumeStage, type StageOutcome } from './driver'
+import { replayDeps, snapshotDeps, type DepRecord } from './dep-replay'
 import { isPromise } from './is-promise'
 import { getOwner, routeError, registerWithOwner } from './owner'
 import { makeAccessor, NODE, signal, signalWithNode, type Accessor, type Signal } from './signal'
@@ -49,9 +50,11 @@ export function computed<A, B, C, D, E>(
  * r3 value becomes that in-flight `Promise<T>` — async color flows downstream).
  *
  * Resumption is two-mode, discriminated by stage type:
- * - Generator stage → 'fast-forward': on settle, the stage is re-invoked from
- *   scratch; the driver fast-forwards through the WeakMap-cached settled yield
- *   and runs the rest of the body. Stage value = the generator's true return.
+ * - Generator stage → 'fast-forward': the paused generator is retained, not
+ *   rebuilt. On settle, the body re-runs, replays the dependencies it had
+ *   recorded up to the pause to keep them linked, and resumes the generator
+ *   forward from where it yielded — so the code before the pause runs once,
+ *   not once per settle. Stage value = the generator's true return.
  * - Non-generator stage (sync/async) that returned a promise → 'reuse-value':
  *   on settle, the rerun callback stashes the resolved value; the next r3 fn
  *   invocation returns it directly WITHOUT re-invoking the stage. This is
@@ -114,8 +117,12 @@ type StashedResolution =
  *   the body re-runs. The new resolved value is compared with Object.is to the
  *   last resolved value; downstream is only invalidated if changed.
  *   Stale-while-revalidate: the last resolved value is returned during refetch.
- * - Generator stages: fast-forward + stash mechanism. The stash is consumed
- *   by the body when input matches, allowing the generator to resume correctly.
+ * - Generator stages: the paused generator is retained (`retainedGen`) rather
+ *   than rebuilt. On settle, the body replays the dependencies recorded up to
+ *   the pause (`depRecords`) to keep them linked, and resumes the generator
+ *   forward with the settled value or rejection (`resumeWith`) — unless a
+ *   replayed dependency changed, in which case the stale generator is
+ *   discarded and a fresh one runs from the top.
  */
 // `any` here is the standard implementation-signature widening for the
 // variadic overloads above; narrowing to `unknown` breaks the overload contract.
@@ -144,6 +151,38 @@ function makeStageNode(
   let suspendedOn: Promise<unknown> | null = null
   let suspendedInput: unknown = undefined
   let stashedResolution: StashedResolution | null = null
+
+  // A generator stage that pauses is retained here rather than rebuilt, so the
+  // code before the pause does not run again. `depRecords` is what r3 had
+  // recorded as this node's dependencies at the moment it paused; replaying
+  // them on the next run keeps them linked (r3 unlinks anything a run does not
+  // read) and says whether any of them changed. `resumeWith` carries the
+  // settled outcome from the settle handler to the next body invocation,
+  // because the handler clears `suspendedOn` before it kicks.
+  let retainedGen: Generator<unknown, unknown, unknown> | null = null
+  let depRecords: DepRecord[] = []
+  let resumeWith: StashedResolution | null = null
+
+  // Dispose a retained generator by running it to completion through its own
+  // `finally` blocks, so a generator that acquired something before its pause
+  // releases it. Untracked, because a `finally` body's reads must not join this
+  // node's dependency list.
+  const discardGen = (): void => {
+    const gen = retainedGen
+    retainedGen = null
+    depRecords = []
+    resumeWith = null
+    if (gen === null) return
+    try {
+      r3Untrack(() => gen.return(undefined))
+    } catch (e) {
+      try {
+        routeError(myOwner, e)
+      } catch (rethrown) {
+        setFailureSig(rethrown)
+      }
+    }
+  }
 
   // The parked failure, as reactive graph state — the mirror of pendingSig. A
   // consumer subscribes to it through the accessor, so it re-runs when this node
@@ -198,10 +237,18 @@ function makeStageNode(
   // registry entry constructed below.
   const [pendingSig, setPendingSig] = signal(false)
 
-  // Generator-only kick: drives body re-run so the generator-driver can
-  // fast-forward through the WeakMap-cached settled yields. Non-generator
+  // Generator-only kick: drives body re-run so a paused generator's retained
+  // dependencies get replayed and the generator resumes forward. Non-generator
   // stages never trigger this (they publish via setPublishedValue directly).
   const [kick, setKick] = signal(0)
+  // `kickNode` is handed to `snapshotDeps` so this signal is left out of the
+  // recorded dependencies. The settle handler bumps it deliberately to force a
+  // run, so recording it would make every settle look like someone else's
+  // change — and the stage would restart every time instead of resuming.
+  // `kick[NODE]` (not the `signalWithNode` scope wrapper) is what r3 actually
+  // links into a computed's dependency list when the body reads `kick()` — the
+  // same r3 node identity `publishedValue[NODE]` uses elsewhere in this file.
+  const kickNode = (kick as Signal<number>)[NODE]
   let kickCount = 0
 
   // Shared envelope: assign suspendedOn/suspendedInput, flip pendingSig,
@@ -289,18 +336,59 @@ function makeStageNode(
         stashedResolution = null
       }
 
-      const outcome = runStage(stage, input)
+      let outcome: StageOutcome
+      if (retainedGen !== null) {
+        // A generator is paused. Replaying the recorded dependencies keeps them
+        // linked for this run and reports whether any of them changed.
+        const changed = replayDeps(depRecords) || !Object.is(input, suspendedInput)
+        const resumption = resumeWith
+        resumeWith = null
+        if (changed) {
+          // Something the generator already read is different, so its partial
+          // computation is stale. A generator cannot be rewound, only resumed
+          // forward or replaced — so replace it.
+          discardGen()
+          outcome = runStage(stage, input)
+        } else if (resumption === null) {
+          // The body re-ran while the generator is still waiting and nothing
+          // has settled. Stay paused; the dependencies were re-read above, so
+          // they remain linked.
+          return null
+        } else {
+          const gen = retainedGen
+          retainedGen = null
+          depRecords = []
+          outcome =
+            resumption.kind === 'fulfilled'
+              ? resumeStage(gen, { throw: false, value: resumption.value })
+              : resumeStage(gen, { throw: true, reason: resumption.reason })
+        }
+      } else {
+        outcome = runStage(stage, input)
+      }
 
       if (outcome.pending) {
+        if (outcome.gen !== undefined) {
+          retainedGen = outcome.gen
+          // The node being recomputed is the current r3 context. Reading it from
+          // there rather than from `depTracker` avoids a temporal dead zone: r3
+          // invokes the body while `const depTracker = r3Computed(...)` is still
+          // being initialised.
+          const self = r3GetContext()
+          // `kickNode` is excluded: the settle handler bumps it to force this
+          // run, so recording it would report a change on every settle.
+          depRecords = self === null ? [] : snapshotDeps(self, kickNode)
+        }
         suspendOn(outcome.promise, input, (state) => {
           if (state.status === 'fulfilled') {
             suspendedOn = null
             setPendingSig(false)
             if (resumeKind === 'fast-forward') {
-              // Generators: no stash. Kick → body re-runs → generator
-              // re-invokes from top; driver fast-forwards via WeakMap and
-              // returns the GENERATOR'S TRUE RETURN (which may be a
-              // transformation of the yielded value).
+              // Stash the fulfilled value for the retained generator's next
+              // resumption, then kick → body re-runs → sees the paused
+              // generator, replays its recorded deps, and resumes it forward
+              // from this pause (see the `retainedGen` branch above).
+              resumeWith = { kind: 'fulfilled', value: state.value }
               setKick(++kickCount)
               return
             }
@@ -323,9 +411,10 @@ function makeStageNode(
             suspendedOn = null
             setPendingSig(false)
             if (resumeKind === 'fast-forward') {
-              // Generators handle rejection via their own try/catch around
-              // yield. Kick → body re-runs → driver re-throws on the yield,
-              // generator catches (or doesn't), runStage returns/throws.
+              // Stash the rejection for the retained generator's next
+              // resumption, so it is thrown at the pause point — the
+              // generator's own try/catch handles it (or doesn't).
+              resumeWith = { kind: 'rejected', reason: state.reason }
               setKick(++kickCount)
               return
             }
