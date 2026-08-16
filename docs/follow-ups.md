@@ -17,8 +17,12 @@ Severity: **(small)** trivial cleanups · **(worth)** worth doing soon · **(lat
 
 ### Test coverage gaps
 
-- **(later) No test for within-generator restart-from-top with multiple `yield*` points.** The current behaviour (a `function*` body with two yields restarts from the top on a sync dep change, fast-forwards both yields via the WeakMap) is correct but documented only in scope notes. A test covering this would make the contract explicit before someone tries to add intra-generator checkpoint resume.
-  Source: Plan 2b final review.
+- **(worth) No test for within-generator restart-from-top with multiple `yield*` points, and the untested case is broken.** This entry previously recorded the behaviour as correct but undertested. A probe has since shown it is correct only when the yielded promises are created outside the generator body, which is what every existing test does (`test/computed.test.ts:123`, `test/computed.test.ts:155`).
+
+  A generator stage that creates its promise inside the body never converges. Resumption re-invokes the stage function, producing a fresh generator that runs from the first line, and the driver skips past an earlier yield only when that yield produces a promise object it has already recorded as settled. An expression such as `yield* read(fetchSomething())` builds a new promise on every run, so it is never a recorded one: the stage suspends, settles, re-runs, and suspends again indefinitely. Measured at thirty-one body runs and thirty-one promises created over thirty-one settles, with the value never resolving.
+
+  This blocks giving stages an abort signal, because a request that must be cancelled is created inside the body by definition — its URL generally depends on a value the generator computed earlier, so it cannot be hoisted out.
+  Source: Plan 2b final review; falsified by a probe during the generator-resumption design discussion.
 - **(later) Integration tests are minimal.** Plan 2a and 2b each have a couple of integration tests; scenarios like nested pipelines, transitions across multiple signals, and the `signal-set-mid-flight` path could be deepened. Not a correctness gap — just thin coverage on real-world shapes.
   Source: Plan 2a final review.
 
@@ -34,6 +38,17 @@ Severity: **(small)** trivial cleanups · **(worth)** worth doing soon · **(lat
 
 
 ### Architectural notes
+
+- **(later, documented constraint rather than a bug) An async-function stage does not track signals read after its first `await`.** In `computed(async () => { const a = sigA(); await something; const b = sigB(); return a + b })`, `sigA` becomes a dependency and `sigB` does not. Writing to `sigB` never re-runs the stage. Writing to `sigA` does, and that run reads the current `sigB`, so the published value is not wrong — it is stale until some other dependency happens to change.
+
+  The cause is in r3, not in pulse. `recompute` assigns the module-level `context`, runs the stage body, and restores `context` in a `finally` block (`../r3/src/index.ts:163-173`). An async function's code after `await` resumes in a later microtask, when `context` is null, and `read` only records a dependency when a context is set (`../r3/src/index.ts:334`).
+
+  This cannot be fixed in userland. Restoring an ambient value across a native `await` needs either the AsyncContext language feature (still stage 2, no browser implementations) or a compiler transform that captures the reactive context before the await and restores it on resume, which is what Svelte does (see `docs/async/LOG.md`, session 12 finding 6). Monkey-patching does not reach it: `await` resumes through the engine's internal promise-then operation rather than through `Promise.prototype.then`, which is the same reason Zone.js loses context across native async functions unless they are downleveled.
+
+  Pulse already ships the stage shape that does not have this limitation. A generator stage pauses at `yield`, and pulse calls `gen.next()` itself from inside the r3 computed body, so the reactive context is set for every segment of the body — before and after every pause. The guidance for async-function stages is therefore to read every signal before the first `await`, which the common shape `async (id) => fetch(\`/x/${id}\`)` already satisfies, and to reach for a generator stage when signals must be read on both sides of an asynchronous boundary.
+
+  A development-mode warning is conceivable — a pulse accessor could warn when it is read with no reactive context at all — but it would also fire on legitimate untracked reads (event handlers, `untrack`), so it needs its own design pass.
+  Source: probe during the generator-resumption design discussion; measured, not inferred.
 
 - **(worth) Top-level component children in a `<Loading>`'s Fragment can't reach the Loading scope via `useLoading()`.** When the JSX is `<Loading>{() => <><Show .../>...</></>}</Loading>`, `<Show>` becomes a function-typed top-level child of the Fragment returned by `props.children()`. Its binding gets wrapped by the OUTER hole's `insertChild` under the OUTER hole's runOwner — NOT under `Loading`'s `boundaryOwner`. So `useLoading()` called inside Show walks parent owners and never reaches the boundary; it returns the constant-false accessor. Reactive children of STATIC elements (`<span>{() => use(x)}</span>` or `<div><Show .../></div>`) work correctly because `h()` calls `insertChild` while `boundaryOwner` is still ambient. Workaround: wrap top-level components in any static element (`<div><Show .../></div>`). Real fix needs either pre-resolving `loadedSubtree` to DOM under `boundaryOwner` (snapshot-stale issue when intermediate bindings mutate before the outer hole moves them) or a marker-based "wrap-under-this-owner" hint that `insertChild` honors. Currently tracked by `test/dom/loading-atomic.test.tsx` ("KNOWN BUG: top-level component inside Loading misses scope via useLoading()", `test.skip`).
   Source: Pokemon demo manual test → playwright failures → unit-test isolation.
