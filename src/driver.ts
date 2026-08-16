@@ -112,9 +112,16 @@ function driveGenerator(
 export function runStage(
   stage: (value: any) => unknown,
   input: unknown,
+  onGenCreated?: (gen: Generator<unknown, unknown, unknown>) => void,
 ): StageOutcome {
   if (isGeneratorFunction(stage)) {
-    return driveGenerator(stage(input) as Generator<unknown, unknown, unknown>, {
+    const gen = stage(input) as Generator<unknown, unknown, unknown>
+    // Hand the generator to the caller before driving it, so the caller can
+    // record it as the generator whose lifetime owns any `onCleanup` callbacks
+    // — even if this very call runs it to completion or has it throw
+    // synchronously, without ever pausing on a promise.
+    onGenCreated?.(gen)
+    return driveGenerator(gen, {
       throw: false,
       value: undefined,
     })

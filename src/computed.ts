@@ -373,7 +373,9 @@ function makeStageNode(
           // computation is stale. A generator cannot be rewound, only resumed
           // forward or replaced — so replace it.
           discardGen()
-          outcome = runStage(stage, input)
+          outcome = runStage(stage, input, (gen) => {
+            retainedGen = gen
+          })
         } else if (resumption === null) {
           // The body re-ran while the generator is still waiting and nothing
           // has settled. Stay paused; the dependencies were re-read above, so
@@ -388,10 +390,17 @@ function makeStageNode(
               : resumeStage(gen, { throw: true, reason: resumption.reason })
         }
       } else {
-        outcome = runStage(stage, input)
+        // Recorded as `retainedGen` the instant the driver creates it — not
+        // only if it pauses — so a generator that completes or throws
+        // entirely synchronously is still reachable below for cleanup, the
+        // same as one that paused and later settled.
+        outcome = runStage(stage, input, (gen) => {
+          retainedGen = gen
+        })
       }
 
-      // A resumed generator that did not pause again has run to completion. Its
+      // A generator that did not pause has run to completion — whether it was
+      // resumed and finished, or ran straight through on this very call. Its
       // `finally` blocks have already run, so only its registered cleanups fire.
       if (!outcome.pending && retainedGen !== null) {
         endGen(retainedGen, false)

@@ -119,6 +119,36 @@ test('cleanups run most recently registered first, after finally blocks', async 
   expect(events).toEqual(['finally', 'second', 'first'])
 })
 
+test('onCleanup fires when a generator completes without ever pausing', () => {
+  // A generator stage whose body never yields anything async runs to
+  // completion inside the very first `gen.next()` call, so it never becomes
+  // `retainedGen`. Its cleanup must still fire, not sit forgotten forever.
+  let cleaned = 0
+
+  const c = computed(function* () {
+    onCleanup(() => cleaned++)
+    return 42
+  })
+
+  expect(latest(c)).toBe(42)
+  expect(cleaned).toBe(1)
+})
+
+test('onCleanup fires when a generator throws without ever pausing', () => {
+  // Same gap as above, but for a generator that throws synchronously instead
+  // of returning: `discardGen()` in the catch path must find a live generator
+  // to end, not silently no-op because nothing was ever retained.
+  let cleaned = 0
+
+  const c = computed(function* () {
+    onCleanup(() => cleaned++)
+    throw new Error('boom')
+  })
+
+  expect(() => c()).toThrow('boom')
+  expect(cleaned).toBe(1)
+})
+
 test('onCleanup outside a generator stage is unchanged', async () => {
   // A sync stage re-runs from the top, so per-run cleanup is still the right
   // meaning there. This guards the routing change from leaking.
