@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest'
 import { computed } from '../src/computed'
 import { signal } from '../src/signal'
-import { latest, read } from '../src/async'
+import { latest, read, use } from '../src/async'
 import { createRoot } from '../src/owner'
 import { failure, resetFailure } from '../src/failure'
 
@@ -288,4 +288,131 @@ test('disposing the owner runs a paused generator finally block', async () => {
 
   dispose()
   expect(closed).toBe(1)
+})
+
+test('a generator stage repeatedly hitting use() on the same still-pending promise attaches no extra settle listener', async () => {
+  // Regression guard for an interaction between two fixes: discarding a
+  // generator that reached the NotReadyYet catch (a `use()` call, not a
+  // `yield`) must not disturb `suspendedOn` when it is still tracking the
+  // very promise about to be re-suspended on. If it did, `suspendOn`'s
+  // same-promise dedup guard (`if (suspendedOn === p) return`) would be
+  // defeated on every repeat hit, each one attaching another `.then`
+  // listener to the same promise. That was measured directly: the
+  // downstream symptom (an extra body run) is masked because the kick
+  // signal that wakes the body coalesces repeat writes into one recompute,
+  // so it does not by itself distinguish one listener from several — the
+  // attachment count is the direct, load-bearing thing to assert.
+  //
+  // The baseline count is 2, not 1: `use`'s own `track()` (`src/async.ts`)
+  // attaches a `.then` of its own the first time it sees a promise, memoized
+  // in a WeakMap independent of `suspendOn` — so what this test asserts is
+  // that the count does not grow past that baseline across repeat hits, not
+  // that it is exactly 1.
+  const [x, setX] = signal(0)
+  let resolveP!: (v: number) => void
+  let thenCalls = 0
+  const p = new Promise<number>((resolve) => {
+    resolveP = resolve
+  })
+  const originalThen = p.then.bind(p)
+  p.then = ((...args: Parameters<typeof originalThen>) => {
+    thenCalls++
+    return originalThen(...args)
+  }) as typeof p.then
+
+  const c = computed(function* () {
+    x() // read so unrelated writes force a body re-run while p is still pending
+    return use(p) as number
+  })
+
+  c()
+  await tick()
+  const baseline = thenCalls
+  expect(baseline).toBeGreaterThan(0)
+
+  setX(1)
+  await tick()
+  setX(2)
+  await tick()
+  // p is still pending; the body has hit the NotReadyYet catch on it three
+  // times in total now, all on the same promise.
+
+  expect(thenCalls).toBe(baseline)
+
+  resolveP(42)
+  await ticks(10)
+
+  expect(latest(c)).toBe(42)
+})
+
+test('use(promise) inside a generator stage resolves and the stage publishes the derived result', async () => {
+  // use() throws NotReadyYet directly out of gen.next() (not via a yield),
+  // straight into the sync-stage NotReadyYet catch in makeStageNode. That
+  // branch must clear the terminated generator, or every later run takes the
+  // dead resume path (replaying an empty dep list, matching input, no
+  // stashed resumption) and returns early forever.
+  const p = new Promise<number>((r) => setTimeout(() => r(5), 5))
+  const c = computed(function* () {
+    const x = use(p)
+    return (x as number) * 2
+  })
+
+  c()
+  await ticks(10)
+
+  expect(latest(c)).toBe(10)
+})
+
+test('use(...) then yield* read(...) inside a generator stage converges', async () => {
+  const [a, setA] = signal(1)
+  const c = computed(function* () {
+    const viaUse = use(a) as number
+    const viaRead: number = yield* read(
+      new Promise<number>((resolve) => setTimeout(() => resolve(10), 1)),
+    )
+    return viaUse + viaRead
+  })
+
+  c()
+  await ticks(10)
+  expect(latest(c)).toBe(11)
+
+  setA(2)
+  await ticks(10)
+  expect(latest(c)).toBe(12)
+})
+
+test('a discarded generator does not leave its abandoned promise able to re-run the stage', async () => {
+  // The reproduction: restart into a synchronously-throwing generator, then
+  // let the FIRST (abandoned) generator's promise settle. If discardGen()
+  // does not clear the in-flight-promise field, the old promise's settle
+  // callback still matches (`suspendedOn === p`) and kicks a third run.
+  const [a, setA] = signal(1)
+  let bodyRuns = 0
+
+  const c = computed(function* () {
+    bodyRuns++
+    const av: number = yield* read(a)
+    if (av === 2) {
+      throw new Error('boom')
+    }
+    const p: number = yield* read(
+      new Promise<number>((resolve) => setTimeout(() => resolve(10), 50)),
+    )
+    return av + p
+  })
+
+  c()
+  await tick() // paused on the 50ms promise; nothing has settled
+  expect(bodyRuns).toBe(1)
+
+  setA(2) // discards the paused generator; the fresh one throws synchronously
+  await tick()
+  expect(bodyRuns).toBe(2)
+  expect(failure(c)).toBeInstanceOf(Error)
+
+  // Let the abandoned first generator's promise settle.
+  await ticks(80)
+
+  expect(bodyRuns).toBe(2) // not 3 — the abandoned promise must not re-run the stage
 })

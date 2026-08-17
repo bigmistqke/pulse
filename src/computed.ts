@@ -162,6 +162,22 @@ function makeStageNode(
   let retainedGen: Generator<unknown, unknown, unknown> | null = null
   let depRecords: DepRecord[] = []
   let resumeWith: StashedResolution | null = null
+  // True exactly while `suspendedOn` holds the promise `retainedGen` itself
+  // paused on (yielded, and the driver returned it pending). Discarding that
+  // generator should clear `suspendedOn`/`suspendedInput` along with it — see
+  // `discardGen` below. This is distinct from `suspendedOn` being set by the
+  // `NotReadyYet` catch further down: a generator whose body calls `use(x)`
+  // directly throws that out of `gen.next()` before ever reaching a `yield`,
+  // so it terminates without ever owning a suspension — `retainedGen` gets
+  // set (recorded the instant the driver creates it), but `genOwnsSuspension`
+  // stays false. That distinction matters because the `NotReadyYet` catch's
+  // own `suspendOn` call manages a same-promise dedup guard
+  // (`if (suspendedOn === p) return`, in `suspendOn` below) across repeated
+  // hits on a promise that is still pending: clearing `suspendedOn` out from
+  // under that guard on every hit would make it re-attach a `.then` listener
+  // every time instead of once, and fire its settle callback once per
+  // attachment when the promise finally settles.
+  let genOwnsSuspension = false
 
   /**
    * End a generator: run its `finally` blocks if it has not already finished,
@@ -200,6 +216,17 @@ function makeStageNode(
     retainedGen = null
     depRecords = []
     resumeWith = null
+    if (genOwnsSuspension) {
+      // The generator being discarded is the one `suspendedOn` currently
+      // belongs to (see `genOwnsSuspension`'s comment above) — clear the
+      // in-flight-promise field and its recorded input along with it, or an
+      // abandoned promise's settle callback still matches (`suspendedOn ===
+      // p`) after the discard and kicks a spurious extra run of whatever
+      // generator replaces it.
+      suspendedOn = null
+      suspendedInput = undefined
+      genOwnsSuspension = false
+    }
     if (gen !== null) endGen(gen, true)
   }
 
@@ -394,6 +421,13 @@ function makeStageNode(
         // only if it pauses — so a generator that completes or throws
         // entirely synchronously is still reachable below for cleanup, the
         // same as one that paused and later settled.
+        //
+        // A stashed resumption belongs to the generator it was recorded for.
+        // There is no retained generator here, so any leftover stash is not
+        // this fresh generator's to consume — clear it so the invariant
+        // (`resumeWith` is non-null only while the retained generator is the
+        // one it belongs to) holds even if something upstream left it set.
+        resumeWith = null
         outcome = runStage(stage, input, (gen) => {
           retainedGen = gen
         })
@@ -409,6 +443,10 @@ function makeStageNode(
       if (outcome.pending) {
         if (outcome.gen !== undefined) {
           retainedGen = outcome.gen
+          // `suspendOn` just below is about to set `suspendedOn` to this
+          // generator's own pause promise — mark it as owned so a discard
+          // knows to clear it (see `genOwnsSuspension`'s comment above).
+          genOwnsSuspension = true
           // The node being recomputed is the current r3 context. Reading it from
           // there rather than from `depTracker` avoids a temporal dead zone: r3
           // invokes the body while `const depTracker = r3Computed(...)` is still
@@ -421,6 +459,10 @@ function makeStageNode(
         suspendOn(outcome.promise, input, (state) => {
           if (state.status === 'fulfilled') {
             suspendedOn = null
+            // The pause this settle resolves is no longer the one
+            // `suspendedOn` reflects (it was just cleared above), so a
+            // later discard of `retainedGen` must not touch it again.
+            genOwnsSuspension = false
             setPendingSig(false)
             if (resumeKind === 'fast-forward') {
               // Stash the fulfilled value for the retained generator's next
@@ -448,6 +490,7 @@ function makeStageNode(
             // else: same value, already a promise — no downstream invalidation
           } else if (state.status === 'rejected') {
             suspendedOn = null
+            genOwnsSuspension = false
             setPendingSig(false)
             if (resumeKind === 'fast-forward') {
               // Stash the rejection for the retained generator's next
@@ -494,11 +537,22 @@ function makeStageNode(
       return null
     } catch (e) {
       if (e instanceof NotReadyYet) {
-        // Sync/async-function stage body called `use(pending)` and threw the
-        // suspension signal. Treat identically to a stage that returned a
-        // pending Promise: set up the same suspendOn + settle machinery.
-        // Generator stages route suspension via their driver and never reach
-        // this catch with a NotReadyYet.
+        // A stage body called `use(pending)` and threw the suspension signal.
+        // Treat identically to a stage that returned a pending Promise: set up
+        // the same suspendOn + settle machinery.
+        //
+        // A generator stage body reaches this catch too: `use(x)` inside a
+        // generator body throws NotReadyYet out of `gen.next()` synchronously
+        // (it does not route through a `yield`), through the driver, and out
+        // of `runStage` uncaught, landing here just like a sync stage's throw.
+        // `retainedGen` was set the instant the driver created the generator
+        // (see the comment above), but that generator has already terminated
+        // — `depRecords` is empty and it will never be resumed — so it must be
+        // discarded here. Otherwise every later run takes the `retainedGen`
+        // resume path: replaying an empty dependency list reports no change,
+        // the input still matches, and there is no stashed resumption, so the
+        // body returns early forever.
+        discardGen()
         suspendOn(e.promise, /* input */ undefined, (state) => {
           if (state.status === 'fulfilled') {
             suspendedOn = null

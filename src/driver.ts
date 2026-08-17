@@ -34,20 +34,6 @@ function settle(value: unknown): StageOutcome {
   return { pending: true, promise: value }
 }
 
-/**
- * Drive a generator from wherever it currently is. Each yielded value goes
- * through `settle`:
- * - settled value -> resume the generator with it via `gen.next`
- * - settled rejection -> resume via `gen.throw` (user's try/catch can handle it;
- *   if uncaught, the generator throws back to us and we propagate)
- * - pending -> short-circuit with `{ pending, promise, gen }`
- * The generator's own return value is itself run through `settle` (a generator
- * may `return await something` and the runtime should still wait on it).
- *
- * `seed` says how to make the first `gen.next` / `gen.throw` call. A fresh
- * generator is seeded with `undefined`, which a generator ignores on its first
- * resumption; a retained one is seeded with what its pending promise settled to.
- */
 /** Cleanups registered through `onCleanup` while a generator was being driven.
  *  Held against the generator rather than the stage node, because the callbacks
  *  belong to that generator's lifetime and the node recomputes more often than
@@ -65,6 +51,20 @@ export function takeGeneratorCleanups(
   return list
 }
 
+/**
+ * Drive a generator from wherever it currently is. Each yielded value goes
+ * through `settle`:
+ * - settled value -> resume the generator with it via `gen.next`
+ * - settled rejection -> resume via `gen.throw` (user's try/catch can handle it;
+ *   if uncaught, the generator throws back to us and we propagate)
+ * - pending -> short-circuit with `{ pending, promise, gen }`
+ * The generator's own return value is itself run through `settle` (a generator
+ * may `return await something` and the runtime should still wait on it).
+ *
+ * `seed` says how to make the first `gen.next` / `gen.throw` call. A fresh
+ * generator is seeded with `undefined`, which a generator ignores on its first
+ * resumption; a retained one is seeded with what its pending promise settled to.
+ */
 function driveGenerator(
   gen: Generator<unknown, unknown, unknown>,
   seed: Resumption,
