@@ -284,7 +284,7 @@ Stage boundaries already provide re-entry that does not re-run upstream stages.
   needs, so it is the seam the cancellation work builds on.
 
 - **The failure entry's `reset` clears the retained generator**
-  (`src/computed.ts:658`), because a retry starts over rather than resumes.
+  (`src/computed.ts:672`), because a retry starts over rather than resumes.
 
 - **The speculation path is unchanged.** `publishedNode.defaultRecipe`
   (`src/computed.ts:257`) continues to build fresh generators; speculation does

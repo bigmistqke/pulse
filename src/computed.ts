@@ -195,6 +195,11 @@ function makeStageNode(
     retainedGen = null
     depRecords = []
     resumeWith = null
+    // No generator is retained now, so nothing can be waiting on a pause to
+    // carry it forward. The flag is already false on every path that reaches
+    // here today; clearing it keeps that true by construction rather than by
+    // an argument a later change could invalidate.
+    genOwnsSuspension = false
     const cleanups = takeGeneratorCleanups(gen)
     try {
       r3Untrack(() => {

@@ -446,6 +446,52 @@ test('a generator stage that pauses and then returns a pending promise resolves 
   expect(latest(c)).toBe(30)
 })
 
+test('a generator stage that pauses, resumes, then returns a promise stays reactive', async () => {
+  // The reactive guard for the resumed path. The test below covers the same
+  // property for a generator that never paused; this one reaches the returned
+  // promise through a resumption, which is the path that leaves a generator
+  // recorded for longest.
+  const [a, setA] = signal(2)
+  let bodyRuns = 0
+
+  const c = computed(function* () {
+    bodyRuns++
+    const av: number = yield* read(a)
+    const paused: number = yield* read(
+      new Promise<number>((resolve) => setTimeout(() => resolve(1), 5)),
+    )
+    return new Promise<number>((resolve) => setTimeout(() => resolve(av * 10 + paused), 5))
+  })
+
+  c()
+  await ticks(30)
+  expect(latest(c)).toBe(21)
+
+  setA(5)
+  await ticks(30)
+
+  expect(latest(c)).toBe(51)
+  expect(bodyRuns).toBe(2)
+})
+
+test('a generator stage whose returned promise rejects parks the failure', async () => {
+  // The rejected half of the same decision. A generator that has already
+  // returned cannot catch its returned promise's rejection — the try/catch
+  // below is around the `return`, and by the time the promise settles the body
+  // is finished, exactly as it would be in an async function.
+  const rejecting = computed(function* () {
+    return new Promise<number>((_, reject) =>
+      setTimeout(() => reject(new Error('server said no')), 5),
+    )
+  })
+
+  rejecting()
+  await ticks(30)
+
+  expect(failure(rejecting)).toBeInstanceOf(Error)
+  expect((failure(rejecting) as Error).message).toBe('server said no')
+})
+
 test('a generator stage returning a pending promise stays reactive to its dependencies', async () => {
   // Ending the finished generator must also clear the retained-generator field.
   // Left set, the next run would find a finished generator with an empty
