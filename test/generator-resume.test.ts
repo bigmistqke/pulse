@@ -416,3 +416,53 @@ test('a discarded generator does not leave its abandoned promise able to re-run 
 
   expect(bodyRuns).toBe(2) // not 3 — the abandoned promise must not re-run the stage
 })
+
+test('a generator stage that returns a pending promise resolves to its value', async () => {
+  const c = computed(function* () {
+    return new Promise<number>((resolve) => setTimeout(() => resolve(7), 5))
+  })
+
+  c()
+  await ticks(20)
+
+  expect(latest(c)).toBe(7)
+})
+
+test('a generator stage that pauses and then returns a pending promise resolves to its value', async () => {
+  // The same ending reached from a resumed generator rather than a fresh one:
+  // the body pauses on a yield, is resumed, and then returns a promise. The
+  // generator is finished at that point, so the promise is its result and not
+  // a pause to re-enter.
+  const c = computed(function* () {
+    const first: number = yield* read(
+      new Promise<number>((resolve) => setTimeout(() => resolve(3), 5)),
+    )
+    return new Promise<number>((resolve) => setTimeout(() => resolve(first * 10), 5))
+  })
+
+  c()
+  await ticks(30)
+
+  expect(latest(c)).toBe(30)
+})
+
+test('a generator stage returning a pending promise stays reactive to its dependencies', async () => {
+  // Ending the finished generator must also clear the retained-generator field.
+  // Left set, the next run would find a finished generator with an empty
+  // dependency record, see nothing to resume, and return early forever.
+  const [a, setA] = signal(2)
+
+  const c = computed(function* () {
+    const av: number = yield* read(a)
+    return new Promise<number>((resolve) => setTimeout(() => resolve(av * 10), 5))
+  })
+
+  c()
+  await ticks(20)
+  expect(latest(c)).toBe(20)
+
+  setA(5)
+  await ticks(20)
+
+  expect(latest(c)).toBe(50)
+})

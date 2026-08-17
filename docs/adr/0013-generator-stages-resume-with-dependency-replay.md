@@ -103,6 +103,17 @@ by the time the body runs it can no longer recover the settled promise to look
 its state up. The settle handler stashes the value or rejection reason at the
 moment it observes them instead, for the resume to pick up.
 
+A generator can also end by returning a promise rather than yielding one, and
+that is not a pause. The driver hands the generator back only when a `yield`
+suspended it, so an outcome that is pending but carries no generator means the
+body has finished and the promise is its result. The stage ends the generator
+there — running its registered cleanups, its `finally` blocks having already run
+— and when the promise settles it publishes the value directly, exactly as a
+sync or async-function stage does. Treating that promise as a pause instead
+would strand the stage: the next run would find a finished generator with an
+empty dependency record, see nothing to resume, and return early forever, while
+re-entering the finished generator publishes `undefined`.
+
 When driving pauses again, the recorded dependencies are rebuilt by walking r3's
 list from its head up to and including the cursor. The cursor marks the last
 dependency read during this run; anything past it is left over from the previous
@@ -137,7 +148,7 @@ list, and a throw from it routes to the failure handler.
 
 Owner disposal calls `gen.return()` on any retained generator as well, in
 addition to the existing `unwatched` call on each stage node
-(`src/computed.ts:86-90`).
+(`src/computed.ts:89-93`).
 
 ## `onCleanup` inside a generator stage binds to the generator, not the run
 

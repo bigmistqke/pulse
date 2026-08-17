@@ -436,7 +436,14 @@ function makeStageNode(
       // A generator that did not pause has run to completion — whether it was
       // resumed and finished, or ran straight through on this very call. Its
       // `finally` blocks have already run, so only its registered cleanups fire.
-      if (!outcome.pending && retainedGen !== null) {
+      //
+      // A pending outcome carrying no generator means the same thing. The driver
+      // hands the generator back only when a `yield` paused it; a generator that
+      // RETURNED a promise is finished, and that promise is its result rather
+      // than a pause to re-enter. Leaving it retained would strand the stage:
+      // the next run would find a finished generator, replay an empty dependency
+      // record, see nothing to resume, and return early forever.
+      if (retainedGen !== null && (!outcome.pending || outcome.gen === undefined)) {
         endGen(retainedGen, false)
       }
 
@@ -457,6 +464,13 @@ function makeStageNode(
           depRecords = self === null ? [] : snapshotDeps(self, kickNode)
         }
         suspendOn(outcome.promise, input, (state) => {
+          // Does a retained generator wait on this pause to carry it forward?
+          // Only a `yield` produces one. A generator that RETURNED a promise is
+          // already finished, so its settle publishes the value directly, the
+          // same way a sync or async-function stage's does — there is no body
+          // left to re-enter, and re-entering a finished generator would publish
+          // `undefined`.
+          const resumesGenerator = genOwnsSuspension
           if (state.status === 'fulfilled') {
             suspendedOn = null
             // The pause this settle resolves is no longer the one
@@ -464,7 +478,7 @@ function makeStageNode(
             // later discard of `retainedGen` must not touch it again.
             genOwnsSuspension = false
             setPendingSig(false)
-            if (resumeKind === 'fast-forward') {
+            if (resumesGenerator) {
               // Stash the fulfilled value for the retained generator's next
               // resumption, then kick → body re-runs → sees the paused
               // generator, replays its recorded deps, and resumes it forward
@@ -492,7 +506,7 @@ function makeStageNode(
             suspendedOn = null
             genOwnsSuspension = false
             setPendingSig(false)
-            if (resumeKind === 'fast-forward') {
+            if (resumesGenerator) {
               // Stash the rejection for the retained generator's next
               // resumption, so it is thrown at the pause point — the
               // generator's own try/catch handles it (or doesn't).
