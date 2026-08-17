@@ -1,0 +1,351 @@
+import {
+  action,
+  committed,
+  computed,
+  effect,
+  Failed,
+  For,
+  isPending,
+  latest,
+  Loading,
+  onSettle,
+  optimistic,
+  read,
+  render,
+  Show,
+  signal,
+  use,
+} from 'pulse'
+import { api, config, type Todo } from './api'
+
+type Filter = 'all' | 'active' | 'completed'
+
+/* ------------------------------------------------------------------ state */
+
+const [filter, setFilter] = signal<Filter>('all')
+const [draft, setDraft] = signal('')
+const [notice, setNotice] = signal<string | null>(null)
+/** Bumped to refetch. Read inside `loaded`, so it is a dependency of the fetch. */
+const [version, setVersion] = signal(0)
+
+/**
+ * The load. A generator stage: `read` resolves the promise, and the stage
+ * suspends until it settles. Because `version` is read before the pause, it is
+ * a dependency — bumping it discards any in-flight generator and starts over.
+ */
+const loaded = computed(function* () {
+  version()
+  return yield* read(api.list())
+})
+
+/**
+ * Canonical server truth, mirrored locally so a mutation can update it from the
+ * server's own response instead of triggering another round trip.
+ *
+ * `latest` is the tolerant read: it returns the last resolved value and never
+ * throws, so this effect neither suspends nor propagates a load failure. The
+ * failure is the bindings' business, and they route it to `<Failed>`.
+ */
+const [serverTodos, setServerTodos] = signal<Todo[]>([])
+effect(() => {
+  const list = latest(loaded)
+  if (list !== undefined) setServerTodos(list)
+})
+
+/**
+ * What the UI reads. While an action has a live overlay this returns the
+ * speculative list; otherwise it falls through to canonical truth. The overlay
+ * is dropped when the action closes on either face, so a refused write rolls
+ * back without any explicit undo.
+ */
+const [todos, setOverlay, speculating] = optimistic(serverTodos)
+
+/** True while the load is in flight, including a refetch over a visible list. */
+const loading = isPending(loaded)
+
+const visible = () => {
+  const all = todos()
+  const f = filter()
+  if (f === 'active') return all.filter((todo) => !todo.done)
+  if (f === 'completed') return all.filter((todo) => todo.done)
+  return all
+}
+
+const remaining = () => todos().filter((todo) => !todo.done).length
+
+/* --------------------------------------------------------------- mutations */
+
+function flash(message: string) {
+  setNotice(message)
+  setTimeout(() => setNotice((current) => (current === message ? null : current)), 4000)
+}
+
+/**
+ * Every mutation has the same shape: write the speculative list, say what to do
+ * if the action is discarded, then wait for the server and fold its answer into
+ * canonical truth. If the server refuses, the generator throws, the action is
+ * discarded, and the overlay disappears with it.
+ *
+ * The overlay is built from `committed(...)` rather than from `todos()` so it
+ * layers on server truth rather than on another in-flight action's guess.
+ */
+function mutate(
+  describe: string,
+  speculate: (canonical: Todo[]) => Todo[],
+  send: () => Generator<unknown, void, unknown>,
+) {
+  void action(function* () {
+    setOverlay(speculate(committed(() => serverTodos())))
+    onSettle((outcome) => {
+      if (outcome === 'discarded') flash(`${describe} — the server refused`)
+    })
+    yield* send()
+  }).catch(() => {
+    // The rejection already surfaced through `onSettle`; swallowing it here
+    // keeps a refused write from becoming an unhandled rejection.
+  })
+}
+
+function addTodo() {
+  const text = draft().trim()
+  if (text === '') return
+  setDraft('')
+  // A placeholder id, negative so it cannot collide with a real one. It only
+  // ever exists inside the overlay.
+  const pending: Todo = { id: -Date.now(), text, done: false }
+  mutate(
+    `Could not add "${text}"`,
+    (canonical) => [...canonical, pending],
+    function* () {
+      const saved = yield* read(api.add(text))
+      setServerTodos((prev) => [...prev, saved])
+    },
+  )
+}
+
+function toggleTodo(todo: Todo) {
+  mutate(
+    `Could not update "${todo.text}"`,
+    (canonical) =>
+      canonical.map((each) => (each.id === todo.id ? { ...each, done: !each.done } : each)),
+    function* () {
+      const saved = yield* read(api.toggle(todo.id))
+      setServerTodos((prev) => prev.map((each) => (each.id === saved.id ? saved : each)))
+    },
+  )
+}
+
+function removeTodo(todo: Todo) {
+  mutate(
+    `Could not remove "${todo.text}"`,
+    (canonical) => canonical.filter((each) => each.id !== todo.id),
+    function* () {
+      yield* read(api.remove(todo.id))
+      setServerTodos((prev) => prev.filter((each) => each.id !== todo.id))
+    },
+  )
+}
+
+/* ------------------------------------------------------------- components */
+
+function Skeleton() {
+  return (
+    <ul class="skeleton" data-testid="skeleton">
+      <li/>
+      <li/>
+      <li/>
+    </ul>
+  )
+}
+
+function ServerPanel() {
+  return (
+    <aside class="panel">
+      <h2>server</h2>
+      <p class="hint">
+        Canonical truth. The list on the left may be ahead of this while a write
+        is in flight, and snaps back to it if the server refuses.
+      </p>
+      <ul class="canonical" data-testid="canonical-list">
+        <For each={serverTodos}>
+          {(todo: Todo) => (
+            <li class:done={() => todo.done} data-testid="canonical-row">
+              {todo.text}
+            </li>
+          )}
+        </For>
+      </ul>
+    </aside>
+  )
+}
+
+function Controls() {
+  return (
+    <div class="controls">
+      <label>
+        latency
+        <input
+          data-testid="latency"
+          attr:type="number"
+          attr:min="0"
+          attr:step="50"
+          prop:defaultValue={String(config.latency)}
+          on:input={(e: Event) => {
+            config.latency = Number((e.target as HTMLInputElement).value)
+          }}
+        />
+        ms
+      </label>
+      <label>
+        failure rate
+        <input
+          data-testid="fail-rate"
+          attr:type="number"
+          attr:min="0"
+          attr:max="1"
+          attr:step="0.1"
+          prop:defaultValue={String(config.failureRate)}
+          on:input={(e: Event) => {
+            config.failureRate = Number((e.target as HTMLInputElement).value)
+          }}
+        />
+      </label>
+      <button data-testid="refetch" on:click={() => setVersion((v) => v + 1)}>
+        Refetch
+      </button>
+    </div>
+  )
+}
+
+function TodoList() {
+  return (
+    <div class="list-area">
+      <ul class="todo-list" class:speculative={speculating} data-testid="todo-list">
+        <For
+          each={() => {
+            // The opt-in. Calling `use` here is what enrols this binding in the
+            // surrounding `<Loading>`: it throws while the load is in flight, so
+            // the boundary shows `initial` on a first load and holds the prior
+            // list on a refetch. The rows themselves come from `visible()`.
+            use(loaded)
+            return visible()
+          }}
+        >
+          {(todo: Todo) => (
+            <li class:done={() => todo.done} data-testid="todo-row">
+              <input
+                attr:type="checkbox"
+                prop:checked={() => todo.done}
+                on:change={() => toggleTodo(todo)}
+              />
+              <span class="text">{todo.text}</span>
+              <button class="remove" on:click={() => removeTodo(todo)}>
+                ×
+              </button>
+            </li>
+          )}
+        </For>
+      </ul>
+      <footer class="footer">
+        <span class="count" data-testid="remaining">
+          {() => {
+            // Enrolled the same way, so the count and the list commit together
+            // rather than the count updating a frame ahead of the rows.
+            use(loaded)
+            return `${remaining()} left`
+          }}
+        </span>
+        <div class="filters">
+          <button
+            data-testid="filter-all"
+            class:active={() => filter() === 'all'}
+            on:click={() => setFilter('all')}
+          >
+            All
+          </button>
+          <button
+            data-testid="filter-active"
+            class:active={() => filter() === 'active'}
+            on:click={() => setFilter('active')}
+          >
+            Active
+          </button>
+          <button
+            data-testid="filter-completed"
+            class:active={() => filter() === 'completed'}
+            on:click={() => setFilter('completed')}
+          >
+            Completed
+          </button>
+        </div>
+      </footer>
+    </div>
+  )
+}
+
+function App() {
+  return (
+    <div class="app">
+      <header class="top">
+        <h1>todos</h1>
+        <Show when={loading}>
+          <span class="inflight" data-testid="inflight">
+            loading…
+          </span>
+        </Show>
+        {/* The third value `optimistic` hands back: true while any action has a
+            live overlay, so the list is showing a guess rather than truth. */}
+        <Show when={speculating}>
+          <span class="inflight" data-testid="saving">
+            saving…
+          </span>
+        </Show>
+      </header>
+
+      <Controls/>
+
+      <input
+        class="new-todo"
+        data-testid="new-todo"
+        attr:placeholder="What needs doing?"
+        prop:value={draft}
+        on:input={(e: Event) => setDraft((e.target as HTMLInputElement).value)}
+        on:keydown={(e: Event) => {
+          if ((e as KeyboardEvent).key === 'Enter') addTodo()
+        }}
+      />
+
+      <Show when={notice}>
+        <p class="notice" data-testid="notice">
+          {notice}
+        </p>
+      </Show>
+
+      <div class="columns">
+        <Failed
+          fallback={(error: unknown, reset: () => void) => (
+            <div class="error" data-testid="error-panel">
+              <p>{String((error as Error)?.message ?? error)}</p>
+              <button data-testid="retry" on:click={reset}>
+                Try again
+              </button>
+            </div>
+          )}
+        >
+          {() => (
+            // A static element between the boundary and its children: a
+            // component sitting directly in the fragment here would be wrapped
+            // under the outer hole's owner and never find the boundary's scope.
+            <div class="main-column">
+              <Loading initial={<Skeleton/>}>{() => <TodoList/>}</Loading>
+            </div>
+          )}
+        </Failed>
+
+        <ServerPanel/>
+      </div>
+    </div>
+  )
+}
+
+render(() => <App/>, document.getElementById('app')!)
