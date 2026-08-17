@@ -18,10 +18,27 @@ Severity: **(small)** trivial cleanups · **(worth)** worth doing soon · **(lat
   Source: generator resumption work.
 - **(small) A discarded generator whose `finally` block contains a `yield`.** Teardown calls the generator's `return` method without checking whether the generator reported itself done. If a `finally` block itself contains a `yield`, `return` reports not-done and the code neither checks that nor drives the generator further, so it is left half-disposed and any promise yielded from that `finally` is dropped. This was deliberate: driving a generator onward during teardown has no coherent meaning, because it would have to suspend on a promise nothing is waiting for.
   Source: generator resumption work.
-- **(small) Cleanup callbacks registered from inside a discarded generator's `finally` block.** While a generator stage is being driven, `onCleanup` registers on that generator rather than on the node. But the teardown path's call to the generator's `return` method is not itself wrapped by that collector, so a cleanup registered from inside a `finally` during a discard routes to the node instead of joining the generator's own list. It fires later than the others, at the node's next recompute, rather than being dropped. Closing it needs a way to read a generator's pending cleanup list without consuming it.
+- **(small) Cleanup callbacks registered from inside a discarded generator's `finally` block.** While a generator stage is being driven, `onCleanup` registers on that generator rather than on the node. But the teardown path's call to the generator's `return` method is not itself wrapped by that collector, so a cleanup registered from inside a `finally` during a discard routes to whatever `onCleanup`'s other routing rules find instead of joining the generator's own list. During a mid-run discard (a changed dependency, or a failure-boundary `reset`) that is still inside an r3 context, so it fires later than the others, at the node's next recompute, rather than being dropped. Under owner disposal, though, there is no reactive context and typically no current owner either — disposal walks the owner tree outside of any r3 run — so the same misrouted callback is dropped entirely rather than merely delayed. Closing it needs a way to read a generator's pending cleanup list without consuming it.
   Source: generator resumption work.
 - **(later) The ambient slot spans a whole synchronous segment.** The mechanism that routes `onCleanup` to the generator being driven is a module-level slot set around each step of the generator. It covers the entire synchronous span of that step, not only direct calls in the generator's own body. So a generator stage body that itself called `effect(...)` or one of the DOM binding helpers would have those functions' own cleanup registrations misrouted onto the generator's lifetime. No current code path does this — `src/effect.ts`, `src/dom/render.ts` and `src/dom/bindings.ts` were all checked — so this is recorded as structural fragility rather than a live defect.
   Source: generator resumption work.
+- **(worth) A restarted generator's replay re-links a dependency the fresh generator no longer reads, and that link persists past the restart.** [ADR 0013](./adr/0013-generator-stages-resume-with-dependency-replay.md) discards a paused generator and restarts a fresh one whenever a dependency read before the pause changed — but the replay walk that reads those recorded dependencies runs before the restart decision, in the same run. So the stale dependencies get re-linked into r3's list before the fresh generator ever runs, and when the fresh generator pauses at its own point, the record rebuilt from that pause walks r3's list from its head up to the new cursor, which still includes the stale entries. They get recorded again, and again on every subsequent pause, until the generator currently driving the stage completes without pausing again and its dependency record is cleared outright. Until then, an unrelated write to one of those stale dependencies keeps restarting the stage — re-running every side effect before the pause and reissuing every request already in flight, which cuts directly against generator bodies being safe to write with side effects.
+
+  Suggested approach (not verified): on the restart path, capture the dependency-list cursor before running the fresh stage, and start the snapshot walk that rebuilds `depRecords` from the entry after that cursor rather than from the list's head. This should exclude the stale, already-replayed entries from the fresh generator's own record while still letting the fresh generator's genuine reads populate it.
+
+  Reproduction:
+  ```js
+  const [flag, setFlag] = signal(true); const [side, setSide] = signal(0)
+  computed(function* () {
+    bodyRuns++
+    if (flag()) side()                       // `side` read only while flag is true
+    yield* read(new Promise(r => setTimeout(() => r(1), 100)))
+  })
+  // paused; setFlag(false) restarts — the fresh generator never reads `side`
+  setSide(1)   // expected: no restart.  actual: bodyRuns 2 -> 3
+  setSide(2)   // expected: no restart.  actual: bodyRuns 3 -> 4   (not one cycle)
+  ```
+  Source: whole-branch review of the generator-resumption work.
 
 ### Test coverage gaps
 

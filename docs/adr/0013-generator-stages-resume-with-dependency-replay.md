@@ -94,10 +94,14 @@ On each run of the stage body:
   generator and run a fresh one from the top. Otherwise resume the retained
   generator.
 
-Resuming reads the settled state of the promise the generator paused on, which
-is already held in the promise state map, and feeds the value to `gen.next` or
-the rejection reason to `gen.throw`. No separate storage for the resumed value
-is introduced.
+Resuming feeds the settled value to `gen.next` or the rejection reason to
+`gen.throw`. That value is stashed in a field of its own (`resumeWith`) rather
+than read back from the promise state map at resume time: the settle handler
+that discovers the promise settled is what clears the field holding the
+in-flight promise, and it does so before it triggers the body's next run, so
+by the time the body runs it can no longer recover the settled promise to look
+its state up. The settle handler stashes the value or rejection reason at the
+moment it observes them instead, for the resume to pick up.
 
 When driving pauses again, the recorded dependencies are rebuilt by walking r3's
 list from its head up to and including the cursor. The cursor marks the last
@@ -138,7 +142,7 @@ addition to the existing `unwatched` call on each stage node
 ## `onCleanup` inside a generator stage binds to the generator, not the run
 
 `onCleanup` registers on the r3 node when it is called inside a reactive body
-(`src/owner.ts:333`), and r3 runs a node's registered callbacks at the start of
+(`src/owner.ts:347`), and r3 runs a node's registered callbacks at the start of
 every recompute and then clears them (`../r3/src/index.ts:162`, `:421-434`).
 
 Re-executing the body from the top kept that balanced: the body re-registered on
@@ -269,17 +273,31 @@ Stage boundaries already provide re-entry that does not re-run upstream stages.
   needs, so it is the seam the cancellation work builds on.
 
 - **The failure entry's `reset` clears the retained generator**
-  (`src/computed.ts:475`), because a retry starts over rather than resumes.
+  (`src/computed.ts:658`), because a retry starts over rather than resumes.
 
 - **The speculation path is unchanged.** `publishedNode.defaultRecipe`
-  (`src/computed.ts:168`) continues to build fresh generators; speculation does
+  (`src/computed.ts:257`) continues to build fresh generators; speculation does
   not support asynchronous stages today, as its own comment records.
 
 - **A restart may leave a dependency linked that the fresh generator no longer
   reads**, because the replay walk reads the recorded dependencies before the
   decision to restart is made. The stage can then run when it did not need to.
-  This is conservative rather than incorrect, and it lasts one cycle: the next
-  pause rebuilds the record from what that run actually read.
+  This is conservative rather than incorrect, and it does not last one cycle:
+  the replay runs before the restart decision, so in the very run that
+  discards the stale generator, the stale dependencies get re-linked into r3's
+  dependency list before the fresh generator ever runs. The fresh generator
+  then pauses at its own point, and the record rebuilt from that pause walks
+  r3's list from its head up to the new cursor — which still includes the
+  stale entries read earlier in the same run, so they are recorded again. This
+  repeats on every subsequent pause, not just the one after the restart: the
+  stale link persists until the generator currently driving the stage
+  completes without pausing again, at which point its dependency record is
+  cleared outright rather than rebuilt. Until then, every unrelated write to
+  one of those stale dependencies restarts the stage again. This matters
+  because the largest visible consequence of this decision is that generator
+  bodies are now safe to write with side effects — a spurious restart
+  re-running every side effect before the pause and reissuing every request
+  already in flight works directly against that guarantee.
 
 ## Relationship to other decisions
 
@@ -288,8 +306,9 @@ architecture. That is what makes this change possible without touching r3: the
 dependency list being replayed belongs to a node pulse created and controls.
 
 [ADR 0012][adr12] put every promise's settled state in one map keyed on the
-promise. That map is what supplies the value a resumed generator is fed, so no
-new storage for the resumed value is needed.
+promise. That map is where the settle handler reads the settled state to stash
+it before it clears the field holding the in-flight promise — it is consulted
+once, at settle time, rather than at resume time.
 
 [adr3]: ./0003-reentry-on-normal-node.md
 [adr12]: ./0012-weakmap-backed-promise-read-model.md
