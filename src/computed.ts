@@ -455,6 +455,16 @@ function makeStageNode(
         stashedResolution = null
       }
 
+      // Did this run resume a generator that actually paused on a yield and
+      // is now continuing from a settled value? A generator can also reach
+      // this body with `retainedGen` set but nothing to resume (still
+      // waiting, or a stale dependency forcing a restart) — only the branch
+      // below that calls `resumeStage` with a real settled resumption counts.
+      // This is what tells apart a generator that ran straight through this
+      // very call from one that only completes now because an earlier call
+      // suspended it — the completion happens synchronously either way, but
+      // the second one took a real asynchronous hop to get here.
+      let resumedFromSuspension = false
       let outcome: StageOutcome
       if (retainedGen !== null) {
         // A generator is paused. Replaying the recorded dependencies keeps them
@@ -478,6 +488,7 @@ function makeStageNode(
         } else {
           const gen = retainedGen
           depRecords = []
+          resumedFromSuspension = true
           outcome =
             resumption.kind === 'fulfilled'
               ? resumeStage(gen, { throw: false, value: resumption.value })
@@ -595,12 +606,16 @@ function makeStageNode(
       // Sync result.
       suspendedOn = null
       setPendingSig(false)
-      // Publish a promise when the stage is async-coloured — a generator, or a
-      // synchronous stage fed by an async upstream — so the read stays a Promise.
-      // A purely synchronous stage (sync input, sync body) publishes the bare
-      // value. Re-publish when the value changes OR the shape flips at the same
-      // value (the change-gate keys on value alone).
-      const asPromise = resumeKind === 'fast-forward' || inputWasAsync
+      // Publish a promise when this run was fed by an async upstream, or when
+      // it is a generator's completion after resuming from a real internal
+      // pause — either way the value took an asynchronous hop to arrive. A
+      // generator stage that ran straight through in one call, or resumed
+      // from a pause caused by a still-pending upstream (handled above, in
+      // the pending branch, which never reaches here), is not asynchronous
+      // just because it is a generator. Re-publish when the value changes OR
+      // the shape flips at the same value (the change-gate keys on value
+      // alone).
+      const asPromise = inputWasAsync || resumedFromSuspension
       if (
         lastResolvedValue === UNRESOLVED ||
         !Object.is(lastResolvedValue, outcome.value) ||
@@ -705,10 +720,11 @@ function makeStageNode(
   }
 
   /** Whether a bare write has to be wrapped so the read keeps its asynchronous
-   *  colour. Uses the same coarse test the publish path uses, so a write does
-   *  not flip the shape a consumer sees. */
-  const writeWrapsInPromise = (): boolean =>
-    resumeKind === 'fast-forward' || lastPublishedShapeIsPromise
+   *  colour. `lastPublishedShapeIsPromise` already answers this precisely —
+   *  it is the same flag the publish path above keeps current on every run,
+   *  including a generator stage that happened to run fully synchronously —
+   *  so a write matches whatever shape the most recent read actually had. */
+  const writeWrapsInPromise = (): boolean => lastPublishedShapeIsPromise
 
   /** Write the published value. Scope-aware: inside an action this installs a
    *  slot rather than touching committed state. Writes through `writeValue`

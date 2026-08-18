@@ -59,16 +59,14 @@ test('Resolved<T> type unwraps signals, promises, and generators (compile-time)'
 test('PipelineRead keeps async colour honestly (compile-time)', () => {
   // Each `const … : T = value` line is the compile-time assertion — a wrong type
   // would fail to compile.
-  type S1sync = PipelineRead<[], number>                             // number
-  type S1async = PipelineRead<[], Promise<number>>                   // Promise<number>
-  type S1gen = PipelineRead<[], Generator<unknown, number, unknown>> // Promise<number>
-  type S1cond = PipelineRead<[], Promise<number> | string>          // Promise<number> | string (honest union)
-  type S2asyncUp = PipelineRead<[Promise<number>], number>          // Promise<number> (upstream colours it)
-  type S2syncUp = PipelineRead<[number], number>                    // number
+  type S1sync = PipelineRead<[], number>                    // number
+  type S1async = PipelineRead<[], Promise<number>>          // Promise<number>
+  type S1cond = PipelineRead<[], Promise<number> | string>  // Promise<number> | string (honest union)
+  type S2asyncUp = PipelineRead<[Promise<number>], number>  // Promise<number> (upstream colours it)
+  type S2syncUp = PipelineRead<[number], number>            // number
 
   const s1sync: S1sync = 1
   const s1async: S1async = Promise.resolve(1)
-  const s1gen: S1gen = Promise.resolve(1)
   const s1condSync: S1cond = 'ok'
   const s1condAsync: S1cond = Promise.resolve(1)
   const s2up: S2asyncUp = Promise.resolve(1)
@@ -78,5 +76,36 @@ test('PipelineRead keeps async colour honestly (compile-time)', () => {
   void s2bad
 
   expect([s1sync, s1condSync, s2sy]).toEqual([1, 'ok', 1])
-  expect([s1async, s1gen, s1condAsync, s2up].every((x) => x instanceof Promise)).toBe(true)
+  expect([s1async, s1condAsync, s2up].every((x) => x instanceof Promise)).toBe(true)
+})
+
+test('PipelineRead colours a generator stage by what it actually yields, not by being a generator (compile-time)', () => {
+  // Three shapes of `function*` stage, colour derived from their `yield*
+  // read(x)` calls rather than asserted for every generator: one that only
+  // ever reads settled values, one that only ever reads a promise, and one
+  // that conditionally reads either.
+  function* fullySync() {
+    return yield* read(5)
+  }
+  function* definitelyAsync() {
+    return yield* read(Promise.resolve(5))
+  }
+  function* maybeAsync(flag: boolean) {
+    return flag ? yield* read(5) : yield* read(Promise.resolve(5))
+  }
+
+  type S1genSync = PipelineRead<[], ReturnType<typeof fullySync>>        // number
+  type S1genAsync = PipelineRead<[], ReturnType<typeof definitelyAsync>> // Promise<number>
+  type S1genMaybe = PipelineRead<[], ReturnType<typeof maybeAsync>>      // number | Promise<number>
+
+  const s1genSync: S1genSync = 3
+  const s1genAsync: S1genAsync = Promise.resolve(1)
+  const s1genMaybeSync: S1genMaybe = 4
+  const s1genMaybeAsync: S1genMaybe = Promise.resolve(4)
+  // @ts-expect-error a fully-synchronous generator stage surfaces bare — a Promise is not assignable.
+  const s1genSyncBad: S1genSync = Promise.resolve(3)
+  void s1genSyncBad
+
+  expect([s1genSync, s1genMaybeSync]).toEqual([3, 4])
+  expect([s1genAsync, s1genMaybeAsync].every((x) => x instanceof Promise)).toBe(true)
 })

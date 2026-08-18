@@ -78,17 +78,22 @@ test('a write into a multi-stage pipeline lands on the output', () => {
 })
 
 test('a bare write into an asynchronously coloured stage keeps the read a promise', async () => {
+  let resolveList: (v: string[]) => void = () => {}
   const [list, setList] = signal(function* () {
-    return ['a']
+    return yield* read(new Promise<string[]>((r) => (resolveList = r)))
   })
 
-  // a generator stage publishes a promise, so the raw read is one
+  // the generator suspended on a promise that was still pending, so the raw
+  // read is one too
   expect(list()).toBeInstanceOf(Promise)
+  resolveList(['a'])
+  await tick()
   expect(use(list)).toEqual(['a'])
 
   setList(['b'])
 
-  // the write must not flip the shape a consumer sees
+  // the write must not flip the shape a consumer sees, even though this
+  // particular run has already settled and nothing is suspended right now
   expect(list()).toBeInstanceOf(Promise)
   expect(use(list)).toEqual(['b'])
 })
@@ -98,6 +103,47 @@ test('a write into a synchronously coloured stage does not introduce a promise',
   expect(n()).toBe(1)
   setN(2)
   expect(n()).toBe(2) // still bare, not a promise
+})
+
+test('a generator stage that never suspends publishes its value bare', () => {
+  let runs = 0
+  const [list, setList] = signal(function* () {
+    runs++
+    return ['a']
+  })
+
+  // nothing was ever yielded on a pending promise, so this is not asynchronous
+  // just because the stage happens to be written as a generator
+  expect(list()).toEqual(['a'])
+  expect(list()).not.toBeInstanceOf(Promise)
+  expect(runs).toBe(1)
+
+  setList(['b'])
+
+  // a bare write into a stage that has only ever published bare stays bare
+  expect(list()).toEqual(['b'])
+  expect(list()).not.toBeInstanceOf(Promise)
+})
+
+test('a generator stage colours its read by what it actually reads, not by being a generator', async () => {
+  const [syncSource] = signal(() => 5)
+  const [syncDerived] = signal(function* () {
+    return yield* read(syncSource)
+  })
+  // this generator never reads anything that could be pending
+  expect(syncDerived()).toBe(5)
+  expect(syncDerived()).not.toBeInstanceOf(Promise)
+
+  let resolveAsync: (v: number) => void = () => {}
+  const asyncSource = new Promise<number>((r) => (resolveAsync = r))
+  const [asyncDerived] = signal(function* () {
+    return yield* read(asyncSource)
+  })
+  // this generator suspends on first load, so the raw read is a promise
+  expect(asyncDerived()).toBeInstanceOf(Promise)
+  resolveAsync(9)
+  await tick()
+  expect(use(asyncDerived)).toBe(9)
 })
 
 /** Resolve after all microtasks have drained (a macrotask boundary). */

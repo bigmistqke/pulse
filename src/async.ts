@@ -167,10 +167,6 @@ export type Resolved<T> = T extends Signal<infer U>
       ? Awaited<R>
       : Awaited<T>
 
-/** Unwrap a generator return to a promise (a generator stage always reads
- *  async); leave everything else — bare, a Promise, or a union — as it is. */
-type Surface<S> = S extends Generator<unknown, infer R, unknown> ? Promise<Awaited<R>> : S
-
 /** The whole type is a Promise or Generator (unconditionally async). Wrapped in
  *  tuples so a union is tested as a whole, not distributed. */
 type DefinitelyAsync<X> =
@@ -184,6 +180,32 @@ type DefinitelyAsync<X> =
  *  a promise member). `Extract` finds it without distributing the conditional. */
 type MaybeAsync<X> =
   [Extract<X, Promise<unknown> | Generator<unknown, unknown, unknown>>] extends [never] ? false : true
+
+/** Unwrap a generator's return type, coloured by what it actually yields — not
+ *  asserted unconditionally. `Y`, the generator's yield type, is whatever
+ *  `read`/`settled` calls inside the body were declared to yield; TypeScript
+ *  infers it as the union of every yield site (including ones reached through
+ *  `yield*` delegation), so it reflects the real shape of the body, not just
+ *  its last stage. A body that never yields (`Y` is `never`) is fully
+ *  synchronous and surfaces bare; one whose every yield is async-coloured
+ *  surfaces a `Promise`; a mix (e.g. a body that conditionally reads a
+ *  sync-or-async signal) surfaces the union of both — the same three-way
+ *  split `UpstreamColor` makes across stages, applied here within one
+ *  generator's own reads. A yield type TypeScript could not narrow past
+ *  `unknown` is treated as possibly async, the safe direction when the
+ *  colour is genuinely unknown. Everything else — bare, a Promise, or a
+ *  union — is left as it is. */
+type Surface<S> = S extends Generator<infer Y, infer R, unknown>
+  ? [Y] extends [never]
+    ? Awaited<R>
+    : unknown extends Y
+      ? Awaited<R> | Promise<Awaited<R>>
+      : DefinitelyAsync<Y> extends true
+        ? Promise<Awaited<R>>
+        : MaybeAsync<Y> extends true
+          ? Awaited<R> | Promise<Awaited<R>>
+          : Awaited<R>
+  : S
 
 /** Reduce the upstream stages' return types to a single async colour. */
 type UpstreamColor<Ups extends unknown[]> =
@@ -210,6 +232,13 @@ function isSignalAccessor(x: unknown): x is Signal<unknown> {
   return typeof x === 'function' && NODE in (x as object)
 }
 
+/** What `read(x)` actually yields, mirroring `Resolved`'s unwrapping of a
+ *  signal or accessor argument — but keeping the colour visible (not run
+ *  through `Awaited`), since this is what `Surface` inspects through a
+ *  generator stage's inferred yield type to tell a settled read apart from
+ *  an async one. */
+type Yielded<T> = T extends Signal<infer U> ? U : T extends () => infer U ? U : T
+
 /**
  * Generator-side resolver. Use as `yield* read(x)` inside a `function*` stage.
  * - x is a signal: the accessor is called (tracking the signal as a dep), and
@@ -218,18 +247,24 @@ function isSignalAccessor(x: unknown): x is Signal<unknown> {
  * - x is a plain value: yielded directly; the driver resumes immediately with it.
  *
  * `yield* read(x)` has type `Resolved<typeof x>` — per-yield inference, courtesy
- * of generator delegation.
+ * of generator delegation. The declared yield type, `Yielded<T>`, carries the
+ * same per-yield colour outward: a `function*` stage that only ever reads
+ * settled values infers a fully synchronous yield type, and `Surface` reads
+ * that to publish the stage's result bare instead of wrapped in a `Promise`.
  *
  * Plan A note: `read` does NOT consult any `[PENDING]` brand. Suspension is
  * driven solely by the driver's `settle()` over the yielded value. Coherent
  * snapshots and transitions are handled by the JSX boundary layer (Plan B),
  * not by `read`.
  */
-export function* read<T>(x: T): Generator<unknown, Resolved<T>, unknown> {
+export function* read<T>(x: T): Generator<Yielded<T>, Resolved<T>, unknown> {
   if (isSignalAccessor(x)) {
-    return (yield (x as () => unknown)()) as Resolved<T>
+    // The runtime shape matches Yielded<T>'s Signal/accessor branch by
+    // construction; TypeScript cannot verify that through a generic T, so the
+    // yield is asserted the same way the return value already is below.
+    return (yield (x as () => unknown)() as Yielded<T>) as Resolved<T>
   }
-  return (yield x) as Resolved<T>
+  return (yield x as Yielded<T>) as Resolved<T>
 }
 
 /**
@@ -243,10 +278,17 @@ export function* read<T>(x: T): Generator<unknown, Resolved<T>, unknown> {
  * promise — reached through the pending registry (`promiseOf`), not the stale
  * value the raw read returns — so the frame is genuinely fresh once it resolves.
  * A settled rejection propagates (via `Promise.all`), routing to the boundary.
+ *
+ * The declared yield type, `Promise<unknown[]>`, is unconditional (unlike
+ * `read`'s per-argument `Yielded<T>`) because the one `yield` below always
+ * awaits a `Promise.all` when it runs — so `Surface` always colours a
+ * generator stage that uses `yield* settled(...)` as async, matching that it
+ * really can suspend, even though the `if` guarding it means a given run
+ * might not.
  */
 export function* settled<T extends readonly unknown[]>(
   inputs: readonly [...T],
-): Generator<unknown, { [K in keyof T]: Resolved<T[K]> }, unknown> {
+): Generator<Promise<unknown[]>, { [K in keyof T]: Resolved<T[K]> }, unknown> {
   const inflight: Promise<unknown>[] = []
   for (const x of inputs) {
     if (isSignalAccessor(x)) {
