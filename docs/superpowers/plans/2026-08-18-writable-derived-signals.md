@@ -983,7 +983,74 @@ calls were made in decides."
 
 ### Task 5: A cancelled upstream stage is left needing recomputation
 
-**Covers:** W10 (a dependency only the tail reads changes afterwards), W11 (the middle stage's own dependency changes afterwards).
+**Covers:** W10 (a dependency only the tail reads changes afterwards), W11 (the middle stage's own dependency changes afterwards), W8 (fetch in the tail, with stages in front) and W12 (two stages in flight at once).
+
+W8 and W12 were named as covered by Task 3 but no test for either was ever written — its brief carried test code for W1, W9 and W13 only. They move here, where the multi-stage shape is already set up.
+
+**Extra tests for W8 and W12,** to be added alongside the two below:
+
+```ts
+test('W8: a write behaves the same when the fetch is in the tail', async () => {
+  let resolveList: (v: string[]) => void = () => {}
+  const [version, setVersion] = signal(1)
+  const [todos, setTodos] = signal(
+    () => version(),
+    function* () {
+      return yield* read(new Promise<string[]>((r) => (resolveList = r)))
+    },
+  )
+
+  expect(isPending(todos)()).toBe(true)
+  setTodos(['written'])
+  expect(isPending(todos)()).toBe(false)
+
+  resolveList(['from server'])
+  await tick()
+  expect(latest(todos)).toEqual(['written'])
+})
+
+test('W12: a write abandons every stage that has work, and resuming reissues both', async () => {
+  let sessionRequests = 0
+  let listRequests = 0
+  let resolveSession: (v: { id: number }) => void = () => {}
+  let resolveList: (v: string[]) => void = () => {}
+
+  const [version, setVersion] = signal(1)
+  const [todos, setTodos] = signal(
+    () => version(),
+    function* () {
+      sessionRequests++
+      return yield* read(new Promise<{ id: number }>((r) => (resolveSession = r)))
+    },
+    function* () {
+      listRequests++
+      return yield* read(new Promise<string[]>((r) => (resolveList = r)))
+    },
+  )
+
+  // the first stage is fetching and the second mirrors its suspension
+  expect(sessionRequests).toBe(1)
+  expect(isPending(todos)()).toBe(true)
+
+  setTodos(['written'])
+  expect(isPending(todos)()).toBe(false)
+
+  resolveSession({ id: 1 })
+  await tick()
+  expect(listRequests).toBe(0) // the abandoned first stage published nothing
+  expect(latest(todos)).toEqual(['written'])
+
+  // a later change resumes the whole chain, which costs both requests
+  setVersion(2)
+  await tick()
+  expect(sessionRequests).toBe(2)
+  resolveSession({ id: 2 })
+  await tick()
+  expect(listRequests).toBe(1)
+})
+```
+
+Adjust the promise plumbing if it does not behave as written — a stage that re-runs builds a fresh promise, so a captured resolve function from an earlier run no longer controls what the stage waits on. Say what you changed and why.
 
 The `keepDirty` argument landed in Task 3. This task proves the behaviour it exists for, which is the one a scenario walk found and which is invisible without a multi-stage test.
 
