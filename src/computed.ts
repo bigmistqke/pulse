@@ -312,19 +312,6 @@ function makeStageNode(
   // registry entry constructed below.
   const [pendingSig, setPendingSig] = signal(false)
 
-  // Plain mirror of pendingSig, kept in lockstep by `setPending` below. A
-  // cancellation check needs to know whether a run is pending WITHOUT reading
-  // any signal: reading a pulse signal accessor outside a reactive context
-  // (`readValue` in scope.ts) unconditionally calls `stabilize()`, which would
-  // run the very queued recompute the check is trying to withdraw before it
-  // gets the chance. `pending` is read instead of `pendingSig()` anywhere that
-  // withdrawal depends on the answer.
-  let pending = false
-  const setPending = (next: boolean): void => {
-    pending = next
-    setPendingSig(next)
-  }
-
   // Generator-only kick: drives body re-run so a paused generator's retained
   // dependencies get replayed and the generator resumes forward. Non-generator
   // stages never trigger this (they publish via setPublishedValue directly).
@@ -350,7 +337,7 @@ function makeStageNode(
     if (suspendedOn === p) return
     suspendedOn = p
     suspendedInput = input
-    setPending(true)
+    setPendingSig(true)
     if (lastResolvedValue === UNRESOLVED) {
       track(p)
       setPublishedValue(p)
@@ -390,7 +377,7 @@ function makeStageNode(
             // Pending upstream: mirror suspension on the promise itself.
             stashedResolution = null
             suspendedOn = null
-            setPending(true)
+            setPendingSig(true)
             if (lastResolvedValue === UNRESOLVED) {
               track(input as Promise<unknown>)
               setPublishedValue(input)
@@ -411,7 +398,7 @@ function makeStageNode(
           const r = stashedResolution
           stashedResolution = null
           suspendedOn = null
-          setPending(false)
+          setPendingSig(false)
           if (r.kind === 'rejected') {
             // Park the failure as graph state; leave publishedValue holding the
             // stale value so a tolerant read can still degrade to it.
@@ -515,7 +502,7 @@ function makeStageNode(
             // `suspendedOn` reflects (it was just cleared above), so a
             // later discard of `retainedGen` must not touch it again.
             genOwnsSuspension = false
-            setPending(false)
+            setPendingSig(false)
             if (resumesGenerator) {
               // Stash the fulfilled value for the retained generator's next
               // resumption, then kick → body re-runs → sees the paused
@@ -543,7 +530,7 @@ function makeStageNode(
           } else if (state.status === 'rejected') {
             suspendedOn = null
             genOwnsSuspension = false
-            setPending(false)
+            setPendingSig(false)
             if (resumesGenerator) {
               // Stash the rejection for the retained generator's next
               // resumption, so it is thrown at the pause point — the
@@ -565,7 +552,7 @@ function makeStageNode(
 
       // Sync result.
       suspendedOn = null
-      setPending(false)
+      setPendingSig(false)
       // Publish a promise when the stage is async-coloured — a generator, or a
       // synchronous stage fed by an async upstream — so the read stays a Promise.
       // A purely synchronous stage (sync input, sync body) publishes the bare
@@ -608,7 +595,7 @@ function makeStageNode(
         suspendOn(e.promise, /* input */ undefined, (state) => {
           if (state.status === 'fulfilled') {
             suspendedOn = null
-            setPending(false)
+            setPendingSig(false)
             // Re-run body via kick (resolved-value cache is meaningless here
             // because the throw means body never returned — re-execute fully).
             // Stash the resolved value first so that SWR works: if the body
@@ -630,7 +617,7 @@ function makeStageNode(
             setKick(++kickCount)
           } else if (state.status === 'rejected') {
             suspendedOn = null
-            setPending(false)
+            setPendingSig(false)
             setFailureSig(state.reason)
             setKick(++kickCount)
           }
@@ -708,24 +695,30 @@ function makeStageNode(
    * and its published value no longer reflects that.
    *
    * Pure: nothing observes a recompute that never ran, so this has to happen
-   * before the value is published. Publishing seeds the tolerant read, which
-   * reads a pulse signal outside any reactive context, which stabilizes the
-   * whole graph — and that stabilize would run the very queued recompute this
-   * is trying to withdraw, before withdrawal gets the chance. For the same
-   * reason this reads no signal itself: `pending` is the plain closure mirror
-   * of `pendingSig`, not the accessor.
+   * before anything reads the graph — before the value is computed (an update
+   * function's `readPrev` peeks the previous value) and before it is published
+   * (publishing seeds the tolerant read). Either of those reads a pulse signal
+   * outside any reactive context, which stabilizes the whole graph — and that
+   * stabilize would run the very queued recompute this is trying to withdraw,
+   * before withdrawal gets the chance. For the same reason this reads no
+   * signal itself: `isRecomputeQueued` is a flag test, not a signal read, and
+   * `hadWork` below reads only local closure state.
    *
    * Refuses a stage whose own body is the caller.
    */
   const withdrawQueuedRun = (isTail: boolean): void => {
     const self = depTracker as R3Computed<unknown>
     if (r3GetContext() === self) return
-    // A stage can be pending without holding a generator or a promise of its
-    // own: a stage downstream of a suspended one mirrors that suspension (see
-    // the `isPromise(input)` branch above) purely by copying `pending` true,
-    // with nothing local to show for it. That mirrored state is still
-    // outstanding work, so a queued recompute for it still needs withdrawing.
-    const hadWork = retainedGen !== null || suspendedOn !== null || pending
+    // A stage can be pending purely by mirroring an upstream suspension (see
+    // the `isPromise(input)` branch above), with no generator or promise of
+    // its own. That does not belong in `hadWork`: `cancelRecompute`'s effect
+    // is governed entirely by `isRecomputeQueued`, so the only thing `hadWork`
+    // needs to ask is whether THIS stage has real local work outstanding —
+    // a mirrored pending flag is not that, and adding it here would only
+    // force a non-tail stage with nothing queued to be marked dirty for no
+    // reason. The mirrored case is `abandonRun`'s concern, not this one: it
+    // runs unconditionally and clears the pending signal regardless.
+    const hadWork = retainedGen !== null || suspendedOn !== null
     if (!hadWork && !isRecomputeQueued(self)) return
     cancelRecompute(self, !isTail)
   }
@@ -751,7 +744,7 @@ function makeStageNode(
     suspendedOn = null
     suspendedInput = undefined
     stashedResolution = null
-    setPending(false)
+    setPendingSig(false)
   }
 
   // User-facing accessor: reads depTracker (to register as sub so dep

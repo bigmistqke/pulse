@@ -175,6 +175,26 @@ test('W19: invalidating then writing in one tick makes no request at all', async
   expect(use(todos)).toEqual(['pushed'])
 })
 
+test('W19: invalidating then writing with an update function also makes no request', async () => {
+  let requests = 0
+  const [version, setVersion] = signal(1)
+  const [todos, setTodos] = signal(function* () {
+    version()
+    requests++
+    return yield* read(Promise.resolve(['from server']))
+  })
+
+  await tick()
+  expect(requests).toBe(1)
+
+  setVersion(2)
+  setTodos((prev) => [...(prev ?? []), 'pushed'])
+  await tick()
+
+  expect(requests).toBe(1) // the queued run was withdrawn before readPrev could reach it
+  expect(latest(todos)).toEqual(['from server', 'pushed'])
+})
+
 test('W20: writing then invalidating in one tick lets the request win', async () => {
   let requests = 0
   const [version, setVersion] = signal(1)

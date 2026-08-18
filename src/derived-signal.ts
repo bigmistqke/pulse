@@ -75,17 +75,18 @@ function signalFromStages(
   const tail = built[built.length - 1]
 
   const setter: DerivedSetter<unknown> = (next) => {
+    // Withdraw first, before anything reads the graph. Computing the value can
+    // call readPrev, and reading the previous value brings the whole graph up
+    // to date, which runs the very run being withdrawn — the same hazard
+    // publishing has, one step earlier for an update function.
+    for (let i = built.length - 1; i >= 0; i--) {
+      built[i].withdrawQueuedRun(built[i] === tail)
+    }
+
     const value =
       typeof next === 'function'
         ? (next as (prev: unknown) => unknown)(tail.readPrev())
         : next
-
-    // Withdrawing a queued run observes nothing, and has to happen before the
-    // publish: publishing seeds the tolerant read, which stabilizes, which
-    // would run the very run being withdrawn.
-    for (let i = built.length - 1; i >= 0; i--) {
-      built[i].withdrawQueuedRun(built[i] === tail)
-    }
 
     // The value next, so a cleanup fired by abandoning below observes the
     // write that triggered it rather than the value it replaced.
