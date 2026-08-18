@@ -200,3 +200,59 @@ test('settled reflects whichever attempt is current, so reading it again after r
   await second
   expect(handle.error()).toBeNull()
 })
+
+test('retry() clears error() synchronously, before the new attempt has settled', async () => {
+  let attempt = 0
+  let resolveSecond: (() => void) | null = null
+  const save = () =>
+    new Promise<void>((resolve, reject) => {
+      attempt++
+      if (attempt === 1) reject(new Error('first failed'))
+      else resolveSecond = resolve
+    })
+
+  const handle = action(function* () {
+    yield* read(save())
+  })
+
+  await handle.settled
+  expect(handle.error()).toBeInstanceOf(Error)
+
+  handle.retry()
+  // The retried attempt is still in flight (parked on resolveSecond below),
+  // but error() must already be cleared rather than stuck on the previous
+  // attempt's failure.
+  expect(handle.error()).toBeNull()
+
+  resolveSecond!()
+  await handle.settled
+  expect(handle.error()).toBeNull()
+})
+
+test('a superseded attempt settling later does not overwrite the outcome of a newer one', async () => {
+  let callCount = 0
+  let resolveSlow: (() => void) | null = null
+  const save = () =>
+    new Promise<void>((resolve, reject) => {
+      callCount++
+      if (callCount === 1) reject(new Error('first failed'))
+      else if (callCount === 2) resolveSlow = resolve // superseded before it settles
+      else reject(new Error('third failed')) // the attempt that supersedes it
+    })
+
+  const handle = action(function* () {
+    yield* read(save())
+  })
+
+  await handle.settled
+  expect(handle.error()).toBeInstanceOf(Error) // attempt 1 failed
+
+  handle.retry() // attempt 2 starts — slow, parked on resolveSlow
+  handle.retry() // attempt 3 starts, superseding attempt 2 — fails right away
+  await handle.settled
+  expect((handle.error() as Error).message).toBe('third failed')
+
+  resolveSlow!() // the superseded attempt 2 finally settles, long after attempt 3
+  await tick()
+  expect((handle.error() as Error).message).toBe('third failed') // unchanged
+})

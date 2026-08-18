@@ -419,7 +419,12 @@ export interface ActionHandle {
    *  it belonged to finished. */
   readonly settled: Promise<void>
   /** Reactive: null while healthy or in flight, the rejection reason once the
-   *  action has failed and nothing has retried it yet. */
+   *  action has failed and nothing has retried it yet. Calling `retry()`
+   *  clears this back to null immediately, before the new attempt has
+   *  settled — and if `retry()` is called again while an attempt is still
+   *  running, only the most recently started attempt's outcome is ever
+   *  reported here; a slower, superseded attempt settling later cannot
+   *  overwrite it. */
   readonly error: Accessor<unknown>
   /** Re-run the action's body from scratch. */
   retry(): void
@@ -461,18 +466,26 @@ export function action(body: () => void): ActionHandle
 export function action(body: () => unknown): ActionHandle {
   const [error, setError] = makeErrorCell()
   let currentSettled: Promise<void>
+  // Bumped at the start of every attempt (the initial run and every retry).
+  // Read back inside the settle handlers below to tell whether the attempt
+  // that just settled is still the current one — a slower, superseded
+  // attempt from an earlier retry() call must not overwrite error() with
+  // its own outcome once a newer attempt has already reported its own.
+  let generation = 0
 
   const runAttempt = (): Promise<void> => {
+    const myGeneration = ++generation
+    setError(null)
     const scope = createScope(getCurrentScope(), 'speculative')
     const attempt = isGeneratorFunction(body)
       ? driveGeneratorAction(scope, body as () => Generator<unknown, void, unknown>)
       : driveNonGeneratorAction(scope, body)
     return attempt.then(
       () => {
-        setError(null)
+        if (myGeneration === generation) setError(null)
       },
       (e: unknown) => {
-        setError(e)
+        if (myGeneration === generation) setError(e)
       },
     )
   }
