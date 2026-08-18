@@ -21,7 +21,7 @@
     "build": "tsdown --dts src/index.ts"
   },
   "dependencies": {
-    "r3": "github:bigmistqke/r3#5ead61654c887791d7e9947db9c60aa82a3aeb80"
+    "r3": "github:bigmistqke/r3#e729d48355240c84dbd1ade8bf8f31696f89004d"
   },
   "devDependencies": {
     "@vitest/browser": "^3.2.4",
