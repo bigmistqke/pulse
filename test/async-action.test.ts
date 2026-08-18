@@ -256,3 +256,42 @@ test('a superseded attempt settling later does not overwrite the outcome of a ne
   await tick()
   expect((handle.error() as Error).message).toBe('third failed') // unchanged
 })
+
+// ---- check(): the strict counterpart to error() ----
+
+test('check() does nothing while healthy or in flight', async () => {
+  const handle = action(function* () {
+    yield* read(tick())
+  })
+  expect(() => handle.check()).not.toThrow()
+  await handle.settled
+  expect(() => handle.check()).not.toThrow()
+})
+
+test('check() throws the current error once the action has failed', async () => {
+  const handle = action(function* () {
+    yield* read(Promise.reject(new Error('boom')))
+  })
+  await handle.settled
+  expect(() => handle.check()).toThrow('boom')
+})
+
+test('check() stops throwing once retry() succeeds', async () => {
+  let attempt = 0
+  const save = () =>
+    tick().then(() => {
+      attempt++
+      if (attempt === 1) throw new Error('save failed')
+    })
+
+  const handle = action(function* () {
+    yield* read(save())
+  })
+
+  await handle.settled
+  expect(() => handle.check()).toThrow('save failed')
+
+  handle.retry()
+  await handle.settled
+  expect(() => handle.check()).not.toThrow()
+})

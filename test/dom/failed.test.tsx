@@ -7,15 +7,18 @@ import {
   effect,
   Failed,
   flush,
+  For,
   Loading,
   microtaskScheduler,
+  onCleanup,
+  optimistic,
   read,
   render,
   setScheduler,
-  Show,
   signal,
   syncScheduler,
   use,
+  type ActionHandle,
 } from '../../src/index'
 
 beforeEach(() => setScheduler(syncScheduler(flush)))
@@ -469,12 +472,13 @@ test('a source marked and swallowed by the effect body itself (no throw reaches 
   expect(poisonedRuns).toBe(1)
 })
 
-test('a failed action registers with the nearest <Failed> boundary, and its retry button re-runs it', async () => {
+test('a binding that reads handle.check() lets <Failed> catch an action failure, and retry() clears it', async () => {
   const target = document.createElement('section')
   document.body.append(target)
 
   let attempt = 0
   const [name, setName] = signal('alice')
+  const [lastMutation, setLastMutation] = signal<ActionHandle | null>(null)
   const save = () =>
     tick().then(() => {
       attempt++
@@ -483,25 +487,45 @@ test('a failed action registers with the nearest <Failed> boundary, and its retr
     })
 
   function saveToBob() {
-    action(function* () {
-      setName('bob')
-      yield* read(save())
-    })
+    setLastMutation(
+      action(function* () {
+        setName('bob')
+        yield* read(save())
+      }),
+    )
   }
 
   render(
     () => (
       <Failed
         fallback={(error, reset) => (
-          <button data-testid="retry" on:click={reset}>
+          <button
+            data-testid="retry"
+            on:click={() => {
+              // check() throwing is what put this fallback up — retrying it
+              // means retrying the action itself, not just re-running the
+              // binding that reported it (reset() would just call check()
+              // again and throw the same, unchanged error).
+              const handle = lastMutation()
+              if (handle !== null && handle.error() !== null) handle.retry()
+              else reset()
+            }}
+          >
             {(error as Error).message}
           </button>
         )}
       >
         {() => (
-          <button data-testid="save" on:click={saveToBob}>
-            save
-          </button>
+          // A static element, not a bare fragment: a function-typed TOP-LEVEL
+          // fragment child is wrapped under the wrong owner and never finds
+          // the boundary's scope (docs/follow-ups.md, the <Loading>/useLoading
+          // version of the same underlying insertChild issue).
+          <div>
+            {() => lastMutation()?.check()}
+            <button data-testid="save" on:click={saveToBob}>
+              save
+            </button>
+          </div>
         )}
       </Failed>
     ),
@@ -524,69 +548,93 @@ test('a failed action registers with the nearest <Failed> boundary, and its retr
   await tick()
   flush()
 
+  // The check() binding re-ran, saw error() cleared by retry(), did not
+  // throw — the boundary is a selection over live state, so it clears on
+  // its own with no reset() call involved.
   expect(target.querySelector('[data-testid="retry"]')).toBeNull()
   expect(committed(name)).toBe('bob')
   expect(attempt).toBe(2)
 })
 
-test('an action that fails after its owning component unmounted does not register a stale entry with the boundary', async () => {
+test('a mutation triggered from a reference-keyed row still reaches <Failed>, even though its own write recreates that row', async () => {
+  // This is the exact shape that broke the owner-capture-based design this
+  // read-based one replaced: the mutation's own optimistic write replaces the
+  // item with a fresh object, <For> is reference-keyed (src/dom/for.ts), so
+  // it tears down and rebuilds the triggering row immediately — before the
+  // request even settles. A check() binding placed outside the list is
+  // unaffected by that, because it was never tied to the row's lifetime.
   const target = document.createElement('section')
   document.body.append(target)
 
-  let reject: ((e: Error) => void) | null = null
-  const pending = new Promise<void>((_, r) => {
-    reject = r
-  })
+  type Item = { id: number; done: boolean }
+  const [items] = signal<Item[]>([{ id: 1, done: false }])
+  // optimistic(), matching examples/todo-async's overlay: this is what makes
+  // the speculative write visible to <For> immediately, the same way it is
+  // in the real demo — a plain signal written inside action() would stay
+  // isolated in the speculative scope until commit, and this action never
+  // commits, so <For> would never see the write and the row would never be
+  // rebuilt at all, which would not reproduce the bug this test is about.
+  const [overlay, setOverlay] = optimistic(items)
+  const [lastMutation, setLastMutation] = signal<ActionHandle | null>(null)
+  let rowDisposals = 0
 
-  function Widget() {
-    return (
-      <button
-        data-testid="save"
-        on:click={() => {
-          action(function* () {
-            yield* read(pending)
-          })
-        }}
-      >
-        save
-      </button>
+  function toggle(item: Item) {
+    setLastMutation(
+      action(function* () {
+        setOverlay(
+          committed(() => overlay()).map((each) =>
+            each.id === item.id ? { ...each, done: !each.done } : each,
+          ),
+        )
+        yield* read(Promise.reject(new Error('server refused')))
+      }),
     )
   }
-
-  const [visible, setVisible] = signal(true)
 
   render(
     () => (
       <Failed
         fallback={(error) => <p data-testid="error-panel">{(error as Error).message}</p>}
       >
-        {() => <Show when={visible}>{() => <Widget />}</Show>}
+        {() => (
+          // A static element, not a bare fragment — see the comment on the
+          // same shape in the test above.
+          <div>
+            {() => lastMutation()?.check()}
+            <ul>
+              <For each={overlay}>
+                {(item: Item) => {
+                  onCleanup(() => {
+                    rowDisposals++
+                  })
+                  return (
+                    <li>
+                      <button data-testid={`toggle-${item.id}`} on:click={() => toggle(item)}>
+                        toggle
+                      </button>
+                    </li>
+                  )
+                }}
+              </For>
+            </ul>
+          </div>
+        )}
       </Failed>
     ),
     target,
   )
 
+  const button = target.querySelector('[data-testid="toggle-1"]') as HTMLButtonElement
+  button.click()
   flush()
 
-  const clickTestId = (id: string) => {
-    const el = target.querySelector(`[data-testid="${id}"]`)
-    ;(el as HTMLButtonElement).click()
-  }
+  // Confirms the premise: the row that triggered the mutation really was
+  // torn down by the mutation's own optimistic write, not merely assumed to.
+  expect(rowDisposals).toBe(1)
 
-  clickTestId('save') // the action starts; its promise stays pending on `reject`
-
-  // Unmount the component while the action is still in flight — its owner
-  // disposes before anything has failed.
-  setVisible(false)
-  flush()
-  expect(target.querySelector('[data-testid="save"]')).toBeNull()
-
-  // Only now does the mutation actually fail — after the component that
-  // started it no longer exists.
-  reject!(new Error('too late'))
   await tick()
   flush()
 
-  // No stale fallback for a component the user can no longer see.
-  expect(target.querySelector('[data-testid="error-panel"]')).toBeNull()
+  // The failure still reached the boundary regardless.
+  expect(target.querySelector('[data-testid="error-panel"]')).not.toBeNull()
 })
