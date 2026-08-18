@@ -46,12 +46,20 @@
 type StageHandle = {
   accessor: Signal<unknown>
   r3Node: R3Computed<unknown>
-  /** Abandon this stage's outstanding run — executing, paused, or queued.
-   *  `isTail` is true for the stage a write lands on, which is left clean
-   *  because the write supplied its value; every other stage is left needing
-   *  recomputation, because its input moved and its published value no longer
-   *  reflects that. */
-  cancelRun: (isTail: boolean) => void
+  /** Withdraw a run that is queued but has not started. Observes nothing, so it
+   *  runs FIRST in the setter — before the value is computed and before it is
+   *  published, both of which read the graph and so bring it up to date, which
+   *  would run the very run being withdrawn. Reads no signals itself for the
+   *  same reason. `isTail` is true for the stage a write lands on, which is left
+   *  clean because the write supplied its value; every other stage is left
+   *  needing recomputation, because its input moved and its published value no
+   *  longer reflects that. */
+  withdrawQueuedRun: (isTail: boolean) => void
+  /** Abandon a run that is executing or paused. Discarding the generator runs
+   *  its cleanup callbacks, which are observable, so this runs LAST in the
+   *  setter — after the value is published, so a cleanup that reads the signal
+   *  sees the write that triggered it. */
+  abandonRun: () => void
   /** Clear this stage's parked failure. Called on every stage, because the
    *  failure query walks upstream. */
   clearFailure: () => void
@@ -67,7 +75,18 @@ type StageHandle = {
 }
 ```
 
-Only the tail's `publishValue`, `applyWriteEffects` and `readPrev` are ever called. `cancelRun` and `clearFailure` are called on every stage.
+Only the tail's `publishValue`, `applyWriteEffects` and `readPrev` are ever called. `withdrawQueuedRun`, `abandonRun` and `clearFailure` are called on every stage.
+
+The setter's order is load-bearing and each position is held up by a test:
+
+```ts
+withdrawQueuedRun on every stage   // observes nothing → first, before any graph read
+const value = …readPrev()          // reading the previous value stabilizes
+publishValue / applyWriteEffects   // publishing stabilizes too
+abandonRun on every stage          // runs cleanups → last, so they see the write
+```
+
+**Tasks 3 and 4 describe an earlier shape.** They were written when this was one `cancelRun` called after the publish, and executing them split it in two for reasons recorded in those tasks' reports. Their text is left as it was, since they are done; every task after them uses the two names above.
 
 ---
 
@@ -1060,7 +1079,7 @@ The `keepDirty` argument landed in Task 3. This task proves the behaviour it exi
 - Test only: `test/writable-derived.test.ts`
 
 **Interfaces:**
-- Consumes: `cancelRun(isTail)` from Task 3.
+- Consumes: `withdrawQueuedRun(isTail)` and `abandonRun()` — Task 3 built one `cancelRun`, Task 4 split it in two.
 - Produces: nothing new.
 
 - [ ] **Step 1: Write the failing tests**
@@ -1151,7 +1170,7 @@ Expected: W10 fails at `expect(requests).toBe(3)` with 2, and at the following a
 
 - [ ] **Step 3: Verify the implementation**
 
-The fix is already in `cancelRun`: `cancelRecompute(self, !isTail)`. If the test still fails, check that the pipeline builder passes `isTail` correctly — `built[i] === tail` — and that `peekValue` is not accidentally being used for the tail's own value read.
+The fix is already in `withdrawQueuedRun`: `cancelRecompute(self, !isTail)`. If the test still fails, check that the pipeline builder passes `isTail` correctly — `built[i] === tail` — and that `peekValue` is not accidentally being used for the tail's own value read.
 
 - [ ] **Step 4: Run the tests**
 
@@ -1253,11 +1272,11 @@ Add it to the handle and to `StageHandle`.
 
 - [ ] **Step 4: Call it from the setter**
 
-In `src/derived-signal.ts`, extend the loop:
+In `src/derived-signal.ts`, extend the **second** loop — the one that runs after the publish, alongside `abandonRun`. Clearing a failure is a signal write and therefore observable, so it belongs on the same side of the publish as the cleanups, not with the withdrawal:
 
 ```ts
     for (let i = built.length - 1; i >= 0; i--) {
-      built[i].cancelRun(built[i] === tail)
+      built[i].abandonRun()
       built[i].clearFailure()
     }
 ```
@@ -1482,7 +1501,7 @@ leave the signal reporting itself as loading forever."
 - Test: `test/writable-derived.test.ts`
 
 **Interfaces:**
-- Consumes: `publishValue` / `applyWriteEffects` / `cancelRun` / `clearFailure`.
+- Consumes: `publishValue` / `applyWriteEffects` / `withdrawQueuedRun` / `abandonRun` / `clearFailure`.
 - Produces:
   ```ts
   // src/scope.ts
@@ -1634,12 +1653,25 @@ and the setter:
     whenCommitted(getCurrentScope(), () => {
       tail.applyWriteEffects(value)
       for (let i = built.length - 1; i >= 0; i--) {
-        built[i].cancelRun(built[i] === tail)
+        built[i].abandonRun()
         built[i].clearFailure()
       }
     })
   }
 ```
+
+**The withdrawal loop needs a scope gate too, and it is the harder half.** It runs first in the setter, before anything has had a chance to ask whether the write is speculative, and it touches real reactive state with no scope awareness at all. Inside an action it must not withdraw anything, because the write may roll back — but it also cannot simply move after the scope check without reintroducing the defect it exists to prevent, since computing the value reads the graph. The shape that works is to ask the scope question first, and withdraw only when the write is committed:
+
+```ts
+    const scope = getCurrentScope()
+    if (scope === ROOT_SCOPE) {
+      for (let i = built.length - 1; i >= 0; i--) {
+        built[i].withdrawQueuedRun(built[i] === tail)
+      }
+    }
+```
+
+with the speculative case's withdrawal moved inside `whenCommitted` alongside the rest. Reading the ambient scope is a plain module-level variable read and does not touch the graph, so it is safe to do first.
 
 - [ ] **Step 5: Run the tests**
 
@@ -1687,7 +1719,7 @@ The guard landed in Task 3. This task proves it and decides what such a write do
 - Test: `test/writable-derived.test.ts`
 
 **Interfaces:**
-- Consumes: `cancelRun`'s context guard from Task 3.
+- Consumes: the re-entrancy guard, which now appears in both `withdrawQueuedRun` and `abandonRun`.
 - Produces: nothing new.
 
 - [ ] **Step 1: Write the failing test**
@@ -1715,7 +1747,7 @@ Expected: FAIL with `TypeError: Generator is already running`, unless Task 3's g
 
 - [ ] **Step 3: Verify the guard**
 
-`cancelRun` returns early when `r3GetContext() === depTracker`. Confirm `r3GetContext` is imported in `src/computed.ts` — it already is, as `getContext as r3GetContext`.
+Both `withdrawQueuedRun` and `abandonRun` return early when `r3GetContext() === depTracker`. The one that matters here is `abandonRun`, since that is what discards the generator. Confirm `r3GetContext` is imported in `src/computed.ts` — it already is, as `getContext as r3GetContext`.
 
 - [ ] **Step 4: Run the tests**
 
@@ -1895,6 +1927,6 @@ is tracked separately and ships on its own."
 
 **Placeholders.** None. Every code step carries the code. Tasks 4, 5 and 9 are test-only by design, because their implementation lands earlier — each says so and says what to check if the test does not fail first.
 
-**Type consistency.** `StageHandle` is defined once in the File Structure section and grows in Tasks 2, 3 and 6, each naming the field it adds. `DerivedSetter<T>` is defined in Task 2 and used unchanged after. `cancelRun(isTail: boolean)`, `clearFailure()`, `publishValue(value)`, `applyWriteEffects(value)` and `readPrev()` keep the same names and signatures throughout. `cancelRecompute(el, keepDirty?)` and `isRecomputeQueued(el)` match Task 1's definitions everywhere they appear.
+**Type consistency.** `StageHandle` is defined once in the File Structure section and grows in Tasks 2, 3 and 6, each naming the field it adds. `DerivedSetter<T>` is defined in Task 2 and used unchanged after. `withdrawQueuedRun(isTail: boolean)`, `abandonRun()`, `clearFailure()`, `publishValue(value)`, `applyWriteEffects(value)` and `readPrev()` keep the same names and signatures throughout. `cancelRecompute(el, keepDirty?)` and `isRecomputeQueued(el)` match Task 1's definitions everywhere they appear.
 
 **Known ordering risk.** Task 8 moves `clearFailure` inside the deferred block, after Task 6 introduced it in the immediate path. Task 8's step 5 calls this out explicitly so it is not read as an accident.
