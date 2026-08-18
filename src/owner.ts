@@ -147,7 +147,11 @@ export function routeError(start: Owner | null, error: unknown): void {
 
 /**
  * The nearest `<Failed>` boundary — or `null` if a `catchError` handler is nearer,
- * or if there is neither.
+ * or if there is neither. Returns the boundary's own owner alongside its scope: a
+ * caller that needs to know when the BOUNDARY itself (as opposed to whatever owner
+ * it started walking from) goes away — e.g. to anchor an `onCleanup` there instead
+ * of on the calling owner — needs that owner directly, since `FailedScope` alone
+ * does not expose it.
  *
  * `<Failed>` and `catchError` are peers in ONE walk up the owner chain, and the
  * nearest wins. Returning `null` when a handler is nearer is what lets the caller
@@ -155,10 +159,12 @@ export function routeError(start: Owner | null, error: unknown): void {
  * So a `catchError` nested inside a `<Failed>` intercepts first, and the boundary
  * catches whatever the inner handler does not.
  */
-export function findNearestFailedScope(start: Owner | null): FailedScope | null {
+export function findNearestFailedScope(
+  start: Owner | null,
+): { owner: Owner; scope: FailedScope } | null {
   let owner = start
   while (owner !== null) {
-    if (owner.boundaries.failed !== null) return owner.boundaries.failed
+    if (owner.boundaries.failed !== null) return { owner, scope: owner.boundaries.failed }
     if (owner.errorHandler !== null) return null // a nearer catchError wins
     owner = owner.parent
   }

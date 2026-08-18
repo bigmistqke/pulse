@@ -15,10 +15,10 @@ import {
   read,
   render,
   setScheduler,
+  Show,
   signal,
   syncScheduler,
   use,
-  type ActionHandle,
 } from '../../src/index'
 
 beforeEach(() => setScheduler(syncScheduler(flush)))
@@ -472,13 +472,12 @@ test('a source marked and swallowed by the effect body itself (no throw reaches 
   expect(poisonedRuns).toBe(1)
 })
 
-test('a binding that reads handle.check() lets <Failed> catch an action failure, and retry() clears it', async () => {
+test('a failed action registers with the nearest <Failed> boundary, and its retry button re-runs it', async () => {
   const target = document.createElement('section')
   document.body.append(target)
 
   let attempt = 0
   const [name, setName] = signal('alice')
-  const [lastMutation, setLastMutation] = signal<ActionHandle | null>(null)
   const save = () =>
     tick().then(() => {
       attempt++
@@ -487,45 +486,25 @@ test('a binding that reads handle.check() lets <Failed> catch an action failure,
     })
 
   function saveToBob() {
-    setLastMutation(
-      action(function* () {
-        setName('bob')
-        yield* read(save())
-      }),
-    )
+    action(function* () {
+      setName('bob')
+      yield* read(save())
+    })
   }
 
   render(
     () => (
       <Failed
         fallback={(error, reset) => (
-          <button
-            data-testid="retry"
-            on:click={() => {
-              // check() throwing is what put this fallback up — retrying it
-              // means retrying the action itself, not just re-running the
-              // binding that reported it (reset() would just call check()
-              // again and throw the same, unchanged error).
-              const handle = lastMutation()
-              if (handle !== null && handle.error() !== null) handle.retry()
-              else reset()
-            }}
-          >
+          <button data-testid="retry" on:click={reset}>
             {(error as Error).message}
           </button>
         )}
       >
         {() => (
-          // A static element, not a bare fragment: a function-typed TOP-LEVEL
-          // fragment child is wrapped under the wrong owner and never finds
-          // the boundary's scope (docs/follow-ups.md, the <Loading>/useLoading
-          // version of the same underlying insertChild issue).
-          <div>
-            {() => lastMutation()?.check()}
-            <button data-testid="save" on:click={saveToBob}>
-              save
-            </button>
-          </div>
+          <button data-testid="save" on:click={saveToBob}>
+            save
+          </button>
         )}
       </Failed>
     ),
@@ -548,21 +527,24 @@ test('a binding that reads handle.check() lets <Failed> catch an action failure,
   await tick()
   flush()
 
-  // The check() binding re-ran, saw error() cleared by retry(), did not
-  // throw — the boundary is a selection over live state, so it clears on
-  // its own with no reset() call involved.
+  // reset() calls the failed report's own retry — the same retry() the
+  // action's handle exposes — so the action runs again, no separate
+  // check()-style binding needed anywhere.
   expect(target.querySelector('[data-testid="retry"]')).toBeNull()
   expect(committed(name)).toBe('bob')
   expect(attempt).toBe(2)
 })
 
 test('a mutation triggered from a reference-keyed row still reaches <Failed>, even though its own write recreates that row', async () => {
-  // This is the exact shape that broke the owner-capture-based design this
-  // read-based one replaced: the mutation's own optimistic write replaces the
-  // item with a fresh object, <For> is reference-keyed (src/dom/for.ts), so
-  // it tears down and rebuilds the triggering row immediately — before the
-  // request even settles. A check() binding placed outside the list is
-  // unaffected by that, because it was never tied to the row's lifetime.
+  // The row-recycling bug this design was fixed for: the mutation's own
+  // optimistic write replaces the item with a fresh object, <For> is
+  // reference-keyed (src/dom/for.ts), so it tears down and rebuilds the
+  // triggering row immediately — before the request even settles. If the
+  // action's disposal guard were anchored to the ROW's owner (the owner
+  // ambient when action() was called), that immediate disposal would
+  // incorrectly suppress the report. It is anchored to the BOUNDARY's
+  // owner instead (see the comment on `disposed` in `action()`), which is
+  // unaffected by the row being recycled underneath it.
   const target = document.createElement('section')
   document.body.append(target)
 
@@ -575,20 +557,17 @@ test('a mutation triggered from a reference-keyed row still reaches <Failed>, ev
   // commits, so <For> would never see the write and the row would never be
   // rebuilt at all, which would not reproduce the bug this test is about.
   const [overlay, setOverlay] = optimistic(items)
-  const [lastMutation, setLastMutation] = signal<ActionHandle | null>(null)
   let rowDisposals = 0
 
   function toggle(item: Item) {
-    setLastMutation(
-      action(function* () {
-        setOverlay(
-          committed(() => overlay()).map((each) =>
-            each.id === item.id ? { ...each, done: !each.done } : each,
-          ),
-        )
-        yield* read(Promise.reject(new Error('server refused')))
-      }),
-    )
+    action(function* () {
+      setOverlay(
+        committed(() => overlay()).map((each) =>
+          each.id === item.id ? { ...each, done: !each.done } : each,
+        ),
+      )
+      yield* read(Promise.reject(new Error('server refused')))
+    })
   }
 
   render(
@@ -597,27 +576,22 @@ test('a mutation triggered from a reference-keyed row still reaches <Failed>, ev
         fallback={(error) => <p data-testid="error-panel">{(error as Error).message}</p>}
       >
         {() => (
-          // A static element, not a bare fragment — see the comment on the
-          // same shape in the test above.
-          <div>
-            {() => lastMutation()?.check()}
-            <ul>
-              <For each={overlay}>
-                {(item: Item) => {
-                  onCleanup(() => {
-                    rowDisposals++
-                  })
-                  return (
-                    <li>
-                      <button data-testid={`toggle-${item.id}`} on:click={() => toggle(item)}>
-                        toggle
-                      </button>
-                    </li>
-                  )
-                }}
-              </For>
-            </ul>
-          </div>
+          <ul>
+            <For each={overlay}>
+              {(item: Item) => {
+                onCleanup(() => {
+                  rowDisposals++
+                })
+                return (
+                  <li>
+                    <button data-testid={`toggle-${item.id}`} on:click={() => toggle(item)}>
+                      toggle
+                    </button>
+                  </li>
+                )
+              }}
+            </For>
+          </ul>
         )}
       </Failed>
     ),
@@ -637,4 +611,134 @@ test('a mutation triggered from a reference-keyed row still reaches <Failed>, ev
 
   // The failure still reached the boundary regardless.
   expect(target.querySelector('[data-testid="error-panel"]')).not.toBeNull()
+})
+
+test('an action that fails after its owning row unmounted (but the boundary is still mounted) still reaches the boundary', async () => {
+  // The counterpart to the reference-keyed-row test above, stated directly:
+  // disposal of the calling owner alone is no longer a suppression signal.
+  // Only the boundary's own disposal is — see the next test.
+  const target = document.createElement('section')
+  document.body.append(target)
+
+  let reject: ((e: Error) => void) | null = null
+  const pending = new Promise<void>((_, r) => {
+    reject = r
+  })
+  const [visible, setVisible] = signal(true)
+
+  function Widget() {
+    return (
+      <button
+        data-testid="save"
+        on:click={() => {
+          action(function* () {
+            yield* read(pending)
+          })
+        }}
+      >
+        save
+      </button>
+    )
+  }
+
+  render(
+    () => (
+      <Failed
+        fallback={(error) => <p data-testid="error-panel">{(error as Error).message}</p>}
+      >
+        {() => <Show when={visible}>{() => <Widget />}</Show>}
+      </Failed>
+    ),
+    target,
+  )
+
+  flush()
+
+  const clickTestId = (id: string) => {
+    const el = target.querySelector(`[data-testid="${id}"]`)
+    ;(el as HTMLButtonElement).click()
+  }
+
+  clickTestId('save') // the action starts; its promise stays pending on `reject`
+
+  // Unmount the widget while the action is still in flight — its owner
+  // disposes before anything has failed. The boundary itself stays mounted.
+  setVisible(false)
+  flush()
+  expect(target.querySelector('[data-testid="save"]')).toBeNull()
+
+  // Only now does the mutation actually fail.
+  reject!(new Error('too late'))
+  await tick()
+  flush()
+
+  // The boundary is still alive, so it still shows the failure — this is
+  // exactly the shape of the reference-keyed row bug, just triggered by
+  // <Show> instead of <For>'s re-keying.
+  expect(target.querySelector('[data-testid="error-panel"]')).not.toBeNull()
+})
+
+test('an action that fails after its <Failed> boundary itself unmounted does not register a stale entry anywhere', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+
+  let reject: ((e: Error) => void) | null = null
+  const pending = new Promise<void>((_, r) => {
+    reject = r
+  })
+  const [boundaryVisible, setBoundaryVisible] = signal(true)
+
+  function Widget() {
+    return (
+      <button
+        data-testid="save"
+        on:click={() => {
+          action(function* () {
+            yield* read(pending)
+          })
+        }}
+      >
+        save
+      </button>
+    )
+  }
+
+  render(
+    () => (
+      <Show when={boundaryVisible}>
+        {() => (
+          <Failed
+            fallback={(error) => <p data-testid="error-panel">{(error as Error).message}</p>}
+          >
+            {() => <Widget />}
+          </Failed>
+        )}
+      </Show>
+    ),
+    target,
+  )
+
+  flush()
+
+  const clickTestId = (id: string) => {
+    const el = target.querySelector(`[data-testid="${id}"]`)
+    ;(el as HTMLButtonElement).click()
+  }
+
+  clickTestId('save') // the action starts; its promise stays pending on `reject`
+
+  // Unmount the BOUNDARY itself (not just the widget beneath it) while the
+  // action is still in flight.
+  setBoundaryVisible(false)
+  flush()
+  expect(target.querySelector('[data-testid="save"]')).toBeNull()
+
+  // Only now does the mutation actually fail — after the boundary that would
+  // have shown it no longer exists.
+  reject!(new Error('too late'))
+  await tick()
+  flush()
+
+  // Nothing left to register with, and nothing stuck: no fallback anywhere.
+  expect(target.querySelector('[data-testid="error-panel"]')).toBeNull()
 })

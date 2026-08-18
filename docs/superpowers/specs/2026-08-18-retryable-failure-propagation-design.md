@@ -2,7 +2,11 @@
 
 Pulse gets its own way of letting a failure be retried, instead of leaving retry as a promise rejection nobody has anywhere good to put. This document works out two connected pieces: how `action()` reports and recovers from failure, and how that failure reaches a `<Failed>` boundary.
 
-This document records the conclusions reached in a design discussion on 2026-08-18 and was written before implementation began. It went through two rounds of revision after implementation started: an earlier version specified a way for a generator to retry a single failed `yield*` without redoing earlier steps, which was cut during design review (see "What was cut, and why it can come back later" for that one); a later version specified automatic boundary discovery through the owner an action was called from, which was built, reviewed, fixed once, and then replaced by the design below after a concrete bug in a real example surfaced a deeper problem with that approach (see "What was cut, and why it can come back later" for that one too — the reasoning is worth keeping, since a future maintainer could reasonably reach for the same design again without knowing why it did not hold up).
+This document records the conclusions reached in a design discussion on 2026-08-18 and was written before implementation began. It went through three rounds of revision after implementation started:
+
+- An earlier version specified a way for a generator to retry a single failed `yield*` without redoing earlier steps. Cut during design review — see "What was cut, and why it can come back later".
+- A later version replaced automatic boundary discovery (an action registers itself with the nearest `<Failed>` boundary through the owner it was called from) with an explicit read (`ActionHandle.check()`, called from inside a binding an app places itself). The trigger was a concrete bug: a reference-keyed `<For>` row recycles itself the instant an optimistic write lands, disposing the very owner the action had captured, before the request even settled — and the disposal guard, doing exactly what it was built to do, suppressed the report for a row that was still on screen.
+- That replacement was itself reverted back to automatic discovery once the actual defect was identified: the disposal guard was anchored to the wrong owner. It watched whether the *calling* owner (the row) had been disposed, when what actually matters is whether the *boundary* has been disposed — a boundary that is still mounted should still hear about a failure, no matter how many times the row that triggered it gets torn down and rebuilt underneath it. Anchoring the guard to the boundary's own owner instead fixes the reference-keyed-row case directly, without giving up automatic discovery — which matters because the read-based replacement required an app to manually thread every mutation's handle through a signal (`lastMutation`) it had to remember to write at every call site and read from a binding it had to remember to place, for something that should simply compose. See "What was cut, and why it can come back later" for the full account of both detours.
 
 ## Motivation
 
@@ -23,14 +27,15 @@ export interface ActionHandle {
    *  it belonged to finished. */
   readonly settled: Promise<void>
   /** Reactive: null while healthy or in flight, the rejection reason once the
-   *  action has failed and nothing has retried it yet. */
+   *  action has failed and nothing has retried it yet.
+   *
+   *  A failure here is also reported automatically to the nearest ambient
+   *  `<Failed>` boundary — see Part 2 — so reading this accessor directly is
+   *  only needed for code that wants to react to the failure somewhere other
+   *  than that boundary's fallback. */
   readonly error: Accessor<unknown>
-  /** Strict read: throws the current error if the action has failed and
-   *  nothing has retried it yet; does nothing otherwise. Call this from
-   *  inside a binding to let a `<Failed>` boundary catch the failure the same
-   *  way it already catches a failed `computed`/`signal` read — see Part 2. */
-  check(): void
-  /** Re-run the action's body from scratch. */
+  /** Re-run the action's body from scratch. This is also what a `<Failed>`
+   *  boundary's own retry calls, if this action auto-registered with one. */
   retry(): void
 }
 ```
@@ -38,17 +43,6 @@ export interface ActionHandle {
 `settled` is a getter, not a fixed value — each read returns the promise for whichever attempt is current at that moment, which is what makes it meaningful to read again after `retry()`.
 
 `action()`'s generator body, driven by `driveGeneratorAction`, no longer lets an uncaught rejection propagate out of the returned value as a promise rejection. It is captured, reported through `error`, and `settled` resolves regardless of which way the action ended. This is a deliberate, breaking change to today's contract, not an addition alongside it — the reason is the thing that motivated this whole document: `examples/todo-async`'s `.catch(() => {})` exists purely to swallow an unhandled rejection that the caller has no good use for, and that awkwardness is a direct symptom of failure being modelled as a throw instead of as state.
-
-`check()` is a thin wrapper over `error`, nothing more:
-
-```ts
-function check(): void {
-  const e = error()
-  if (e !== null) throw e
-}
-```
-
-It exists because `error()` alone is the *tolerant* view — it degrades, the way `latest()` does for a value — and pulse already has a name for the *strict* counterpart to a tolerant read everywhere else in the library (`use()` next to `latest()`, a computed's own accessor next to its parked failure). `check()` is that counterpart for an action: read it inside a reactive binding, and a failure becomes a real throw, which is what lets ordinary error-boundary catching apply to it.
 
 ### Why `retry()` re-runs the whole body
 
@@ -66,64 +60,62 @@ This is also consistent with `resetFailure`'s existing behaviour for a `computed
 
 `test/async-action.test.ts` currently asserts the old contract directly — `await expect(done).rejects.toThrow('save failed')` — and needs rewriting against `.error` once this lands; this is a deliberate test-contract change, not an oversight to reconcile.
 
-`onSettled` (`src/scope.ts`) is unaffected as a primitive — it remains the lower-level "the scope closed, here is how" notification, useful for anything that is not specifically "did this fail." For the specific case this document is about, `.error`/`.check()` supersede what `examples/todo-async` was using `onSettled` for.
+`onSettled` (`src/scope.ts`) is unaffected as a primitive — it remains the lower-level "the scope closed, here is how" notification, useful for anything that is not specifically "did this fail." For the specific case this document is about, `.error` and automatic `<Failed>` discovery (Part 2) supersede what `examples/todo-async` was using `onSettled` for.
 
-## Part 2 — a failure reaches `<Failed>` through an explicit read, not automatic discovery
+## Part 2 — a failed action registers with the nearest `<Failed>` boundary automatically
 
 ### The mechanism this reuses is already fully built and already tested
 
-`<Failed>` (`src/dom/failed.ts`) does not know anything about actions, and this design does not teach it anything new. It already catches a *plain thrown error* from any binding inside it — `test/dom/failed.test.tsx`'s `reset() re-runs a binding that threw a plain error` is exactly this case, with `source: null` on the report, the same shape a `check()` throw produces. Calling `check()` from inside a binding is not a special integration point; it is an ordinary read that happens to throw, exactly like reading a failed `computed`'s accessor directly does.
+`<Failed>` (`src/dom/failed.ts`) collects reports from a `BindingController`, keyed by the controller so a binding that re-reports several times still occupies one entry. `action()` becomes one more source of these reports, alongside the bindings `src/effect.ts` already registers for a failed `computed`/`signal` read — no change to `<Failed>` itself.
 
-Concretely, an app keeps a small signal holding whichever `ActionHandle` it currently cares about showing:
+Concretely, `action()` captures the ambient owner at the moment it is called and walks up from there to find the nearest boundary:
 
 ```ts
-const [lastMutation, setLastMutation] = signal<ActionHandle | null>(null)
-
-function toggleTodo(todo: Todo) {
-  setLastMutation(action(function* () {
-    // ...
-  }))
-}
+const found = findNearestFailedScope(getOwner())
 ```
 
-and places one binding somewhere inside the `<Failed>` boundary that reads it:
+`getOwner()` is whatever owner is ambient right then. For a call made from a component's render, that is the component's own owner. For a call made from inside an `on:` event handler, it is the owner that was captured and restored when the handler was bound — see the prerequisite fix below, since a raw DOM event handler otherwise fires with no owner ambient at all. Called from somewhere with no owner reachable (or a `catchError` sitting nearer than any `<Failed>`), `found` is `null`, the action still runs normally, and its `error`/`retry` are still directly usable — it is just not auto-discovered by anything.
 
-```tsx
-<Failed fallback={...}>
-  {() => (
-    <>
-      {() => lastMutation()?.check()}
-      <TodoList/>
-    </>
-  )}
-</Failed>
-```
+When the action's body throws, and a boundary was found, `action()` registers a `BindingController` with it (lazily — only once a failure actually happens, not on every successful run) and reports `{ status: 'failed', error, source: null, retry }`. `source` is `null` because there is no parked-failure node behind an action's rejection the way there is for a failed `computed` — the report shape already supports that (`test/dom/failed.test.tsx`'s `reset() re-runs a binding that threw a plain error` is the existing test for exactly this shape). On success, or once retried successfully, the controller reports `idle` and unregisters — an action is one-shot, so there is nothing left to keep tracking once it has genuinely succeeded.
 
-That binding re-runs whenever `lastMutation` changes (a new mutation started) or the current handle's `error` changes (it failed, or a retry cleared it) — ordinary dependency tracking, nothing bespoke. When it throws, `<Failed>` catches it the same way it always has.
+### Retry goes through the boundary's own `reset`, with no special-casing needed at the call site
 
-### Retrying has to call `ActionHandle.retry()` directly — `<Failed>`'s generic `reset` is not enough on its own
-
-This is the one place this design needed working out carefully, because it is not obvious on first read. `<Failed>`'s fallback receives `(error, reset)`, and `reset` re-runs whichever binding reported the failure — for the `check()` binding above, re-running it just calls `check()` again, which reads the *same* `error()` that has not changed, and throws the same error immediately. Nothing about `reset` on its own retries the action; it only replays the read.
-
-So the fallback has to call `ActionHandle.retry()` itself, not `reset`, when the currently-showing failure is this action's:
+Because the action registered itself directly with the boundary, `<Failed>`'s existing `reset()` already does the right thing with no help: it calls each failed report's own `retry` (see `src/dom/failed.ts`) — which, for an action's report, *is* `ActionHandle.retry()`. An app's fallback needs nothing beyond the ordinary shape:
 
 ```tsx
 fallback={(error, reset) => (
-  <button on:click={() => {
-    const handle = lastMutation()
-    if (handle !== null && handle.error() !== null) handle.retry()
-    else reset()
-  }}>
-    Try again
-  </button>
+  <button on:click={reset}>Try again</button>
 )}
 ```
 
-`retry()` clears `error()` synchronously (Part 1), so the `check()` binding re-runs, does not throw, and reports healthy — at which point `<Failed>`'s collection empties and the fallback disappears on its own. This is not new behaviour needing new plumbing: it is the exact case `test/dom/failed.test.tsx`'s `the boundary unlatches itself when the failure clears` already covers — a boundary is a selection over live state, not a latch, so it already knows how to stop showing a fallback the moment nothing under it is failed anymore, with no `reset()` call at all involved. Falling back to `reset()` when the failure is not this action's own (e.g. the initial load failed instead) keeps the existing load-failure path untouched.
+This is a direct improvement on the read-based design this replaced, which needed the fallback to inspect a `lastMutation` signal and choose between `handle.retry()` and `reset()` depending on which kind of failure was currently showing. With the action registering itself, `reset` is always correct, for every kind of failure a boundary might be showing — the boundary does not need to know whether what failed was a `computed`, a `signal`, or an `action`.
 
-### No auto-discovery, and no owner capture needed for this
+### Which owner the disposal guard watches for is what makes this correct
 
-This design needs nothing from the owner tree. `action()` does not call `getOwner()`, does not walk anything, does not register a `BindingController`, and does not need to know or care whether it was called from an event handler, a component body, or anywhere else. Whether a failure is ever shown anywhere is entirely up to whether some binding, somewhere, reads `check()` — the same way whether a `computed`'s failure is ever shown depends on whether some binding reads it.
+An in-flight action can outlive the specific component or DOM row it was triggered from — that gap between "the owner action() was called with" and "the request actually settling" is exactly what makes automatic discovery need a disposal guard at all: if the owner that triggered the action is gone by the time it fails, nothing should register a stale entry for UI the user can no longer see.
+
+The guard has to watch the right owner, though. It is anchored to the **boundary's own owner** (the one `findNearestFailedScope` found), not to whichever owner was ambient when `action()` was called:
+
+```ts
+if (found !== null) {
+  runWithOwner(found.owner, () => {
+    onCleanup(() => {
+      disposed = true
+      controller?.unregister()
+    })
+  })
+}
+```
+
+`findNearestFailedScope` returns `{ owner, scope }` rather than just the `FailedScope` for exactly this reason — the owner is needed to anchor this cleanup somewhere other than wherever `action()` happened to be called from.
+
+Anchoring to the calling owner instead — which is what an earlier version of this mechanism did — breaks on optimistic UI specifically. `toggleTodo`'s speculative write does `{ ...each, done: !each.done }`, a fresh object; `<For>`'s rows are reference-keyed (`src/dom/for.ts`), so the instant that write lands, `<For>` tears down the row that triggered the click and rebuilds a new one — before the request has even settled. The action's owner was captured from that now-disposed row, so a disposal guard watching *that* owner fires immediately, well before the mutation has a chance to fail, and permanently suppresses reporting for a row that is still fully visible on screen, just quietly rebuilt underneath the user. `test/dom/failed.test.tsx`'s `a mutation triggered from a reference-keyed row still reaches <Failed>, even though its own write recreates that row` is the regression test for this.
+
+Watching the boundary's owner instead asks the right question: not "did the specific thing that triggered this go away", but "is there still somewhere for this failure to be shown at all". A row being recycled by its own optimistic write answers no to the first question and yes to the second, which is exactly the mismatch that broke the earlier version. A boundary being unmounted entirely — the whole subtree containing both the boundary and everything under it going away — answers no to both, and disposal still suppresses correctly: `test/dom/failed.test.tsx`'s `an action that fails after its <Failed> boundary itself unmounted does not register a stale entry anywhere` covers this. The middle case — the specific triggering component unmounts but the boundary around it stays mounted (a modal closing, say, inside a page-level boundary) — now reports the failure rather than suppressing it, a deliberate change from the earlier version's behaviour; `an action that fails after its owning row unmounted (but the boundary is still mounted) still reaches the boundary` states this directly. The boundary's own `reset` button is a perfectly good way to dismiss that failure regardless of whether the triggering UI still exists, so nothing is actually stuck — it is just visible for a little longer than before.
+
+### The one prerequisite: `on:` event handlers need to capture an owner at all
+
+`action()` is very often called directly from an `on:click` handler. Before this could work, `src/dom/bindings.ts`'s `bindProp` needed to capture the ambient owner at bind time and restore it around every invocation of the handler — until this was added, a raw DOM event firing later had no owner ambient at all, since owners are a construction-time concept and a click can happen long after construction. This also fixes `onCleanup` called from inside a click handler, which had the identical problem and is unrelated to actions specifically — both are one fix.
 
 ## Explicitly out of scope
 
@@ -145,16 +137,20 @@ Either could be revisited if a genuine multi-step, non-idempotent case shows up 
 
 ### Automatic boundary discovery through the calling owner
 
-This is the design Part 2 originally specified, in full: `action()` would call `getOwner()` at the moment it was invoked, walk upward via `findNearestFailedScope` to find the nearest `<Failed>`, and register a `BindingController` with it directly — no read anywhere required, a failure would just show up. It needed one prerequisite fix that is still in the codebase and still worth having on its own merits: `src/dom/bindings.ts`'s `on:` event handlers capture no owner at all today, so `bindProp` now captures the ambient owner at bind time and restores it around the handler call — this also fixes `onCleanup` called from inside a click handler, which had the identical problem and is unrelated to actions specifically.
+This section now covers two detours: the first version of automatic discovery, which was replaced by a read-based design; and that read-based design, which was in turn replaced by the corrected automatic discovery Part 2 now describes.
 
-The auto-discovery mechanism itself was built, reviewed, and had one real bug found and fixed (a controller could register with a still-alive boundary after its owning component had already been disposed, if the failure arrived after disposal — fixed with a `disposed` flag checked before registering). It was then replaced, not because that fix was wrong, but because manually verifying the finished `examples/todo-async` migration surfaced a deeper problem the review process had not reached.
+**The first automatic-discovery attempt, and the bug that ended it.** `action()` called `getOwner()` at the moment it was invoked, walked upward via `findNearestFailedScope` to find the nearest `<Failed>`, and registered a `BindingController` with it directly — no read anywhere required. It needed the same `on:` event handler owner-capture prerequisite Part 2 still describes. It was built, reviewed, and had one real bug found and fixed during that review: a controller could register with a still-alive boundary after its owning component had already been disposed, if the failure arrived after disposal — fixed at the time with a `disposed` flag, set by an `onCleanup` registered on whichever owner was ambient when `action()` was called (i.e. the calling owner, not the boundary).
 
-The concrete failure: `toggleTodo`'s speculative write does `{ ...each, done: !each.done }` — a fresh object, not the same one. `<For>`'s rows are reference-keyed (`src/dom/for.ts`), so the instant that write lands, `<For>` sees a new object at that array position, tears down the old row's owner, and builds a new one — before the server has even responded. The action's owner was captured from the *old* row at the moment the checkbox was clicked, and that row is disposed almost immediately by the action's own optimistic write, not by the user navigating away. The disposal-guard fix, doing exactly what it was built to do, then correctly refused to register a failure against an owner it believed was legitimately gone — except the row was not gone from the user's point of view; it had just been quietly rebuilt, and was still on screen the whole time.
+That fix was itself the bug. Manually verifying the finished `examples/todo-async` migration surfaced it: `toggleTodo`'s speculative write does `{ ...each, done: !each.done }` — a fresh object, not the same one. `<For>`'s rows are reference-keyed (`src/dom/for.ts`), so the instant that write lands, `<For>` sees a new object at that array position, tears down the old row's owner, and builds a new one — before the server has even responded. The action's owner was captured from the *old* row at the moment the checkbox was clicked, and that row is disposed almost immediately by the action's own optimistic write, not by the user navigating away. The disposal guard, watching that owner, fired immediately and permanently suppressed reporting for a row that was still fully visible on screen, just quietly rebuilt underneath the user.
 
-This is not a bug specific to this demo's list. It is a structural mismatch: automatic discovery through "the owner active when the triggering event fired" is only as reliable as that owner's lifetime, and an optimistic write reference-keyed list is a case, not a corner case, where that lifetime is much shorter than the action it is supposed to represent. Confirmed against Solid's own error boundary before replacing this design: Solid's `<ErrorBoundary>` does not attempt to catch errors from event handlers at all, and Solid Router's equivalent to this problem (`useSubmission`) is read-based — a hook the app calls wherever it wants a submission's `.error` visible, with nothing auto-discovered. Read-based was not merely an available alternative; it is the direction the closest prior art already went, for what looks like the same underlying reason.
+**The read-based detour.** At the time, this looked like a structural mismatch with automatic discovery itself, not just a misplaced guard: discovery through "the owner active when the triggering event fired" seemed only as reliable as that owner's lifetime, and an optimistic write over a reference-keyed list is a case, not a corner case, where that lifetime is much shorter than the action it represents. Solid's own error boundary was checked for comparison: Solid's `<ErrorBoundary>` does not attempt to catch errors from event handlers at all, and Solid Router's equivalent to this problem (`useSubmission`) is read-based — a hook the app calls wherever it wants a submission's `.error` visible, with nothing auto-discovered. That looked like confirmation that read-based was the right direction, so Part 2 was rewritten around `ActionHandle.check()`: a strict, throw-on-failure counterpart to `error()`, called from inside a binding an app places itself, with a `lastMutation` signal holding whichever handle should currently be visible.
 
-If a future case genuinely needs zero-wiring discovery despite this — some usage pattern that does not sit inside a reference-keyed list — the owner-capture prerequisite is still in place, and the registration code (`findNearestFailedScope`, a lazily-registered `BindingController`, the `disposed` guard, all layered inside `runAttempt`'s generation-guarded settle branches) is recoverable from this document's git history at the commits where it was built (`07343a9`) and fixed (`cd71fe5`).
+It worked, and was fully implemented, tested, and used to migrate `examples/todo-async` — but it traded away composition to fix a bug that had a narrower cause. Every mutation function in the app had to remember to write its handle into `lastMutation`; the boundary could only ever show one mutation's failure at a time, keyed by whichever call happened most recently, rather than something that naturally composed across concurrent mutations; and a binding had to be placed and kept in sync with which handle was current, entirely by hand — exactly the kind of manual state synchronization pulse's reactive philosophy exists to avoid, and the same complaint that motivated cutting `examples/todo-async`'s original hand-rolled `notice`/`flash()` UI in the first place (see Motivation, above).
+
+**Revisiting the actual cause.** The bug was never that automatic discovery is unreliable — it was that the disposal guard was watching the wrong owner. What a disposal guard should be asking is "is there still somewhere for this failure to be shown", and the boundary's own owner answers that question directly, regardless of how many times the specific row that triggered the click gets recycled underneath it. Re-anchoring the guard to `findNearestFailedScope`'s returned boundary owner (Part 2, above) fixes the reference-keyed-row case without giving up automatic discovery, and restores composition: no signal to thread, no binding to place, multiple concurrent actions from different rows all report and clear independently with no coordination required at the call site.
+
+If a future case genuinely needs the read-based shape instead — e.g. showing more than one mutation's failure at once, or showing a failure somewhere other than the nearest enclosing boundary — `ActionHandle.check()` and the `lastMutation`-signal pattern are recoverable from this document's git history at the commits where they were built (`da818a2` through `624c76d`), and the original (uncorrected) automatic-discovery code is recoverable at `07343a9` and `cd71fe5`.
 
 ## Resolved during review
 
-- `ActionHandle`'s shape is named fields (`settled`, `error`, `retry`, `check`), as written above — not a tuple. A tuple fits `signal`'s `[accessor, setter]` convention because both members are used together at nearly every call site; `ActionHandle`'s members are read independently and at different times (`retry()` from a UI event, `error`/`check()` from a reactive read, `settled` only by code that specifically wants to await one attempt), so named access reads better at each of those call sites than a positional destructure would.
+- `ActionHandle`'s shape is named fields (`settled`, `error`, `retry`), as written above — not a tuple. A tuple fits `signal`'s `[accessor, setter]` convention because both members are used together at nearly every call site; `ActionHandle`'s members are read independently and at different times (`retry()` from a UI event, `error` from a reactive read, `settled` only by code that specifically wants to await one attempt), so named access reads better at each of those call sites than a positional destructure would.

@@ -135,7 +135,7 @@ function stagedEffect(
       // re-runs this body several times still renders one fallback.
       const failedScope = findNearestFailedScope(myOwner)
       if (failedScope !== null) {
-        ensureFailedController(failedScope).report({
+        ensureFailedController(failedScope.scope).report({
           status: 'failed',
           error: e,
           source: takeFailureSource(),
@@ -266,7 +266,7 @@ function singleArgEffect(fn: () => void): void {
       controller?.report({ status: 'idle' }) // failed is not pending
       const failedScope = findNearestFailedScope(myOwner)
       if (failedScope !== null) {
-        ensureFailedController(failedScope).report({
+        ensureFailedController(failedScope.scope).report({
           status: 'failed',
           error: e,
           source: takeFailureSource(),

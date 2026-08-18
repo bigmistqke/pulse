@@ -107,30 +107,6 @@ h2 {
   font: inherit;
 }
 
-.notice {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  margin: 0 0 1rem;
-  padding: 0.6rem 0.8rem;
-  border-radius: 6px;
-  background: var(--danger-bg);
-  color: var(--danger);
-  font-size: 0.9rem;
-}
-
-.notice-retry {
-  flex-shrink: 0;
-  padding: 0.2rem 0.7rem;
-  border: 1px solid currentColor;
-  border-radius: 999px;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-}
-
 .columns {
   display: grid;
   grid-template-columns: 1fr 16rem;
