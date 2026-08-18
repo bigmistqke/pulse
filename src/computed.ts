@@ -722,9 +722,45 @@ function makeStageNode(
   /** Everything a write implies that is not scope-aware. Runs immediately for a
    *  committed write, and at commit for one made inside an action. */
   const applyWriteEffects = (value: unknown): void => {
-    if (isPromise(value)) return // handled in a later task
-    lastResolvedValue = value
-    lastPublishedShapeIsPromise = writeWrapsInPromise()
+    if (!isPromise(value)) {
+      lastResolvedValue = value
+      lastPublishedShapeIsPromise = writeWrapsInPromise()
+      return
+    }
+
+    // A written promise has resolved nothing, so `lastResolvedValue` keeps
+    // whatever it held — the same thing the body does when it suspends, and
+    // what lets the tolerant read degrade to the last known value.
+    const written = value as Promise<unknown>
+    lastPublishedShapeIsPromise = true
+
+    // Held in the same field the body uses, so the body's next suspension
+    // supersedes it through the check below and a dependency change cancels a
+    // write for free.
+    suspendedOn = written
+    setPendingSig(true)
+
+    const settle = (): void => {
+      if (suspendedOn !== written) return // superseded
+      suspendedOn = null
+      // The pending flag clears regardless of whether anything is published, or
+      // a write that settles to the value already held would leave it stuck on.
+      setPendingSig(false)
+      const state = track(written)
+      if (state.status === 'rejected') {
+        setFailureSig(state.reason)
+        return
+      }
+      if (
+        lastResolvedValue === UNRESOLVED ||
+        !Object.is(lastResolvedValue, state.value)
+      ) {
+        lastResolvedValue = state.value
+        setFailureSig(null)
+        publishResolvedPromise(state.value)
+      }
+    }
+    written.then(settle, settle)
   }
 
   /**

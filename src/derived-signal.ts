@@ -91,14 +91,22 @@ function signalFromStages(
     // The value next, so a cleanup fired by abandoning below observes the
     // write that triggered it rather than the value it replaced.
     tail.publishValue(value)
-    tail.applyWriteEffects(value)
 
     // Abandoning runs cleanup callbacks, so it happens after the publish — a
-    // cleanup that reads the signal sees the write that triggered it.
+    // cleanup that reads the signal sees the write that triggered it. It also
+    // has to happen BEFORE applyWriteEffects: abandoning the tail's own
+    // pre-write run clears its suspendedOn field, and if that ran after
+    // applyWriteEffects had already set suspendedOn to a just-written promise,
+    // it would clobber the write's own suspension bookkeeping rather than the
+    // stale one it is meant to clear.
     for (let i = built.length - 1; i >= 0; i--) {
       built[i].abandonRun()
       built[i].clearFailure()
     }
+
+    // Last, so nothing written here is touched again. A written promise sets
+    // up its own suspension in the same field abandonRun just cleared.
+    tail.applyWriteEffects(value)
   }
 
   return [tail.accessor as Accessor<unknown>, setter]

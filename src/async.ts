@@ -30,7 +30,13 @@ export function latest<T>(s: Accessor<T>): Awaited<T> | undefined {
       return state.value as Awaited<T>
     }
     if (state.status === 'rejected') {
-      // A rejected promise carries no value — fall back to the last one we saw.
+      // A rejected promise carries no value of its own, but may still hold a
+      // stale-while-revalidate prior seeded at write time (see `track`) — read
+      // that first, and only fall back to the last value `latest` itself
+      // observed if nothing was ever seeded (a raw promise passed to `signal()`
+      // that rejects before anything else reads it).
+      const swr = state.value
+      if (swr !== undefined) return swr as Awaited<T>
       return lastResolved.get(s) as Awaited<T> | undefined
     }
     // Still pending. The stale-while-revalidate prior is seeded onto the tracked
@@ -82,7 +88,12 @@ export function track(promise: Promise<unknown>, prior?: unknown): PromiseState 
   states.set(promise, state)
   promise.then(
     (value) => states.set(promise, { status: 'fulfilled', value }),
-    (reason) => states.set(promise, { status: 'rejected', reason }),
+    // A rejection carries no value of its own, but the seeded prior — read from
+    // the pending entry this settle handler is about to replace — is carried
+    // forward rather than dropped, so a tolerant read of a promise that rejected
+    // can still degrade to the last value seen, the same as it does while the
+    // promise is still pending.
+    (reason) => states.set(promise, { status: 'rejected', reason, value: state.value }),
   )
   return state
 }

@@ -435,3 +435,71 @@ test('W5: a write clears the failure through more than one never-resolved stage'
   expect(failure(todos)).toBeNull()
   expect(use(todos)).toEqual(['pushed'])
 })
+
+test('W6: a written promise reports as pending and then resolves', async () => {
+  const [todos, setTodos] = signal(function* () {
+    return yield* read(Promise.resolve(['a']))
+  })
+  await tick()
+  expect(use(todos)).toEqual(['a'])
+
+  let resolveAdd: (v: string[]) => void = () => {}
+  setTodos(new Promise<string[]>((r) => (resolveAdd = r)))
+
+  expect(isPending(todos)()).toBe(true)
+  expect(latest(todos)).toEqual(['a']) // the tolerant read degrades to the prior value
+
+  resolveAdd(['a', 'saved'])
+  await tick()
+  expect(isPending(todos)()).toBe(false)
+  expect(use(todos)).toEqual(['a', 'saved'])
+})
+
+test('W6: an update function sees the value from before a written promise settles', async () => {
+  const [todos, setTodos] = signal(function* () {
+    return yield* read(Promise.resolve(['a']))
+  })
+  await tick()
+
+  setTodos(new Promise<string[]>(() => {}))
+  let seen: unknown = 'not called'
+  setTodos((prev) => {
+    seen = prev
+    return ['replaced']
+  })
+  expect(seen).toEqual(['a']) // the last value that actually resolved
+})
+
+test('W7: a dependency change supersedes a written promise that has not settled', async () => {
+  const [version, setVersion] = signal(1)
+  const [todos, setTodos] = signal(function* () {
+    const v = version()
+    return yield* read(Promise.resolve([`server ${v}`]))
+  })
+  await tick()
+  expect(use(todos)).toEqual(['server 1'])
+
+  let resolveWrite: (v: string[]) => void = () => {}
+  setTodos(new Promise<string[]>((r) => (resolveWrite = r)))
+  expect(isPending(todos)()).toBe(true)
+
+  setVersion(2)
+  await tick()
+  expect(use(todos)).toEqual(['server 2'])
+
+  resolveWrite(['from the write'])
+  await tick()
+  expect(use(todos)).toEqual(['server 2']) // the superseded write published nothing
+})
+
+test('W6: a rejected written promise parks as a failure', async () => {
+  const [todos, setTodos] = signal(function* () {
+    return yield* read(Promise.resolve(['a']))
+  })
+  await tick()
+
+  setTodos(Promise.reject(new Error('save failed')))
+  await tick()
+  expect(failure(todos)).toBeInstanceOf(Error)
+  expect(latest(todos)).toEqual(['a'])
+})
