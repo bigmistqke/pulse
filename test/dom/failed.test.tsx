@@ -12,6 +12,7 @@ import {
   read,
   render,
   setScheduler,
+  Show,
   signal,
   syncScheduler,
   use,
@@ -526,4 +527,66 @@ test('a failed action registers with the nearest <Failed> boundary, and its retr
   expect(target.querySelector('[data-testid="retry"]')).toBeNull()
   expect(committed(name)).toBe('bob')
   expect(attempt).toBe(2)
+})
+
+test('an action that fails after its owning component unmounted does not register a stale entry with the boundary', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+
+  let reject: ((e: Error) => void) | null = null
+  const pending = new Promise<void>((_, r) => {
+    reject = r
+  })
+
+  function Widget() {
+    return (
+      <button
+        data-testid="save"
+        on:click={() => {
+          action(function* () {
+            yield* read(pending)
+          })
+        }}
+      >
+        save
+      </button>
+    )
+  }
+
+  const [visible, setVisible] = signal(true)
+
+  render(
+    () => (
+      <Failed
+        fallback={(error) => <p data-testid="error-panel">{(error as Error).message}</p>}
+      >
+        {() => <Show when={visible}>{() => <Widget />}</Show>}
+      </Failed>
+    ),
+    target,
+  )
+
+  flush()
+
+  const clickTestId = (id: string) => {
+    const el = target.querySelector(`[data-testid="${id}"]`)
+    ;(el as HTMLButtonElement).click()
+  }
+
+  clickTestId('save') // the action starts; its promise stays pending on `reject`
+
+  // Unmount the component while the action is still in flight — its owner
+  // disposes before anything has failed.
+  setVisible(false)
+  flush()
+  expect(target.querySelector('[data-testid="save"]')).toBeNull()
+
+  // Only now does the mutation actually fail — after the component that
+  // started it no longer exists.
+  reject!(new Error('too late'))
+  await tick()
+  flush()
+
+  // No stale fallback for a component the user can no longer see.
+  expect(target.querySelector('[data-testid="error-panel"]')).toBeNull()
 })

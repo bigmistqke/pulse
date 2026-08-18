@@ -425,9 +425,15 @@ export interface ActionHandle {
    *  settled — and if `retry()` is called again while an attempt is still
    *  running, only the most recently started attempt's outcome is ever
    *  reported here; a slower, superseded attempt settling later cannot
-   *  overwrite it. */
+   *  overwrite it.
+   *
+   *  A failure here is also reported automatically to the nearest ambient
+   *  `<Failed>` boundary — see `action()`'s own doc comment — so reading
+   *  this accessor directly is only needed for code that wants to react to
+   *  the failure somewhere other than that boundary's fallback. */
   readonly error: Accessor<unknown>
-  /** Re-run the action's body from scratch. */
+  /** Re-run the action's body from scratch. This is also what a `<Failed>`
+   *  boundary's own retry calls, if this action auto-registered with one. */
   retry(): void
 }
 
@@ -460,6 +466,16 @@ export interface ActionHandle {
  * A failure in any shape never becomes a thrown or rejected value the caller has
  * to handle — it is captured and reported through the returned handle's `error`,
  * and `settled` resolves regardless of which way the attempt ended.
+ *
+ * A failure also registers itself with the nearest ambient `<Failed>` boundary
+ * automatically, the same way a binding that reads a parked computed/signal
+ * failure already does — no wiring needed at the call site. This only reaches a
+ * boundary when `action()` is called from somewhere with an owner to walk from:
+ * a component's render, or an `on:` event handler (which captures and restores
+ * the owner it was bound under — see `bindProp` in `src/dom/bindings.ts`). Called
+ * from somewhere with no owner at all, the action still runs and the returned
+ * handle's `error`/`retry` are still usable directly; it just is not
+ * auto-discovered by anything.
  */
 export function action(body: () => Generator<unknown, void, unknown>): ActionHandle
 export function action(body: () => Promise<void>): ActionHandle
@@ -475,6 +491,15 @@ export function action(body: () => unknown): ActionHandle {
   const owner = getOwner()
   const failedScope = findNearestFailedScope(owner)
   let controller: BindingController | null = null
+  // Set once, by the onCleanup below, when the owner that called action() is
+  // disposed. onCleanup only unregisters a controller that is ALREADY
+  // registered at the moment of disposal — it does nothing about a failure
+  // that arrives afterward, from an attempt still in flight when the owner
+  // went away. Without this flag, that later failure would freshly register
+  // a controller with a boundary that is still alive, for a component that
+  // no longer is, with no cleanup left to fire (onCleanup already ran, once)
+  // to ever clear it — a stuck fallback nothing can dismiss.
+  let disposed = false
   let currentSettled: Promise<void>
   // Bumped at the start of every attempt (the initial run and every retry).
   // Read back inside the settle handlers below to tell whether the attempt
@@ -508,6 +533,7 @@ export function action(body: () => unknown): ActionHandle {
       (e: unknown) => {
         if (myGeneration !== generation) return
         setError(e)
+        if (disposed) return
         ensureController()?.report({ status: 'failed', error: e, source: null, retry })
       },
     )
@@ -520,8 +546,12 @@ export function action(body: () => unknown): ActionHandle {
   // Runs even if this action never fails: unregisters a live controller if
   // the owner that called action() is disposed before the current attempt
   // settles, so a component unmounting mid-action does not leave a stale
-  // entry in the boundary's collection.
-  onCleanup(() => controller?.unregister())
+  // entry in the boundary's collection. Also flips `disposed`, which the
+  // failure branch above checks — see its comment.
+  onCleanup(() => {
+    disposed = true
+    controller?.unregister()
+  })
 
   currentSettled = runAttempt()
 
