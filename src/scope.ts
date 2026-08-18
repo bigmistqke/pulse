@@ -11,6 +11,7 @@ import {
 } from 'r3'
 import { isGeneratorFunction } from './is-generator-function'
 import { isPromise } from './is-promise'
+import { findNearestFailedScope, getOwner, onCleanup, type BindingController } from './owner'
 import type { Accessor } from './signal'
 
 /** Graph identity wrapping a recipe. Value is not in the Node — it is produced
@@ -465,6 +466,15 @@ export function action(body: () => Promise<void>): ActionHandle
 export function action(body: () => void): ActionHandle
 export function action(body: () => unknown): ActionHandle {
   const [error, setError] = makeErrorCell()
+  // Captured once, at the moment action() is called — the owner ambient here
+  // is what determines which <Failed> boundary (if any) a failure reaches.
+  // For a call made from inside an on: event handler, this is the owner that
+  // was captured and restored when the handler was bound (see bindProp in
+  // src/dom/bindings.ts), not whatever happens to be ambient when the DOM
+  // event actually fires.
+  const owner = getOwner()
+  const failedScope = findNearestFailedScope(owner)
+  let controller: BindingController | null = null
   let currentSettled: Promise<void>
   // Bumped at the start of every attempt (the initial run and every retry).
   // Read back inside the settle handlers below to tell whether the attempt
@@ -472,6 +482,11 @@ export function action(body: () => unknown): ActionHandle {
   // attempt from an earlier retry() call must not overwrite error() with
   // its own outcome once a newer attempt has already reported its own.
   let generation = 0
+
+  const ensureController = (): BindingController | null => {
+    if (controller === null && failedScope !== null) controller = failedScope.register()
+    return controller
+  }
 
   const runAttempt = (): Promise<void> => {
     const myGeneration = ++generation
@@ -482,10 +497,18 @@ export function action(body: () => unknown): ActionHandle {
       : driveNonGeneratorAction(scope, body)
     return attempt.then(
       () => {
-        if (myGeneration === generation) setError(null)
+        if (myGeneration !== generation) return
+        setError(null)
+        // Succeeded — an action is one-shot, so once it has genuinely
+        // succeeded there is nothing left for the boundary to keep tracking.
+        controller?.report({ status: 'idle' })
+        controller?.unregister()
+        controller = null
       },
       (e: unknown) => {
-        if (myGeneration === generation) setError(e)
+        if (myGeneration !== generation) return
+        setError(e)
+        ensureController()?.report({ status: 'failed', error: e, source: null, retry })
       },
     )
   }
@@ -493,6 +516,12 @@ export function action(body: () => unknown): ActionHandle {
   function retry(): void {
     currentSettled = runAttempt()
   }
+
+  // Runs even if this action never fails: unregisters a live controller if
+  // the owner that called action() is disposed before the current attempt
+  // settles, so a component unmounting mid-action does not leave a stale
+  // entry in the boundary's collection.
+  onCleanup(() => controller?.unregister())
 
   currentSettled = runAttempt()
 

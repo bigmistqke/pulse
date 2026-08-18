@@ -1,12 +1,15 @@
 import { afterEach, beforeEach, expect, test } from 'vitest'
 import {
+  action,
   catchError,
+  committed,
   computed,
   effect,
   Failed,
   flush,
   Loading,
   microtaskScheduler,
+  read,
   render,
   setScheduler,
   signal,
@@ -463,4 +466,64 @@ test('a source marked and swallowed by the effect body itself (no throw reaches 
   // which the first effect had already swallowed on its own — must not have been
   // reset and recomputed.
   expect(poisonedRuns).toBe(1)
+})
+
+test('a failed action registers with the nearest <Failed> boundary, and its retry button re-runs it', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+
+  let attempt = 0
+  const [name, setName] = signal('alice')
+  const save = () =>
+    tick().then(() => {
+      attempt++
+      if (attempt === 1) throw new Error('save failed')
+      return 'bob'
+    })
+
+  function saveToBob() {
+    action(function* () {
+      setName('bob')
+      yield* read(save())
+    })
+  }
+
+  render(
+    () => (
+      <Failed
+        fallback={(error, reset) => (
+          <button data-testid="retry" on:click={reset}>
+            {(error as Error).message}
+          </button>
+        )}
+      >
+        {() => (
+          <button data-testid="save" on:click={saveToBob}>
+            save
+          </button>
+        )}
+      </Failed>
+    ),
+    target,
+  )
+
+  const clickTestId = (id: string) => {
+    const el = target.querySelector(`[data-testid="${id}"]`)
+    ;(el as HTMLButtonElement).click()
+  }
+
+  clickTestId('save')
+  await tick()
+  flush()
+
+  expect(target.querySelector('[data-testid="retry"]')).not.toBeNull()
+  expect(name()).toBe('alice') // rolled back — the boundary's fallback is showing
+
+  clickTestId('retry')
+  await tick()
+  flush()
+
+  expect(target.querySelector('[data-testid="retry"]')).toBeNull()
+  expect(committed(name)).toBe('bob')
+  expect(attempt).toBe(2)
 })
