@@ -1,6 +1,6 @@
 import { afterEach, expect, test, vi } from 'vitest'
 import { h } from '../../src/dom/h'
-import { createRoot } from '../../src/index'
+import { createRoot, onCleanup } from '../../src/index'
 
 afterEach(() => { document.body.innerHTML = '' })
 
@@ -37,4 +37,26 @@ test('on:click listener is removed on owner dispose', () => {
   dispose()
   el.click()
   expect(handler).toHaveBeenCalledTimes(1) // unchanged after dispose
+})
+
+test('on:click captures the owner at bind time, so onCleanup called from inside the handler attaches to it', () => {
+  let cleaned = false
+  let el!: HTMLButtonElement
+  const dispose = createRoot((d) => {
+    el = h('button', {
+      'on:click': () => {
+        onCleanup(() => {
+          cleaned = true
+        })
+      },
+    }) as HTMLButtonElement
+    document.body.append(el)
+    return d
+  })
+
+  el.click() // registers the cleanup against the root captured when the handler was bound
+  expect(cleaned).toBe(false)
+
+  dispose()
+  expect(cleaned).toBe(true)
 })

@@ -258,14 +258,19 @@ export function bindProp(el: Element, name: string, value: unknown): void {
     if (typeof value === 'function') (value as (el: Element) => void)(el)
     return
   }
-  // on:event — direct addEventListener; the handler is not reactive
+  // on:event — direct addEventListener, wrapped to restore the owner that was
+  // ambient when this binding was created. Without this, code run from inside
+  // the handler (onCleanup, action()'s boundary discovery) has no owner to
+  // reach, because a DOM event fires outside any owner context entirely.
   if (name.startsWith('on:')) {
     const event = name.slice(3)
     if (typeof value !== 'function') return
     warnIfOrphaned('event listener')
+    const capturedOwner = getOwner()
     const handler = value as EventListener
-    el.addEventListener(event, handler)
-    onCleanup(() => el.removeEventListener(event, handler))
+    const wrapped = (e: Event) => runWithOwner(capturedOwner, () => handler(e))
+    el.addEventListener(event, wrapped)
+    onCleanup(() => el.removeEventListener(event, wrapped))
     return
   }
   // prop:name — DOM property assignment; function value is reactive
