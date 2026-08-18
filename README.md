@@ -139,6 +139,26 @@ const profile = computed(
 Async stages publish **stale-while-revalidate**: the prior resolved value stays
 visible during a refetch.
 
+### Writable derived signals
+
+`signal` also accepts a stage list — the same one `computed` accepts — and
+returns a setter alongside the accessor. One value, two sources: the pipeline
+derives it, or a write overrides it directly.
+
+```ts
+const [todos, setTodos] = signal(function* () {
+  return yield* read(api.list())
+})
+
+setTodos((prev) => [...(prev ?? []), added]) // prev is the last resolved value, never a promise
+```
+
+A write cancels whatever run of the pipeline is in progress — executing,
+paused, or merely queued — the same way a dependency change would. Inside an
+`action`, a write is invisible outside the action until it commits, and
+cancelling the run it superseded waits for that same moment, so a discarded
+action never cancels work the committed world still needs.
+
 ### Effects
 
 ```ts

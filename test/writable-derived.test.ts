@@ -5,6 +5,7 @@ import { isPending } from '../src/pending'
 import { onCleanup } from '../src/owner'
 import { failure } from '../src/failure'
 import { action } from '../src/scope'
+import { effect } from '../src/effect'
 
 test('W2: a write replaces the value and the body does not re-run', () => {
   let runs = 0
@@ -694,4 +695,107 @@ test('W22: a write from inside the derivation own body does not raise', async ()
   await tick()
   expect(use(todos)).toEqual(['seeded'])
   expect(cleanups).toEqual(['ran'])
+})
+
+test('W4: a dependency change after a write takes the derivation back over', async () => {
+  const [version, setVersion] = signal(1)
+  const [todos, setTodos] = signal(function* () {
+    const v = version()
+    return yield* read(Promise.resolve([`server ${v}`]))
+  })
+  await tick()
+
+  setTodos(['written'])
+  expect(use(todos)).toEqual(['written'])
+
+  setVersion(2)
+  expect(latest(todos)).toEqual(['written']) // held while it reloads
+  await tick()
+  expect(use(todos)).toEqual(['server 2'])
+})
+
+test('a read from inside an effect while an earlier stage is waiting to reload', async () => {
+  // Rewritten from the brief's original, which asserted the write survives
+  // showAll's change — that assertion was never coherent. showAll is a
+  // dependency of the TAIL's own body, so per W4 the write is already
+  // superseded the moment it changes, regardless of anything upstream. What
+  // this scenario is actually responsible for proving is the same thing W10
+  // proves through a direct read: an abandoned upstream stage, left needing
+  // recomputation rather than clean, genuinely refetches when something
+  // pulls it up to date — here, an effect's own re-run rather than a direct
+  // read — instead of staying stuck serving data for a version the pipeline
+  // has already moved past.
+  let resolveList: (v: string[]) => void = () => {}
+  let requests = 0
+  const [version, setVersion] = signal(1)
+  const [showAll, setShowAll] = signal(false)
+  const [todos, setTodos] = signal(
+    () => version(),
+    function* () {
+      requests++
+      return yield* read(new Promise<string[]>((r) => (resolveList = r)))
+    },
+    (server: string[]) => (showAll() ? server : server.slice(0, 1)),
+  )
+  resolveList(['a', 'b'])
+  await tick()
+  expect(requests).toBe(1)
+
+  const seen: unknown[] = []
+  effect(() => {
+    seen.push(latest(todos))
+  })
+  await tick()
+
+  setVersion(2) // starts a second request
+  await tick()
+  expect(requests).toBe(2)
+
+  setTodos(['written']) // abandons it — left needing recomputation, not clean
+  await tick()
+  expect(requests).toBe(2) // still abandoned, nothing pulled it yet
+
+  setShowAll(true) // a dependency of the tail itself — supersedes the write per W4
+  await tick()
+
+  // not stuck: the abandoned stage was pulled up to date and restarted
+  expect(requests).toBe(3)
+  expect(isPending(todos)()).toBe(true)
+
+  resolveList(['fresh', 'refetched'])
+  await tick()
+  // the pipeline converges on real data once the reload settles
+  expect(seen.at(-1)).toEqual(['fresh', 'refetched'])
+})
+
+test('a discarded action does not leave the change gate describing a rolled-back value', async () => {
+  // The write inside the action (7) has to equal what a LATER, genuine
+  // derivation run resolves to, or this proves nothing: the change gate
+  // compares by Object.is, and if the discarded write's stale value never
+  // coincides with a real result, the gate always sees a difference and
+  // republishes regardless of whether the deferral is working. Version 2
+  // is engineered to resolve to the same 7 the rolled-back write used.
+  const [version, setVersion] = signal(1)
+  const [count, setCount] = signal(function* () {
+    const v = version()
+    return yield* read(Promise.resolve(v === 1 ? 5 : 7))
+  })
+  await tick()
+  expect(use(count)).toBe(5)
+
+  await expect(
+    action(function* () {
+      setCount(7)
+      yield* read(Promise.reject(new Error('nope')))
+    }),
+  ).rejects.toThrow('nope')
+
+  expect(use(count)).toBe(5) // rolled back correctly
+
+  setVersion(2) // the derivation genuinely resolves to 7 this time
+  await tick()
+  // must actually publish 7 — a gate still describing the rolled-back write
+  // as the current value would wrongly treat this as no change and leave
+  // the signal stuck showing 5
+  expect(use(count)).toBe(7)
 })

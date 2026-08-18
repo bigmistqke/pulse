@@ -180,41 +180,41 @@ Each trace walks a scenario end-to-end through engine + library calls.
 
 ### W. Writes into derivations (`signal(fn)`)
 
-A derivation that also has a setter, so one value has two sources: the stage chain that computes it, and a direct write. The settled semantics and the mechanism are in [the writable derived signal design](../superpowers/specs/2026-08-18-writable-derived-signals-design.md). These scenarios exist to check that design against use, and they have already changed it twice: W10 established that a cancelled upstream stage must be left dirty rather than clean, and W1 established that the update function must receive the last resolved value rather than the raw published read. All twenty-two were walked on 2026-08-18; thirteen held, six had friction worth designing around, three exposed defects (W5, W13, W22), and one defect predating this work was found in `computed` (see [`docs/follow-ups.md`](../follow-ups.md)).
+A derivation that also has a setter, so one value has two sources: the stage chain that computes it, and a direct write. The settled semantics and the mechanism are in [the writable derived signal design](../superpowers/specs/2026-08-18-writable-derived-signals-design.md). These scenarios exist to check that design against use, and they have already changed it twice: W10 established that a cancelled upstream stage must be left dirty rather than clean, and W1 established that the update function must receive the last resolved value rather than the raw published read. All twenty-two were walked on 2026-08-18; thirteen held, six had friction worth designing around, three exposed defects (W5, W13, W22), and one defect predating this work was found in `computed` (see [`docs/follow-ups.md`](../follow-ups.md)). Twenty-one are implemented and tested in `test/writable-derived.test.ts`; W18 is open, waiting on the `cancel(x)` verb tracked in the same follow-ups document.
 
 **Single stage**
 
-- **W1.** Write while the stage's fetch is in flight. The base case. Tests: the fetch is abandoned and never publishes.
-- **W2.** Write while nothing is running. Tests: the value is replaced and the body does not re-run.
+- **W1.** Write while the stage's fetch is in flight. The base case. Tests: the fetch is abandoned and never publishes. ✓ (Implemented and tested in `test/writable-derived.test.ts`.)
+- **W2.** Write while nothing is running. Tests: the value is replaced and the body does not re-run. ✓ (Implemented and tested in `test/writable-derived.test.ts`.)
 - **W3.** Write before the signal has ever been read — seeding from a cache during startup. Tests: the written value stays visible until the request lands rather than blanking. ✓ (Walked, then corrected during implementation. The design assumed a derivation is lazy and would first run on the first read; it is eager and has already run and suspended by the time the write lands, so the value an update function receives is `undefined` because nothing has *resolved*, not because nothing has run. A synchronous derivation, having resolved at creation, hands back its value instead.)
-- **W4.** Write, then a dependency changes. Tests: the derivation takes over and the write is gone.
-- **W5.** Write onto a parked failure. Tests: the failure clears and a `<Failed>` boundary stops showing its fallback.
-- **W6.** Write a promise. Tests: `isPending` is true while it is in flight, `use()` suspends on it, `latest` degrades to the prior value.
-- **W7.** Write a promise, then a dependency changes before it settles. Tests: two promises are outstanding — which one is allowed to publish.
+- **W4.** Write, then a dependency changes. Tests: the derivation takes over and the write is gone. ✓ (Implemented and tested in `test/writable-derived.test.ts`.)
+- **W5.** Write onto a parked failure. Tests: the failure clears and a `<Failed>` boundary stops showing its fallback. ✓ (Implemented and tested in `test/writable-derived.test.ts`.)
+- **W6.** Write a promise. Tests: `isPending` is true while it is in flight, `use()` suspends on it, `latest` degrades to the prior value. ✓ (Implemented and tested in `test/writable-derived.test.ts`.)
+- **W7.** Write a promise, then a dependency changes before it settles. Tests: two promises are outstanding — which one is allowed to publish. ✓ (Implemented and tested in `test/writable-derived.test.ts`.)
 
 **Multi-stage**
 
-- **W8.** Fetch in the tail, write to the tail. W1 with stages in front of it.
-- **W9.** Fetch in a middle stage, write to the tail. Tests: the middle stage's fetch is abandoned.
+- **W8.** Fetch in the tail, write to the tail. W1 with stages in front of it. ✓ (Implemented and tested in `test/writable-derived.test.ts`.)
+- **W9.** Fetch in a middle stage, write to the tail. Tests: the middle stage's fetch is abandoned. ✓ (Implemented and tested in `test/writable-derived.test.ts`.)
 - **W10.** W9, then a dependency only the tail reads changes. Tests: what the tail recomputes from. ✓ (Walked; see the design's cancellation-state section. Established that a cancelled upstream stage must be left dirty rather than clean, or the pipeline is permanently serving data from an input that has since moved.)
-- **W11.** W9, then the middle stage's own dependency changes. Tests: whether the abandoned fetch restarts, and what the tail shows while it is in flight.
-- **W12.** Two stages both in flight, write to the tail. Tests: both are abandoned, and the pending answer for the pipeline goes false exactly once.
-- **W13.** A middle stage is a paused generator holding a resource, write to the tail. Tests: its `finally` runs and its registered cleanups fire, so a wired abort controller aborts.
+- **W11.** W9, then the middle stage's own dependency changes. Tests: whether the abandoned fetch restarts, and what the tail shows while it is in flight. ✓ (Implemented and tested in `test/writable-derived.test.ts`.)
+- **W12.** Two stages both in flight, write to the tail. Tests: both are abandoned, and the pending answer for the pipeline goes false exactly once. ✓ (Implemented and tested in `test/writable-derived.test.ts`.)
+- **W13.** A middle stage is a paused generator holding a resource, write to the tail. Tests: its `finally` runs and its registered cleanups fire, so a wired abort controller aborts. ✓ (Implemented and tested in `test/writable-derived.test.ts`.)
 
 **Under an action**
 
-- **W14.** Write inside an action that commits, with a fetch in flight. Tests: cancellation happens at commit, not at write.
-- **W15.** Write inside an action that is discarded, with a fetch in flight. Tests: the fetch survives and publishes, so the refresh is not lost to an unrelated failure.
-- **W16.** Write inside a nested action; the inner commits, the outer discards. Tests: cancellation waits until the value reaches the committed world rather than firing on the inner commit.
-- **W17.** Write inside an action; the derivation lands while the action is still open. Tests: the value that appears outside the action and is then replaced at commit.
-- **W18.** `cancel(x)` inside an action, then discard. Tests: cancellation is a side effect and is not rolled back.
+- **W14.** Write inside an action that commits, with a fetch in flight. Tests: cancellation happens at commit, not at write. ✓ (Implemented and tested in `test/writable-derived.test.ts`.)
+- **W15.** Write inside an action that is discarded, with a fetch in flight. Tests: the fetch survives and publishes, so the refresh is not lost to an unrelated failure. ✓ (Implemented and tested in `test/writable-derived.test.ts`.)
+- **W16.** Write inside a nested action; the inner commits, the outer discards. Tests: cancellation waits until the value reaches the committed world rather than firing on the inner commit. ✓ (Implemented and tested in `test/writable-derived.test.ts`.)
+- **W17.** Write inside an action; the derivation lands while the action is still open. Tests: the value that appears outside the action and is then replaced at commit. ✓ (Implemented and tested in `test/writable-derived.test.ts`.)
+- **W18.** `cancel(x)` inside an action, then discard. Tests: cancellation is a side effect and is not rolled back. Open — depends on `cancel(x)`, which is designed but ships separately (see [`docs/follow-ups.md`](../follow-ups.md)).
 
 **Ordering**
 
-- **W19.** Invalidate then write, same tick (`setVersion` then `setTodos`). Tests: the queued run is withdrawn and the write stands.
-- **W20.** Write then invalidate, same tick. Tests: nothing is queued at write time, so the later change runs and wins.
-- **W21.** Two writes in one tick. Tests: the last one wins and cancellation happens once.
-- **W22.** Write from inside the derivation's own body. Re-entrancy; the analogue of K1.
+- **W19.** Invalidate then write, same tick (`setVersion` then `setTodos`). Tests: the queued run is withdrawn and the write stands. ✓ (Implemented and tested in `test/writable-derived.test.ts`.)
+- **W20.** Write then invalidate, same tick. Tests: nothing is queued at write time, so the later change runs and wins. ✓ (Implemented and tested in `test/writable-derived.test.ts`.)
+- **W21.** Two writes in one tick. Tests: the last one wins and cancellation happens once. ✓ (Implemented and tested in `test/writable-derived.test.ts`.)
+- **W22.** Write from inside the derivation's own body. Re-entrancy; the analogue of K1. ✓ (Implemented and tested in `test/writable-derived.test.ts`.)
 
 ### Probably out of scope for the research phase
 
