@@ -114,6 +114,6 @@ The earlier draft of this document specified `read()` gaining a fourth argument 
 
 Either could be revisited if a genuine multi-step, non-idempotent case shows up — `resetFailure`'s `reset()` for a stage and `ActionHandle.retry()` for an action are both already the right, stable place to make that change internally, without touching anything that calls them.
 
-## Open questions for review
+## Resolved during review
 
-1. `ActionHandle`'s exact shape — `settled` / `error` / `retry` as named fields, versus some other arrangement (e.g. a tuple, matching `signal`'s `[accessor, setter]` convention).
+- `ActionHandle`'s shape is named fields (`settled`, `error`, `retry`), as written above — not a tuple. A tuple fits `signal`'s `[accessor, setter]` convention because both members are used together at nearly every call site; `ActionHandle`'s three members are read independently and at different times (`retry()` from a UI event, `error` from a reactive read, `settled` only by code that specifically wants to await one attempt), so named access reads better at each of those call sites than a positional destructure would.
