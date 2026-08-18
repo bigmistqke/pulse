@@ -11,9 +11,9 @@ Latency and failure rate are adjustable in the page, and can be seeded from the 
 
 ## What each part demonstrates
 
-**The load is a generator stage.** `computed(function* () { version(); return yield* read(api.list()) })`. `read` resolves the promise and the stage suspends until it settles. `version` is read before the pause, so it is a dependency — the Refetch button bumps it, which discards any in-flight generator and starts over.
+**The load is a writable derived signal.** `signal(function* () { version(); return yield* read(api.list()) })`. `read` resolves the promise and the stage suspends until it settles. `version` is read before the pause, so it is a dependency — the Refetch button bumps it, which discards any in-flight generator and starts over. Being writable is what a mutation uses once the server confirms — see below.
 
-**`use` is the opt-in, per binding.** Both the list and the remaining count call `use(loaded)`. That is what enrols them in the surrounding `<Loading>`, and it is why they commit together rather than the count updating a frame ahead of the rows. Forgetting the call silently opts a binding out, which is the trade pulse makes for having every coordination choice visible at the call site.
+**`use` is the opt-in, per binding.** Both the list and the remaining count call `use(todos)`. That is what enrols them in the surrounding `<Loading>`, and it is why they commit together rather than the count updating a frame ahead of the rows. Forgetting the call silently opts a binding out, which is the trade pulse makes for having every coordination choice visible at the call site.
 
 **`<Loading>` shows `initial` on a first load and holds the prior list on a refetch.** Click Refetch with the latency turned up: the list stays on screen and a cue appears, rather than the whole thing being replaced by the skeleton. That is stale-while-revalidate — the prior resolved value stays visible, and downstream is only invalidated if the new value differs.
 
@@ -27,9 +27,11 @@ Latency and failure rate are adjustable in the page, and can be seeded from the 
 
 **`<Failed>` is a selection, not a latch.** Set the failure rate to 1 and reload: the load fails and the boundary renders in place of the subtree. Set it back to 0 and press Try again. The boundary shows its fallback exactly while something beneath it is currently failed, so it also clears on its own when an upstream change makes the stage succeed.
 
-**`latest` is the tolerant read.** The effect that mirrors the server's answer into local state uses `latest`, which returns the last resolved value and never throws — so it neither suspends nor swallows a load failure. The failure is the bindings' business, and they route it to `<Failed>`.
+**`latest` is the tolerant read.** `todos` is a fetch, so its raw value is a list or a promise of one; `latest` returns the last resolved value and never throws, so `optimistic`'s canonical view and the server panel's list can read it as a plain array without suspending or swallowing a load failure. The failure is the bindings' business, and they route it to `<Failed>`.
 
 **`isPending`** drives the loading cue, and the third value `optimistic` returns drives the saving cue.
+
+**A mutation writes `todos` directly once the server confirms — no mirror signal.** `todos` is both the fetch and the write target: `setTodos((prev) => [...(prev ?? []), saved])` is the whole "fold the server's answer into canonical truth" step. An earlier version of this demo kept a second, plain signal in sync with the fetch via an effect purely so `optimistic` had something ordinary to wrap — a signal existing only to mirror another one into a form something else needs is a sign the mirrored thing should have been writable in the first place.
 
 ## Two things the code works around deliberately
 

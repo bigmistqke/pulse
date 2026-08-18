@@ -1,8 +1,6 @@
 import {
   action,
   committed,
-  computed,
-  effect,
   Failed,
   For,
   isPending,
@@ -25,31 +23,24 @@ type Filter = 'all' | 'active' | 'completed'
 const [filter, setFilter] = signal<Filter>('all')
 const [draft, setDraft] = signal('')
 const [notice, setNotice] = signal<string | null>(null)
-/** Bumped to refetch. Read inside `loaded`, so it is a dependency of the fetch. */
+/** Bumped to refetch. Read inside `todos`'s own stage, so it is a dependency
+ *  of the fetch. */
 const [version, setVersion] = signal(0)
 
 /**
- * The load. A generator stage: `read` resolves the promise, and the stage
- * suspends until it settles. Because `version` is read before the pause, it is
- * a dependency — bumping it discards any in-flight generator and starts over.
+ * The load, and the write target once a mutation's request confirms — one
+ * signal, two sources, so there is no separate mirror to keep in sync. A
+ * generator stage: `read` resolves the promise, and the stage suspends until
+ * it settles. Because `version` is read before the pause, it is a dependency
+ * — bumping it discards any in-flight generator and starts over.
+ *
+ * This is canonical server truth. `setTodos` is called only with what the
+ * server actually confirmed; the speculative guess a mutation shows before
+ * that lives entirely in the overlay below, never here.
  */
-const loaded = computed(function* () {
+const [todos, setTodos] = signal(function* () {
   version()
   return yield* read(api.list())
-})
-
-/**
- * Canonical server truth, mirrored locally so a mutation can update it from the
- * server's own response instead of triggering another round trip.
- *
- * `latest` is the tolerant read: it returns the last resolved value and never
- * throws, so this effect neither suspends nor propagates a load failure. The
- * failure is the bindings' business, and they route it to `<Failed>`.
- */
-const [serverTodos, setServerTodos] = signal<Todo[]>([])
-effect(() => {
-  const list = latest(loaded)
-  if (list !== undefined) setServerTodos(list)
 })
 
 /**
@@ -57,21 +48,25 @@ effect(() => {
  * speculative list; otherwise it falls through to canonical truth. The overlay
  * is dropped when the action closes on either face, so a refused write rolls
  * back without any explicit undo.
+ *
+ * `optimistic` wraps a tolerant, always-bare read rather than `todos` itself:
+ * `todos` is a fetch, so its raw read is `Todo[] | Promise<Todo[]>`, and the
+ * overlay only ever needs to compare and replace plain arrays.
  */
-const [todos, setOverlay, speculating] = optimistic(serverTodos)
+const [overlay, setOverlay, speculating] = optimistic(() => latest(todos) ?? [])
 
 /** True while the load is in flight, including a refetch over a visible list. */
-const loading = isPending(loaded)
+const loading = isPending(todos)
 
 const visible = () => {
-  const all = todos()
+  const all = overlay()
   const f = filter()
   if (f === 'active') return all.filter((todo) => !todo.done)
   if (f === 'completed') return all.filter((todo) => todo.done)
   return all
 }
 
-const remaining = () => todos().filter((todo) => !todo.done).length
+const remaining = () => overlay().filter((todo) => !todo.done).length
 
 /* --------------------------------------------------------------- mutations */
 
@@ -86,8 +81,11 @@ function flash(message: string) {
  * canonical truth. If the server refuses, the generator throws, the action is
  * discarded, and the overlay disappears with it.
  *
- * The overlay is built from `committed(...)` rather than from `todos()` so it
- * layers on server truth rather than on another in-flight action's guess.
+ * The overlay is built from `committed(...)` rather than from `overlay()` so it
+ * layers on server truth rather than on another in-flight action's guess. Read
+ * through `latest`, not called directly: `todos` is a fetch, so it may itself
+ * be a promise mid-reload, and the tolerant read degrades to the last known
+ * list instead — the same list a plain `Todo[]` mirror signal used to hold.
  */
 function mutate(
   describe: string,
@@ -95,7 +93,7 @@ function mutate(
   send: () => Generator<unknown, void, unknown>,
 ) {
   void action(function* () {
-    setOverlay(speculate(committed(() => serverTodos())))
+    setOverlay(speculate(committed(() => latest(todos) ?? [])))
     onSettle((outcome) => {
       if (outcome === 'discarded') flash(`${describe} — the server refused`)
     })
@@ -118,7 +116,7 @@ function addTodo() {
     (canonical) => [...canonical, pending],
     function* () {
       const saved = yield* read(api.add(text))
-      setServerTodos((prev) => [...prev, saved])
+      setTodos((prev) => [...(prev ?? []), saved])
     },
   )
 }
@@ -130,7 +128,7 @@ function toggleTodo(todo: Todo) {
       canonical.map((each) => (each.id === todo.id ? { ...each, done: !each.done } : each)),
     function* () {
       const saved = yield* read(api.toggle(todo.id))
-      setServerTodos((prev) => prev.map((each) => (each.id === saved.id ? saved : each)))
+      setTodos((prev) => (prev ?? []).map((each) => (each.id === saved.id ? saved : each)))
     },
   )
 }
@@ -141,7 +139,7 @@ function removeTodo(todo: Todo) {
     (canonical) => canonical.filter((each) => each.id !== todo.id),
     function* () {
       yield* read(api.remove(todo.id))
-      setServerTodos((prev) => prev.filter((each) => each.id !== todo.id))
+      setTodos((prev) => (prev ?? []).filter((each) => each.id !== todo.id))
     },
   )
 }
@@ -167,7 +165,7 @@ function ServerPanel() {
         is in flight, and snaps back to it if the server refuses.
       </p>
       <ul class="canonical" data-testid="canonical-list">
-        <For each={serverTodos}>
+        <For each={() => latest(todos) ?? []}>
           {(todo: Todo) => (
             <li class:done={() => todo.done} data-testid="canonical-row">
               {todo.text}
@@ -227,7 +225,7 @@ function TodoList() {
             // surrounding `<Loading>`: it throws while the load is in flight, so
             // the boundary shows `initial` on a first load and holds the prior
             // list on a refetch. The rows themselves come from `visible()`.
-            use(loaded)
+            use(todos)
             return visible()
           }}
         >
@@ -251,7 +249,7 @@ function TodoList() {
           {() => {
             // Enrolled the same way, so the count and the list commit together
             // rather than the count updating a frame ahead of the rows.
-            use(loaded)
+            use(todos)
             return `${remaining()} left`
           }}
         </span>
