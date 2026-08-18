@@ -395,14 +395,21 @@ function makeStageNode(
             // re-park the same rejection the moment it is next pulled — which
             // then poisons every stage downstream of IT through the ordinary
             // unshielded-throw path, including the tail, which does have a
-            // value. A write clearing the failure has to stay cleared; the
-            // registry's own upstream walk (`src/failure.ts`) is what a
-            // `<Failed>` boundary actually queries, and it already finds a
-            // still-live failure at its true origin without any stage needing
-            // to keep a local copy. So a rejected input is treated exactly
-            // like a pending one: nothing published, nothing parked, only the
-            // pending flag (which is not accurate here — the upstream is not
-            // in flight) is corrected.
+            // value. A write clearing the failure has to stay cleared.
+            //
+            // No stage needs to keep a local copy of an upstream's failure for
+            // a `<Failed>` boundary to see it, in either direction. If the
+            // failure is still genuinely live (nothing has cleared it), the
+            // ordinary path above already reaches it: reading `inputAccessor()`
+            // on that stage throws, and this stage's own outer catch parks it.
+            // If the failure HAS been cleared by a write, as in the case this
+            // comment is about, the registry's own upstream walk
+            // (`src/failure.ts`) already reports null — every stage's
+            // `failureSig` was cleared directly by that same write, this
+            // stage's included. So a rejected input is treated exactly like a
+            // pending one: nothing published, nothing parked, only the pending
+            // flag (which is not accurate here — the upstream is not in
+            // flight) is corrected.
             stashedResolution = null
             suspendedOn = null
             setPendingSig(false)
