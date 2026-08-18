@@ -76,7 +76,21 @@ test('a bare write into an asynchronously coloured stage keeps the read a promis
   const [list, setList] = signal(function* () {
     return ['a']
   })
+
+  // a generator stage publishes a promise, so the raw read is one
+  expect(list()).toBeInstanceOf(Promise)
   expect(use(list)).toEqual(['a'])
+
   setList(['b'])
+
+  // the write must not flip the shape a consumer sees
+  expect(list()).toBeInstanceOf(Promise)
   expect(use(list)).toEqual(['b'])
+})
+
+test('a write into a synchronously coloured stage does not introduce a promise', () => {
+  const [n, setN] = signal(() => 1)
+  expect(n()).toBe(1)
+  setN(2)
+  expect(n()).toBe(2) // still bare, not a promise
 })
