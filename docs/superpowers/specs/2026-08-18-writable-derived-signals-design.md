@@ -2,9 +2,11 @@
 
 A derivation that also has a setter. `signal` accepts the same stage list `computed` accepts and returns an accessor and a setter, so a value can be produced by a derivation and also written directly.
 
-This document records the conclusions reached in a design discussion on 2026-08-18. The semantics are settled and the construction approach is settled. Several mechanical questions are still open and are listed at the end. Nothing has been implemented.
+This document records the conclusions reached in a design discussion on 2026-08-18. The design is complete: semantics, construction, cancellation, speculation, registry integration, the three defects the scenarios exposed, and the test plan. Nothing has been implemented.
 
-The scenarios this design is checked against are catalogued as group W in [`docs/pulse/scenarios.md`](../../pulse/scenarios.md#w-writes-into-derivations-signalfn). W10 has already changed the design once.
+Two pieces of work it depends on are tracked separately in [`docs/follow-ups.md`](../../follow-ups.md): a way to withdraw a queued recomputation, which pulse's pinned fork of r3 has to expose, and `cancel(x)`, designed here and shipped on its own because it applies to any derivation.
+
+The scenarios this design is checked against are catalogued as group W in [`docs/pulse/scenarios.md`](../../pulse/scenarios.md#w-writes-into-derivations-signalfn). All twenty-two were walked, and two of them changed the design: W10 established that a cancelled upstream stage must be left needing recomputation rather than clean, and W1 established that the update function must receive the last resolved value rather than the raw published read.
 
 An accompanying visual summary of the same material is published at <https://claude.ai/code/artifact/9585d141-a661-47eb-8f45-5ede7ea4ec99>.
 
@@ -360,32 +362,81 @@ The alternative of not cancelling upstream stages at all is coherent too: the mi
 
 Writing the value alone is not enough. The tail keeps private state that the change-gate depends on, and leaving it stale produces a node that is stuck.
 
-- **`lastResolvedValue`** ([`src/computed.ts:145`](../../../src/computed.ts)) must become the written value. The settle path publishes only when the newly resolved value differs from this field ([`src/computed.ts:500-508`](../../../src/computed.ts)). Consider a stage resolving to the number `5`, then a write of `7`, then a re-run that resolves to `5` again: without updating the field, the gate compares 5 against a stale 5, suppresses the publish, and the node holds `7` forever.
-- **`lastPublishedShapeIsPromise`** ([`src/computed.ts:150`](../../../src/computed.ts)) must record whether the write was published bare or wrapped, for the same reason applied to the shape half of the gate.
-- **The failure signal** is cleared, per the settled semantics above.
-- **The pending flag** is cleared by `cancelRun`, but a write of a promise has to set it again, or `isPending` reports false while the written promise is in flight. The registry entry reads the stage's pending signal first and only falls back to inspecting the value ([`src/pending.ts:39-56`](../../../src/pending.ts)), so the flag has to be correct rather than relying on the fallback.
+- **`lastResolvedValue`** ([`src/computed.ts:145`](../../../src/computed.ts)) becomes the written value when the write is a bare value. The settle path publishes only when the newly resolved value differs from this field ([`src/computed.ts:500-508`](../../../src/computed.ts)). Consider a stage resolving to the number `5`, then a write of `7`, then a re-run that resolves to `5` again: without updating the field, the gate compares 5 against a stale 5, suppresses the publish, and the node holds `7` forever.
+- **`lastPublishedShapeIsPromise`** ([`src/computed.ts:150`](../../../src/computed.ts)) records whether the write was published bare or wrapped, for the same reason applied to the shape half of the gate.
+- **The failure signal** is cleared on every stage, not only the tail — see the failure section below.
+- **The pending flag** is cleared by `cancelRun`, and a write of a promise sets it again. The registry entry reads the stage's pending signal first and only falls back to inspecting the value ([`src/pending.ts:39-56`](../../../src/pending.ts)), so the flag has to be correct rather than relying on the fallback.
 
 The write itself goes through the existing scope-aware setter from `signalWithNode` ([`src/signal.ts:73-91`](../../../src/signal.ts)), which also seeds the stale-while-revalidate prior when a promise is written.
 
-## Open questions
+### Writing a promise
 
-These were identified but not resolved.
+A written promise does not resolve anything until it settles, so **`lastResolvedValue` keeps the pre-write value for the duration**. That is what the field means — "the last value this stage actually resolved to" — and it is what the body already does when it suspends: the stale-while-revalidate branch leaves the prior value in place ([`src/computed.ts:321-327`](../../../src/computed.ts)). The field has to mean one thing regardless of which producer set it, or `latest` and the update function's `prev` start disagreeing about what the last known value was. Clearing it would make `latest` return nothing while a write is in flight, which is worse than returning the last known value.
 
-**What the stage's previous value is while a written promise is in flight.** Either the last settled value, matching how a stage's own pending promise behaves under stale-while-revalidate, or nothing at all for the duration. The first keeps one meaning everywhere: the last settled value of this stage, never a promise, never absent once the stage has resolved at least once. This only becomes decidable once the stage signature question below is taken up.
+When the written promise settles to a value the field already holds, the change gate suppresses the publish, which is correct — the node already holds a resolved promise carrying that value. **The pending flag must clear independently of the gate**, or `isPending` sticks on true.
 
-**Two defects found by walking the scenarios, both with obvious fixes but neither designed yet.**
+A written promise **is published immediately**, unlike the body's own suspension. The body holds its prior value published to avoid churning downstream on a refetch; a written promise is the value the caller asked for, so the accessor returns it, `latest` gives the prior, and `use` suspends on it. This is what the plain signal setter already does ([`src/signal.ts:84-88`](../../../src/signal.ts)).
 
-A write clears the failure on the stage it lands on, but the failure query walks upstream through the registry the same way the pending query does ([`src/computed.ts:684-686`](../../../src/computed.ts)). So a middle stage's parked failure still reports after a write, and a `<Failed>` boundary keeps rendering its fallback over a signal that now holds a good value. A write has to clear the failure on every stage, the same way it cancels every stage (scenario W5).
+But a written promise **does occupy `suspendedOn`**, which is what makes the next rule free.
 
-Cancelling discards the retained generator by calling its `return` method, which runs its `finally` blocks and its registered cleanups synchronously, inside the setter call and before the value being written is published. A cleanup that writes a signal therefore executes in the middle of another write. This is the re-entrancy shape of category K arriving through a new door, and it needs an explicit decision about ordering rather than a fix (scenario W13).
+### A new production cancels the previous one, whoever started it
 
-A third was found and is not a defect: a write to a signal nothing has read yet was expected to be erased by the first read. It is not — stale-while-revalidate keeps the written value published while the first fetch is in flight, so seeding from a cache works (scenario W3).
+A write cancels a running derivation. The converse also holds: **a dependency change supersedes a written promise that has not settled.**
 
-**Asynchronous stages under speculation.** The speculation path builds fresh generators through `defaultRecipe` and hands back a still-pending promise rather than suspending on it, because the suspend and settle machinery is driven by r3 and does not run inside a speculation ([`src/computed.ts:262-278`](../../../src/computed.ts)). So a derivation read for the first time inside an action cannot resolve there. This predates the writable derived signal and is not made worse by it, but it bounds what a write inside an action can be built on.
+This is not a second rule. A later dependency change already beats an earlier write — that is the settled behaviour and nothing about the write being pending changes which one is earlier. The alternatives do not survive contact: letting both stand means whichever settles last wins, nondeterministically; letting a pending write block a subsequent dependency change contradicts the settled rule directly.
 
-**A write from inside the derivation's own body throws.** Cancelling calls the retained generator's `return` method, and calling that on a generator which is currently executing raises `TypeError: Generator is already running`. The r3 addition described above already refuses when the node is mid-run; pulse needs the equivalent guard, and then a decision about whether such a write should be applied, ignored, or rejected with a readable error (scenario W22).
+So the single rule is: **starting a new production of the tail's value cancels the previous one, whoever started it.** A write cancels a running derivation; a dependency change cancels a pending write.
 
-**Sections not yet designed.** The discussion covered the surface, the setter, cancellation, and the write's bookkeeping. Not yet covered: the full speculation interaction, the failure and pending registry integration beyond what is noted above, and the test plan.
+The mechanism costs nothing, because a written promise is stored in the same `suspendedOn` field the body uses. The body's next `suspendOn` replaces it, and the settle handler's existing supersession check ([`src/computed.ts:329`](../../../src/computed.ts)) then discards it.
+
+## Speculation
+
+A write inside an action divides cleanly by one question: is this piece of state scope-aware?
+
+**The value needs nothing new.** `writeValue` installs a slot on the tail's published node in the action's scope ([`src/scope.ts:256-272`](../../../src/scope.ts)). Reads inside the action find the slot, which also shadows `defaultRecipe` so the stage is not evaluated speculatively. Commit promotes it, discard drops it.
+
+**The failure signals and pending signals are already scope-aware**, because they are ordinary pulse signals. Clearing a failure inside an action installs a slot and promotes or reverts with everything else. No special handling — only the correction that the clear applies to every stage.
+
+**The retained generator, the suspended-on promise, `lastResolvedValue` and `lastPublishedShapeIsPromise` are plain closure variables, so every consequence that touches them is deferred to commit.** Updating them speculatively is not merely untidy, it is wrong: write `7` over `5` inside an action and discard it, and the published value reverts to `5` while the field says `7`; the derivation later resolving to `7` is then suppressed by the change gate and the node holds `5` indefinitely.
+
+That gives one rule covering cancellation and bookkeeping together: **a speculative write installs the value in its slot, and every consequence that is not scope-aware waits until the value reaches the committed world.** Cancellation was not a special case; it was the first instance of this.
+
+**The one thing that cannot wait is `prev`**, because a second update inside the same action has to see the first. So `prev` is the last resolved value *as seen from the current scope*: read the tail's published value scope-aware, unwrap it if it is a settled promise, fall back to the committed last resolved value if it is pending, and `undefined` for the sentinel. That chains correctly inside an action and behaves identically outside one.
+
+This needs one internal helper: a scope-aware read that does **not** run `defaultRecipe` on a miss. The ordinary read would evaluate the stage inside the speculation, and asynchronous stages cannot resolve there — the suspend and settle machinery is driven by r3 and does not run inside a speculation ([`src/computed.ts:262-278`](../../../src/computed.ts)). Checking for a slot and otherwise falling through to the committed value avoids the problem entirely rather than working around it.
+
+That limitation is unchanged by this design and still bounds it: a derivation read for the first time inside an action cannot resolve there.
+
+## Registry integration
+
+The setter does not use the registries. It is built by the pipeline builder, which holds every stage directly, so cancelling and clearing failures across stages is a loop over handles it already has.
+
+The registries are needed for exactly one thing: the public `cancel(x)` described below, where the caller holds an accessor and nothing else. `registerPending`'s entry gains a `cancel` field alongside `pending` and `promise`, and `cancel(x)` walks the `upstream` chain the same way `isPending` does ([`src/pending.ts:43-48`](../../../src/pending.ts)).
+
+That is one implementation of per-stage cancellation with two entry points. Routing the setter through the registry instead would be worse, not tidier: the setter also clears failures, which is not in the pending registry, so it would need a second walk over a second chain to do what one loop over handles already does.
+
+## The three defects found by walking the scenarios
+
+**A write clears only the tail's failure (W5).** The failure query walks upstream through the registry the same way the pending query does ([`src/computed.ts:684-686`](../../../src/computed.ts)), so a middle stage's parked failure still reports after a write, and a `<Failed>` boundary keeps rendering its fallback over a signal that now holds a good value. The write clears the failure on every stage, the same loop that cancels every stage.
+
+**A write from inside the derivation's own body throws (W22).** Cancelling calls the retained generator's `return` method, and calling that on a generator which is currently executing raises `TypeError: Generator is already running`. `cancelRun` skips a stage whose generator is the one currently executing, mirroring the guard the r3 addition needs for a node that is mid-run. The write itself still applies; it is the cancellation of one's own run that is meaningless, since that run is about to finish and publish anyway — and its publish then loses to the write under the change gate, because the write already updated the last resolved value.
+
+**Cleanups run inside the setter (W13).** Discarding a paused generator runs its `finally` blocks and registered cleanups synchronously, and a cleanup that writes a signal therefore executes in the middle of another write. **Cleanups run after the value is published**, so a cleanup observing the signal it was triggered by sees the written value rather than the one it replaced. That is the ordering a developer would assume from the outside — the write happened, then the teardown it caused — and it keeps the re-entrancy shape of scenario category K to a single well-defined point.
+
+A fourth finding was not a defect: a write to a signal nothing has read yet was expected to be erased by the first read. It is not — stale-while-revalidate keeps the written value published while the first fetch is in flight, so seeding from a cache works (W3).
+
+## Test plan
+
+The scenarios are the plan. `docs/pulse/scenarios.md` states that each scenario is intended to become a test case, so W1 through W22 become one test each in `test/writable-derived.test.ts`.
+
+Three are regression tests rather than specifications — W5, W13 and W22 — and are written first, failing, because they are the cases most likely to be quietly reintroduced.
+
+Two need coverage the scenario text does not imply:
+
+- **A read of the pipeline from inside an effect while an upstream stage is cancelled and awaiting recomputation.** The push path hides the pull path, and the reasoning that a stage left needing recomputation behaves correctly depends on r3 internals that should not be relied on untested.
+- **A discarded action whose write updated the change-gate state.** This is the failure mode the speculation section above rules out by deferring, and the test is what keeps it ruled out.
+
+The r3 fork needs its own tests: withdrawing a queued recomputation, withdrawing one while leaving the node needing recomputation, withdrawing a node that is not queued, and refusing to withdraw a node that is mid-run.
 
 ## Designed here, shipped separately: `cancel(x)`
 
@@ -434,4 +485,6 @@ Two things about it are settled by the setter's `prev`, which is the same value 
 - **It is the tail's `previous` that a write lands on.** The derivation and a write are two ways of producing the tail's next value, and both receive the tail's current value under the same name and type. An intermediate stage's previous value is never affected by a write, since a write reaches only the tail.
 - **A write feeds forward.** A write updates `lastResolvedValue`, so the next derivation run sees it as `previous`. This is what makes reconciling a refetch against local state possible — the user-space route to the "let the fetch finish and then apply the write on top" behaviour that was rejected as a default.
 
-One question remains: what it holds while a written promise is in flight. See the open questions above.
+And while a written promise is in flight it holds the pre-write value, per the promise-write section above — the same answer for the same reason, since it is the same field.
+
+What is left for that work is the parameter object itself: the abort signal, the shape of the object, and whether stage 0's parameter and later stages' second parameter should be the same type.
