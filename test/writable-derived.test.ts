@@ -799,3 +799,36 @@ test('a discarded action does not leave the change gate describing a rolled-back
   // the signal stuck showing 5
   expect(use(count)).toBe(7)
 })
+
+test('an update function that throws leaves a queued run intact', async () => {
+  // Found during the final whole-branch review, not by any scenario: at the
+  // root, a queued run is withdrawn before the update function is called (it
+  // has to be — computing the value can itself stabilize the graph, which is
+  // the same hazard publishing has). If the update function throws instead
+  // of producing a value, no write happens, but the withdrawal already ran
+  // on the assumption that one was about to. Without correcting for that,
+  // the dependency change that queued the run is lost with nothing left to
+  // notice it — a permanently stuck pipeline, reached through an unrelated
+  // exception rather than through any write.
+  let requests = 0
+  const [version, setVersion] = signal(1)
+  const [todos, setTodos] = signal(function* () {
+    const v = version()
+    requests++
+    return yield* read(Promise.resolve([`v${v}`]))
+  })
+  await tick()
+  expect(requests).toBe(1)
+
+  setVersion(2) // queues a recompute
+  expect(() =>
+    setTodos(() => {
+      throw new Error('updater failed')
+    }),
+  ).toThrow('updater failed')
+
+  // the queued recompute for version 2 must still run
+  await tick()
+  expect(requests).toBe(2)
+  expect(use(todos)).toEqual(['v2'])
+})

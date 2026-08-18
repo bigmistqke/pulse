@@ -269,7 +269,8 @@ export function* settled<T extends readonly unknown[]>(
   // Suspend until every in-flight input has settled — then the frame is coherent.
   if (inflight.length > 0) yield Promise.all(inflight)
   // Read the fresh resolved values. A rejected input THROWS (as `read`/`use` do)
-  // rather than reading `.value` off a rejected state, which is always undefined.
+  // rather than reading `.value` off a rejected state — which may hold a seeded
+  // stale-while-revalidate prior (see `track`), not the rejection's own result.
   return inputs.map((x) => {
     const v = isSignalAccessor(x) ? (x as () => unknown)() : x
     if (!isPromise(v)) return v

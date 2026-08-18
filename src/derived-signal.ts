@@ -112,10 +112,25 @@ function signalFromStages(
 
     if (scope === ROOT_SCOPE) withdrawQueuedRuns(built, tail)
 
-    const value =
-      typeof next === 'function'
-        ? (next as (prev: unknown) => unknown)(tail.readPrev())
-        : next
+    let value: unknown
+    if (typeof next === 'function') {
+      try {
+        value = (next as (prev: unknown) => unknown)(tail.readPrev())
+      } catch (e) {
+        // No write is happening, so the withdrawal above was premature: it
+        // left the tail clean on the promise that a write was about to
+        // supply its value. With no value, the tail needs the same "recompute
+        // when next pulled" state an upstream stage gets when its own run is
+        // abandoned — otherwise a dependency change that queued a recompute
+        // moments before this call is silently and permanently lost, with
+        // nothing left to notice it. Only relevant at the root: inside an
+        // action the withdrawal above never ran in the first place.
+        if (scope === ROOT_SCOPE) tail.markNeedsRecomputation()
+        throw e
+      }
+    } else {
+      value = next
+    }
 
     // Scope-aware: at the root this writes committed state; inside an action
     // it installs a slot that promotes on commit and vanishes on a discard.

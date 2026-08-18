@@ -1,4 +1,4 @@
-import { cancelRecompute, computed as r3Computed, getContext as r3GetContext, isRecomputeQueued, read as r3Read, setSignal as r3SetSignal, untrack as r3Untrack, unwatched, type Computed as R3Computed, type Signal as R3Signal } from 'r3'
+import { cancelRecompute, computed as r3Computed, getContext as r3GetContext, isRecomputeQueued, read as r3Read, requeueRecompute, setSignal as r3SetSignal, untrack as r3Untrack, unwatched, type Computed as R3Computed, type Signal as R3Signal } from 'r3'
 import { isGeneratorFunction, NotReadyYet, resolvedPromise, track, type PromiseState, type PipelineRead, type Resolved } from './async'
 import { runStage, resumeStage, takeGeneratorCleanups, type StageOutcome } from './driver'
 import { replayDeps, snapshotDeps, type DepRecord } from './dep-replay'
@@ -111,6 +111,7 @@ export type StageHandle = {
   applyWriteEffects: (value: unknown) => void
   readPrev: () => unknown
   withdrawQueuedRun: (isTail: boolean) => void
+  markNeedsRecomputation: () => void
   abandonRun: () => void
   clearFailure: () => void
 }
@@ -811,6 +812,36 @@ function makeStageNode(
   }
 
   /**
+   * Restore this stage to "needs recomputation" after `withdrawQueuedRun`
+   * already left it clean on the assumption that a write was about to supply
+   * its value. Called only when that assumption turned out false — an update
+   * function threw before producing anything to write. Without this, a
+   * dependency change that queued a recompute moments before the write is
+   * silently and permanently lost: the queued run was already withdrawn, no
+   * write ever landed to justify that, and nothing is left to notice.
+   *
+   * This is `requeueRecompute`, not `cancelRecompute(self, true)` — leaving
+   * the stage merely flagged and out of the heap is only useful to a stage
+   * something else reads through a tracked call, which is what eventually
+   * pulls it up to date. For the tail of a single-stage pipeline read
+   * directly, nothing ever reads it that way, so a flag alone would never be
+   * noticed; putting it back in the heap is what makes the next flush
+   * recompute it on its own, the way the dependency change that queued it
+   * originally would have.
+   *
+   * Refuses a stage whose own body is the caller, the same as every other
+   * cancellation entry point, though this path is not reachable from there in
+   * practice: an update function throwing during its own stage's recompute
+   * would not have reached `withdrawQueuedRun`'s immediate, root-scope-only
+   * branch in the first place.
+   */
+  const markNeedsRecomputation = (): void => {
+    const self = depTracker as R3Computed<unknown>
+    if (r3GetContext() === self) return
+    requeueRecompute(self)
+  }
+
+  /**
    * Abandon a run that is executing or paused — an in-flight fetch, or a
    * generator suspended on one. Discarding a generator calls its `return`
    * method, which runs its cleanup callbacks, so this happens after the value
@@ -921,6 +952,7 @@ function makeStageNode(
     applyWriteEffects,
     readPrev,
     withdrawQueuedRun,
+    markNeedsRecomputation,
     abandonRun,
     clearFailure,
   }
