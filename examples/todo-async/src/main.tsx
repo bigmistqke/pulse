@@ -39,11 +39,17 @@ const [version, setVersion] = signal(0)
  * This is canonical server truth. `setTodos` is called only with what the
  * server actually confirmed; the speculative guess a mutation shows before
  * that lives entirely in the overlay below, never here.
+ *
+ * The `[]` default seeds `latest(todos)`'s fallback, so every tolerant read
+ * below can drop its own `?? []` — `latest(todos)` reports `[]` on its own
+ * until the first load resolves, exactly as if that had already happened.
+ * The strict read (`todos()`, `use(todos)`) is unaffected: it still stays a
+ * Promise while the load is genuinely in flight.
  */
 const [todos, setTodos] = signal(function* () {
   version()
   return yield* read(api.list())
-})
+}, [] as Todo[])
 
 /**
  * What the UI reads. While an action has a live overlay this returns the
@@ -55,7 +61,7 @@ const [todos, setTodos] = signal(function* () {
  * `todos` is a fetch, so its raw read is `Todo[] | Promise<Todo[]>`, and the
  * overlay only ever needs to compare and replace plain arrays.
  */
-const [overlay, setOverlay, speculating] = optimistic(() => latest(todos) ?? [])
+const [overlay, setOverlay, speculating] = optimistic(() => latest(todos))
 
 /** True while the load is in flight, including a refetch over a visible list. */
 const loading = isPending(todos)
@@ -101,7 +107,7 @@ function submitTodo(text: string) {
   // ever exists inside the overlay.
   const pending: Todo = { id: -Date.now(), text, done: false }
   void action(function* () {
-    setOverlay([...committed(() => latest(todos) ?? []), pending])
+    setOverlay([...committed(() => latest(todos)), pending])
     onSettled((outcome) => {
       if (outcome === 'discarded') {
         flash(`Could not add "${text}" — the server refused`, () => submitTodo(text))
@@ -125,7 +131,7 @@ function addTodo() {
 function toggleTodo(todo: Todo) {
   void action(function* () {
     setOverlay(
-      committed(() => latest(todos) ?? []).map((each) =>
+      committed(() => latest(todos)).map((each) =>
         each.id === todo.id ? { ...each, done: !each.done } : each,
       ),
     )
@@ -144,7 +150,7 @@ function toggleTodo(todo: Todo) {
 
 function removeTodo(todo: Todo) {
   void action(function* () {
-    setOverlay(committed(() => latest(todos) ?? []).filter((each) => each.id !== todo.id))
+    setOverlay(committed(() => latest(todos)).filter((each) => each.id !== todo.id))
     onSettled((outcome) => {
       if (outcome === 'discarded') {
         flash(`Could not remove "${todo.text}" — the server refused`, () => removeTodo(todo))
@@ -179,7 +185,7 @@ function ServerPanel() {
         is in flight, and snaps back to it if the server refuses.
       </p>
       <ul class="canonical" data-testid="canonical-list">
-        <For each={() => latest(todos) ?? []}>
+        <For each={() => latest(todos)}>
           {(todo: Todo) => (
             <li class:done={() => todo.done} data-testid="canonical-row">
               {() => todo.text}
