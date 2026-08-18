@@ -635,3 +635,34 @@ test('a queued recompute survives a write inside a discarded action', async () =
   expect(requests).toBe(2)
   expect(use(todos)).toEqual(['v2'])
 })
+
+test('writing a promise inside an action does not trigger a fresh recompute', async () => {
+  // Covers the isPromise(value) branch of publishValue under the same
+  // conditions Defect 1 was about — the bare-value branch is exercised by
+  // W14-W17 and the queued-recompute regression test, but all of those write
+  // a bare value; this is the sibling branch, reached only when the caller
+  // passes a promise directly to the setter, which none of those exercise.
+  //
+  // Defect 1's fresh-recompute symptom would show up as `requests` climbing
+  // past 1, since the stray recompute it triggered built a whole new promise
+  // from scratch. The pending flag itself is not asserted here: it belongs to
+  // applyWriteEffects, which this task's own design defers until commit, so
+  // it stays false the whole time the action is open — asserting it true
+  // here would be testing something the design does not promise.
+  let requests = 0
+  const [todos, setTodos] = signal(function* () {
+    requests++
+    return yield* read(Promise.resolve(['a']))
+  })
+  await tick()
+  expect(requests).toBe(1)
+
+  await action(function* () {
+    setTodos(Promise.resolve(['a', 'walk']))
+    yield* read(Promise.resolve(null))
+  })
+  await tick()
+
+  expect(requests).toBe(1)
+  expect(use(todos)).toEqual(['a', 'walk'])
+})
