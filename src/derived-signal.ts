@@ -1,7 +1,7 @@
 import { signal as valueSignal, type Accessor, type Setter } from './signal'
 import { buildStages, type StageHandle } from './computed'
 import { getCurrentScope, onSettledOn, ROOT_SCOPE, type Scope } from './scope'
-import type { PipelineRead, Resolved } from './async'
+import { seedLatest, type PipelineRead, type Resolved, type WithFallback } from './async'
 
 /** A stage of any shape: sync, async, or generator. */
 type Stage<In, Out> = (value: In) => Out
@@ -34,6 +34,23 @@ export type DerivedSetter<T> = (
 export function signal<A>(
   s0: () => A,
 ): [Accessor<PipelineRead<[], A>>, DerivedSetter<PipelineRead<[], A>>]
+// Single-stage form with a default: `fallback` is what `latest()` on the
+// returned accessor reports before stage 0 has resolved anything, instead of
+// `undefined` — sugar for seeding `latest`'s own fallback once at
+// construction rather than passing it at every call site, and the returned
+// accessor is branded (`WithFallback`) so `latest(thatAccessor)` picks up
+// `Resolved<A>` as its return type with no second argument needed. This does
+// not change the accessor's own read (still `PipelineRead<[], A>`, still a
+// Promise while genuinely pending) — only the tolerant read's fallback.
+// `Resolved<A>` — stage 0's own resolved value type — is what `fallback`
+// must match, and what a resolved `latest()` read reports once settled.
+export function signal<A>(
+  s0: () => A,
+  fallback: Resolved<A>,
+): [
+  WithFallback<Accessor<PipelineRead<[], A>>, Resolved<A>>,
+  DerivedSetter<PipelineRead<[], A>>,
+]
 export function signal<A, B>(
   s0: () => A,
   s1: Stage<Resolved<A>, B>,
@@ -63,6 +80,15 @@ export function signal<T>(initial: T): [Accessor<T>, Setter<T>]
 export function signal(...args: any[]): [Accessor<any>, any] {
   if (typeof args[0] !== 'function') {
     return valueSignal(args[0])
+  }
+  // The single-stage-with-default overload: a lone non-function second
+  // argument is a fallback for `latest()`, not a second pipeline stage — a
+  // real stage is always itself a function, so this never misreads a
+  // genuine two-stage call.
+  if (args.length === 2 && typeof args[1] !== 'function') {
+    const built = signalFromStages(args[0])
+    seedLatest(built[0], args[1])
+    return built
   }
   return signalFromStages(...(args as Array<(value: any) => unknown>))
 }

@@ -149,6 +149,56 @@ test('a generator stage colours its read by what it actually reads, not by being
 /** Resolve after all microtasks have drained (a macrotask boundary). */
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
 
+test('signal(fn, default): latest() reports the default before the first resolution', () => {
+  const [todos] = signal(function* () {
+    return yield* read(new Promise<string[]>(() => {})) // never resolves
+  }, [] as string[])
+  expect(latest(todos)).toEqual([])
+})
+
+test('signal(fn, default): latest() reports the real value once resolved, not the default', async () => {
+  let resolveList: (v: string[]) => void = () => {}
+  const [todos] = signal(function* () {
+    return yield* read(new Promise<string[]>((r) => (resolveList = r)))
+  }, [] as string[])
+  expect(latest(todos)).toEqual([])
+  resolveList(['a'])
+  await tick()
+  expect(latest(todos)).toEqual(['a'])
+})
+
+test('signal(fn, default) does not change the raw read — still a promise while pending', () => {
+  const [todos] = signal(function* () {
+    return yield* read(new Promise<string[]>(() => {})) // never resolves
+  }, [] as string[])
+  // the default only seeds the tolerant read; the strict read stays honest
+  // about the pipeline still being in flight
+  expect(todos()).toBeInstanceOf(Promise)
+  expect(isPending(todos)()).toBe(true)
+})
+
+test('signal(fn, default): latest(todos) needs no second argument to type as non-optional (compile-time)', () => {
+  // This is mostly a typecheck-only assertion — the `const … : T = …` lines
+  // are the compile-time checks; a wrong type would fail to compile.
+  const [withDefault] = signal(function* () {
+    return yield* read(new Promise<string[]>(() => {}))
+  }, [] as string[])
+  const [withoutDefault] = signal(function* () {
+    return yield* read(new Promise<string[]>(() => {}))
+  })
+
+  // string[], not string[] | undefined — no ?? [] or second argument needed
+  const withDefaultValue: string[] = latest(withDefault)
+  // without a construction-time default, latest() still includes undefined
+  const withoutDefaultValue: string[] | undefined = latest(withoutDefault)
+  // @ts-expect-error a plain accessor's latest() is not narrowed to string[]
+  const shouldError: string[] = latest(withoutDefault)
+  void shouldError
+
+  expect(withDefaultValue).toEqual([])
+  expect(withoutDefaultValue).toBeUndefined()
+})
+
 test('W1: a write abandons the fetch in flight and it never publishes', async () => {
   let resolveList: (v: string[]) => void = () => {}
   const [version, setVersion] = signal(1)

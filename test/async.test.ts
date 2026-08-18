@@ -45,6 +45,23 @@ test('latest keeps the last resolved value while a newer promise is pending', as
   expect(latest(s)).toBe(2) // now the new resolved value
 })
 
+test('latest(s, fallback) returns the fallback before the first resolution', () => {
+  const [s] = signal(new Promise<number[]>(() => {})) // never resolves
+  expect(latest(s, [] as number[])).toEqual([])
+})
+
+test('latest(s, fallback) reports the real value once resolved, not the fallback', async () => {
+  const [s] = signal(Promise.resolve([1, 2]))
+  expect(latest(s, [] as number[])).toEqual([])
+  await tick()
+  expect(latest(s, [] as number[])).toEqual([1, 2])
+})
+
+test('latest(s, fallback) falls back again after a rejection with nothing seeded', () => {
+  const [s] = signal(Promise.reject(new Error('nope')))
+  expect(latest(s, 'fallback')).toBe('fallback')
+})
+
 test('latest is reactive — updates when the signal is written to a new value', () => {
   // latest re-runs the effect when the signal *value* changes (a write). It does
   // NOT push on the same-Promise-settling, since signal stores values as-is and

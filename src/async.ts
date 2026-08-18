@@ -10,13 +10,36 @@ import { markUsedInBinding } from './transition-tracker'
  */
 const lastResolved = new WeakMap<object, unknown>()
 
+/** A compile-time-only marker key. Never read at runtime — `WithFallback`
+ *  uses it purely so `latest`'s overloads can tell a `signal(fn, default)`
+ *  accessor apart from a plain one; nothing ever writes this property onto
+ *  the actual accessor object. */
+declare const FALLBACK: unique symbol
+
+/** An accessor that carries a construction-time fallback of type `D` for
+ *  `latest` to report before anything has resolved. `signal(fn, default)`
+ *  returns an accessor typed this way; `latest`'s single-argument overload
+ *  below matches it specifically so the fallback shows up in the return type
+ *  without needing to be passed again at the call site. */
+export type WithFallback<A, D> = A & { readonly [FALLBACK]: D }
+
 /**
  * The latest *resolved* value of a signal. Returns `undefined` until the signal
  * first resolves, then always the most recent resolved value — it does NOT
  * revert to `undefined` while a newer promise is pending (stale-while-revalidate).
  * Reactive: reads `s()`, so it re-evaluates when the signal changes.
+ *
+ * A `signal(fn, default)` accessor reports `default` instead of `undefined`
+ * here, with no second argument needed — the first overload below matches
+ * that accessor's branded type. For any other accessor, the two-argument
+ * form returns `fallback` instead of `undefined` before the first
+ * resolution, so a call site that always wants a value (`latest(x, [])`)
+ * does not need its own `?? []`.
  */
-export function latest<T>(s: Accessor<T>): Awaited<T> | undefined {
+export function latest<T, D>(s: WithFallback<Accessor<T>, D>): Awaited<T> | D
+export function latest<T>(s: Accessor<T>): Awaited<T> | undefined
+export function latest<T, D>(s: Accessor<T>, fallback: D): Awaited<T> | D
+export function latest<T, D>(s: Accessor<T>, fallback?: D): Awaited<T> | D | undefined {
   // The TOLERANT read: it NEVER throws. A failed node still holds the value it
   // last resolved to, so read it raw — bypassing the accessor's error conversion —
   // and degrade to it. (The raw accessor throws; that is the strict view, and it is
@@ -37,7 +60,7 @@ export function latest<T>(s: Accessor<T>): Awaited<T> | undefined {
       // that rejects before anything else reads it).
       const swr = state.value
       if (swr !== undefined) return swr as Awaited<T>
-      return lastResolved.get(s) as Awaited<T> | undefined
+      return lastResolved.has(s) ? (lastResolved.get(s) as Awaited<T>) : fallback
     }
     // Still pending. The stale-while-revalidate prior is seeded onto the tracked
     // state by track(promise, prior) — from the signal setter, and from computed —
@@ -45,10 +68,19 @@ export function latest<T>(s: Accessor<T>): Awaited<T> | undefined {
     // promise that was never seeded (an initial promise passed to signal()).
     const swr = state.value
     if (swr !== undefined) return swr as Awaited<T>
-    return lastResolved.get(s) as Awaited<T> | undefined
+    return lastResolved.has(s) ? (lastResolved.get(s) as Awaited<T>) : fallback
   }
   lastResolved.set(s, value as T)
   return value as Awaited<T>
+}
+
+/** Seed `latest`'s fallback for `s` before anything has resolved. Internal —
+ *  used by `signal(fn, default)` so every caller of `latest(thatSignal)`
+ *  gets `default` back for free, without passing it at each call site.
+ *  `latest` overwrites this the moment the signal genuinely resolves, so the
+ *  seed only ever matters until then. */
+export function seedLatest<T>(s: Accessor<T>, value: Awaited<T>): void {
+  lastResolved.set(s, value)
 }
 
 /**
