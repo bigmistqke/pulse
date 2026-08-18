@@ -690,7 +690,9 @@ next."
 
 ### Task 3: A write cancels a run that is executing or paused
 
-**Covers:** W1 (write while the fetch is in flight), W8 (same, with stages in front), W9 (fetch in a middle stage), W12 (two stages in flight), W13 partially (a paused stage's cleanups fire).
+**Covers:** W1 (write while the fetch is in flight), W9 (fetch in a middle stage), W13 (a paused stage's cleanups fire).
+
+W8 and W12 were originally claimed here and moved to Task 5, where they have actual test code. A "Covers" line is a claim the task review checks against the tests that exist — do not list a scenario a step does not write.
 
 **Files:**
 - Modify: `src/computed.ts` — add `cancelRun` to the handle
@@ -1738,7 +1740,7 @@ the write has already moved the value the change gate compares against."
 
 ### Task 10: Remaining scenario coverage and documentation
 
-**Covers:** W4 (write then a dependency changes), W17 (the value that appears and is replaced), W18 is out of scope (it needs `cancel`), plus the two tests the spec calls for that no scenario implies.
+**Covers:** W4 (write then a dependency changes), plus the two tests the spec calls for that no scenario implies. W17 is Task 8's; W18 is out of scope, since it needs `cancel`.
 
 **Files:**
 - Test: `test/writable-derived.test.ts`
