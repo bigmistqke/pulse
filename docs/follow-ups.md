@@ -57,6 +57,8 @@ Severity: **(small)** trivial cleanups · **(worth)** worth doing soon · **(lat
 
 ### API ergonomics
 
+- **(worth) Give stages a parameter object carrying an abort signal and the stage's previous value.** The intended shape is `({ signal, previous }) => …` for stage 0 and `(value, { signal, previous }) => …` for later stages, so further members can be added without another signature change. This was decided in an earlier session and never recorded; it is written up in [the writable derived signal design](./superpowers/specs/2026-08-18-writable-derived-signals-design.md#deferred), including the two questions left unanswered about what `previous` holds after a write and while a written promise is in flight. Two things have changed since it was first deferred: [ADR 0013](./adr/0013-generator-stages-resume-with-dependency-replay.md) removed the blocker (a generator building its promise inside its own body used to never converge under restart-from-top resumption), and discarding a generator now runs its `finally` blocks and drains its registered cleanups, so `onCleanup(() => controller.abort())` inside a generator stage already works — a parameter would make it the default rather than something each stage wires by hand.
+  Source: writable derived signal design discussion, 2026-08-18.
 
 ### Architectural notes
 
