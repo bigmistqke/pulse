@@ -186,7 +186,7 @@ A derivation that also has a setter, so one value has two sources: the stage cha
 
 - **W1.** Write while the stage's fetch is in flight. The base case. Tests: the fetch is abandoned and never publishes.
 - **W2.** Write while nothing is running. Tests: the value is replaced and the body does not re-run.
-- **W3.** Write before the signal has ever been read — seeding from a cache during startup. Tests: the first read starts the body, and stale-while-revalidate keeps the written value visible until the fetch lands rather than blanking it. ✓ (Walked; better than the design predicted, which expected the write to be erased by the first read.)
+- **W3.** Write before the signal has ever been read — seeding from a cache during startup. Tests: the written value stays visible until the request lands rather than blanking. ✓ (Walked, then corrected during implementation. The design assumed a derivation is lazy and would first run on the first read; it is eager and has already run and suspended by the time the write lands, so the value an update function receives is `undefined` because nothing has *resolved*, not because nothing has run. A synchronous derivation, having resolved at creation, hands back its value instead.)
 - **W4.** Write, then a dependency changes. Tests: the derivation takes over and the write is gone.
 - **W5.** Write onto a parked failure. Tests: the failure clears and a `<Failed>` boundary stops showing its fallback.
 - **W6.** Write a promise. Tests: `isPending` is true while it is in flight, `use()` suspends on it, `latest` degrades to the prior value.

@@ -141,7 +141,14 @@ setTodos(prev => [...(prev ?? []), saved])                 // a write produces i
 
 A write updates `lastResolvedValue`, so a write feeds forward into the next derivation run's `previous`.
 
-Reading the last resolved value does **not** trigger the derivation's first evaluation. A stage body is lazy, so on a signal nothing has read yet the setter hands the update function `undefined` rather than running the body to produce something. One consequence: a stage that legitimately resolves to `undefined` is indistinguishable from a stage that has never run.
+**A derivation is eager, not lazy.** `computed` in the pinned reactive core recomputes at creation when there is no ambient reactive context ([`../r3/src/index.ts:114-126`](../../../../r3/src/index.ts)), so a stage body runs the moment the signal is declared, before anything reads it. An earlier draft of this document assumed the opposite and reasoned from it; the assumption was wrong and the reasoning that depended on it is corrected here.
+
+Under eagerness the definition above needs no adjustment, because it is about resolution rather than execution:
+
+- A synchronous derivation runs at creation and resolves, so `prev` is its value from the first write onward.
+- An asynchronous derivation runs at creation and suspends, so nothing has resolved yet and `prev` is `undefined` until its first result lands.
+
+So `undefined` means "nothing has resolved", not "nothing has run", and it needs no tracking of its own — the sentinel already says exactly that. One ambiguity remains: a stage that legitimately resolves to `undefined` is indistinguishable from one that has not resolved yet.
 
 **What this replaces.** An earlier decision made `prev` the raw published read, `T | Promise<T> | undefined`, on the grounds that a promise write could then be chained onto an in-flight one. Walking the scenarios showed the cost: for any async derivation `prev` was always a promise, so every update needed `use(prev)` or a `.then` chain — and on a first load with nothing cached, `use(prev)` throws `NotReadyYet` out of a setter that has no boundary to catch it. Handing back the last resolved value removes that case rather than mitigating it.
 
@@ -423,7 +430,7 @@ That is one implementation of per-stage cancellation with two entry points. Rout
 
 **Cleanups run inside the setter (W13).** Discarding a paused generator runs its `finally` blocks and registered cleanups synchronously, and a cleanup that writes a signal therefore executes in the middle of another write. **Cleanups run after the value is published**, so a cleanup observing the signal it was triggered by sees the written value rather than the one it replaced. That is the ordering a developer would assume from the outside — the write happened, then the teardown it caused — and it keeps the re-entrancy shape of scenario category K to a single well-defined point.
 
-A fourth finding was not a defect: a write to a signal nothing has read yet was expected to be erased by the first read. It is not — stale-while-revalidate keeps the written value published while the first fetch is in flight, so seeding from a cache works (W3).
+A fourth finding was not a defect: a write to a signal nothing has read yet was expected to be erased by the first read. It is not, for two reasons that only became clear during implementation. The derivation has already run by then — it runs at creation, not at first read — and stale-while-revalidate keeps the written value published while its request is in flight. So seeding from a cache works (W3).
 
 ## Test plan
 
