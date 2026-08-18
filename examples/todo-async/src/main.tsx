@@ -20,9 +20,11 @@ type Filter = 'all' | 'active' | 'completed'
 
 /* ------------------------------------------------------------------ state */
 
+type Notice = { message: string; retry?: () => void }
+
 const [filter, setFilter] = signal<Filter>('all')
 const [draft, setDraft] = signal('')
-const [notice, setNotice] = signal<string | null>(null)
+const [notice, setNotice] = signal<Notice | null>(null)
 /** Bumped to refetch. Read inside `todos`'s own stage, so it is a dependency
  *  of the fetch. */
 const [version, setVersion] = signal(0)
@@ -70,9 +72,13 @@ const remaining = () => overlay().filter((todo) => !todo.done).length
 
 /* --------------------------------------------------------------- mutations */
 
-function flash(message: string) {
-  setNotice(message)
-  setTimeout(() => setNotice((current) => (current === message ? null : current)), 4000)
+/** Shows `message` for four seconds. When `retry` is given, the notice grows a
+ *  button that runs it and dismisses the notice — the same mutation call,
+ *  fed back in, rather than a bespoke undo path. */
+function flash(message: string, retry?: () => void) {
+  const entry: Notice = { message, retry }
+  setNotice(entry)
+  setTimeout(() => setNotice((current) => (current === entry ? null : current)), 4000)
 }
 
 /**
@@ -87,17 +93,19 @@ function flash(message: string) {
  * be a promise mid-reload, and the tolerant read degrades to the last known
  * list instead — the same list a plain `Todo[]` mirror signal used to hold.
  */
-function addTodo() {
-  const text = draft().trim()
-  if (text === '') return
-  setDraft('')
+/** Split from `addTodo` so a refused write's retry button can resubmit the
+ *  same text — by the time it is pressed, `draft()` has moved on to whatever
+ *  the user typed next. */
+function submitTodo(text: string) {
   // A placeholder id, negative so it cannot collide with a real one. It only
   // ever exists inside the overlay.
   const pending: Todo = { id: -Date.now(), text, done: false }
   void action(function* () {
     setOverlay([...committed(() => latest(todos) ?? []), pending])
     onSettled((outcome) => {
-      if (outcome === 'discarded') flash(`Could not add "${text}" — the server refused`)
+      if (outcome === 'discarded') {
+        flash(`Could not add "${text}" — the server refused`, () => submitTodo(text))
+      }
     })
     const saved = yield* read(api.add(text))
     setTodos((prev) => [...(prev ?? []), saved])
@@ -105,6 +113,13 @@ function addTodo() {
     // The rejection already surfaced through `onSettled`; swallowing it here
     // keeps a refused write from becoming an unhandled rejection.
   })
+}
+
+function addTodo() {
+  const text = draft().trim()
+  if (text === '') return
+  setDraft('')
+  submitTodo(text)
 }
 
 function toggleTodo(todo: Todo) {
@@ -115,7 +130,9 @@ function toggleTodo(todo: Todo) {
       ),
     )
     onSettled((outcome) => {
-      if (outcome === 'discarded') flash(`Could not update "${todo.text}" — the server refused`)
+      if (outcome === 'discarded') {
+        flash(`Could not update "${todo.text}" — the server refused`, () => toggleTodo(todo))
+      }
     })
     const saved = yield* read(api.toggle(todo.id))
     setTodos((prev) => (prev ?? []).map((each) => (each.id === saved.id ? saved : each)))
@@ -129,7 +146,9 @@ function removeTodo(todo: Todo) {
   void action(function* () {
     setOverlay(committed(() => latest(todos) ?? []).filter((each) => each.id !== todo.id))
     onSettled((outcome) => {
-      if (outcome === 'discarded') flash(`Could not remove "${todo.text}" — the server refused`)
+      if (outcome === 'discarded') {
+        flash(`Could not remove "${todo.text}" — the server refused`, () => removeTodo(todo))
+      }
     })
     yield* read(api.remove(todo.id))
     setTodos((prev) => (prev ?? []).filter((each) => each.id !== todo.id))
@@ -163,7 +182,7 @@ function ServerPanel() {
         <For each={() => latest(todos) ?? []}>
           {(todo: Todo) => (
             <li class:done={() => todo.done} data-testid="canonical-row">
-              {todo.text}
+              {() => todo.text}
             </li>
           )}
         </For>
@@ -231,7 +250,7 @@ function TodoList() {
                 prop:checked={() => todo.done}
                 on:change={() => toggleTodo(todo)}
               />
-              <span class="text">{todo.text}</span>
+              <span class="text">{() => todo.text}</span>
               <button class="remove" on:click={() => removeTodo(todo)}>
                 ×
               </button>
@@ -310,7 +329,20 @@ function App() {
 
       <Show when={notice}>
         <p class="notice" data-testid="notice">
-          {notice}
+          <span class="notice-message">{() => notice()?.message}</span>
+          <Show when={() => notice()?.retry}>
+            <button
+              class="notice-retry"
+              data-testid="notice-retry"
+              on:click={() => {
+                const pending = notice()
+                setNotice(null)
+                pending?.retry?.()
+              }}
+            >
+              Retry
+            </button>
+          </Show>
         </p>
       </Show>
 

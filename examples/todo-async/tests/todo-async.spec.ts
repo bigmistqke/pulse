@@ -69,6 +69,30 @@ test('a rejected write rolls the optimistic row back', async ({ page }) => {
   await expect(canonicalRows(page)).toHaveCount(before)
 })
 
+test('a rejected write shows a retry affordance that resubmits the same request', async ({ page }) => {
+  await open(page, { latency: 200, fail: 0 })
+  await expect(page.getByTestId('todo-list')).toBeAttached({ timeout: 5000 })
+
+  const before = await rows(page).count()
+  await page.getByTestId('fail-rate').fill('1')
+  await addTodo(page, 'retry me')
+  await expect(rows(page).filter({ hasText: 'retry me' })).toHaveCount(0, { timeout: 5000 })
+
+  const notice = page.getByTestId('notice')
+  await expect(notice).toContainText('retry me')
+  const retryButton = page.getByTestId('notice-retry')
+  await expect(retryButton).toBeVisible()
+
+  // Fix the server, then press retry — the same text is resubmitted.
+  await page.getByTestId('fail-rate').fill('0')
+  await retryButton.click()
+
+  await expect(rows(page).filter({ hasText: 'retry me' })).toBeVisible({ timeout: 5000 })
+  await expect(canonicalRows(page).filter({ hasText: 'retry me' })).toBeVisible({ timeout: 5000 })
+  await expect(rows(page)).toHaveCount(before + 1)
+  await expect(notice).not.toBeAttached()
+})
+
 test('a refetch holds the current list on screen while it is in flight', async ({ page }) => {
   await open(page, { latency: 100 })
   await expect(page.getByTestId('todo-list')).toBeAttached({ timeout: 5000 })
