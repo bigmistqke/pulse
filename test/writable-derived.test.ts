@@ -4,6 +4,7 @@ import { latest, read, use } from '../src/async'
 import { isPending } from '../src/pending'
 import { onCleanup } from '../src/owner'
 import { failure } from '../src/failure'
+import { action } from '../src/scope'
 
 test('W2: a write replaces the value and the body does not re-run', () => {
   let runs = 0
@@ -502,4 +503,135 @@ test('W6: a rejected written promise parks as a failure', async () => {
   await tick()
   expect(failure(todos)).toBeInstanceOf(Error)
   expect(latest(todos)).toEqual(['a'])
+})
+
+test('W14: a write inside an action is invisible until it commits', async () => {
+  const [todos, setTodos] = signal(function* () {
+    return yield* read(Promise.resolve(['a']))
+  })
+  await tick()
+
+  const seenInside: unknown[] = []
+  await action(function* () {
+    setTodos(['a', 'walk'])
+    seenInside.push(use(todos))
+    yield* read(Promise.resolve(null))
+  })
+
+  expect(seenInside).toEqual([['a', 'walk']])
+  expect(use(todos)).toEqual(['a', 'walk'])
+})
+
+test('W15: a discarded action leaves the reload alive', async () => {
+  let resolveList: (v: string[]) => void = () => {}
+  const [version, setVersion] = signal(1)
+  const [todos, setTodos] = signal(function* () {
+    version()
+    return yield* read(new Promise<string[]>((r) => (resolveList = r)))
+  })
+
+  resolveList(['a'])
+  await tick()
+  resolveList = () => {}
+  setVersion(2)
+  await tick()
+  expect(isPending(todos)()).toBe(true)
+
+  await expect(
+    action(function* () {
+      setTodos(['a', 'walk'])
+      yield* read(Promise.reject(new Error('save failed')))
+    }),
+  ).rejects.toThrow('save failed')
+
+  // the write rolled back and the reload was never abandoned
+  expect(isPending(todos)()).toBe(true)
+  resolveList(['a', 'b'])
+  await tick()
+  expect(use(todos)).toEqual(['a', 'b'])
+})
+
+test('W16: cancelling waits until the value reaches the committed world', async () => {
+  let resolveList: (v: string[]) => void = () => {}
+  const [version, setVersion] = signal(1)
+  const [todos, setTodos] = signal(function* () {
+    version()
+    return yield* read(new Promise<string[]>((r) => (resolveList = r)))
+  })
+  resolveList(['a'])
+  await tick()
+  resolveList = () => {}
+  setVersion(2)
+  await tick()
+
+  await expect(
+    action(function* () {
+      action(() => setTodos(['inner']))
+      yield* read(Promise.reject(new Error('outer failed')))
+    }),
+  ).rejects.toThrow('outer failed')
+
+  // the inner commit only promoted to the outer scope, which then rolled back
+  expect(isPending(todos)()).toBe(true)
+})
+
+test('W17: a reload that lands while an action is open is replaced at commit', async () => {
+  let resolveList: (v: string[]) => void = () => {}
+  const [version, setVersion] = signal(1)
+  const [todos, setTodos] = signal(function* () {
+    version()
+    return yield* read(new Promise<string[]>((r) => (resolveList = r)))
+  })
+  resolveList(['a'])
+  await tick()
+
+  let resolveSave: (v: null) => void = () => {}
+  resolveList = () => {}
+  setVersion(2)
+  await tick()
+
+  const running = action(function* () {
+    setTodos(['a', 'walk'])
+    yield* read(new Promise<null>((r) => (resolveSave = r)))
+  })
+
+  resolveList(['a', 'b']) // the reload lands while the action is open
+  await tick()
+  expect(use(todos)).toEqual(['a', 'b']) // visible outside the action
+
+  resolveSave(null)
+  await running
+  expect(use(todos)).toEqual(['a', 'walk']) // replaced at commit
+})
+
+test('a queued recompute survives a write inside a discarded action', async () => {
+  // A regression test for the withdrawal loop's scope gate. Withdrawing a
+  // queued recompute is only safe once a write is known to be committed —
+  // withdrawing it eagerly, before the action that wrote had a chance to roll
+  // back, would permanently lose a recompute an unrelated dependency change
+  // had already queued, if that action then discarded.
+  let requests = 0
+  const [version, setVersion] = signal(1)
+  const [todos, setTodos] = signal(function* () {
+    const v = version()
+    requests++
+    return yield* read(Promise.resolve([`v${v}`]))
+  })
+  await tick()
+  expect(requests).toBe(1)
+
+  setVersion(2) // queues a recompute
+
+  await expect(
+    action(function* () {
+      setTodos(['written'])
+      yield* read(Promise.reject(new Error('fail')))
+    }),
+  ).rejects.toThrow('fail')
+
+  // the action rolled back, so the write never took effect — the queued
+  // recompute for version 2 must still run rather than having been withdrawn
+  await tick()
+  expect(requests).toBe(2)
+  expect(use(todos)).toEqual(['v2'])
 })

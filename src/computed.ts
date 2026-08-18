@@ -4,7 +4,7 @@ import { runStage, resumeStage, takeGeneratorCleanups, type StageOutcome } from 
 import { replayDeps, snapshotDeps, type DepRecord } from './dep-replay'
 import { isPromise } from './is-promise'
 import { getOwner, routeError, registerWithOwner } from './owner'
-import { peekValue } from './scope'
+import { peekValue, writeValue } from './scope'
 import { makeAccessor, NODE, signal, signalWithNode, type Accessor, type Signal } from './signal'
 import { registerPending, lookupPending } from './pending'
 import { registerFailure, lookupFailure } from './failure'
@@ -710,13 +710,23 @@ function makeStageNode(
     resumeKind === 'fast-forward' || lastPublishedShapeIsPromise
 
   /** Write the published value. Scope-aware: inside an action this installs a
-   *  slot rather than touching committed state. */
+   *  slot rather than touching committed state. Writes through `writeValue`
+   *  directly rather than the published node's own setter — that setter's
+   *  stale-while-revalidate seeding reads the node's current value first to
+   *  compute a prior, and inside an action, with no slot installed yet, that
+   *  read hits the node's speculative recipe, which runs this stage's body
+   *  fresh. This stage already tracks its own prior in `lastResolvedValue`,
+   *  so that seeding is redundant for a derivation's own published node — it
+   *  exists for a plain signal, which has no other prior to fall back on. */
   const publishValue = (value: unknown): void => {
     if (isPromise(value)) {
-      setPublishedValue(value)
+      track(value as Promise<unknown>, lastResolvedOrUndefined())
+      writeValue(publishedNode, value)
+      requestFlush()
       return
     }
-    setPublishedValue(writeWrapsInPromise() ? resolvedPromise(value) : value)
+    writeValue(publishedNode, writeWrapsInPromise() ? resolvedPromise(value) : value)
+    requestFlush()
   }
 
   /** Everything a write implies that is not scope-aware. Runs immediately for a

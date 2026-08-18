@@ -372,7 +372,17 @@ export function committed<T>(s: () => T): T {
   return runInScope(ROOT_SCOPE, undefined, s)
 }
 
-/** Register a callback fired once when the current speculative scope closes:
+/** Register a close callback on an explicit scope, fired once when THAT scope
+ *  closes: with 'committed' when it commits, 'discarded' when it is discarded.
+ *  Nested actions need this — an inner scope committing only promotes its
+ *  writes to its parent, not to the committed world, so a callback that has
+ *  to wait for the committed world re-registers on the parent from inside its
+ *  own 'committed' callback rather than firing on the inner commit. */
+export function onSettleOn(scope: Scope, callback: (outcome: SettleOutcome) => void): void {
+  scope.cleanups.push(callback)
+}
+
+/** Register a callback fired once when the CURRENT speculative scope closes:
  *  with 'committed' when it commits, 'discarded' when it is discarded. A caller
  *  that does not care which face closed the scope ignores the argument. Throws
  *  outside an action, where the callback would never fire. */
@@ -381,7 +391,7 @@ export function onSettle(callback: (outcome: SettleOutcome) => void): void {
   if (scope === ROOT_SCOPE) {
     throw new Error('onSettle requires an active speculative scope')
   }
-  scope.cleanups.push(callback)
+  onSettleOn(scope, callback)
 }
 
 /**

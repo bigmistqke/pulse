@@ -1,5 +1,6 @@
 import { signal as valueSignal, type Accessor, type Setter } from './signal'
-import { buildStages } from './computed'
+import { buildStages, type StageHandle } from './computed'
+import { getCurrentScope, onSettleOn, ROOT_SCOPE, type Scope } from './scope'
 import type { PipelineRead, Resolved } from './async'
 
 /** A stage of any shape: sync, async, or generator. */
@@ -66,6 +67,38 @@ export function signal(...args: any[]): [Accessor<any>, any] {
   return signalFromStages(...(args as Array<(value: any) => unknown>))
 }
 
+/** Run `effects` when the written value reaches the committed world. At the
+ *  root that is now. Inside an action it is when that action commits — and for
+ *  a nested action, only once the value has been promoted all the way out,
+ *  since an inner commit promotes to its parent and the parent may still roll
+ *  back. Reading the ambient scope is a plain module-level variable read and
+ *  does not touch the graph, so callers may do it before anything else. */
+function whenCommitted(scope: Scope, effects: () => void): void {
+  if (scope === ROOT_SCOPE) {
+    effects()
+    return
+  }
+  onSettleOn(scope, (outcome) => {
+    if (outcome !== 'committed') return
+    whenCommitted(scope.parent ?? ROOT_SCOPE, effects)
+  })
+}
+
+/** Withdraw a queued run on every stage. Pure — nothing observes it — so
+ *  outside an action it runs immediately, before the value is even computed:
+ *  computing an update function's value can read the graph via `readPrev`, and
+ *  publishing does too, either of which would let a queued run slip past this
+ *  check and run anyway. Inside an action the write may still roll back, so
+ *  this is instead called again from inside `whenCommitted`, once the value
+ *  has genuinely reached the committed world — withdrawing eagerly here would
+ *  otherwise permanently lose a recompute an unrelated dependency change had
+ *  queued, if the action that happened to write in between then rolled back. */
+function withdrawQueuedRuns(built: StageHandle[], tail: StageHandle): void {
+  for (let i = built.length - 1; i >= 0; i--) {
+    built[i].withdrawQueuedRun(built[i] === tail)
+  }
+}
+
 /** Build a pipeline and return it with a setter. `computed` builds the same
  *  stages and drops the setter. */
 function signalFromStages(
@@ -75,38 +108,46 @@ function signalFromStages(
   const tail = built[built.length - 1]
 
   const setter: DerivedSetter<unknown> = (next) => {
-    // Withdraw first, before anything reads the graph. Computing the value can
-    // call readPrev, and reading the previous value brings the whole graph up
-    // to date, which runs the very run being withdrawn — the same hazard
-    // publishing has, one step earlier for an update function.
-    for (let i = built.length - 1; i >= 0; i--) {
-      built[i].withdrawQueuedRun(built[i] === tail)
-    }
+    const scope = getCurrentScope()
+
+    if (scope === ROOT_SCOPE) withdrawQueuedRuns(built, tail)
 
     const value =
       typeof next === 'function'
         ? (next as (prev: unknown) => unknown)(tail.readPrev())
         : next
 
-    // The value next, so a cleanup fired by abandoning below observes the
-    // write that triggered it rather than the value it replaced.
+    // Scope-aware: at the root this writes committed state; inside an action
+    // it installs a slot that promotes on commit and vanishes on a discard.
     tail.publishValue(value)
 
-    // Abandoning runs cleanup callbacks, so it happens after the publish — a
-    // cleanup that reads the signal sees the write that triggered it. It also
-    // has to happen BEFORE applyWriteEffects: abandoning the tail's own
-    // pre-write run clears its suspendedOn field, and if that ran after
-    // applyWriteEffects had already set suspendedOn to a just-written promise,
-    // it would clobber the write's own suspension bookkeeping rather than the
-    // stale one it is meant to clear.
-    for (let i = built.length - 1; i >= 0; i--) {
-      built[i].abandonRun()
-      built[i].clearFailure()
-    }
+    // Everything else touches state that is not scope-aware, so it waits
+    // until the value is committed. Abandoning a run cannot be rolled back,
+    // and the change-gate fields would otherwise be left describing a value
+    // that was rolled back.
+    whenCommitted(scope, () => {
+      // At the root this already ran above, before the value was computed —
+      // here only for a write that came from inside an action, where it could
+      // not run any earlier without touching the graph before the write was
+      // known to be committed.
+      if (scope !== ROOT_SCOPE) withdrawQueuedRuns(built, tail)
 
-    // Last, so nothing written here is touched again. A written promise sets
-    // up its own suspension in the same field abandonRun just cleared.
-    tail.applyWriteEffects(value)
+      // Abandoning runs cleanup callbacks, so it happens after the publish —
+      // a cleanup that reads the signal sees the write that triggered it. It
+      // also has to happen BEFORE applyWriteEffects: abandoning the tail's
+      // own pre-write run clears its suspendedOn field, and if that ran after
+      // applyWriteEffects had already set suspendedOn to a just-written
+      // promise, it would clobber the write's own suspension bookkeeping
+      // rather than the stale one it is meant to clear.
+      for (let i = built.length - 1; i >= 0; i--) {
+        built[i].abandonRun()
+        built[i].clearFailure()
+      }
+
+      // Last, so nothing written here is touched again. A written promise
+      // sets up its own suspension in the same field abandonRun just cleared.
+      tail.applyWriteEffects(value)
+    })
   }
 
   return [tail.accessor as Accessor<unknown>, setter]
