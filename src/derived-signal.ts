@@ -80,14 +80,22 @@ function signalFromStages(
         ? (next as (prev: unknown) => unknown)(tail.readPrev())
         : next
 
-    // The value first, so a cleanup fired by cancelling below observes the
+    // Withdrawing a queued run observes nothing, and has to happen before the
+    // publish: publishing seeds the tolerant read, which stabilizes, which
+    // would run the very run being withdrawn.
+    for (let i = built.length - 1; i >= 0; i--) {
+      built[i].withdrawQueuedRun(built[i] === tail)
+    }
+
+    // The value next, so a cleanup fired by abandoning below observes the
     // write that triggered it rather than the value it replaced.
     tail.publishValue(value)
     tail.applyWriteEffects(value)
 
-    // One run, spread across stages — abandon all of it.
+    // Abandoning runs cleanup callbacks, so it happens after the publish — a
+    // cleanup that reads the signal sees the write that triggered it.
     for (let i = built.length - 1; i >= 0; i--) {
-      built[i].cancelRun(built[i] === tail)
+      built[i].abandonRun()
     }
   }
 

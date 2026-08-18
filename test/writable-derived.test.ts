@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
 import { signal } from '../src/derived-signal'
-import { read, use } from '../src/async'
+import { latest, read, use } from '../src/async'
 import { isPending } from '../src/pending'
 import { onCleanup } from '../src/owner'
 
@@ -141,6 +141,58 @@ test('W13: abandoning a paused stage runs its cleanups', async () => {
   expect(isPending(todos)()).toBe(true)
   setTodos(['written'])
   expect(aborted).toEqual(['run 1'])
+})
+
+test('a cleanup fired by a write sees the value that was written', () => {
+  const seen: unknown[] = []
+  const [todos, setTodos] = signal(function* () {
+    onCleanup(() => seen.push(latest(todos)))
+    return yield* read(new Promise<string[]>(() => {}))
+  })
+
+  setTodos(['written'])
+  expect(seen).toEqual([['written']])
+})
+
+test('W19: invalidating then writing in one tick makes no request at all', async () => {
+  let requests = 0
+  const [version, setVersion] = signal(1)
+  const [todos, setTodos] = signal(function* () {
+    version()
+    requests++
+    return yield* read(Promise.resolve(['from server']))
+  })
+
+  await tick()
+  expect(use(todos)).toEqual(['from server'])
+  expect(requests).toBe(1)
+
+  setVersion(2)
+  setTodos(['pushed'])
+  await tick()
+
+  expect(requests).toBe(1) // the queued run was withdrawn
+  expect(use(todos)).toEqual(['pushed'])
+})
+
+test('W20: writing then invalidating in one tick lets the request win', async () => {
+  let requests = 0
+  const [version, setVersion] = signal(1)
+  const [todos, setTodos] = signal(function* () {
+    version()
+    requests++
+    return yield* read(Promise.resolve([`server ${requests}`]))
+  })
+
+  await tick()
+  expect(use(todos)).toEqual(['server 1'])
+
+  setTodos(['written'])
+  setVersion(2)
+  await tick()
+
+  expect(requests).toBe(2) // nothing was queued when the write landed
+  expect(use(todos)).toEqual(['server 2'])
 })
 
 test('W9: a write abandons a fetch that is in a middle stage', async () => {

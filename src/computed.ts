@@ -110,7 +110,8 @@ export type StageHandle = {
   publishValue: (value: unknown) => void
   applyWriteEffects: (value: unknown) => void
   readPrev: () => unknown
-  cancelRun: (isTail: boolean) => void
+  withdrawQueuedRun: (isTail: boolean) => void
+  abandonRun: () => void
 }
 
 /** Resumption strategy for a suspended stage — see the `computed` JSDoc. */
@@ -311,6 +312,19 @@ function makeStageNode(
   // registry entry constructed below.
   const [pendingSig, setPendingSig] = signal(false)
 
+  // Plain mirror of pendingSig, kept in lockstep by `setPending` below. A
+  // cancellation check needs to know whether a run is pending WITHOUT reading
+  // any signal: reading a pulse signal accessor outside a reactive context
+  // (`readValue` in scope.ts) unconditionally calls `stabilize()`, which would
+  // run the very queued recompute the check is trying to withdraw before it
+  // gets the chance. `pending` is read instead of `pendingSig()` anywhere that
+  // withdrawal depends on the answer.
+  let pending = false
+  const setPending = (next: boolean): void => {
+    pending = next
+    setPendingSig(next)
+  }
+
   // Generator-only kick: drives body re-run so a paused generator's retained
   // dependencies get replayed and the generator resumes forward. Non-generator
   // stages never trigger this (they publish via setPublishedValue directly).
@@ -336,7 +350,7 @@ function makeStageNode(
     if (suspendedOn === p) return
     suspendedOn = p
     suspendedInput = input
-    setPendingSig(true)
+    setPending(true)
     if (lastResolvedValue === UNRESOLVED) {
       track(p)
       setPublishedValue(p)
@@ -376,7 +390,7 @@ function makeStageNode(
             // Pending upstream: mirror suspension on the promise itself.
             stashedResolution = null
             suspendedOn = null
-            setPendingSig(true)
+            setPending(true)
             if (lastResolvedValue === UNRESOLVED) {
               track(input as Promise<unknown>)
               setPublishedValue(input)
@@ -397,7 +411,7 @@ function makeStageNode(
           const r = stashedResolution
           stashedResolution = null
           suspendedOn = null
-          setPendingSig(false)
+          setPending(false)
           if (r.kind === 'rejected') {
             // Park the failure as graph state; leave publishedValue holding the
             // stale value so a tolerant read can still degrade to it.
@@ -501,7 +515,7 @@ function makeStageNode(
             // `suspendedOn` reflects (it was just cleared above), so a
             // later discard of `retainedGen` must not touch it again.
             genOwnsSuspension = false
-            setPendingSig(false)
+            setPending(false)
             if (resumesGenerator) {
               // Stash the fulfilled value for the retained generator's next
               // resumption, then kick → body re-runs → sees the paused
@@ -529,7 +543,7 @@ function makeStageNode(
           } else if (state.status === 'rejected') {
             suspendedOn = null
             genOwnsSuspension = false
-            setPendingSig(false)
+            setPending(false)
             if (resumesGenerator) {
               // Stash the rejection for the retained generator's next
               // resumption, so it is thrown at the pause point — the
@@ -551,7 +565,7 @@ function makeStageNode(
 
       // Sync result.
       suspendedOn = null
-      setPendingSig(false)
+      setPending(false)
       // Publish a promise when the stage is async-coloured — a generator, or a
       // synchronous stage fed by an async upstream — so the read stays a Promise.
       // A purely synchronous stage (sync input, sync body) publishes the bare
@@ -594,7 +608,7 @@ function makeStageNode(
         suspendOn(e.promise, /* input */ undefined, (state) => {
           if (state.status === 'fulfilled') {
             suspendedOn = null
-            setPendingSig(false)
+            setPending(false)
             // Re-run body via kick (resolved-value cache is meaningless here
             // because the throw means body never returned — re-execute fully).
             // Stash the resolved value first so that SWR works: if the body
@@ -616,7 +630,7 @@ function makeStageNode(
             setKick(++kickCount)
           } else if (state.status === 'rejected') {
             suspendedOn = null
-            setPendingSig(false)
+            setPending(false)
             setFailureSig(state.reason)
             setKick(++kickCount)
           }
@@ -686,31 +700,58 @@ function makeStageNode(
   }
 
   /**
-   * Abandon this stage's outstanding run. `isTail` is true for the stage a write
-   * lands on, which is left clean because the write supplied its value; every
-   * other stage is left needing recomputation, because its input moved and its
-   * published value no longer reflects that.
+   * Withdraw a run that is queued but has not started — the case where an
+   * invalidation scheduled a recompute earlier in the same tick and a write
+   * now supersedes it before it ever ran. `isTail` is true for the stage a
+   * write lands on, which is left clean because the write supplied its value;
+   * every other stage is left needing recomputation, because its input moved
+   * and its published value no longer reflects that.
    *
-   * Refuses a stage whose own body is the caller. Discarding a generator calls
-   * its `return` method, and calling that on a generator which is currently
-   * executing raises a TypeError.
+   * Pure: nothing observes a recompute that never ran, so this has to happen
+   * before the value is published. Publishing seeds the tolerant read, which
+   * reads a pulse signal outside any reactive context, which stabilizes the
+   * whole graph — and that stabilize would run the very queued recompute this
+   * is trying to withdraw, before withdrawal gets the chance. For the same
+   * reason this reads no signal itself: `pending` is the plain closure mirror
+   * of `pendingSig`, not the accessor.
+   *
+   * Refuses a stage whose own body is the caller.
    */
-  const cancelRun = (isTail: boolean): void => {
+  const withdrawQueuedRun = (isTail: boolean): void => {
     const self = depTracker as R3Computed<unknown>
     if (r3GetContext() === self) return
     // A stage can be pending without holding a generator or a promise of its
     // own: a stage downstream of a suspended one mirrors that suspension (see
-    // the `isPromise(input)` branch above) purely by copying `pendingSig`
-    // true, with nothing local to show for it. That mirrored state is still
-    // outstanding work to abandon.
-    const hadWork = retainedGen !== null || suspendedOn !== null || r3Untrack(pendingSig)
+    // the `isPromise(input)` branch above) purely by copying `pending` true,
+    // with nothing local to show for it. That mirrored state is still
+    // outstanding work, so a queued recompute for it still needs withdrawing.
+    const hadWork = retainedGen !== null || suspendedOn !== null || pending
     if (!hadWork && !isRecomputeQueued(self)) return
+    cancelRecompute(self, !isTail)
+  }
+
+  /**
+   * Abandon a run that is executing or paused — an in-flight fetch, or a
+   * generator suspended on one. Discarding a generator calls its `return`
+   * method, which runs its cleanup callbacks, so this happens after the value
+   * is published: a cleanup that reads the signal it was abandoned by must see
+   * the write that triggered the abandonment, not the value it is replacing.
+   *
+   * Refuses a stage whose own body is the caller. Discarding a generator calls
+   * its `return` method, and calling that on a generator which is currently
+   * executing raises a TypeError.
+   *
+   * No guard beyond re-entrancy: discarding when there is nothing to discard,
+   * and clearing fields that are already clear, are both harmless.
+   */
+  const abandonRun = (): void => {
+    const self = depTracker as R3Computed<unknown>
+    if (r3GetContext() === self) return
     discardGen()
     suspendedOn = null
     suspendedInput = undefined
     stashedResolution = null
-    setPendingSig(false)
-    cancelRecompute(self, !isTail)
+    setPending(false)
   }
 
   // User-facing accessor: reads depTracker (to register as sub so dep
@@ -791,6 +832,7 @@ function makeStageNode(
     publishValue,
     applyWriteEffects,
     readPrev,
-    cancelRun,
+    withdrawQueuedRun,
+    abandonRun,
   }
 }
