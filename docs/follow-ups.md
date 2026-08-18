@@ -123,6 +123,8 @@ Severity: **(small)** trivial cleanups · **(worth)** worth doing soon · **(lat
   Source: generator resumption work.
 - **(later) `Scope.status` is a write-only field — the lifecycle is recorded but never enforced.** `status: 'open' | 'committed' | 'discarded'` is assigned by `commit()` and `discard()` and read **nowhere** in `src/`. Nothing rejects `commit()` on a discarded scope, `discard()` on a committed one, or a double-`commit()`. (A double-`discard()` is safe only because `cleanups.length = 0` empties the array first — safe by accident, not by design.) Either gate the transitions on `status` — and decide deliberately whether an invalid transition throws or no-ops — or drop the field. As written it reads like a guarantee the code doesn't make.
   Source: as above.
+- **(later) An action body that calls its own handle's `retry()` synchronously, during its own execution, is not reentrancy-safe.** `action()`'s `retry()` does `currentSettled = runAttempt()` with no guard against `runAttempt()` itself (directly or via something the body calls) triggering another `retry()` call before the outer assignment completes — the outer assignment can then clobber a nested, more recent one. Not currently reachable through any code in this repository (a body would have to close over its own not-yet-returned `ActionHandle`, which does not happen anywhere today), and predates the generation-counter fix for `error()`'s two retry-related bugs, which does not touch this.
+  Source: independent verification pass during review of the `ActionHandle.retry()` generation-counter fix, 2026-08-18.
 
 ### r3-side findings
 
