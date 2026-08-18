@@ -4,6 +4,8 @@ A derivation that also has a setter. `signal` accepts the same stage list `compu
 
 This document records the conclusions reached in a design discussion on 2026-08-18. The semantics are settled and the construction approach is settled. Several mechanical questions are still open and are listed at the end. Nothing has been implemented.
 
+The scenarios this design is checked against are catalogued as group W in [`docs/pulse/scenarios.md`](../../pulse/scenarios.md#w-writes-into-derivations-signalfn). W10 has already changed the design once.
+
 An accompanying visual summary of the same material is published at <https://claude.ai/code/artifact/9585d141-a661-47eb-8f45-5ede7ea4ec99>.
 
 ## The problem
@@ -36,6 +38,60 @@ The third is to **let the fetch finish and then apply the write on top of it**. 
 
 **Decision: the first.** A write cancels the run in progress, exactly the way a dependency change does.
 
+"In progress" covers three states, and all three are cancelled:
+
+- **executing or waiting on a promise** — the stage is suspended on a promise it will never publish
+- **paused** — a generator stage is holding a partial computation
+- **queued** — a dependency changed but the flush has not happened yet, so the body has not re-run
+
+The third case is easy to miss and produces the behaviour we rejected. `setVersion` does not run the body; it marks it dirty and schedules a flush. So a write in the same synchronous block finds no promise and no generator to cancel, the flush then runs the body, and two seconds later it publishes over the write.
+
+Handling the queued case is also what makes the two possible orderings come out right, without a rule about either:
+
+```ts
+// invalidate, then write — "the list changed, and here is what it is"
+setVersion(v => v + 1)
+setTodos([buy, call, walk])
+// at the moment of the write a run is queued, so it is cancelled. No fetch happens.
+
+// write, then invalidate — "show this now, then go and refresh"
+setTodos(prev => [...prev, saved])
+setVersion(v => v + 1)
+// at the moment of the write nothing is queued. The later change queues a run,
+// which happens normally and wins.
+```
+
+The question is asked at the moment of the write, so program order decides.
+
+Cancelling a queued run needs a change to r3, which pulse consumes as a pinned fork (`github:bigmistqke/r3` in `package.json`). `stabilize` recomputes every node in the heap without consulting its flags, and `recompute` has no early exit, so clearing `Dirty` and `Check` from outside achieves nothing; the node has to leave the heap, and `deleteFromHeap` is internal. The addition:
+
+```ts
+export function cancelRecompute(el: Computed<unknown>): boolean {
+  // A node in the middle of its own run is not ours to cancel — clearing flags
+  // here would wipe RecomputingDeps and corrupt the dependency rebuild.
+  if (el.flags & ReactiveFlags.RecomputingDeps) return false
+
+  const pending =
+    (el.flags & (ReactiveFlags.Dirty | ReactiveFlags.Check | ReactiveFlags.InHeap)) !== 0
+
+  deleteFromHeap(el)
+  el.flags = ReactiveFlags.None
+  return pending
+}
+```
+
+`deleteFromHeap` already exists and is exercised by the recompute path, so this needs a caller and an export rather than new logic. [ADR 0005](../../adr/0005-r3-exports-unwatched.md) is the precedent for pulse asking the fork for an export.
+
+Solid has the same feature and reaches for the same lever. `createSignal(fn)` is its memo form, and its setter is `setMemo`, which writes the value and then calls `suppressComputedRecompute` — which removes the node from the dirty queue and clears its dirty and check flags, described in its own comment as being for "when a manual write should win over dependency changes queued in the same tick" (`packages/solid-signals/src/core/core.ts:983` and `:998`). Two details of theirs are worth carrying over and one is not:
+
+- The write does not touch the node's dependency list. A written memo keeps the callback's dependencies and re-runs when one of them next changes. Same here.
+- Their suppression is scoped to the tick — a manual-write flag is cleared when the scheduler drains — so it defends against changes queued in the same tick and nothing further. Same scope here, but reached differently: removing from the heap and clearing the flags leaves nothing set, so it is already one-shot and needs no flag of its own. Solid carries that flag for its pending-value and projection machinery, which r3 does not have.
+- Solid's memo is a single node, so `setMemo` has no upstream to consider. It offers no guidance on what a write should do to earlier stages of a chain; that question is settled below by treating the stage chain as computeds for dependency purposes and as one unit for lifecycle purposes.
+
+An alternative that needs no r3 change was considered and rejected: snapshot the body's dependencies at write time, and on the next run replay them and return early if none changed. It works, and both helpers already exist for generator resumption, but a suppressed run rebuilds the node's dependency list from the recorded set alone — so it adds a second caller to a replay path that already has a recorded problem with re-linking dependencies a fresh generator no longer reads (see the entry in [`docs/follow-ups.md`](../../follow-ups.md)). Leaving the dependency graph untouched is worth an export.
+
+Three things to verify when implementing the r3 side: how removal interacts with `markHeap`'s marking latch; that nothing depends on `maxDirty` staying tight, since `deleteFromHeap` does not lower it; and whether a setter called from inside the derivation's own body — which the `RecomputingDeps` guard turns into a no-op — deserves a warning.
+
 The third behaviour remains available in user space once stages can read their own previous value, by reconciling the incoming server list against it. See [Deferred](#deferred).
 
 ### A write inside an action stays invisible until the action commits
@@ -44,25 +100,111 @@ A write made inside an `action` lands in that action's speculative scope and is 
 
 This is not changed by the writable derived signal. Deliberately leaking a provisional value out of an action before it commits is what `optimistic` exists for, and it stays the opt-in mechanism for that. The alternative — making every write inside an action immediately visible outside it — would give optimistic user interface behaviour by default and leave `optimistic` with nothing to do, at the cost of removing the isolation that makes an action's rollback meaningful.
 
-### The update function receives the raw published read
+### The update function receives the last resolved value, not the published read
 
-When the setter is called with a function rather than a value, that function receives the same thing the accessor returns, with no unwrapping:
+Resolution follows one rule, which the pipeline already applies to stage inputs but had never been stated:
+
+```
+inside a stage, and on the write side   →  Resolved<T>, no colour
+on the read side                        →  T | Promise<T>, colour visible
+```
+
+Stage N's parameter is already `Resolved<stage N-1>` ([`src/computed.ts:20-42`](../../../src/computed.ts)), because pulse drives the resumption and hands the stage a settled value. The same applies to what an update function is handed.
 
 ```ts
 type DerivedSetter<T> = (
-  next: T | Awaited<T> | ((prev: T | undefined) => T | Awaited<T>)
+  next: T | Awaited<T> | ((prev: Awaited<T> | undefined) => T | Awaited<T>)
 ) => void
 ```
 
-So `prev` is `T | Promise<T> | undefined`. It is a promise whenever the accessor would return a promise. It is `undefined` when the derivation has not produced anything yet — the stage's published value is still the internal `UNRESOLVED` sentinel ([`src/computed.ts:137`](../../../src/computed.ts)), which is mapped to `undefined` at the setter boundary so the sentinel never escapes.
-
-This is the same convention as the previous value a memo body receives: the last value, `undefined` on the first run, and the caller writes the guard.
+`prev` is the stage's `lastResolvedValue` — "the last value this stage actually resolved to", which is already tracked and is only ever a real resolved value ([`src/computed.ts:145`](../../../src/computed.ts)) — with the `UNRESOLVED` sentinel mapped to `undefined` so it never escapes. Never a promise, never the sentinel.
 
 ```ts
 setTodos(prev => [...(prev ?? []), saved])
 ```
 
-Reading the published value does **not** trigger the derivation's first evaluation. A stage body is lazy, so on a signal nothing has read yet the setter finds no value and hands the update function `undefined` rather than running the body to produce one. One consequence: a stage that legitimately resolves to `undefined` is indistinguishable from a stage that has never run.
+This needs no scheduling control, because nothing is being resolved: the setter hands back the last thing that already resolved. During a refetch that is the stale value, which is the same thing `latest` gives, so the two agree by construction.
+
+Since the setter belongs to the pipeline's output, `prev` is specifically the **tail's** last resolved value. That makes it the same value as the tail stage's own `previous` parameter, once that lands — the derivation and a write are two ways of producing the tail's next value, and both receive the tail's current value under the same type:
+
+```ts
+signal(
+  () => version(),
+  function* (v) { return yield* read(api.list(v)) },
+  (server, { previous }) => reconcile(previous, server),   // the derivation produces it
+)
+
+setTodos(prev => [...(prev ?? []), saved])                 // a write produces it
+```
+
+A write updates `lastResolvedValue`, so a write feeds forward into the next derivation run's `previous`.
+
+Reading the last resolved value does **not** trigger the derivation's first evaluation. A stage body is lazy, so on a signal nothing has read yet the setter hands the update function `undefined` rather than running the body to produce something. One consequence: a stage that legitimately resolves to `undefined` is indistinguishable from a stage that has never run.
+
+**What this replaces.** An earlier decision made `prev` the raw published read, `T | Promise<T> | undefined`, on the grounds that a promise write could then be chained onto an in-flight one. Walking the scenarios showed the cost: for any async derivation `prev` was always a promise, so every update needed `use(prev)` or a `.then` chain — and on a first load with nothing cached, `use(prev)` throws `NotReadyYet` out of a setter that has no boundary to catch it. Handing back the last resolved value removes that case rather than mitigating it.
+
+**What it costs.** Chaining onto an in-flight promise from inside the update function is no longer expressible. It remains reachable through the accessor:
+
+```ts
+setTodos(untrack(todos).then(list => [...list, saved]))
+```
+
+which still works, because a write cancels pulse's *publishing* of that fetch, not the promise object already captured.
+
+**What is unchanged.** The setter still accepts `T | Promise<T>` — writing a promise is how you say "the value is whatever this resolves to", and `isPending` and `use` follow it. And the read type is untouched, so `use`, `latest`, `isPending` and `<Loading>` behave exactly as before. The asymmetry is deliberate: what you are handed is what is known, what you hand back is whatever you have.
+
+### Cancellation waits until the written value reaches the committed world
+
+The written value is scope-aware: inside an action it lands in that action's slot and is dropped if the action is discarded. Cancelling the run is not — the retained generator and the suspended-on promise are plain per-stage variables, and discarding a generator runs its `finally` blocks and its cleanups, which cannot be undone.
+
+If a write cancelled the run at the moment it was made, a discarded action would leave the node holding its pre-write value, not pending, with no run in progress and nothing scheduled to start one. A refresh the user began before the action would have silently disappeared because an unrelated action failed.
+
+**Decision: a write made inside an action registers its cancellation and performs it only if the action commits.**
+
+```ts
+const setter = (next) => {
+  const value = typeof next === 'function' ? next(tail.readPrev()) : next
+
+  if (getCurrentScope() === ROOT_SCOPE) {
+    cancelAllStages()                        // an ordinary write: cancel now
+  } else {
+    onSettle(outcome => {                    // a write inside an action:
+      if (outcome === 'committed') {         // cancel only if it commits
+        cancelAllStages()
+      }
+    })
+  }
+
+  tail.publishWrite(value)
+}
+```
+
+The reasoning is that the committed world and an action's speculative scope are separate, and a speculative write does not reach across to kill work the committed world is waiting on. The derivation keeps running, lands when it lands, and publishes. The write becomes a fact about the committed world only when the action commits — which is also the first moment there is anything for cancellation to protect.
+
+Ordering inside `commit` is already correct for this. Promotions are applied, then close callbacks fire, then the flush ([`src/scope.ts:321-341`](../../../src/scope.ts)), so cancellation runs after the value has landed and the abandoned promise has no window to publish in.
+
+Two consequences follow, both accepted:
+
+- **A value can appear and then be replaced.** If the derivation lands while the action is still open, everyone outside the action sees that result, and the write overwrites it at commit.
+- **The promoted value was computed against a stale base.** An update function reads the previous value at write time. If the derivation lands afterwards, the value promoted at commit was built on data that is now out of date. This is the same rule as a write cancelling a run, applied at commit time.
+
+Inside the action, the value reads as the written one while `isPending` still reports true, because the pending flag describes the committed world's run, which genuinely is still going. Under this separation that is an accurate report of two different things rather than an inconsistency.
+
+One piece of machinery is missing. With nested actions, an inner scope committing only promotes the value to its parent, not to the committed world, so the callback has to re-register on the parent and cancel only when the value actually reaches the root. `onSettle` always uses the ambient scope and throws at the root ([`src/scope.ts:367-373`](../../../src/scope.ts)), so this needs an internal variant that takes the scope explicitly.
+
+```ts
+const cancelWhenValueReachesRoot = (scope) => {
+  if (scope === ROOT_SCOPE) {
+    cancelAllStages()
+    return
+  }
+  onSettleOn(scope, outcome => {
+    if (outcome === 'committed') {
+      cancelWhenValueReachesRoot(scope.parent ?? ROOT_SCOPE)
+    }
+  })
+}
+```
 
 ### A write clears a parked failure
 
@@ -180,13 +322,39 @@ The update function is resolved **before** anything is cancelled, so an update f
 
 ### What `cancelRun` does to one stage
 
-Three things, all local to that stage:
+Four things, all local to that stage:
 
 - **Discard its retained generator.** This runs the generator's `finally` blocks and its registered cleanups, by way of the existing `discardGen` ([`src/computed.ts:219-236`](../../../src/computed.ts)). A stage that wires an `AbortController` through `onCleanup` therefore aborts its request on a write, the same as on a dependency change.
 - **Clear the promise it is suspended on.** The settle handler checks whether the promise it fired for is still the one the stage is suspended on ([`src/computed.ts:329`](../../../src/computed.ts)); clearing the field makes that check fail, so the abandoned promise publishes nothing when it settles.
 - **Set its pending flag to false.**
+- **Take it out of the recompute heap**, so a run that was queued but had not started does not run either.
 
-It does **not** write to that stage. An upstream stage's published value stays where it was, and it re-runs on its next dependency change, the same as the tail.
+It does **not** write to that stage. An upstream stage's published value stays exactly where it was.
+
+### The state a cancelled stage is left in
+
+This is the part scenario W10 corrected. Cancelling must leave each stage in the state its inputs imply, and only the tail gets an exemption, because a write supplied its value.
+
+```
+the tail                  clean      out of the heap, flags cleared.
+                                     The write is its value, so there is
+                                     nothing to recompute.
+
+an upstream stage that    dirty      out of the heap, flags set to Dirty.
+had a run in progress                It recomputes when something next
+                                     reads it.
+
+an upstream stage that    untouched  no run to cancel, and no reason to
+was idle                             invalidate it.
+```
+
+Leaving an upstream stage clean produces a pipeline that is permanently wrong. Suppose the fetch is in a middle stage and the tail also reads a signal the middle stage knows nothing about — a display filter, say. A dependency change starts the fetch, a write lands and cancels it, and the middle stage is left clean while holding data for an input that has since moved. When the filter changes later, only the tail recomputes; it reads the middle stage, finds it clean, and serves the old data. The write is gone, the refresh is gone, and nothing is scheduled to reconcile the two — the first stage says one version, the middle stage holds another, forever.
+
+Marking the cancelled upstream stage dirty fixes it without any eager work. "Dirty but not in the heap" is a real state: `stabilize` only walks the heap, so nothing recomputes at the next flush, but `read` checks the flags of any computed dependency and calls `updateIfNecessary`, which recomputes a dirty one ([`../r3/src/index.ts:333-352`](../../../../r3/src/index.ts) and `:202-220`). So the stage stays dormant until the tail actually needs it, and then it refetches while the tail holds the written value under stale-while-revalidate.
+
+This means the r3 addition needs two behaviours rather than one — clear the flags, or leave the node dirty — either as a parameter or as two exported functions.
+
+The alternative of not cancelling upstream stages at all is coherent too: the middle stage keeps fetching and publishes when it lands, and the tail recomputes from real data. But that is the "let the fetch finish and win" behaviour rejected in the settled semantics, reached by moving the fetch one stage up — and which stage holds a fetch is a detail of how someone chose to split their pipeline, not something the semantics should turn on.
 
 ### What `publishWrite` must update
 
@@ -203,15 +371,52 @@ The write itself goes through the existing scope-aware setter from `signalWithNo
 
 These were identified but not resolved.
 
-**The same-tick race.** If `setVersion` and `setTodos` land in the same tick, the body has not re-run yet when the write arrives — there is no run in progress to cancel, only a queued recompute. The flush then runs the body, refetches, and eventually publishes over the write. Suppressing a queued recompute needs a dependency snapshot taken at write time (`snapshotDeps` in [`src/dep-replay.ts:32`](../../../src/dep-replay.ts)) and a replay on the next body run that lets the run proceed only if a dependency genuinely differs from what it was at the moment of the write. Solid handles the equivalent case by suppressing the queued recompute directly.
-
 **What the stage's previous value is while a written promise is in flight.** Either the last settled value, matching how a stage's own pending promise behaves under stale-while-revalidate, or nothing at all for the duration. The first keeps one meaning everywhere: the last settled value of this stage, never a promise, never absent once the stage has resolved at least once. This only becomes decidable once the stage signature question below is taken up.
 
-**A write before the first read.** Neither setter form materialises the derivation, so a write to a signal nothing has read yet lands, the body has still never run, and the first read runs it and publishes over the write. This follows from the settled decision that the update function receives `undefined` rather than forcing an evaluation, and it is recorded here as a consequence rather than a separate choice. It has not been tested against a real usage.
+**Two defects found by walking the scenarios, both with obvious fixes but neither designed yet.**
 
-**Cancellation is not speculation-aware.** The write is scope-aware and rolls back on discard, but `cancelRun` mutates plain closure variables — the retained generator and the suspended-on promise are not per-scope state. So a write inside an action that is later discarded would still have irreversibly discarded the derivation's generator and abandoned its in-flight promise. The likely resolution is that cancellation is part of the write's committed effect and should therefore be deferred to commit rather than run at write time, but this has not been worked through. Note also that the speculation path builds fresh generators through `defaultRecipe` and does not support asynchronous stages today ([`src/computed.ts:262-278`](../../../src/computed.ts)).
+A write clears the failure on the stage it lands on, but the failure query walks upstream through the registry the same way the pending query does ([`src/computed.ts:684-686`](../../../src/computed.ts)). So a middle stage's parked failure still reports after a write, and a `<Failed>` boundary keeps rendering its fallback over a signal that now holds a good value. A write has to clear the failure on every stage, the same way it cancels every stage (scenario W5).
+
+Cancelling discards the retained generator by calling its `return` method, which runs its `finally` blocks and its registered cleanups synchronously, inside the setter call and before the value being written is published. A cleanup that writes a signal therefore executes in the middle of another write. This is the re-entrancy shape of category K arriving through a new door, and it needs an explicit decision about ordering rather than a fix (scenario W13).
+
+A third was found and is not a defect: a write to a signal nothing has read yet was expected to be erased by the first read. It is not — stale-while-revalidate keeps the written value published while the first fetch is in flight, so seeding from a cache works (scenario W3).
+
+**Asynchronous stages under speculation.** The speculation path builds fresh generators through `defaultRecipe` and hands back a still-pending promise rather than suspending on it, because the suspend and settle machinery is driven by r3 and does not run inside a speculation ([`src/computed.ts:262-278`](../../../src/computed.ts)). So a derivation read for the first time inside an action cannot resolve there. This predates the writable derived signal and is not made worse by it, but it bounds what a write inside an action can be built on.
+
+**A write from inside the derivation's own body throws.** Cancelling calls the retained generator's `return` method, and calling that on a generator which is currently executing raises `TypeError: Generator is already running`. The r3 addition described above already refuses when the node is mid-run; pulse needs the equivalent guard, and then a decision about whether such a write should be applied, ignored, or rejected with a readable error (scenario W22).
 
 **Sections not yet designed.** The discussion covered the surface, the setter, cancellation, and the write's bookkeeping. Not yet covered: the full speculation interaction, the failure and pending registry integration beyond what is noted above, and the test plan.
+
+## Designed here, shipped separately: `cancel(x)`
+
+A public verb that abandons the run in progress on a derivation.
+
+```ts
+cancel(todos)
+```
+
+It performs the same three things per stage that a write performs before publishing — discard the retained generator, running its `finally` blocks and cleanups so a wired abort controller fires; clear the promise the stage is suspended on so its settle handler finds itself superseded; clear the pending flag. The node keeps its current published value and re-runs on its next dependency change.
+
+So the two neighbouring verbs are:
+
+```
+reset(x)     stop the run, clear the failure, run again
+cancel(x)    stop the run
+```
+
+`reset` already exists on the failure registry entry ([`src/computed.ts:677-683`](../../../src/computed.ts)) and differs only by bumping the kick that forces a fresh run.
+
+**Why it is separate from the write.** A write says what the value is now. Cancelling says to stop the work in progress. Those are usually wanted together, which is why the setter bundles them, but not always — and only an explicit verb can express the case where they come apart.
+
+The case that motivated it: under the commit-deferred cancellation above, a derivation that lands while an action is open publishes its result and is then overwritten when the action commits, so a value appears and is replaced. A caller who does not want that calls `cancel` inside the action and accepts the consequence — if the action is discarded, the run is gone and only a dependency change will start another. That is a decision the caller made rather than a surprise, which is what distinguishes it from cancelling implicitly on every speculative write.
+
+**It stands alone.** `cancel(searchResults)` when the search box is cleared, `cancel(feed)` when navigating away. It applies to any derivation, not only a writable one, which is why it ships on its own.
+
+**Where it lives.** It needs a registry lookup, because the caller holds an accessor rather than the pipeline that built it. The pending registry is the natural home: its entry already describes in-flight state and already carries the `upstream` link that `isPending` walks ([`src/pending.ts:43-48`](../../../src/pending.ts)), so walking that chain cancels every stage with no new wiring. Given that walk exists, the setter should call the same internal function rather than keep a second path to the same operation through the builder's stage list.
+
+**Not rolled back by a discard.** `cancel` called inside an action takes effect immediately and stays in effect if the action is discarded. It belongs with the side effects an action cannot undo, in the same way a request already sent cannot be unsent.
+
+**One documented hazard.** `cancel(todos)` affects every consumer of `todos`, since it is one shared node. Within a pipeline this is safe because intermediate stages are private, but across components it is not something the caller can scope. This is already true of `reset` and needs documenting rather than solving.
 
 ## Deferred
 
@@ -222,4 +427,11 @@ Two facts about its current state:
 - The blocker is gone. Giving stages an abort signal was previously blocked because a request that must be cancelled is created inside the stage body by definition, and under restart-from-top resumption a generator that built its promise inside its own body never converged ([ADR 0013](../../adr/0013-generator-stages-resume-with-dependency-replay.md), and the resolved entry in [`docs/follow-ups.md`](../../follow-ups.md)). ADR 0013 replaced restart with resume, so that no longer holds.
 - The teardown hook already exists. Discarding a generator calls its `return` method, which runs its `finally` blocks, and drains its registered cleanups ([`src/computed.ts:191-216`](../../../src/computed.ts)). So `onCleanup(() => controller.abort())` inside a generator stage works today; a parameter would only make it the default rather than something each stage wires by hand.
 
-`previous` would hand a stage its own `lastResolvedValue`. Per stage, not per pipeline — each stage already keeps that field, so no new bookkeeping is required. A write reaches only the tail, so an intermediate stage's previous value is never affected by one. Two questions were raised and left unanswered: whether a write feeds forward into the tail's previous value on the next run (the argument for is that it is what makes reconciling a refetch against local state possible, which is the user-space route to the "let the fetch finish and then apply the write on top" behaviour rejected as a default), and what it holds while a written promise is in flight.
+`previous` hands a stage its own `lastResolvedValue`. Per stage, not per pipeline — each stage already keeps that field, so no new bookkeeping is required, and it is a resolved value rather than a promise, per the resolution rule in the settled semantics above.
+
+Two things about it are settled by the setter's `prev`, which is the same value for the tail:
+
+- **It is the tail's `previous` that a write lands on.** The derivation and a write are two ways of producing the tail's next value, and both receive the tail's current value under the same name and type. An intermediate stage's previous value is never affected by a write, since a write reaches only the tail.
+- **A write feeds forward.** A write updates `lastResolvedValue`, so the next derivation run sees it as `previous`. This is what makes reconciling a refetch against local state possible — the user-space route to the "let the fetch finish and then apply the write on top" behaviour that was rejected as a default.
+
+One question remains: what it holds while a written promise is in flight. See the open questions above.
