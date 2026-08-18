@@ -20,7 +20,8 @@ export {
   type FlushFn,
   type Scheduler,
 } from './scheduler'
-export { signal, type Accessor, type Setter, type Signal } from './signal'
+export { type Accessor, type Setter, type Signal } from './signal'
+export { signal, type DerivedSetter } from './derived-signal'
 export { optimistic } from './optimistic'
 export { action, committed, onSettle, type SettleOutcome } from './scope'
 export { Failed, For, Fragment, h, Loading, Match, render, Show, Switch, useLoading, type Truthy } from './dom'

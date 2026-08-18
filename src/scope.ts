@@ -227,6 +227,18 @@ export function readValue<T>(node: Node<T>): T {
   return (node.backing as R3Signal<T>).value
 }
 
+/** Read a node's value from the current scope WITHOUT running its recipe on a
+ *  miss and without forming any dependency. A speculative miss on a node that
+ *  has a recipe would evaluate it inside the speculation, where the suspend and
+ *  settle machinery does not run — so anything asynchronous could not resolve.
+ *  Falling through to the committed value avoids that entirely. */
+export function peekValue<T>(node: Node<T>): T {
+  const slot = readSlot(node, getCurrentScope())
+  if (slot !== undefined && slot.cached !== DIRTY) return slot.cached as T
+  stabilize()
+  return (node.backing as R3Signal<T>).value
+}
+
 /** Unlink a slot's existing dependency edges before it is recomputed, so edges
  *  don't accumulate across recomputes (mirrors r3's recompute clearing deps). */
 function resetSlotDeps(slot: Slot): void {

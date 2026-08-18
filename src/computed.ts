@@ -4,6 +4,7 @@ import { runStage, resumeStage, takeGeneratorCleanups, type StageOutcome } from 
 import { replayDeps, snapshotDeps, type DepRecord } from './dep-replay'
 import { isPromise } from './is-promise'
 import { getOwner, routeError, registerWithOwner } from './owner'
+import { peekValue } from './scope'
 import { makeAccessor, NODE, signal, signalWithNode, type Accessor, type Signal } from './signal'
 import { registerPending, lookupPending } from './pending'
 import { registerFailure, lookupFailure } from './failure'
@@ -66,32 +67,49 @@ export function computed<A, B, C, D, E>(
 // `any` here is the standard implementation-signature widening for the
 // variadic overloads above; narrowing to `unknown` breaks the overload contract.
 export function computed(...stages: Array<(value: any) => unknown>): Signal<unknown> {
+  const built = buildStages(stages)
+  return built[built.length - 1].accessor
+}
+
+/**
+ * Build a pipeline of stages and return a handle per stage, in order. Disposal
+ * walks stages in creation order (upstream to downstream). Each
+ * `unwatched(stageN)` removes that node from its dependencies' subscriber lists;
+ * if stage N+1 was the only consumer of stage N, stage N would have auto-cleaned
+ * via r3's `unwatched` cascade anyway. Every stage is disposed explicitly to be
+ * robust against external consumers of intermediate stages (though pulse does
+ * not currently expose them).
+ *
+ * Exported so the writable form can build the same pipeline and keep the
+ * per-stage handles, which is what lets its setter reach every stage.
+ */
+export function buildStages(stages: Array<(value: any) => unknown>): StageHandle[] {
   if (stages.length === 0) {
     throw new Error('computed requires at least one stage')
   }
-
-  // Build the chain: stage 0 has no input; later stages read the previous accessor.
-  let prevAccessor: Signal<unknown> | null = null
-  const r3Nodes: R3Computed<unknown>[] = []
-  for (let i = 0; i < stages.length; i++) {
-    const stage = stages[i]
-    const inputAccessor = prevAccessor
-    const { accessor, r3Node } = makeStageNode(stage, inputAccessor)
-    r3Nodes.push(r3Node)
-    prevAccessor = accessor
+  const built: StageHandle[] = []
+  let inputAccessor: Signal<unknown> | null = null
+  for (const stage of stages) {
+    const handle = makeStageNode(stage, inputAccessor)
+    built.push(handle)
+    inputAccessor = handle.accessor
   }
-  // Disposal walks stages in creation order (upstream → downstream). Each
-  // `unwatched(stageN)` removes that node from its deps' sub-lists; if stage
-  // N+1 was the only consumer of stage N, stage N would have auto-cleaned via
-  // r3's `unwatched` cascade anyway. We dispose every stage explicitly to be
-  // robust against external consumers of intermediate stages (though pulse
-  // doesn't currently expose them).
   registerWithOwner({
     dispose: () => {
-      for (const node of r3Nodes) unwatched(node)
+      for (const handle of built) unwatched(handle.r3Node)
     },
   })
-  return prevAccessor as Signal<unknown>
+  return built
+}
+
+/** What `makeStageNode` hands back: the stage's public accessor plus the
+ *  operations the writable form needs to reach it. */
+export type StageHandle = {
+  accessor: Signal<unknown>
+  r3Node: R3Computed<unknown>
+  publishValue: (value: unknown) => void
+  applyWriteEffects: (value: unknown) => void
+  readPrev: () => unknown
 }
 
 /** Resumption strategy for a suspended stage — see the `computed` JSDoc. */
@@ -129,7 +147,7 @@ type StashedResolution =
 function makeStageNode(
   stage: (value: any) => unknown,
   inputAccessor: Signal<unknown> | null,
-): { accessor: Signal<unknown>; r3Node: R3Computed<unknown> } {
+): StageHandle {
   const myOwner = getOwner()
   const resumeKind: ResumeKind = isGeneratorFunction(stage) ? 'fast-forward' : 'reuse-value'
 
@@ -614,6 +632,61 @@ function makeStageNode(
     }
   })
 
+  // ---- write path -------------------------------------------------------
+
+  /** Whether the public accessor has ever been called. r3's computed happens to
+   *  run a stage's body immediately when the node is created (an implementation
+   *  detail of the reactive core, not something a caller can observe directly),
+   *  but the user-facing contract is pull-based: nothing has been "produced"
+   *  until something reads it. Gating on this — rather than on `lastResolvedValue`
+   *  directly — is what lets an update function see `undefined` for a derivation
+   *  nobody has read yet, even though it already has a value internally. */
+  let hasBeenRead = false
+
+  /** The last resolved value, or undefined when there is none — either because
+   *  the derivation has not resolved anything yet, or because nobody has read it
+   *  yet. Never the sentinel, never a promise. */
+  const lastResolvedOrUndefined = (): unknown =>
+    !hasBeenRead || lastResolvedValue === UNRESOLVED ? undefined : lastResolvedValue
+
+  /** What an update function is handed: the last resolved value as seen from
+   *  the current scope. Reads the published value through `peekValue`, so a
+   *  speculative write earlier in the same action is visible, and resolves it —
+   *  a settled promise unwraps, a pending one falls back to the committed last
+   *  resolved value. */
+  const readPrev = (): unknown => {
+    if (!hasBeenRead) return undefined
+    const seen = r3Untrack(() => peekValue(publishedNode))
+    if (seen === UNRESOLVED) return lastResolvedOrUndefined()
+    if (!isPromise(seen)) return seen
+    const state = track(seen as Promise<unknown>)
+    return state.status === 'fulfilled' ? state.value : lastResolvedOrUndefined()
+  }
+
+  /** Whether a bare write has to be wrapped so the read keeps its asynchronous
+   *  colour. Uses the same coarse test the publish path uses, so a write does
+   *  not flip the shape a consumer sees. */
+  const writeWrapsInPromise = (): boolean =>
+    resumeKind === 'fast-forward' || lastPublishedShapeIsPromise
+
+  /** Write the published value. Scope-aware: inside an action this installs a
+   *  slot rather than touching committed state. */
+  const publishValue = (value: unknown): void => {
+    if (isPromise(value)) {
+      setPublishedValue(value)
+      return
+    }
+    setPublishedValue(writeWrapsInPromise() ? resolvedPromise(value) : value)
+  }
+
+  /** Everything a write implies that is not scope-aware. Runs immediately for a
+   *  committed write, and at commit for one made inside an action. */
+  const applyWriteEffects = (value: unknown): void => {
+    if (isPromise(value)) return // handled in a later task
+    lastResolvedValue = value
+    lastPublishedShapeIsPromise = writeWrapsInPromise()
+  }
+
   // User-facing accessor: reads depTracker (to register as sub so dep
   // changes propagate AND to trigger lazy first eval) and publishedValue
   // (the actual view value). Surfaces parked errors.
@@ -632,6 +705,7 @@ function makeStageNode(
     // This is the STRICT view of the failure state: the raw read throws. The
     // tolerant view (`latest`) reads publishedValue directly and degrades to it;
     // the query view is `failure(x)`.
+    hasBeenRead = true
     r3Read(depTracker as R3Computed<unknown>)
     const value = publishedValue()
     const err = failureSig()
@@ -686,5 +760,11 @@ function makeStageNode(
       : undefined,
   })
 
-  return { accessor, r3Node: depTracker as R3Computed<unknown> }
+  return {
+    accessor,
+    r3Node: depTracker as R3Computed<unknown>,
+    publishValue,
+    applyWriteEffects,
+    readPrev,
+  }
 }
