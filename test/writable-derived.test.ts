@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
 import { signal } from '../src/derived-signal'
-import { use } from '../src/async'
+import { read, use } from '../src/async'
 
 test('W2: a write replaces the value and the body does not re-run', () => {
   let runs = 0
@@ -23,15 +23,27 @@ test('W2: an update function receives the last resolved value', () => {
   expect(list()).toEqual(['a', 'b'])
 })
 
-test('W3: an update function receives undefined before the derivation has run', () => {
+test('W3: an update function receives the value an eagerly-run derivation produced', () => {
   let seen: unknown = 'not called'
   const [list, setList] = signal(() => ['a'])
   setList((prev) => {
     seen = prev
     return ['seeded']
   })
-  expect(seen).toBeUndefined()
+  expect(seen).toEqual(['a']) // it ran at creation, so it has a value
   expect(list()).toEqual(['seeded'])
+})
+
+test('W3: an update function receives undefined while nothing has resolved yet', () => {
+  let seen: unknown = 'not called'
+  const [list, setList] = signal(function* () {
+    return yield* read(new Promise<string[]>(() => {}))
+  })
+  setList((prev) => {
+    seen = prev
+    return ['seeded']
+  })
+  expect(seen).toBeUndefined() // it ran at creation but suspended, so nothing resolved
 })
 
 test('W21: two writes in one tick chain, and the last one wins', () => {

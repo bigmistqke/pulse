@@ -634,28 +634,25 @@ function makeStageNode(
 
   // ---- write path -------------------------------------------------------
 
-  /** Whether the public accessor has ever been called. r3's computed happens to
-   *  run a stage's body immediately when the node is created (an implementation
-   *  detail of the reactive core, not something a caller can observe directly),
-   *  but the user-facing contract is pull-based: nothing has been "produced"
-   *  until something reads it. Gating on this — rather than on `lastResolvedValue`
-   *  directly — is what lets an update function see `undefined` for a derivation
-   *  nobody has read yet, even though it already has a value internally. */
-  let hasBeenRead = false
-
-  /** The last resolved value, or undefined when there is none — either because
-   *  the derivation has not resolved anything yet, or because nobody has read it
-   *  yet. Never the sentinel, never a promise. */
+  /** The last resolved value, or undefined when there is none. Never the
+   *  sentinel, never a promise. */
   const lastResolvedOrUndefined = (): unknown =>
-    !hasBeenRead || lastResolvedValue === UNRESOLVED ? undefined : lastResolvedValue
+    lastResolvedValue === UNRESOLVED ? undefined : lastResolvedValue
 
   /** What an update function is handed: the last resolved value as seen from
    *  the current scope. Reads the published value through `peekValue`, so a
    *  speculative write earlier in the same action is visible, and resolves it —
    *  a settled promise unwraps, a pending one falls back to the committed last
-   *  resolved value. */
+   *  resolved value.
+   *
+   *  A stage's body runs at creation, not on first read — r3 evaluates a
+   *  computed's body the moment it is made, when nothing else is already
+   *  running (see `makeStageNode`'s `depTracker`). So `undefined` here does
+   *  not mean "the derivation has not run yet"; it means nothing has RESOLVED
+   *  yet — the stage ran and is still pending (async), or has not settled.
+   *  A synchronous stage has a real value the instant `signal(fn)` returns,
+   *  before any explicit read. */
   const readPrev = (): unknown => {
-    if (!hasBeenRead) return undefined
     const seen = r3Untrack(() => peekValue(publishedNode))
     if (seen === UNRESOLVED) return lastResolvedOrUndefined()
     if (!isPromise(seen)) return seen
@@ -705,7 +702,6 @@ function makeStageNode(
     // This is the STRICT view of the failure state: the raw read throws. The
     // tolerant view (`latest`) reads publishedValue directly and degrades to it;
     // the query view is `failure(x)`.
-    hasBeenRead = true
     r3Read(depTracker as R3Computed<unknown>)
     const value = publishedValue()
     const err = failureSig()
