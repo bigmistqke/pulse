@@ -21,3 +21,6 @@ h1 { text-align: center; color: #b83f45; font-weight: 200; font-size: 4rem; marg
 .filters button.active { border-color: #ce4646; color: #b83f45; }
 .clear { background: none; border: 0; color: #777; cursor: pointer; font: inherit; text-decoration: underline; padding: 0; }
 .clear:hover { color: #111; }
+.estimate-row { padding: 0 1.25rem 0.75rem; font-size: 0.8rem; color: #999; }
+.estimate { display: inline-flex; align-items: center; gap: 0.3rem; cursor: help; }
+.estimate-input { width: 3rem; font: inherit; border: 1px solid #ddd; border-radius: 4px; padding: 0.1rem 0.3rem; text-align: right; }

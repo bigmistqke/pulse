@@ -136,4 +136,23 @@ test.describe('TodoMVC', () => {
     await page.locator('.filters button', { hasText: 'Completed' }).click()
     await expect(page.locator('.filters button', { hasText: 'Completed' })).toHaveClass(/active/)
   })
+
+  test('estimate auto-computes from what is left', async ({ page }) => {
+    await addTodo(page, 'A')
+    await addTodo(page, 'B')
+    await expect(page.locator('.estimate-input')).toHaveValue('10')
+  })
+
+  test('editing the estimate overrides it until the list changes', async ({ page }) => {
+    await addTodo(page, 'A')
+    await expect(page.locator('.estimate-input')).toHaveValue('5')
+
+    await page.locator('.estimate-input').fill('30')
+    await expect(page.locator('.estimate-input')).toHaveValue('30')
+
+    // the derivation takes back over the moment `remaining` changes — a
+    // write, unlike this one, does not survive a change to its own dependency
+    await addTodo(page, 'B')
+    await expect(page.locator('.estimate-input')).toHaveValue('10')
+  })
 })

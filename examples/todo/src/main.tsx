@@ -54,6 +54,16 @@ const visibleTodos = () => {
 
 const remaining = () => todos().filter((t) => !t.done()).length
 
+/**
+ * The one piece of writable derived state in this example: normally
+ * `remaining() * 5`, but directly editable. One value, two sources — the
+ * formula computes it, or you type your own. The next add, remove, or toggle
+ * changes `remaining`, and the derivation takes back over, dropping whatever
+ * was typed. No server, no promise, no action involved: the same setter that
+ * writes a fetched list elsewhere writes a plain number here.
+ */
+const [estimate, setEstimate] = signal(() => remaining() * 5)
+
 function App() {
   return (
     <div class="app">
@@ -104,6 +114,21 @@ function App() {
           </div>
           <button class="clear" on:click={clearCompleted}>Clear completed</button>
         </footer>
+        <div class="estimate-row">
+          <label class="estimate" attr:title="Derived from what's left; edit it and it's yours until the list changes.">
+            ~
+            <input
+              class="estimate-input"
+              attr:type="number"
+              attr:min="0"
+              prop:value={estimate}
+              on:input={(e: Event) =>
+                setEstimate(Number((e.target as HTMLInputElement).value))
+              }
+            />
+            min left
+          </label>
+        </div>
       </Show>
     </div>
   )
