@@ -4,19 +4,22 @@ import { action, committed, computed, read, signal } from '../src/index'
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
 
 /**
- * TARGET BEHAVIOUR — async actions (not implemented yet; these are red).
+ * TARGET BEHAVIOUR — async actions.
  *
  * An action body may be a generator. The driver resumes it inside the action's
  * scope, so the speculation stays open across a `yield*` and writes made AFTER
  * the await are still speculative. The action commits when the body completes and
  * discards (rolling back every speculative write) when it throws.
+ *
+ * `action()` returns an ActionHandle rather than a promise that rejects: `settled`
+ * resolves either way, and a failure is reported through `error()` instead.
  */
 
 test('an async action holds the speculation open across the await and commits on success', async () => {
   const [name, setName] = signal('alice')
   const save = (v: string) => tick().then(() => v)
 
-  const done = action(function* () {
+  const handle = action(function* () {
     setName('bob') // optimistic write
     const saved: string = yield* read(save('bob')) // the mutation; scope stays open
     setName(`${saved}!`) // a write AFTER the await must still be speculative
@@ -25,26 +28,29 @@ test('an async action holds the speculation open across the await and commits on
   // In flight: committed state is untouched.
   expect(committed(name)).toBe('alice')
 
-  await done
+  await handle.settled
   // Completed: every write in the body commits together, atomically.
   expect(committed(name)).toBe('bob!')
   expect(name()).toBe('bob!')
+  expect(handle.error()).toBeNull()
 })
 
 test('an async action rolls back every speculative write when the mutation fails', async () => {
   const [name, setName] = signal('alice')
   const save = () => tick().then<string>(() => Promise.reject(new Error('save failed')))
 
-  const done = action(function* () {
+  const handle = action(function* () {
     setName('bob')
     yield* read(save())
     setName('never') // unreachable
   })
 
-  await expect(done).rejects.toThrow('save failed')
+  await handle.settled
   // Discarded: the speculative writes vanish; committed state never moved.
   expect(name()).toBe('alice')
   expect(committed(name)).toBe('alice')
+  expect(handle.error()).toBeInstanceOf(Error)
+  expect((handle.error() as Error).message).toBe('save failed')
 })
 
 test('derived state follows the speculation across the await', async () => {
@@ -52,7 +58,7 @@ test('derived state follows the speculation across the await', async () => {
   const doubled = computed(() => n() * 2)
   const save = () => tick()
 
-  const done = action(function* () {
+  const handle = action(function* () {
     setN(5)
     yield* read(save())
     // Resumed inside the scope: the derivation still sees the speculative value.
@@ -60,7 +66,7 @@ test('derived state follows the speculation across the await', async () => {
     expect(committed(doubled)).toBe(2)
   })
 
-  await done
+  await handle.settled
   expect(doubled()).toBe(10)
 })
 
@@ -68,25 +74,27 @@ test('derived state follows the speculation across the await', async () => {
 
 test('an async body: the sync prefix is speculative and commits when the mutation resolves', async () => {
   const [name, setName] = signal('alice')
-  const done = action(async () => {
+  const handle = action(async () => {
     setName('bob') // sync prefix — runs under the scope
     expect(committed(name)).toBe('alice') // isolated
     await tick() // the mutation
   })
   expect(committed(name)).toBe('alice') // in flight — not committed yet
-  await done
+  await handle.settled
   expect(committed(name)).toBe('bob') // resolved → committed
 })
 
 test('an async body rolls back when the mutation rejects', async () => {
   const [name, setName] = signal('alice')
-  const done = action(async () => {
+  const handle = action(async () => {
     setName('bob')
     await tick().then(() => Promise.reject(new Error('save failed')))
   })
-  await expect(done).rejects.toThrow('save failed')
+  await handle.settled
   expect(name()).toBe('alice') // rolled back
   expect(committed(name)).toBe('alice')
+  expect(handle.error()).toBeInstanceOf(Error)
+  expect((handle.error() as Error).message).toBe('save failed')
 })
 
 // SHARP EDGE — documented behaviour, not a bug to fix.
@@ -101,12 +109,12 @@ test('an async body rolls back when the mutation rejects', async () => {
 // above): pulse drives those resumptions itself and re-enters the scope.
 test('SHARP EDGE: a write after an await in an async body escapes the speculation', async () => {
   const [name, setName] = signal('alice')
-  const done = action(async () => {
+  const handle = action(async () => {
     setName('bob') // speculative
     await tick()
     setName('after') // NOT speculative — goes straight to committed state
   })
-  await done
+  await handle.settled
   // The post-await write hit committed state, then commit promoted 'bob' over it.
   expect(committed(name)).toBe('bob')
 })
@@ -125,7 +133,70 @@ test('two concurrent async actions are isolated from each other', async () => {
     yield* read(slow(5))
   })
 
-  await Promise.all([first, second])
+  await Promise.all([first.settled, second.settled])
   expect(committed(a)).toBe('a1')
   expect(committed(b)).toBe('b1')
+})
+
+// ---- ActionHandle-specific behaviour ----
+
+test('a sync body that throws does not throw synchronously; the failure is reported through error()', async () => {
+  let ran = false
+  const handle = action(() => {
+    ran = true
+    throw new Error('sync boom')
+  })
+  expect(ran).toBe(true) // the body did run
+  await handle.settled
+  expect(handle.error()).toBeInstanceOf(Error)
+  expect((handle.error() as Error).message).toBe('sync boom')
+})
+
+test('retry() re-runs the action from scratch after a failure', async () => {
+  const [name, setName] = signal('alice')
+  let attempt = 0
+  const save = () =>
+    tick().then(() => {
+      attempt++
+      if (attempt === 1) throw new Error('save failed')
+      return 'bob'
+    })
+
+  const handle = action(function* () {
+    setName('bob')
+    yield* read(save())
+  })
+
+  await handle.settled
+  expect(handle.error()).toBeInstanceOf(Error)
+  expect(name()).toBe('alice') // rolled back
+
+  handle.retry()
+  await handle.settled
+  expect(handle.error()).toBeNull()
+  expect(committed(name)).toBe('bob')
+  expect(attempt).toBe(2)
+})
+
+test('settled reflects whichever attempt is current, so reading it again after retry() gives a new promise', async () => {
+  let attempt = 0
+  const save = () =>
+    tick().then(() => {
+      attempt++
+      if (attempt === 1) throw new Error('save failed')
+    })
+
+  const handle = action(function* () {
+    yield* read(save())
+  })
+
+  const first = handle.settled
+  await first
+  expect(handle.error()).toBeInstanceOf(Error)
+
+  handle.retry()
+  const second = handle.settled
+  expect(second).not.toBe(first)
+  await second
+  expect(handle.error()).toBeNull()
 })

@@ -324,15 +324,16 @@ test('action commits its writes on normal return', () => {
   expect(readValue(name)).toBe('bar')
 })
 
-test('action discards its writes when the body throws (and rethrows)', () => {
+test('action discards its writes when the body throws', async () => {
   const name = signalNode('foo')
-  expect(() =>
-    action(() => {
-      writeValue(name, 'bar')
-      throw new Error('boom')
-    }),
-  ).toThrow('boom')
-  expect(readValue(name)).toBe('foo') // rolled back
+  const handle = action(() => {
+    writeValue(name, 'bar')
+    throw new Error('boom')
+  })
+  expect(readValue(name)).toBe('foo') // rolled back, synchronously
+  await handle.settled
+  expect(handle.error()).toBeInstanceOf(Error)
+  expect((handle.error() as Error).message).toBe('boom')
 })
 
 test('G2: inner action promotes to outer, outer promotes to ROOT', () => {
@@ -352,15 +353,15 @@ test('G2: inner action promotes to outer, outer promotes to ROOT', () => {
   expect(readValue(y)).toBe('y1')
 })
 
-test('G3: inner commits, outer discards → nothing reaches committed', () => {
+test('G3: inner commits, outer discards → nothing reaches committed', async () => {
   const y = signalNode('y0')
-  expect(() =>
-    action(() => {
-      action(() => writeValue(y, 'y1')) // inner commits to outer
-      throw new Error('outer fails')     // outer discards → y1 dropped with it
-    }),
-  ).toThrow('outer fails')
+  const handle = action(() => {
+    action(() => writeValue(y, 'y1')) // inner commits to outer
+    throw new Error('outer fails')     // outer discards → y1 dropped with it
+  })
   expect(readValue(y)).toBe('y0')
+  await handle.settled
+  expect(handle.error()).toBeInstanceOf(Error)
 })
 
 test('G4: inner discards, outer continues and commits', () => {

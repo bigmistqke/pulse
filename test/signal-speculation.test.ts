@@ -10,12 +10,10 @@ test('an action commits a public signal write', () => {
 
 test('an action discards a public signal write on throw (rollback)', () => {
   const [count, setCount] = signal(0)
-  expect(() =>
-    action(() => {
-      setCount(5)
-      throw new Error('boom')
-    }),
-  ).toThrow('boom')
+  action(() => {
+    setCount(5)
+    throw new Error('boom')
+  })
   expect(count()).toBe(0) // rolled back — never committed
 })
 

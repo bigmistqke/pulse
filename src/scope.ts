@@ -11,6 +11,7 @@ import {
 } from 'r3'
 import { isGeneratorFunction } from './is-generator-function'
 import { isPromise } from './is-promise'
+import type { Accessor } from './signal'
 
 /** Graph identity wrapping a recipe. Value is not in the Node — it is produced
  *  by handing the Node to a read walk. Per Q6. */
@@ -394,6 +395,36 @@ export function onSettled(callback: (outcome: SettleOutcome) => void): void {
   onSettledOn(scope, callback)
 }
 
+/** A tiny reactive cell built on r3's raw signal directly, not pulse's
+ *  `signal()` wrapper — `src/signal.ts` imports from this file, so importing
+ *  `signal()` back here would be a cycle. Mirrors `makeAccessor`'s top-level
+ *  read behaviour (`src/signal.ts`): inside an r3 context, read through it
+ *  directly; outside one, stabilize first so the value is never stale. */
+function makeErrorCell(): [Accessor<unknown>, (value: unknown) => void] {
+  const node = r3Signal<unknown>(null)
+  const accessor = (() => {
+    if (getContext()) return r3Read(node)
+    stabilize()
+    return node.value
+  }) as Accessor<unknown>
+  const setError = (value: unknown) => r3SetSignal(node, value)
+  return [accessor, setError]
+}
+
+export interface ActionHandle {
+  /** The currently in-flight attempt's outcome — the initial run, or the most
+   *  recent `retry()` if one is running. Never rejects. Read `.settled` again
+   *  after calling `retry()` to get the promise for that attempt; the one
+   *  returned before `retry()` was called already resolved when the attempt
+   *  it belonged to finished. */
+  readonly settled: Promise<void>
+  /** Reactive: null while healthy or in flight, the rejection reason once the
+   *  action has failed and nothing has retried it yet. */
+  readonly error: Accessor<unknown>
+  /** Re-run the action's body from scratch. */
+  retry(): void
+}
+
 /**
  * Open a speculative child of the current scope and run `body` under it. Every
  * write inside is speculative until the action commits; a discard rolls them all
@@ -402,7 +433,7 @@ export function onSettled(callback: (outcome: SettleOutcome) => void): void {
  *
  * The body may take three shapes:
  *
- * - **Sync** — commits on return, discards on throw (rethrowing).
+ * - **Sync** — commits on return, discards on throw.
  *
  * - **Async** (`async () => …`) — the SYNCHRONOUS PREFIX runs under the scope, and
  *   the action commits or discards when the returned promise settles. This covers
@@ -419,26 +450,60 @@ export function onSettled(callback: (outcome: SettleOutcome) => void): void {
  *   drives the resumption itself, so it re-enters the scope on every resume and a
  *   write after a `yield*` is still speculative. Commits when the body completes,
  *   discards when it throws.
+ *
+ * A failure in any shape never becomes a thrown or rejected value the caller has
+ * to handle — it is captured and reported through the returned handle's `error`,
+ * and `settled` resolves regardless of which way the attempt ended.
  */
-export function action(body: () => Generator<unknown, void, unknown>): Promise<void>
-export function action(body: () => Promise<void>): Promise<void>
-export function action(body: () => void): void
-export function action(body: () => unknown): void | Promise<void> {
-  const scope = createScope(getCurrentScope(), 'speculative')
+export function action(body: () => Generator<unknown, void, unknown>): ActionHandle
+export function action(body: () => Promise<void>): ActionHandle
+export function action(body: () => void): ActionHandle
+export function action(body: () => unknown): ActionHandle {
+  const [error, setError] = makeErrorCell()
+  let currentSettled: Promise<void>
 
-  if (isGeneratorFunction(body)) {
-    return driveGeneratorAction(scope, body as () => Generator<unknown, void, unknown>)
+  const runAttempt = (): Promise<void> => {
+    const scope = createScope(getCurrentScope(), 'speculative')
+    const attempt = isGeneratorFunction(body)
+      ? driveGeneratorAction(scope, body as () => Generator<unknown, void, unknown>)
+      : driveNonGeneratorAction(scope, body)
+    return attempt.then(
+      () => {
+        setError(null)
+      },
+      (e: unknown) => {
+        setError(e)
+      },
+    )
   }
 
+  function retry(): void {
+    currentSettled = runAttempt()
+  }
+
+  currentSettled = runAttempt()
+
+  return {
+    get settled() {
+      return currentSettled
+    },
+    error,
+    retry,
+  }
+}
+
+/** Drive a sync or async (non-generator) action body: run it under `scope`, then
+ *  commit on success or discard on failure — either way as a resolved promise
+ *  the caller reads through `.then`, never a synchronous throw or a rejection
+ *  the caller has to catch. */
+function driveNonGeneratorAction(scope: Scope, body: () => unknown): Promise<void> {
   let result: unknown
   try {
     result = runInScope(scope, undefined, body)
   } catch (e) {
     discard(scope)
-    throw e
+    return Promise.reject(e)
   }
-
-  // Async body: the prefix already ran under the scope; settle decides the fate.
   if (isPromise(result)) {
     return (result as Promise<unknown>).then(
       () => {
@@ -450,16 +515,16 @@ export function action(body: () => unknown): void | Promise<void> {
       },
     )
   }
-
   commit(scope)
-  return undefined
+  return Promise.resolve()
 }
 
 /** Drive a generator action body. The await happens OUTSIDE the scope (nothing
  *  writes there); every resume happens INSIDE it, which is what keeps writes made
  *  after a `yield*` speculative. Deliberately not the stage driver: an action body
  *  is an imperative one-shot with side effects, not a memoized derivation, so it
- *  must never re-run from the top. */
+ *  must never re-run from the top — `retry()` above achieves retry by calling
+ *  `action()`'s whole flow again, fresh, not by resuming this generator. */
 async function driveGeneratorAction(
   scope: Scope,
   body: () => Generator<unknown, void, unknown>,

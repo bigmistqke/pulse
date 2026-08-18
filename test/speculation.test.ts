@@ -15,14 +15,12 @@ test('a speculative write is visible to a normal read but NOT to committed', () 
 
 test('a discarded action leaves committed state untouched and the write vanishes', () => {
   const [name, setName] = signal('alice')
-  expect(() =>
-    action(() => {
-      setName('bob')
-      expect(name()).toBe('bob') // speculative
-      expect(committed(name)).toBe('alice') // isolated from it
-      throw new Error('boom')
-    }),
-  ).toThrow('boom')
+  action(() => {
+    setName('bob')
+    expect(name()).toBe('bob') // speculative
+    expect(committed(name)).toBe('alice') // isolated from it
+    throw new Error('boom')
+  })
   // Discarded: the speculative write is gone; committed state never moved.
   expect(name()).toBe('alice')
   expect(committed(name)).toBe('alice')
@@ -56,13 +54,11 @@ test('a discarded action leaves derived state untouched', () => {
   const [n, setN] = signal(1)
   const doubled = computed(() => n() * 2)
   expect(doubled()).toBe(2)
-  expect(() =>
-    action(() => {
-      setN(5)
-      expect(doubled()).toBe(10) // speculative derivation
-      throw new Error('nope')
-    }),
-  ).toThrow('nope')
+  action(() => {
+    setN(5)
+    expect(doubled()).toBe(10) // speculative derivation
+    throw new Error('nope')
+  })
   expect(doubled()).toBe(2) // the speculative derivation vanished with the scope
   expect(committed(doubled)).toBe(2)
 })
@@ -104,14 +100,12 @@ test('a discarded action rolls back a transitively-derived value', () => {
   const b = computed(() => a() * 2)
   const c = computed(() => b() + 1)
   expect(c()).toBe(3)
-  expect(() =>
-    action(() => {
-      expect(c()).toBe(3)
-      setA(10)
-      expect(c()).toBe(21) // speculative derivation two hops down
-      throw new Error('rollback')
-    }),
-  ).toThrow('rollback')
+  action(() => {
+    expect(c()).toBe(3)
+    setA(10)
+    expect(c()).toBe(21) // speculative derivation two hops down
+    throw new Error('rollback')
+  })
   expect(c()).toBe(3) // the transitive derivation vanished with the scope
   expect(committed(c)).toBe(3)
 })

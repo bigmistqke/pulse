@@ -613,7 +613,7 @@ test('W14: a write inside an action is invisible until it commits', async () => 
     setTodos(['a', 'walk'])
     seenInside.push(use(todos))
     yield* read(Promise.resolve(null))
-  })
+  }).settled
 
   expect(seenInside).toEqual([['a', 'walk']])
   expect(use(todos)).toEqual(['a', 'walk'])
@@ -634,12 +634,13 @@ test('W15: a discarded action leaves the reload alive', async () => {
   await tick()
   expect(isPending(todos)()).toBe(true)
 
-  await expect(
-    action(function* () {
-      setTodos(['a', 'walk'])
-      yield* read(Promise.reject(new Error('save failed')))
-    }),
-  ).rejects.toThrow('save failed')
+  const handle = action(function* () {
+    setTodos(['a', 'walk'])
+    yield* read(Promise.reject(new Error('save failed')))
+  })
+  await handle.settled
+  expect(handle.error()).toBeInstanceOf(Error)
+  expect((handle.error() as Error).message).toBe('save failed')
 
   // the write rolled back and the reload was never abandoned
   expect(isPending(todos)()).toBe(true)
@@ -661,12 +662,13 @@ test('W16: cancelling waits until the value reaches the committed world', async 
   setVersion(2)
   await tick()
 
-  await expect(
-    action(function* () {
-      action(() => setTodos(['inner']))
-      yield* read(Promise.reject(new Error('outer failed')))
-    }),
-  ).rejects.toThrow('outer failed')
+  const handle = action(function* () {
+    action(() => setTodos(['inner']))
+    yield* read(Promise.reject(new Error('outer failed')))
+  })
+  await handle.settled
+  expect(handle.error()).toBeInstanceOf(Error)
+  expect((handle.error() as Error).message).toBe('outer failed')
 
   // the inner commit only promoted to the outer scope, which then rolled back
   expect(isPending(todos)()).toBe(true)
@@ -697,7 +699,7 @@ test('W17: a reload that lands while an action is open is replaced at commit', a
   expect(use(todos)).toEqual(['a', 'b']) // visible outside the action
 
   resolveSave(null)
-  await running
+  await running.settled
   expect(use(todos)).toEqual(['a', 'walk']) // replaced at commit
 })
 
@@ -719,12 +721,13 @@ test('a queued recompute survives a write inside a discarded action', async () =
 
   setVersion(2) // queues a recompute
 
-  await expect(
-    action(function* () {
-      setTodos(['written'])
-      yield* read(Promise.reject(new Error('fail')))
-    }),
-  ).rejects.toThrow('fail')
+  const handle = action(function* () {
+    setTodos(['written'])
+    yield* read(Promise.reject(new Error('fail')))
+  })
+  await handle.settled
+  expect(handle.error()).toBeInstanceOf(Error)
+  expect((handle.error() as Error).message).toBe('fail')
 
   // the action rolled back, so the write never took effect — the queued
   // recompute for version 2 must still run rather than having been withdrawn
@@ -757,7 +760,7 @@ test('writing a promise inside an action does not trigger a fresh recompute', as
   await action(function* () {
     setTodos(Promise.resolve(['a', 'walk']))
     yield* read(Promise.resolve(null))
-  })
+  }).settled
   await tick()
 
   expect(requests).toBe(1)
@@ -879,12 +882,13 @@ test('a discarded action does not leave the change gate describing a rolled-back
   await tick()
   expect(use(count)).toBe(5)
 
-  await expect(
-    action(function* () {
-      setCount(7)
-      yield* read(Promise.reject(new Error('nope')))
-    }),
-  ).rejects.toThrow('nope')
+  const handle = action(function* () {
+    setCount(7)
+    yield* read(Promise.reject(new Error('nope')))
+  })
+  await handle.settled
+  expect(handle.error()).toBeInstanceOf(Error)
+  expect((handle.error() as Error).message).toBe('nope')
 
   expect(use(count)).toBe(5) // rolled back correctly
 
