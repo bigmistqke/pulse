@@ -1,112 +1,16 @@
-# Retryable failure propagation — thunk-based reads, action failure, boundary auto-discovery
+# Retryable action failure and boundary auto-discovery
 
-Pulse gets its own way of letting a failure be retried, instead of accepting the ceiling that native JavaScript generator semantics impose. Today, once a rejection has been thrown into a generator via `gen.throw()` and nothing catches it, that generator is permanently done — there is no way to hand it a fresh value and keep going. Retrying "just the part that failed" therefore cannot mean resuming the same generator instance; it has to mean something else. This document works out what that something else is, and follows the consequence through three places: how a generator stage reads something retryable, how an `action()` reports and recovers from failure, and how a `<Failed>` boundary discovers a failed action without anything being wired to it by hand.
+Pulse gets its own way of letting a failure be retried, instead of leaving retry as a promise rejection nobody has anywhere good to put. This document works out two connected pieces: how `action()` reports and recovers from failure, and how a `<Failed>` boundary discovers a failed action without anything being wired to it by hand.
 
-This document records the conclusions reached in a design discussion on 2026-08-18 and was written before implementation began.
+This document records the conclusions reached in a design discussion on 2026-08-18 and was written before implementation began. An earlier version of this document specified a third piece — a way for a generator to retry a single failed `yield*` without redoing earlier steps that already succeeded, without discarding the generator instance. It was cut during design review; see "Why retry re-runs the whole body" below for why, and "What was cut, and why it can come back later" for the reasoning kept for the record.
 
 ## Motivation
 
-Solid 2.x has self-healing error boundaries: a retry re-runs only the part that threw, not the whole subtree. Pulse's `<Failed>` boundary already does something close to this for a `computed`/`signal` pipeline — `src/failure.ts`'s `resetFailure` walks a failed accessor's upstream chain to the deepest stage that is actually failed and resets only that one, leaving a healthy earlier stage untouched. The granularity that is missing is *inside* one generator stage's body: a rejection at a specific `yield*` currently either gets caught by the generator's own `try`/`catch`, or it escapes and the whole generator is discarded and restarted from the top — redoing every step that already succeeded.
+Solid 2.x has self-healing error boundaries: a retry re-runs only the part that threw, not the whole subtree. Pulse's `<Failed>` boundary already does something close to this for a `computed`/`signal` pipeline — `src/failure.ts`'s `resetFailure` walks a failed accessor's upstream chain to the deepest stage that is actually failed and resets only that one, leaving a healthy earlier stage untouched.
 
-Separately, and for a related reason, `examples/todo-async`'s retry-on-refusal UI (`notice`/`flash()`, added earlier in this session) turned out to be exactly the kind of thing pulse's reactive philosophy argues against: a hand-rolled signal that gets pushed into from an `onSettled` callback and cleared with a `setTimeout`, duplicating information that should be derivable from graph state the way `failure()`/`<Failed>` already derive it for a failed load. The reason it had to be hand-rolled is concrete: `action()` returns a bare `Promise<void>` today, with no persistent identity for anything to register against or read later. Closing that gap is part of this design, not a follow-on.
+Separately, and for a related reason, `examples/todo-async`'s retry-on-refusal UI (`notice`/`flash()`, added earlier in this session) turned out to be exactly the kind of thing pulse's reactive philosophy argues against: a hand-rolled signal that gets pushed into from an `onSettled` callback and cleared with a `setTimeout`, duplicating information that should be derivable from graph state the way `failure()`/`<Failed>` already derive it for a failed load. The reason it had to be hand-rolled is concrete: `action()` returns a bare `Promise<void>` today, with no persistent identity for anything to register against or read later. Closing that gap is what this design does.
 
-## Guiding principle
-
-Be as fine-grained as possible, and fall back to something coarser only when there is nothing finer to reach for. This is not three separate mechanisms layered on top of each other — it is one mechanism (a thunk-based read remembers its result across a failure-triggered restart) that degrades gracefully on its own:
-
-- Nothing in a generator body uses a thunk-based read → a retry redoes everything, which is exactly today's `resetFailure` behaviour, unchanged.
-- Some reads are thunk-based → a retry replays whatever already succeeded and only re-executes from the first one that did not.
-- Retrying reaches all the way down to one specific failed read, unambiguously → that is the finest case, and it falls out of the same mechanism rather than needing its own.
-
-The same principle applies to `action()`: its `retry()` uses this identical mechanism, so a multi-step action does not redo an earlier step that already succeeded either.
-
-## Part 1 — `read()` accepts a thunk, and a thunk-based read can be replayed
-
-### What changes and what does not
-
-`read(x)` keeps its existing three cases — a signal accessor, a promise, or a plain value — and gains a fourth: a plain zero-argument function (a thunk) that is not a signal accessor.
-
-```ts
-function* stage() {
-  const users = yield* read(() => api.list())
-  return users
-}
-```
-
-The reason a thunk is required rather than an already-created promise is unavoidable: a promise object cannot be redone. `yield* read(apiCall())` has already evaluated `apiCall()` by the time `read` sees it — there is nothing left to retry. `yield* read(() => apiCall())` hands `read` the expression itself, so a retry can call it again and get a genuinely fresh attempt.
-
-**Unchanged:** a rejected thunk-based read still throws into the generator via `gen.throw()` first, exactly like a plain `read()` yield. A local `try`/`catch` around it keeps working precisely as it does today — there is no second, parallel failure-propagation path that bypasses the generator's own exception handling. The difference only shows up if the rejection is uncaught and escapes the generator body.
-
-**New:** when that happens, pulse remembers the values every thunk-based read *before* the failed one resolved to, for this run only. When the generator stage — or the action, see Part 2 — is retried, the fresh run replays those remembered values instead of re-invoking their thunks, and only genuinely re-executes starting at the one that actually failed. A retry that reaches a dependency change instead of a genuine retry trigger does **not** replay anything: the input moved, so everything should re-run, exactly as it does today.
-
-### Why this needed no type-level work
-
-`Yielded<T>` and `Resolved<T>` (`src/async.ts`, added earlier in this session's generator-colour-fix work) already unwrap `T extends () => infer U` generically — they do not distinguish a signal accessor from a plain thunk at the type level, only `isSignalAccessor`'s *runtime* check does that. So `read(() => api.list())`'s type already resolves correctly today; this part is purely a runtime addition inside `read`'s implementation, not a type change.
-
-### Where the replay memo lives, and how it is threaded through
-
-`read`'s generator body has no state of its own across separate invocations — a fresh inner generator is created every time the outer body executes `yield* read(x)` in source. The memo therefore cannot live inside `read`; it has to be ambient state that the driver sets up around each synchronous segment of the outer generator, the same way `src/generator-cleanup.ts` already does for `onCleanup` routing.
-
-A new module, `src/generator-replay.ts`, mirrors that existing pattern:
-
-```ts
-export interface ReplaySlot {
-  /** What a thunk-based read produced last time, in call order — from the run
-   *  that failed and is now being retried. Consumed positionally. */
-  memo: readonly unknown[]
-  /** What a thunk-based read has produced so far in THIS run, in call order.
-   *  Becomes the next run's `memo` if this run also fails and is retried. */
-  recorded: unknown[]
-}
-
-let current: ReplaySlot | null = null
-
-export function withReplaySlot<T>(slot: ReplaySlot | null, fn: () => T): T {
-  const saved = current
-  current = slot
-  try {
-    return fn()
-  } finally {
-    current = saved
-  }
-}
-
-export function currentReplaySlot(): ReplaySlot | null {
-  return current
-}
-```
-
-`read`'s thunk branch consults it:
-
-```ts
-if (typeof x === 'function' && !isSignalAccessor(x)) {
-  const slot = currentReplaySlot()
-  const position = slot === null ? -1 : slot.recorded.length
-  const alreadySucceeded = slot !== null && position < slot.memo.length
-  const produced = alreadySucceeded
-    ? ((yield slot.memo[position] as Yielded<T>) as Resolved<T>)
-    : ((yield (x as () => unknown)() as Yielded<T>) as Resolved<T>)
-  // Reaching this line at all means the yield settled successfully — a
-  // rejection would have resumed via gen.throw() instead, jumping past here.
-  if (slot !== null) slot.recorded.push(produced)
-  return produced
-}
-```
-
-A replayed value is a plain (already-resolved) value, not a promise, so it goes through the driver's existing `settle()` the same way any synchronous result does — it resumes immediately, with no special-casing needed. This is a pleasing consequence of the generator-colour fix from earlier this session: a retry that replays several already-succeeded steps and only genuinely awaits the one that failed becomes synchronous-then-asynchronous through the same machinery that already exists for that shape, not a new one.
-
-The driver side threads a `ReplaySlot` through each attempt:
-
-- **Computed/signal stages** (`src/computed.ts`, `src/driver.ts`): `driveGenerator`'s existing `collectGeneratorCleanups` wrap around each `gen.next()`/`gen.throw()` call gains a sibling `withReplaySlot` wrap. `makeStageNode` keeps a `let retryMemo: readonly unknown[] = []` alongside its existing per-stage state; on an uncaught escape, `retryMemo` is set from the failed run's `slot.recorded`. `reset()` (called from `resetFailure`'s walk) passes `{ memo: retryMemo, recorded: [] }` into the fresh run. A restart triggered by a genuine dependency change — the `changed` branch in the existing `retainedGen` handling — passes `{ memo: [], recorded: [] }` instead, so nothing is replayed.
-- **Actions** (`src/scope.ts`): `driveGeneratorAction`'s `gen.next()`/`gen.throw()` calls get the same wrap. The action instance (see Part 2) keeps its own `retryMemo`, updated the same way, and `retry()` passes it into the next attempt.
-
-### Open question: positional identity under conditional control flow
-
-The memo is consumed positionally — the Nth thunk-based read in this run reuses the Nth remembered value, by count alone, the same way React's "hooks must run in the same order" rule works. If a generator's control flow genuinely varies between the failed run and the retried run — a thunk-based read inside an `if` whose condition changed — a positional replay could hand a later read the value meant for an earlier one, silently.
-
-The default decision here is to accept this as a documented constraint rather than build a detection-and-safe-fallback mechanism for it, on the grounds that pulse already carries an equivalent, currently-open limitation in a closely related mechanism: `docs/follow-ups.md` already tracks a bug in `ADR 0013`'s dependency-replay (`depRecords`) where a generator's varying control flow confuses what gets replayed. Adding a second, differently-shaped version of the same class of constraint is consistent with what is already there, and a bespoke signature-based divergence check would be new machinery whose own correctness would need scrutiny. This is flagged for review, not settled — the alternative (record something identifying enough to detect a mismatch and drop the memo from that point forward, falling back to the coarse "redo everything after this point" behaviour automatically) is a reasonable v2 if this proves to matter in practice.
-
-## Part 2 — `action()` returns a handle instead of a promise that rejects
+## Part 1 — `action()` returns a handle instead of a promise that rejects
 
 ### The new shape
 
@@ -121,8 +25,7 @@ export interface ActionHandle {
   /** Reactive: null while healthy or in flight, the rejection reason once the
    *  action has failed and nothing has retried it yet. */
   readonly error: Accessor<unknown>
-  /** Re-run the action from its point of failure, replaying whatever
-   *  thunk-based reads already succeeded (Part 1). */
+  /** Re-run the action's body from scratch. */
   retry(): void
 }
 ```
@@ -131,13 +34,25 @@ export interface ActionHandle {
 
 `action()`'s generator body, driven by `driveGeneratorAction`, no longer lets an uncaught rejection propagate out of the returned value as a promise rejection. It is captured, reported through `error`, and `settled` resolves regardless of which way the action ended. This is a deliberate, breaking change to today's contract, not an addition alongside it — the reason is the thing that motivated this whole document: `examples/todo-async`'s `.catch(() => {})` exists purely to swallow an unhandled rejection that the caller has no good use for, and that awkwardness is a direct symptom of failure being modelled as a throw instead of as state.
 
+### Why `retry()` re-runs the whole body
+
+`retry()` holds a reference to the original body function and calls `action(body)` again, fresh — the exact same driving logic as the first attempt, with no memory of where the previous attempt got to. Every condition and dependency the body reads gets evaluated against whatever is true right now, exactly like the first run did.
+
+This was a deliberate simplification made during design review, not the starting point. The alternative considered — keep the failed generator instance alive, hold onto whichever specific operation failed, and re-invoke just that one when `retry()` fires, resuming the same paused generator in place rather than starting a new one — has a real use case: a multi-step body where an earlier step did something non-idempotent (charged a card, sent an email, reserved inventory), where redoing it on retry would be a bug, not just wasted work. But every mutation this design was built against — `submitTodo`, `toggleTodo`, `removeTodo` in `examples/todo-async` — has exactly one network call in its body. For a single-step action, "retry just the failed step" and "retry the whole thing" are the same operation, so the finer-grained mechanism would have been built for a case this design does not actually have.
+
+It also has a real correctness risk that "re-run the whole body" does not: holding a generator paused indefinitely, waiting for someone to eventually call `retry()`, freezes every decision it already made to get there — including which branch of an `if` it took, based on a signal it read earlier. If that signal's value changes while the generator sits parked — which could be a long time, since nothing bounds how soon a person clicks retry — resuming the held generator re-invokes the original failed operation on the branch that was correct *back when it first ran*, not the one current state calls for. Restarting the whole body from scratch cannot go stale this way, because every condition is re-read at retry time.
+
+`retry(): void` is deliberately opaque about how it recovers — nothing in the public shape says whether it re-runs everything or resumes something in place. If a genuine multi-step, non-idempotent case shows up later, upgrading `retry()`'s internals to something finer-grained is a change behind that same method, not a public API break. Choosing "whole body, every time" now does not close that door; it just declines to build it before anything needs it.
+
+This is also consistent with `resetFailure`'s existing behaviour for a `computed`/`signal` pipeline stage, which already discards a failed generator and restarts it from the top — nothing about that changes here.
+
 ### What this changes elsewhere
 
 `test/async-action.test.ts` currently asserts the old contract directly — `await expect(done).rejects.toThrow('save failed')` — and needs rewriting against `.error` once this lands; this is a deliberate test-contract change, not an oversight to reconcile.
 
 `onSettled` (`src/scope.ts`) is unaffected as a primitive — it remains the lower-level "the scope closed, here is how" notification, useful for anything that is not specifically "did this fail." For the specific case this document is about, `.error` supersedes what `examples/todo-async` was using `onSettled` for.
 
-## Part 3 — a failed action is discovered by the nearest `<Failed>` boundary automatically
+## Part 2 — a failed action is discovered by the nearest `<Failed>` boundary automatically
 
 ### The registration mechanism already exists — for bindings
 
@@ -187,10 +102,18 @@ If there is no ambient `<Failed>` boundary — `findNearestFailedScope` returns 
 
 - `resetFailure`'s existing gap — it does not cross a `use()` link into a separate `computed()` call — is untouched by this design; it is a pre-existing, separately tracked follow-up.
 - `<Loading>` and its atomic-commit gating are untouched.
-- Automatic retry policy (backoff, a fixed retry count before giving up) is deliberately not built here — that is a different feature (this document's earlier exploration called it "interpretation 1"), self-contained inside a single read, and does not need any of this machinery. It could be layered on top of a thunk-based read later without conflicting with anything here.
+- Automatic retry policy (backoff, a fixed retry count before giving up, entirely internal to one read) is a different feature from anything here and is not built by this design.
+- Retrying a single failed step inside a multi-step body without redoing earlier, already-succeeded steps — see below.
+
+## What was cut, and why it can come back later
+
+The earlier draft of this document specified `read()` gaining a fourth argument shape — a thunk, `read(() => apiCall())` — so a specific `yield*` could be marked retryable and its rejection handled by pulse's own mechanism instead of being thrown into the generator. Two designs for that were worked through and both are recorded here for whoever picks this up again, since the reasoning is what would need re-checking, not just the shape:
+
+- **Discard and restart, replaying remembered values positionally.** A rejected thunk-based read still throws into the generator first, same as a plain read; if uncaught, instead of losing everything, pulse would remember what every *earlier* thunk-based read in that run produced and feed those back into a fresh run, so it only genuinely re-executes from the failed one forward. This was dropped because the positional matching — "the Nth thunk-based read this run is the same one as the Nth last run" — breaks silently if the set of reads a body actually reaches differs between runs, the same class of risk as violating React's rule that hooks run in the same order every render.
+- **Hold the generator paused, retry re-invokes just the held thunk.** Simpler, and it avoids positional matching entirely, because the generator is never restarted — everything before the failed read is still sitting in its own local variables, since it is still alive. This was dropped for the staleness reason in "Why `retry()` re-runs the whole body" above: a paused generator does not re-evaluate the conditions it already used to get where it is, so a retry fired after upstream state has moved on can act on a decision that is no longer correct. It also means a rejected thunk-based read never reaches the generator's own `try`/`catch` — a real, if smaller, behavioural surprise on its own.
+
+Either could be revisited if a genuine multi-step, non-idempotent case shows up — `resetFailure`'s `reset()` for a stage and `ActionHandle.retry()` for an action are both already the right, stable place to make that change internally, without touching anything that calls them.
 
 ## Open questions for review
 
-1. Positional replay safety under conditional control flow (Part 1) — accept as a documented constraint, matching the existing `depRecords` limitation, or build detection-and-safe-fallback now.
-2. `ActionHandle`'s exact shape — `settled` / `error` / `retry` as named fields, versus some other arrangement (e.g. a tuple, matching `signal`'s `[accessor, setter]` convention).
-3. Whether `ActionHandle.retry()` should itself return something (e.g. a fresh `settled` promise for that specific attempt) or stay `void`, relying entirely on `error`/`settled` being read reactively.
+1. `ActionHandle`'s exact shape — `settled` / `error` / `retry` as named fields, versus some other arrangement (e.g. a tuple, matching `signal`'s `[accessor, setter]` convention).
