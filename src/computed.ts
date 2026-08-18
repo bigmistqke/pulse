@@ -384,17 +384,28 @@ function makeStageNode(
             // promise that rejected — it never got a value to replace it with,
             // because the write landed on a later stage. Reading that promise
             // here must not be mistaken for "still pending"; nothing is
-            // in-flight. With a value already in hand — including one this
-            // very write just supplied — keep serving it (stale-while-revalidate,
-            // the same as the pending branch below). Only with nothing ever
-            // resolved does this stage adopt the upstream's reason as its own
-            // parked failure, mirroring what a live throw would have done.
+            // in-flight.
+            //
+            // This stage does NOT adopt the rejection as its own new failure,
+            // even when it has never resolved anything of its own. Adopting
+            // would reintroduce exactly the failure a write just cleared: a
+            // pipeline with more than one stage between the rejection and the
+            // tail has more than one stage whose lastResolvedValue is
+            // UNRESOLVED, and each of them would independently rediscover and
+            // re-park the same rejection the moment it is next pulled — which
+            // then poisons every stage downstream of IT through the ordinary
+            // unshielded-throw path, including the tail, which does have a
+            // value. A write clearing the failure has to stay cleared; the
+            // registry's own upstream walk (`src/failure.ts`) is what a
+            // `<Failed>` boundary actually queries, and it already finds a
+            // still-live failure at its true origin without any stage needing
+            // to keep a local copy. So a rejected input is treated exactly
+            // like a pending one: nothing published, nothing parked, only the
+            // pending flag (which is not accurate here — the upstream is not
+            // in flight) is corrected.
             stashedResolution = null
             suspendedOn = null
             setPendingSig(false)
-            if (lastResolvedValue === UNRESOLVED) {
-              setFailureSig(st.reason)
-            }
             return null
           } else {
             // Pending upstream: mirror suspension on the promise itself.

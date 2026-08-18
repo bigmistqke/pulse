@@ -408,3 +408,30 @@ test('W5: a write clears a failure parked on an earlier stage', async () => {
   expect(failure(todos)).toBeNull() // the query walks upstream
   expect(use(todos)).toEqual(['pushed'])
 })
+
+test('W5: a write clears the failure through more than one never-resolved stage', async () => {
+  // A regression test. An earlier version of the failure-clearing fix adopted
+  // a rejected upstream as a stage's own new failure whenever that stage had
+  // never resolved anything of its own. With two such stages between the
+  // rejection and the tail, each independently rediscovered and re-parked
+  // the same rejection the moment the pipeline was next read, which poisoned
+  // every stage downstream of it — including the tail, which does have a
+  // written value — through the ordinary unshielded-throw path. A write must
+  // stay cleared regardless of how many never-resolved stages sit in between.
+  const [version, setVersion] = signal(1)
+  const [todos, setTodos] = signal(
+    () => version(),
+    function* () {
+      return yield* read(Promise.reject(new Error('offline')) as Promise<string[]>)
+    },
+    (server: string[]) => server, // never independently resolves
+    (server: string[]) => server, // the tail
+  )
+
+  await tick()
+  expect(failure(todos)).toBeInstanceOf(Error)
+
+  setTodos(['pushed'])
+  expect(failure(todos)).toBeNull()
+  expect(use(todos)).toEqual(['pushed'])
+})
