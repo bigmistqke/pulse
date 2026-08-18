@@ -112,6 +112,7 @@ export type StageHandle = {
   readPrev: () => unknown
   withdrawQueuedRun: (isTail: boolean) => void
   abandonRun: () => void
+  clearFailure: () => void
 }
 
 /** Resumption strategy for a suspended stage — see the `computed` JSDoc. */
@@ -373,6 +374,28 @@ function makeStageNode(
             // Settled upstream: unwrap to the bare resolved value and fall
             // through to normal stage execution.
             input = st.value
+          } else if (st.status === 'rejected') {
+            // The upstream is not in flight — it settled, and settled to a
+            // rejection. This is reachable even though a failed upstream's
+            // accessor normally throws before this point: a write clears the
+            // failure on every stage of the pipeline (see the setter in
+            // derived-signal.ts), which can leave an upstream stage healthy
+            // (failureSig null) while its publishedValue still holds the
+            // promise that rejected — it never got a value to replace it with,
+            // because the write landed on a later stage. Reading that promise
+            // here must not be mistaken for "still pending"; nothing is
+            // in-flight. With a value already in hand — including one this
+            // very write just supplied — keep serving it (stale-while-revalidate,
+            // the same as the pending branch below). Only with nothing ever
+            // resolved does this stage adopt the upstream's reason as its own
+            // parked failure, mirroring what a live throw would have done.
+            stashedResolution = null
+            suspendedOn = null
+            setPendingSig(false)
+            if (lastResolvedValue === UNRESOLVED) {
+              setFailureSig(st.reason)
+            }
+            return null
           } else {
             // Pending upstream: mirror suspension on the promise itself.
             stashedResolution = null
@@ -747,6 +770,14 @@ function makeStageNode(
     setPendingSig(false)
   }
 
+  /** Clear this stage's parked failure. Called on every stage of a pipeline by a
+   *  write, because the failure query walks upstream — clearing only the stage a
+   *  write lands on leaves a boundary rendering its fallback over a signal that
+   *  now holds a value. */
+  const clearFailure = (): void => {
+    setFailureSig(null)
+  }
+
   // User-facing accessor: reads depTracker (to register as sub so dep
   // changes propagate AND to trigger lazy first eval) and publishedValue
   // (the actual view value). Surfaces parked errors.
@@ -827,5 +858,6 @@ function makeStageNode(
     readPrev,
     withdrawQueuedRun,
     abandonRun,
+    clearFailure,
   }
 }

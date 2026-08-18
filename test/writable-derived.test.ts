@@ -3,6 +3,7 @@ import { signal } from '../src/derived-signal'
 import { latest, read, use } from '../src/async'
 import { isPending } from '../src/pending'
 import { onCleanup } from '../src/owner'
+import { failure } from '../src/failure'
 
 test('W2: a write replaces the value and the body does not re-run', () => {
   let runs = 0
@@ -373,4 +374,37 @@ test('W12: a write abandons every stage that has work, and resuming reissues bot
   resolveSession({ id: 2 })
   await tick()
   expect(listRequests).toBe(1)
+})
+
+test('W5: a write clears a parked failure on a single stage', async () => {
+  const [version, setVersion] = signal(1)
+  const [todos, setTodos] = signal(function* () {
+    version()
+    return yield* read(Promise.reject(new Error('offline')) as Promise<string[]>)
+  })
+
+  await tick()
+  expect(failure(todos)).toBeInstanceOf(Error)
+
+  setTodos(['pushed'])
+  expect(failure(todos)).toBeNull()
+  expect(use(todos)).toEqual(['pushed'])
+})
+
+test('W5: a write clears a failure parked on an earlier stage', async () => {
+  const [version, setVersion] = signal(1)
+  const [todos, setTodos] = signal(
+    () => version(),
+    function* () {
+      return yield* read(Promise.reject(new Error('offline')) as Promise<string[]>)
+    },
+    (server: string[]) => server,
+  )
+
+  await tick()
+  expect(failure(todos)).toBeInstanceOf(Error)
+
+  setTodos(['pushed'])
+  expect(failure(todos)).toBeNull() // the query walks upstream
+  expect(use(todos)).toEqual(['pushed'])
 })

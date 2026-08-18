@@ -97,6 +97,7 @@ function signalFromStages(
     // cleanup that reads the signal sees the write that triggered it.
     for (let i = built.length - 1; i >= 0; i--) {
       built[i].abandonRun()
+      built[i].clearFailure()
     }
   }
 
