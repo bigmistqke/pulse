@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { createScope, chainFor, writeSlot, readSlot, chainMatch, linkEdge, edgesToFire, closeScopeEdges, ROOT_KIND, ROOT_SCOPE, DIRTY, getCurrentScope, getCurrentTracker, runInScope, signalNode, computedNode, readValue, writeValue, commit, discard, action, onSettle, type Scope, type Node, type Slot, type Edge } from '../src/scope'
+import { createScope, chainFor, writeSlot, readSlot, chainMatch, linkEdge, edgesToFire, closeScopeEdges, ROOT_KIND, ROOT_SCOPE, DIRTY, getCurrentScope, getCurrentTracker, runInScope, signalNode, computedNode, readValue, writeValue, commit, discard, action, onSettled, type Scope, type Node, type Slot, type Edge } from '../src/scope'
 import { read as r3Read } from 'r3'
 
 test('createScope produces an open scope with empty bags', () => {
@@ -397,46 +397,46 @@ test('committing a scope where a computed was only read does not promote/corrupt
   expect(readValue(doubleName)).toBe('barbar')
 })
 
-test('onSettle fires with committed when the scope commits', () => {
+test('onSettled fires with committed when the scope commits', () => {
   const s = createScope(ROOT_SCOPE, 'speculative')
   const seen: string[] = []
-  runInScope(s, undefined, () => onSettle((outcome) => seen.push(outcome)))
+  runInScope(s, undefined, () => onSettled((outcome) => seen.push(outcome)))
   commit(s)
   expect(seen).toEqual(['committed'])
 })
 
-test('onSettle fires with discarded when the scope is discarded', () => {
+test('onSettled fires with discarded when the scope is discarded', () => {
   const s = createScope(ROOT_SCOPE, 'speculative')
   const seen: string[] = []
-  runInScope(s, undefined, () => onSettle((outcome) => seen.push(outcome)))
+  runInScope(s, undefined, () => onSettled((outcome) => seen.push(outcome)))
   discard(s)
   expect(seen).toEqual(['discarded'])
 })
 
-test('onSettle fires each callback once, in last-in-first-out order', () => {
+test('onSettled fires each callback once, in last-in-first-out order', () => {
   const s = createScope(ROOT_SCOPE, 'speculative')
   const order: number[] = []
   runInScope(s, undefined, () => {
-    onSettle(() => order.push(1))
-    onSettle(() => order.push(2))
+    onSettled(() => order.push(1))
+    onSettled(() => order.push(2))
   })
   commit(s)
   expect(order).toEqual([2, 1])
 })
 
-test('onSettle throws when called with no active speculative scope', () => {
-  expect(() => onSettle(() => {})).toThrow()
+test('onSettled throws when called with no active speculative scope', () => {
+  expect(() => onSettled(() => {})).toThrow()
 })
 
 test('a throwing settle callback does not strand the scope or block siblings', () => {
   const s = createScope(ROOT_SCOPE, 'speculative')
   const fired: string[] = []
   runInScope(s, undefined, () => {
-    onSettle(() => fired.push('a'))
-    onSettle(() => {
+    onSettled(() => fired.push('a'))
+    onSettled(() => {
       throw new Error('boom')
     })
-    onSettle(() => fired.push('c'))
+    onSettled(() => fired.push('c'))
   })
   expect(() => commit(s)).not.toThrow()
   expect(fired).toEqual(['c', 'a']) // LIFO; the throwing middle callback is isolated

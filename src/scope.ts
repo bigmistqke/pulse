@@ -64,7 +64,7 @@ export interface Scope {
   writeSet: Set<Node>
   readSet: Set<Node>
   /** Callbacks fired once when the scope closes, receiving how it closed.
-   *  Registered via `onSettle`; drained by both `commit` and `discard`. A plain
+   *  Registered via `onSettled`; drained by both `commit` and `discard`. A plain
    *  zero-argument callback is fine — it simply ignores the outcome. */
   cleanups: Array<(outcome: SettleOutcome) => void>
   status: 'open' | 'committed' | 'discarded'
@@ -378,7 +378,7 @@ export function committed<T>(s: () => T): T {
  *  writes to its parent, not to the committed world, so a callback that has
  *  to wait for the committed world re-registers on the parent from inside its
  *  own 'committed' callback rather than firing on the inner commit. */
-export function onSettleOn(scope: Scope, callback: (outcome: SettleOutcome) => void): void {
+export function onSettledOn(scope: Scope, callback: (outcome: SettleOutcome) => void): void {
   scope.cleanups.push(callback)
 }
 
@@ -386,12 +386,12 @@ export function onSettleOn(scope: Scope, callback: (outcome: SettleOutcome) => v
  *  with 'committed' when it commits, 'discarded' when it is discarded. A caller
  *  that does not care which face closed the scope ignores the argument. Throws
  *  outside an action, where the callback would never fire. */
-export function onSettle(callback: (outcome: SettleOutcome) => void): void {
+export function onSettled(callback: (outcome: SettleOutcome) => void): void {
   const scope = getCurrentScope()
   if (scope === ROOT_SCOPE) {
-    throw new Error('onSettle requires an active speculative scope')
+    throw new Error('onSettled requires an active speculative scope')
   }
-  onSettleOn(scope, callback)
+  onSettledOn(scope, callback)
 }
 
 /**

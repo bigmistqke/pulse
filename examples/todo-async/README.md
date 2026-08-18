@@ -23,7 +23,7 @@ Latency and failure rate are adjustable in the page, and can be seeded from the 
 
 **`committed` builds the overlay from server truth**, not from another in-flight action's guess, which is what keeps two overlapping writes from compounding each other's speculation.
 
-**`onSettle` reports the discard.** It fires once when the action closes, with which face closed it, and the demo uses the discarded case to explain what happened rather than leaving the row's disappearance unexplained.
+**`onSettled` reports the discard.** It fires once when the action closes, with which face closed it, and the demo uses the discarded case to explain what happened rather than leaving the row's disappearance unexplained.
 
 **`<Failed>` is a selection, not a latch.** Set the failure rate to 1 and reload: the load fails and the boundary renders in place of the subtree. Set it back to 0 and press Try again. The boundary shows its fallback exactly while something beneath it is currently failed, so it also clears on its own when an upstream change makes the stage succeed.
 

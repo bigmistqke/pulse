@@ -6,7 +6,7 @@ import {
   isPending,
   latest,
   Loading,
-  onSettle,
+  onSettled,
   optimistic,
   read,
   render,
@@ -87,23 +87,6 @@ function flash(message: string) {
  * be a promise mid-reload, and the tolerant read degrades to the last known
  * list instead — the same list a plain `Todo[]` mirror signal used to hold.
  */
-function mutate(
-  describe: string,
-  speculate: (canonical: Todo[]) => Todo[],
-  send: () => Generator<unknown, void, unknown>,
-) {
-  void action(function* () {
-    setOverlay(speculate(committed(() => latest(todos) ?? [])))
-    onSettle((outcome) => {
-      if (outcome === 'discarded') flash(`${describe} — the server refused`)
-    })
-    yield* send()
-  }).catch(() => {
-    // The rejection already surfaced through `onSettle`; swallowing it here
-    // keeps a refused write from becoming an unhandled rejection.
-  })
-}
-
 function addTodo() {
   const text = draft().trim()
   if (text === '') return
@@ -111,37 +94,49 @@ function addTodo() {
   // A placeholder id, negative so it cannot collide with a real one. It only
   // ever exists inside the overlay.
   const pending: Todo = { id: -Date.now(), text, done: false }
-  mutate(
-    `Could not add "${text}"`,
-    (canonical) => [...canonical, pending],
-    function* () {
-      const saved = yield* read(api.add(text))
-      setTodos((prev) => [...(prev ?? []), saved])
-    },
-  )
+  void action(function* () {
+    setOverlay([...committed(() => latest(todos) ?? []), pending])
+    onSettled((outcome) => {
+      if (outcome === 'discarded') flash(`Could not add "${text}" — the server refused`)
+    })
+    const saved = yield* read(api.add(text))
+    setTodos((prev) => [...(prev ?? []), saved])
+  }).catch(() => {
+    // The rejection already surfaced through `onSettled`; swallowing it here
+    // keeps a refused write from becoming an unhandled rejection.
+  })
 }
 
 function toggleTodo(todo: Todo) {
-  mutate(
-    `Could not update "${todo.text}"`,
-    (canonical) =>
-      canonical.map((each) => (each.id === todo.id ? { ...each, done: !each.done } : each)),
-    function* () {
-      const saved = yield* read(api.toggle(todo.id))
-      setTodos((prev) => (prev ?? []).map((each) => (each.id === saved.id ? saved : each)))
-    },
-  )
+  void action(function* () {
+    setOverlay(
+      committed(() => latest(todos) ?? []).map((each) =>
+        each.id === todo.id ? { ...each, done: !each.done } : each,
+      ),
+    )
+    onSettled((outcome) => {
+      if (outcome === 'discarded') flash(`Could not update "${todo.text}" — the server refused`)
+    })
+    const saved = yield* read(api.toggle(todo.id))
+    setTodos((prev) => (prev ?? []).map((each) => (each.id === saved.id ? saved : each)))
+  }).catch(() => {
+    // The rejection already surfaced through `onSettled`; swallowing it here
+    // keeps a refused write from becoming an unhandled rejection.
+  })
 }
 
 function removeTodo(todo: Todo) {
-  mutate(
-    `Could not remove "${todo.text}"`,
-    (canonical) => canonical.filter((each) => each.id !== todo.id),
-    function* () {
-      yield* read(api.remove(todo.id))
-      setTodos((prev) => (prev ?? []).filter((each) => each.id !== todo.id))
-    },
-  )
+  void action(function* () {
+    setOverlay(committed(() => latest(todos) ?? []).filter((each) => each.id !== todo.id))
+    onSettled((outcome) => {
+      if (outcome === 'discarded') flash(`Could not remove "${todo.text}" — the server refused`)
+    })
+    yield* read(api.remove(todo.id))
+    setTodos((prev) => (prev ?? []).filter((each) => each.id !== todo.id))
+  }).catch(() => {
+    // The rejection already surfaced through `onSettled`; swallowing it here
+    // keeps a refused write from becoming an unhandled rejection.
+  })
 }
 
 /* ------------------------------------------------------------- components */

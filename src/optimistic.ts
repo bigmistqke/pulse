@@ -1,4 +1,4 @@
-import { committed, getCurrentScope, onSettle, ROOT_SCOPE, type Scope } from './scope'
+import { committed, getCurrentScope, onSettled, ROOT_SCOPE, type Scope } from './scope'
 import { signal, type Accessor } from './signal'
 
 /** Distinguishes "no overlay is live" from any real overlay value, including
@@ -19,7 +19,7 @@ const EMPTY = Symbol('empty')
  * write is forced to committed state, so consumers binding outside the writing
  * action see it immediately and reactively. Each action's overlay is removed
  * when that action closes — on both the commit and the discard face — via
- * onSettle. Reading the wrapped signal directly still reports canonical truth.
+ * onSettled. Reading the wrapped signal directly still reports canonical truth.
  */
 export function optimistic<T>(
   source: Accessor<T>,
@@ -50,7 +50,7 @@ export function optimistic<T>(
     overlays.set(scope, value)
     publishTop()
     if (firstForScope) {
-      onSettle(() => {
+      onSettled(() => {
         overlays.delete(scope)
         publishTop()
       })

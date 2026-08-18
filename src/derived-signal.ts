@@ -1,6 +1,6 @@
 import { signal as valueSignal, type Accessor, type Setter } from './signal'
 import { buildStages, type StageHandle } from './computed'
-import { getCurrentScope, onSettleOn, ROOT_SCOPE, type Scope } from './scope'
+import { getCurrentScope, onSettledOn, ROOT_SCOPE, type Scope } from './scope'
 import type { PipelineRead, Resolved } from './async'
 
 /** A stage of any shape: sync, async, or generator. */
@@ -78,7 +78,7 @@ function whenCommitted(scope: Scope, effects: () => void): void {
     effects()
     return
   }
-  onSettleOn(scope, (outcome) => {
+  onSettledOn(scope, (outcome) => {
     if (outcome !== 'committed') return
     whenCommitted(scope.parent ?? ROOT_SCOPE, effects)
   })
