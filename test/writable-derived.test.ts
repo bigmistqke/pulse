@@ -666,3 +666,32 @@ test('writing a promise inside an action does not trigger a fresh recompute', as
   expect(requests).toBe(1)
   expect(use(todos)).toEqual(['a', 'walk'])
 })
+
+test('W22: a write from inside the derivation own body does not raise', async () => {
+  // A write here cancels every stage's run, including this one's own — the
+  // re-entrancy guard exists so that does not mean calling a generator's
+  // return method on the generator that is currently calling it, which
+  // raises. This is not observable as a throw or a wrong value on its own:
+  // without the guard, discarding a still-running generator still raises
+  // internally, but the raise is caught and immediately overwritten by the
+  // write's own clearFailure call, which runs moments later in the same
+  // pass — so it never surfaces here. What breaks silently instead is the
+  // generator's normal completion bookkeeping: the driver's own "the
+  // generator finished, run its cleanups" step is skipped, because
+  // discarding it early already cleared the field that step checks. A
+  // cleanup registered before the self-write is what catches that.
+  const cleanups: string[] = []
+  const [todos, setTodos] = signal(function* () {
+    onCleanup(() => cleanups.push('ran'))
+    const list = yield* read(Promise.resolve<string[]>([]))
+    if (list.length === 0) {
+      setTodos(['seeded'])
+      return ['seeded']
+    }
+    return list
+  })
+
+  await tick()
+  expect(use(todos)).toEqual(['seeded'])
+  expect(cleanups).toEqual(['ran'])
+})
