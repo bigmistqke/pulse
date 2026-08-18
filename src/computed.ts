@@ -1,4 +1,4 @@
-import { computed as r3Computed, getContext as r3GetContext, read as r3Read, setSignal as r3SetSignal, untrack as r3Untrack, unwatched, type Computed as R3Computed, type Signal as R3Signal } from 'r3'
+import { cancelRecompute, computed as r3Computed, getContext as r3GetContext, isRecomputeQueued, read as r3Read, setSignal as r3SetSignal, untrack as r3Untrack, unwatched, type Computed as R3Computed, type Signal as R3Signal } from 'r3'
 import { isGeneratorFunction, NotReadyYet, resolvedPromise, track, type PromiseState, type PipelineRead, type Resolved } from './async'
 import { runStage, resumeStage, takeGeneratorCleanups, type StageOutcome } from './driver'
 import { replayDeps, snapshotDeps, type DepRecord } from './dep-replay'
@@ -110,6 +110,7 @@ export type StageHandle = {
   publishValue: (value: unknown) => void
   applyWriteEffects: (value: unknown) => void
   readPrev: () => unknown
+  cancelRun: (isTail: boolean) => void
 }
 
 /** Resumption strategy for a suspended stage — see the `computed` JSDoc. */
@@ -684,6 +685,34 @@ function makeStageNode(
     lastPublishedShapeIsPromise = writeWrapsInPromise()
   }
 
+  /**
+   * Abandon this stage's outstanding run. `isTail` is true for the stage a write
+   * lands on, which is left clean because the write supplied its value; every
+   * other stage is left needing recomputation, because its input moved and its
+   * published value no longer reflects that.
+   *
+   * Refuses a stage whose own body is the caller. Discarding a generator calls
+   * its `return` method, and calling that on a generator which is currently
+   * executing raises a TypeError.
+   */
+  const cancelRun = (isTail: boolean): void => {
+    const self = depTracker as R3Computed<unknown>
+    if (r3GetContext() === self) return
+    // A stage can be pending without holding a generator or a promise of its
+    // own: a stage downstream of a suspended one mirrors that suspension (see
+    // the `isPromise(input)` branch above) purely by copying `pendingSig`
+    // true, with nothing local to show for it. That mirrored state is still
+    // outstanding work to abandon.
+    const hadWork = retainedGen !== null || suspendedOn !== null || r3Untrack(pendingSig)
+    if (!hadWork && !isRecomputeQueued(self)) return
+    discardGen()
+    suspendedOn = null
+    suspendedInput = undefined
+    stashedResolution = null
+    setPendingSig(false)
+    cancelRecompute(self, !isTail)
+  }
+
   // User-facing accessor: reads depTracker (to register as sub so dep
   // changes propagate AND to trigger lazy first eval) and publishedValue
   // (the actual view value). Surfaces parked errors.
@@ -762,5 +791,6 @@ function makeStageNode(
     publishValue,
     applyWriteEffects,
     readPrev,
+    cancelRun,
   }
 }

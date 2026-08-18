@@ -1,6 +1,8 @@
 import { expect, test } from 'vitest'
 import { signal } from '../src/derived-signal'
 import { read, use } from '../src/async'
+import { isPending } from '../src/pending'
+import { onCleanup } from '../src/owner'
 
 test('W2: a write replaces the value and the body does not re-run', () => {
   let runs = 0
@@ -93,4 +95,70 @@ test('a write into a synchronously coloured stage does not introduce a promise',
   expect(n()).toBe(1)
   setN(2)
   expect(n()).toBe(2) // still bare, not a promise
+})
+
+/** Resolve after all microtasks have drained (a macrotask boundary). */
+const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
+
+test('W1: a write abandons the fetch in flight and it never publishes', async () => {
+  let resolveList: (v: string[]) => void = () => {}
+  const [version, setVersion] = signal(1)
+  const [todos, setTodos] = signal(function* () {
+    version()
+    return yield* read(new Promise<string[]>((r) => (resolveList = r)))
+  })
+
+  // start the first load and let it settle
+  expect(isPending(todos)()).toBe(true)
+  resolveList(['a'])
+  await tick()
+  expect(use(todos)).toEqual(['a'])
+
+  // a refresh starts a second fetch
+  setVersion(2)
+  await tick()
+  expect(isPending(todos)()).toBe(true)
+
+  // the write abandons it
+  setTodos(['a', 'saved'])
+  expect(isPending(todos)()).toBe(false)
+  expect(use(todos)).toEqual(['a', 'saved'])
+
+  resolveList(['a', 'b'])
+  await tick()
+  expect(use(todos)).toEqual(['a', 'saved']) // the abandoned fetch published nothing
+})
+
+test('W13: abandoning a paused stage runs its cleanups', async () => {
+  const aborted: string[] = []
+  const [version, setVersion] = signal(1)
+  const [todos, setTodos] = signal(function* () {
+    const v = version()
+    onCleanup(() => aborted.push(`run ${v}`))
+    return yield* read(new Promise<string[]>(() => {}))
+  })
+
+  expect(isPending(todos)()).toBe(true)
+  setTodos(['written'])
+  expect(aborted).toEqual(['run 1'])
+})
+
+test('W9: a write abandons a fetch that is in a middle stage', async () => {
+  let resolveList: (v: string[]) => void = () => {}
+  const [version, setVersion] = signal(1)
+  const [todos, setTodos] = signal(
+    () => version(),
+    function* () {
+      return yield* read(new Promise<string[]>((r) => (resolveList = r)))
+    },
+    (server: string[]) => server.filter((t) => t !== 'done'),
+  )
+
+  expect(isPending(todos)()).toBe(true)
+  setTodos(['written'])
+  expect(isPending(todos)()).toBe(false)
+
+  resolveList(['from', 'server'])
+  await tick()
+  expect(use(todos)).toEqual(['written']) // the middle stage published nothing
 })

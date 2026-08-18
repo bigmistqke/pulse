@@ -79,8 +79,16 @@ function signalFromStages(
       typeof next === 'function'
         ? (next as (prev: unknown) => unknown)(tail.readPrev())
         : next
+
+    // The value first, so a cleanup fired by cancelling below observes the
+    // write that triggered it rather than the value it replaced.
     tail.publishValue(value)
     tail.applyWriteEffects(value)
+
+    // One run, spread across stages — abandon all of it.
+    for (let i = built.length - 1; i >= 0; i--) {
+      built[i].cancelRun(built[i] === tail)
+    }
   }
 
   return [tail.accessor as Accessor<unknown>, setter]
