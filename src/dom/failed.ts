@@ -42,10 +42,18 @@ const CONST_FAILED_STATE: FailedState = {
 /**
  * Reads the nearest enclosing `<Failed>` boundary's state — active/error/retry
  * — without swapping anything, the same way `useLoading()` reads a `<Loading>`
- * boundary's pending state. Returns a safe, always-inactive state when called
- * outside any owner at all (mirrors `useLoading()`'s `CONST_FALSE_ACCESSOR`).
- * Every root created via `createRoot()` always has a real boundary to find —
- * see `createFailedScope()`'s installation there.
+ * boundary's pending state. Returns a safe, always-inactive state when no
+ * boundary is found (mirrors `useLoading()`'s `CONST_FALSE_ACCESSOR`) — today
+ * that includes both "called with no owner at all" and "called under a root
+ * with no explicit `<Failed>` anywhere in it".
+ *
+ * Uses `findBoundaryScope`, not `findNearestFailedScope` — a plain owner walk
+ * that does not stop early for a nearer `catchError`, unlike the walk actual
+ * failure routing (`effect.ts`, `action()`) uses. This answers "which boundary
+ * would swap me out if it went active", not "who intercepts my own failure" —
+ * a `catchError` between this call and a `<Failed>` does not hide that
+ * `<Failed>`'s state from `useFailed()`, since that boundary still owns
+ * whatever DOM this call's descendants sit inside.
  */
 export function useFailed(): FailedState {
   const scope = findBoundaryScope(getOwner(), 'failed')
