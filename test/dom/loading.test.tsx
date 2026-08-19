@@ -63,7 +63,7 @@ test('pending use() with no initial → renders fallback', () => {
   dispose()
 })
 
-test('pending use() with neither → renders nothing', () => {
+test('pending use() with neither: the one pending binding still shows nothing (its own commit is still withheld)', () => {
   const target = document.createElement('section')
   document.body.append(target)
   const p = new Promise<string>(() => {})
@@ -72,6 +72,31 @@ test('pending use() with neither → renders nothing', () => {
     target,
   )
   expect(target.textContent).toBe('')
+  dispose()
+})
+
+test('pending use() with neither initial nor fallback → the rest of the subtree still renders', () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+  const p = new Promise<string>(() => {})
+  const dispose = render(
+    () => (
+      <Loading>
+        {() => (
+          <div>
+            <span data-testid="static">always here</span>
+            <span>{() => use(p)}</span>
+          </div>
+        )}
+      </Loading>
+    ),
+    target,
+  )
+  // The pending binding contributes no text, but the surrounding structure
+  // — which does not depend on the pending value — is not hidden behind a
+  // swap the way it would be if <Loading> rendered nothing at all.
+  expect(target.querySelector('[data-testid="static"]')).not.toBeNull()
+  expect(target.querySelector('[data-testid="static"]')?.textContent).toBe('always here')
   dispose()
 })
 

@@ -149,6 +149,13 @@ export function Loading(props: LoadingProps): Accessor<unknown> {
 
   return () => {
     if (!pendingSig()) return loadedSubtree
+    // Neither prop given at all (not merely falsy — an explicit fallback of
+    // null/''/false still means "swap to this") → context-only: stay
+    // mounted. The atomic-commit gate above is unaffected either way — it
+    // lives in the individual bindings' own reporting to this scope, not in
+    // this swap decision, so a still-pending binding inside loadedSubtree
+    // continues to withhold its own commit exactly as it already does.
+    if (props.initial === undefined && props.fallback === undefined) return loadedSubtree
     if (!hasEverLoaded) return props.initial ?? props.fallback
     return props.fallback ?? loadedSubtree
   }
