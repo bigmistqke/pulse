@@ -153,8 +153,8 @@ function ServerPanel() {
       <ul class="canonical" data-testid="canonical-list">
         <For each={() => latest(todos)}>
           {(todo: Todo) => (
-            <li class:done={() => todo.done} data-testid="canonical-row">
-              {() => todo.text}
+            <li class:done={todo.done} data-testid="canonical-row">
+              {todo.text}
             </li>
           )}
         </For>
@@ -227,7 +227,7 @@ function TodoList() {
   return (
     <div class="list-area">
       <MutationError/>
-      <ul class="todo-list" class:speculative={speculating} data-testid="todo-list">
+      <ul class="todo-list" class:speculative={speculating()} data-testid="todo-list">
         <For
           each={() => {
             // The opt-in. Calling `use` here is what enrols this binding in the
@@ -239,13 +239,13 @@ function TodoList() {
           }}
         >
           {(todo: Todo) => (
-            <li class:done={() => todo.done} data-testid="todo-row">
+            <li class:done={todo.done} data-testid="todo-row">
               <input
                 attr:type="checkbox"
-                prop:checked={() => todo.done}
+                prop:checked={todo.done}
                 on:change={() => toggleTodo(todo)}
               />
-              <span class="text">{() => todo.text}</span>
+              <span class="text">{todo.text}</span>
               <button class="remove" on:click={() => removeTodo(todo)}>
                 ×
               </button>
@@ -265,21 +265,21 @@ function TodoList() {
         <div class="filters">
           <button
             data-testid="filter-all"
-            class:active={() => filter() === 'all'}
+            class:active={filter() === 'all'}
             on:click={() => setFilter('all')}
           >
             All
           </button>
           <button
             data-testid="filter-active"
-            class:active={() => filter() === 'active'}
+            class:active={filter() === 'active'}
             on:click={() => setFilter('active')}
           >
             Active
           </button>
           <button
             data-testid="filter-completed"
-            class:active={() => filter() === 'completed'}
+            class:active={filter() === 'completed'}
             on:click={() => setFilter('completed')}
           >
             Completed
@@ -295,14 +295,14 @@ function App() {
     <div class="app">
       <header class="top">
         <h1>todos</h1>
-        <Show when={loading}>
+        <Show when={loading()}>
           <span class="inflight" data-testid="inflight">
             loading…
           </span>
         </Show>
         {/* The third value `optimistic` hands back: true while any action has a
             live overlay, so the list is showing a guess rather than truth. */}
-        <Show when={speculating}>
+        <Show when={speculating()}>
           <span class="inflight" data-testid="saving">
             saving…
           </span>
@@ -354,10 +354,10 @@ function App() {
                     <div class="mutation-scope">
                       <input
                         class="new-todo"
-                        class:has-error={mutationFailed.active}
+                        class:has-error={mutationFailed.active()}
                         data-testid="new-todo"
                         attr:placeholder="What needs doing?"
-                        prop:value={draft}
+                        prop:value={draft()}
                         on:input={(e: Event) => setDraft((e.target as HTMLInputElement).value)}
                         on:keydown={(e: Event) => {
                           if ((e as KeyboardEvent).key === 'Enter') addTodo()
