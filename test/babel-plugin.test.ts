@@ -36,3 +36,15 @@ test('leaves an existing function/arrow expression attribute value untouched', (
   expect(code).toContain('onFoo={() => bar()}')
   expect(code).not.toContain('() => () => bar()')
 })
+
+test('never wraps ref or an on:-namespaced attribute, even for a bare identifier value', () => {
+  const code = transform('<input ref={setup} on:click={handleClick} on:input={handleInput} />;')
+  expect(code).toContain('ref={setup}')
+  expect(code).toContain('on:click={handleClick}')
+  expect(code).toContain('on:input={handleInput}')
+})
+
+test('never touches a spread attribute', () => {
+  const code = transform('<div {...rest} />;')
+  expect(code).toContain('{...rest}')
+})
