@@ -48,3 +48,16 @@ test('never touches a spread attribute', () => {
   const code = transform('<div {...rest} />;')
   expect(code).toContain('{...rest}')
 })
+
+test('wraps dynamic JSX child expressions the same way as attribute values', () => {
+  const code = transform('<div>{count()}</div>;')
+  expect(code).toContain('{() => count()}')
+})
+
+test('leaves a literal or function-expression JSX child untouched', () => {
+  const code = transform('<div>{5}{() => bar()}</div>;')
+  expect(code).toContain('{5}')
+  expect(code).toContain('{() => bar()}')
+  expect(code).not.toContain('{() => 5}')
+  expect(code).not.toContain('{() => () => bar()}')
+})
