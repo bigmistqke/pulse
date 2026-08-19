@@ -496,11 +496,16 @@ export function action(body: () => unknown): ActionHandle {
   // exist until an attempt later fails — so discovery still happens
   // eagerly, at call time, while the calling owner (e.g. a reference-keyed
   // row) is still guaranteed alive; only the PICK among these already-
-  // collected candidates is deferred to failure time, and re-checked on
-  // EVERY failure — a retry can fail with a different error type than the
-  // one that made an earlier attempt's claim, and the previously-claimed
-  // candidate's own for may decline it even though it accepted the first
-  // error. action() never talks to catchError itself: the walk below stops,
+  // collected candidates is deferred to failure time, and re-run on EVERY
+  // failure, from scratch, against the whole candidate list — a retry can
+  // fail with a different error type than the one that made an earlier
+  // attempt's claim, and the nearest candidate that accepts THIS error is
+  // not necessarily the one that accepted the last one; it could decline
+  // now where it accepted before, or a nearer candidate could newly accept
+  // where a farther one (most commonly the always-accepting implicit root)
+  // had to settle for it before.
+  //
+  // action() never talks to catchError itself: the walk below stops,
   // unconditionally, the moment it reaches one, without checking its own
   // for and without invoking it — matching today's behaviour, where an
   // action failure with no <Failed> found is not routed anywhere either.
@@ -512,8 +517,11 @@ export function action(body: () => unknown): ActionHandle {
   // on to a different one), and re-claimed by a further failure — the
   // cleanup from its first claim still covers every later one, since it
   // checks claimedCandidate at the moment it actually fires, not at
-  // install time. Without this set, every re-claim would install another,
-  // permanently inert once the earlier one already released the claim.
+  // install time. Without this set, every re-claim would install another
+  // cleanup for the same candidate — not wrong (each one checks the exact
+  // same condition, so at most one of them ever does anything, on
+  // whichever fires first), but an unbounded number of them pile up on
+  // that owner's own cleanups across enough retries.
   const cleanupInstalledFor = new Set<FailedCandidate>()
   let currentSettled: Promise<void>
   // Bumped at the start of every attempt (the initial run and every retry).

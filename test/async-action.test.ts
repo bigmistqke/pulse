@@ -353,6 +353,7 @@ test('action() moves a claim to a boundary that now accepts a retry, releasing t
   const outerReports: unknown[] = []
   const outerUnregisters: number[] = []
   const innerReports: unknown[] = []
+  const innerUnregisters: number[] = []
   let attempt = 0
 
   const handle = createRoot(() => {
@@ -381,7 +382,7 @@ test('action() moves a claim to a boundary that now accepts a retry, releasing t
           report: (state) => {
             if (state.status === 'failed') innerReports.push(state.error)
           },
-          unregister: () => {},
+          unregister: () => innerUnregisters.push(1),
         }),
         reset: () => {},
       }
@@ -408,6 +409,10 @@ test('action() moves a claim to a boundary that now accepts a retry, releasing t
   expect(outerReports).toHaveLength(1) // outer received it instead
   expect((outerReports[0] as Error).message).toBe('t')
   expect(outerUnregisters).toEqual([]) // outer was never claimed-then-released
+  // inner WAS claimed and then released: this is the actual release the
+  // claim's move depends on — without it, inner would stay latched active
+  // on a failure that now belongs to a different boundary.
+  expect(innerUnregisters).toEqual([1])
 })
 
 test('action() moves a claim back to a nearer boundary once a retry fails with an error that boundary accepts, even though a farther boundary already claimed an earlier failure', async () => {
