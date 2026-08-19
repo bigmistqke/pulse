@@ -11,7 +11,7 @@ import {
 } from 'r3'
 import { isGeneratorFunction } from './is-generator-function'
 import { isPromise } from './is-promise'
-import { findNearestFailedScope, getOwner, onCleanup, runWithOwner, type BindingController } from './owner'
+import { getOwner, onCleanup, runWithOwner, type BindingController, type FailedScope, type Owner } from './owner'
 import type { Accessor } from './signal'
 
 /** Graph identity wrapping a recipe. Value is not in the Node — it is produced
@@ -482,24 +482,21 @@ export function action(body: () => Promise<void>): ActionHandle
 export function action(body: () => void): ActionHandle
 export function action(body: () => unknown): ActionHandle {
   const [error, setError] = makeErrorCell()
-  // Captured once, at the moment action() is called — the owner ambient here
-  // is what determines which <Failed> boundary (if any) a failure reaches.
-  // For a call made from inside an on: event handler, this is the owner that
-  // was captured and restored when the handler was bound (see bindProp in
-  // src/dom/bindings.ts), not whatever happens to be ambient when the DOM
-  // event actually fires.
-  const found = findNearestFailedScope(getOwner())
-  const failedScope = found?.scope ?? null
+  // Every <Failed> between the calling owner and the nearest catchError (or
+  // the root) — collected ONCE, at the moment action() is called, exactly
+  // like the single-candidate version this replaces. Filtering by error
+  // type needs the error itself to pick a winner, and the error does not
+  // exist until an attempt later fails — so discovery still happens
+  // eagerly, at call time, while the calling owner (e.g. a reference-keyed
+  // row) is still guaranteed alive; only the FINAL PICK among these already-
+  // collected candidates is deferred to failure time. action() never talks
+  // to catchError itself: the walk below stops, unconditionally, the moment
+  // it reaches one, without checking its own for and without invoking it —
+  // matching today's behaviour, where an action failure with no <Failed>
+  // found is not routed anywhere either.
+  const candidates = collectFailedCandidates(getOwner())
+  let claimedCandidate: FailedCandidate | null = null
   let controller: BindingController | null = null
-  // Set once, by the onCleanup below, when the BOUNDARY (not the calling
-  // owner) is disposed. Anchoring to the boundary rather than to whichever
-  // component happened to call action() matters for optimistic UI: a write
-  // this action makes can itself dispose and recreate the very row that
-  // triggered it (a reference-keyed <For> re-keys on object identity, and an
-  // optimistic write typically produces a fresh object), well before the
-  // request settles. That row's disposal says nothing about whether anyone
-  // is still around to see the failure — the boundary is what answers that,
-  // since it can easily still be mounted with the row just rebuilt under it.
   let disposed = false
   let currentSettled: Promise<void>
   // Bumped at the start of every attempt (the initial run and every retry).
@@ -509,9 +506,21 @@ export function action(body: () => unknown): ActionHandle {
   // its own outcome once a newer attempt has already reported its own.
   let generation = 0
 
-  const ensureController = (): BindingController | null => {
-    if (controller === null && failedScope !== null) controller = failedScope.register()
-    return controller
+  // One disposal guard per candidate, installed now — while every one of
+  // them is still guaranteed alive, exactly like the single-candidate
+  // version's guard was. A candidate that never ends up claimed just marks
+  // itself disposed; the one that does gets its controller unregistered
+  // through the same check that used to run unconditionally.
+  for (const candidate of candidates) {
+    runWithOwner(candidate.owner, () => {
+      onCleanup(() => {
+        candidate.disposed = true
+        if (claimedCandidate === candidate) {
+          disposed = true
+          controller?.unregister()
+        }
+      })
+    })
   }
 
   const runAttempt = (): Promise<void> => {
@@ -530,34 +539,32 @@ export function action(body: () => unknown): ActionHandle {
         controller?.report({ status: 'idle' })
         controller?.unregister()
         controller = null
+        claimedCandidate = null
       },
       (e: unknown) => {
         if (myGeneration !== generation) return
         setError(e)
         if (disposed) return
-        ensureController()?.report({ status: 'failed', error: e, source: null, retry })
+        // Deliberately does not re-run this search on a later retry once a
+        // candidate has already claimed an earlier failure — the same
+        // controller is reused across retries (report()'s own dedup already
+        // relies on this), so the claim stays put too.
+        if (claimedCandidate === null) {
+          claimedCandidate =
+            candidates.find(
+              (c) => !c.disposed && (c.scope.for === undefined || c.scope.for(e)),
+            ) ?? null
+        }
+        if (claimedCandidate !== null) {
+          controller ??= claimedCandidate.scope.register()
+          controller.report({ status: 'failed', error: e, source: null, retry })
+        }
       },
     )
   }
 
   function retry(): void {
     currentSettled = runAttempt()
-  }
-
-  // Runs even if this action never fails: unregisters a live controller if
-  // the BOUNDARY is disposed before the current attempt settles, so a
-  // boundary unmounting mid-action does not leave a stale entry in its own
-  // (now-gone) collection. Also flips `disposed`, which the failure branch
-  // above checks — see its comment. Registered on the boundary's own owner,
-  // not the ambient one action() was called under — see the comment on
-  // `disposed` above for why.
-  if (found !== null) {
-    runWithOwner(found.owner, () => {
-      onCleanup(() => {
-        disposed = true
-        controller?.unregister()
-      })
-    })
   }
 
   currentSettled = runAttempt()
@@ -569,6 +576,30 @@ export function action(body: () => unknown): ActionHandle {
     error,
     retry,
   }
+}
+
+interface FailedCandidate {
+  readonly owner: Owner
+  readonly scope: FailedScope
+  disposed: boolean
+}
+
+/** Walk up from `start`, collecting every `<Failed>` boundary in nearest-
+ *  first order, stopping unconditionally at the first `catchError` (action()
+ *  never reaches past one, and never invokes it — see action()'s own doc
+ *  comment). Does not check any filter itself: that happens later, in
+ *  action()'s own failure branch, once the error is known. */
+function collectFailedCandidates(start: Owner | null): FailedCandidate[] {
+  const candidates: FailedCandidate[] = []
+  let owner = start
+  while (owner !== null) {
+    if (owner.boundaries.failed !== null) {
+      candidates.push({ owner, scope: owner.boundaries.failed, disposed: false })
+    }
+    if (owner.errorHandler !== null) break
+    owner = owner.parent
+  }
+  return candidates
 }
 
 /** Drive a sync or async (non-generator) action body: run it under `scope`, then

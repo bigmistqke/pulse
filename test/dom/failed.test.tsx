@@ -1095,3 +1095,117 @@ test('<Failed> with a declining for lets a computed rejection propagate to a far
   expect(target.querySelector('[data-testid="inner-panel"]')).toBeNull()
   expect(target.querySelector('[data-testid="outer-panel"]')?.textContent).toBe('boom')
 })
+
+test('action() skips a nearer <Failed> whose for declines the error, and registers with a farther one that accepts', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+
+  render(
+    () => (
+      <Failed
+        for={(e: unknown): e is Error => e instanceof Error}
+        fallback={(error) => <p data-testid="outer-panel">{(error as Error).message}</p>}
+      >
+        {() => (
+          <Failed
+            for={(e: unknown): e is RangeError => e instanceof RangeError}
+            fallback={() => <p data-testid="inner-panel">inner</p>}
+          >
+            {() => (
+              <button
+                data-testid="trigger"
+                on:click={() =>
+                  action(function* () {
+                    yield* read(Promise.reject(new TypeError('boom')))
+                  })
+                }
+              >
+                trigger
+              </button>
+            )}
+          </Failed>
+        )}
+      </Failed>
+    ),
+    target,
+  )
+
+  // Nested <Failed> boundaries defer their innermost commit by one flush,
+  // unlike a single <Failed> wrapping a button directly — flush() once
+  // before querying, or the button is not in the DOM yet to click.
+  flush()
+  const button = target.querySelector('[data-testid="trigger"]') as HTMLButtonElement
+  button.click()
+  await tick()
+  flush()
+
+  expect(target.querySelector('[data-testid="inner-panel"]')).toBeNull()
+  expect(target.querySelector('[data-testid="outer-panel"]')?.textContent).toBe('boom')
+})
+
+test('a mutation triggered from a reference-keyed row still reaches a filtered <Failed>, even though its own write recreates that row', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+
+  type Item = { id: number; done: boolean }
+  const [items] = signal<Item[]>([{ id: 1, done: false }])
+  const [overlay, setOverlay] = optimistic(items)
+  let rowDisposals = 0
+
+  function toggle(item: Item) {
+    action(function* () {
+      setOverlay(
+        committed(() => overlay()).map((each) =>
+          each.id === item.id ? { ...each, done: !each.done } : each,
+        ),
+      )
+      yield* read(Promise.reject(new Error('server refused')))
+    })
+  }
+
+  render(
+    () => (
+      <Failed
+        for={(e: unknown): e is Error => e instanceof Error}
+        fallback={(error) => <p data-testid="error-panel">{(error as Error).message}</p>}
+      >
+        {() => (
+          <ul>
+            <For each={overlay}>
+              {(item: Item) => {
+                onCleanup(() => {
+                  rowDisposals++
+                })
+                return (
+                  <li>
+                    <button data-testid={`toggle-${item.id}`} on:click={() => toggle(item)}>
+                      toggle
+                    </button>
+                  </li>
+                )
+              }}
+            </For>
+          </ul>
+        )}
+      </Failed>
+    ),
+    target,
+  )
+
+  const button = target.querySelector('[data-testid="toggle-1"]') as HTMLButtonElement
+  button.click()
+  flush()
+
+  // Confirms the premise, same as the equivalent unfiltered test from the
+  // earlier session's work: the row that triggered the mutation really was
+  // torn down by the mutation's own optimistic write, not merely assumed to.
+  expect(rowDisposals).toBe(1)
+
+  await tick()
+  flush()
+
+  // The failure still reached the filtered boundary regardless — proving
+  // the multi-candidate restructuring did not regress the disposal-anchor
+  // fix this exact scenario exists to guard.
+  expect(target.querySelector('[data-testid="error-panel"]')).not.toBeNull()
+})

@@ -1,5 +1,13 @@
-import { expect, test } from 'vitest'
+import { expect, test, vi } from 'vitest'
 import { action, committed, computed, read, signal } from '../src/index'
+import {
+  catchError,
+  createRoot,
+  createSubOwner,
+  getOwner,
+  runWithOwner,
+  type FailedScope,
+} from '../src/owner'
 
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
 
@@ -255,4 +263,82 @@ test('a superseded attempt settling later does not overwrite the outcome of a ne
   resolveSlow!() // the superseded attempt 2 finally settles, long after attempt 3
   await tick()
   expect((handle.error() as Error).message).toBe('third failed') // unchanged
+})
+
+test('action() skips a nearer FailedScope whose for declines the error, registering with a farther one that accepts', async () => {
+  const outerReports: unknown[] = []
+  const innerReports: unknown[] = []
+
+  const handle = createRoot(() => {
+    const outer = createSubOwner(getOwner())
+    outer.boundaries.failed = {
+      kind: 'failed',
+      active: () => false,
+      error: () => null,
+      register: () => ({
+        report: (state) => {
+          if (state.status === 'failed') outerReports.push(state.error)
+        },
+        unregister: () => {},
+      }),
+      reset: () => {},
+    }
+
+    return runWithOwner(outer, () => {
+      const inner = createSubOwner(getOwner())
+      inner.boundaries.failed = {
+        kind: 'failed',
+        active: () => false,
+        error: () => null,
+        for: (e): e is RangeError => e instanceof RangeError,
+        register: () => ({
+          report: (state) => {
+            if (state.status === 'failed') innerReports.push(state.error)
+          },
+          unregister: () => {},
+        }),
+        reset: () => {},
+      }
+
+      return runWithOwner(inner, () =>
+        action(function* () {
+          yield* read(Promise.reject(new TypeError('boom')))
+        }),
+      )
+    })
+  })
+
+  await handle.settled
+
+  expect(innerReports).toEqual([])
+  expect(outerReports).toHaveLength(1)
+  expect((outerReports[0] as Error).message).toBe('boom')
+})
+
+test('action() with no explicit <Failed> anywhere still reaches the implicit root, unaffected by candidate collection', async () => {
+  const handle = createRoot(() =>
+    action(function* () {
+      yield* read(Promise.reject(new Error('boom')))
+    }),
+  )
+  await handle.settled
+  expect(handle.error()).toBeInstanceOf(Error)
+})
+
+test('action() stops candidate-collection at the nearest catchError, never reaching a farther <Failed> (the implicit root)', async () => {
+  const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+  let handle!: ReturnType<typeof action>
+  createRoot(() => {
+    catchError(
+      () => {
+        handle = action(function* () {
+          yield* read(Promise.reject(new Error('boom')))
+        })
+      },
+      () => {},
+    )
+  })
+  await handle.settled
+  expect(spy).not.toHaveBeenCalled()
+  spy.mockRestore()
 })
