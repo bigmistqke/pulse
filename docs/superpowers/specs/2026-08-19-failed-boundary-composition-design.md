@@ -1,14 +1,14 @@
-# Composable failure state: `useFailed()` and a boundary that does not have to swap its content
+# Composable boundary state: content that does not have to unmount to show `<Failed>`/`<Loading>` state
 
-Today, `<Failed>` only has one way to show a failure: replace its entire subtree with `fallback(error, reset)`. This document adds a second way to read the same state — without unmounting anything — so an app can show error UI inline, next to a specific control, or as a CSS class toggle, while the rest of the content it wraps stays exactly where it is. `fallback` keeps working exactly as it does today; the new pieces are additive.
+Today, `<Failed>` and `<Loading>` each have only one way to show their state: replace their entire subtree — `<Failed>` with `fallback(error, reset)`, `<Loading>` with `fallback`/`initial`. This document adds a second way to read the same state from each — without unmounting anything — so an app can show error or pending UI inline, next to a specific control, or as a CSS class toggle, while the rest of the content stays exactly where it is. Both boundaries' existing swap behavior keeps working exactly as it does today; the new pieces are additive.
 
-This document records the conclusions reached in a design discussion on 2026-08-19 and was written before implementation began.
+This document records the conclusions reached in a design discussion on 2026-08-19 and was written before implementation began. `<Loading>`'s symmetric treatment (Part 3) was folded in during review, after the `<Failed>` design was already approved — see "Resolved during review".
 
 ## Motivation
 
 `<Failed>`'s all-or-nothing fallback was already recorded as a known limitation (`docs/follow-ups.md`): a failed mutation on one row of a list currently has no way to show its error next to that row without tearing down every other row alongside it. The retryable-action-failure work earlier in this session (`docs/superpowers/specs/2026-08-18-retryable-failure-propagation-design.md`) built the registration side of this — an action finds and registers with the nearest `<Failed>` boundary automatically — but left the *display* side exactly as constrained as before: the only way to show that a boundary is failing is still to let it replace everything underneath it.
 
-`<Loading>` already solves the equivalent problem for its own boundary, and the solution generalizes directly: `useLoading()` (`src/dom/loading.ts`) lets any descendant read the nearest `<Loading>` boundary's pending state as a plain reactive accessor, with no swap involved — `<Loading>` itself still swaps for its own `fallback`/`initial`, but nothing stops an app from also reading `useLoading()` somewhere else entirely, for a spinner icon next to one button rather than the whole page. `<Failed>` gets the same treatment here: a `useFailed()` hook as the primitive, plus a little JSX sugar built on top of it.
+`<Loading>` already has half of the answer: `useLoading()` (`src/dom/loading.ts`) lets any descendant read the nearest `<Loading>` boundary's pending state as a plain reactive accessor, with no swap involved. But `<Loading>` itself still always swaps — passing neither `fallback` nor `initial` doesn't leave content mounted, it renders nothing at all while pending (see Part 3). `<Failed>` gets the primitive built fresh here (`useFailed()`, mirroring `useLoading()`), and `<Loading>` gets the one piece of symmetry it was missing: an actual context-only mode when neither prop is given.
 
 ## Part 1 — `useFailed()`: a boundary that does not have to swap anything
 
@@ -154,11 +154,46 @@ The default `FailedScope` installed by `createRoot()` calls `console.error(repor
 
 `<Failed>`'s current collection bookkeeping (`failedSet`, the `collection` signal, `recompute`, `register`/`unregister`, `reset`) is built on pulse's own `signal()` wrapper (`src/signal.ts`). `src/owner.ts` cannot import `signal.ts` at runtime — `signal.ts` imports from `src/scope.ts`, which already imports from `src/owner.ts` (for `findNearestFailedScope`/`getOwner`/`onCleanup`, added by the retryable-action-failure work), so the reverse import would cycle. `src/scope.ts`'s own `makeErrorCell()` hit exactly this problem and solved it by building its reactive cell directly on r3's raw `signal`/`read`/`setSignal` instead of pulse's wrapper; `createDefaultFailedScope()` needs the same treatment, built on raw r3 primitives inside `src/owner.ts` (which already imports `getContext`/`onCleanup` from `'r3'`, so this is consistent with its existing style). Whether `<Failed>`'s own implementation gets refactored to share this same helper (removing its bespoke duplicate) or keeps its current pulse-`signal()`-based version is left to the implementation plan — functionally equivalent either way, and not required for this design to work.
 
+## Part 3 — the same treatment for `<Loading>`
+
+### `<Loading>` already has the hook; it's missing the context-only mode
+
+`useLoading()` already exists and needs no changes — it is the precedent Part 1 followed. What `<Loading>` is missing is the `<Failed>`-style behavior of falling through to the mounted subtree when nothing is provided to swap to. Today, `initial`/`fallback` are already both optional on `LoadingProps`, but the render function doesn't treat "neither provided" as "don't swap" — it treats it as "swap to `undefined`", i.e. render nothing at all while pending:
+
+```ts
+return () => {
+  if (!pendingSig()) return loadedSubtree
+  if (!hasEverLoaded) return props.initial ?? props.fallback
+  return props.fallback ?? loadedSubtree
+}
+```
+
+### Why this is safe: the atomic-commit gate lives inside the bindings, not in this swap decision
+
+`<Loading>`'s atomic-commit guarantee — nothing partially loaded ever flashes on screen — is enforced by the individual bindings inside `loadedSubtree` (their own `use()`-driven `pendingSet`/`readySet`/`deferOrCommit` reporting to the `LoadingScope`, in `src/dom/loading.ts` and the compute/commit split in `src/dom/bindings.ts`/`insertChild`), not by whether `<Loading>`'s own render function is currently displaying `loadedSubtree` or a fallback. `loadedSubtree` is constructed once, up front (`runWithOwner(boundaryOwner, props.children)`), before the render function above ever runs, and its bindings report their pending/ready state to the scope regardless of what gets displayed. So returning `loadedSubtree` unconditionally when neither prop is given doesn't touch the atomicity guarantee at all: a binding waiting on a pending value still withholds its own commit until the gate opens, exactly as today. What changes is that everything *else* in the subtree — static markup, bindings that don't depend on the pending value — is visible immediately instead of being hidden behind the swap while it waits.
+
+### The change
+
+```ts
+return () => {
+  if (!pendingSig()) return loadedSubtree
+  if (props.initial === undefined && props.fallback === undefined) return loadedSubtree
+  if (!hasEverLoaded) return props.initial ?? props.fallback
+  return props.fallback ?? loadedSubtree
+}
+```
+
+Fully backward compatible: anyone passing `initial` and/or `fallback` today sees no change in behavior. An app that wants to swap to a genuinely blank fallback (rather than going context-only) still can — the check is `=== undefined`, not a truthiness check, so `fallback={null}` (or `''`, or `false`) is "provided, swap to this" and only an actually-omitted prop is "not provided, stay mounted."
+
+### Test impact
+
+`test/dom/loading.test.tsx`'s `'pending use() with neither → renders nothing'` is the one existing test that exercises this exact case (`<Loading>{() => <span>{() => use(p)}</span>}</Loading>`, `p` never resolving, asserting `target.textContent === ''`). Traced by hand: under the new render function, the `<span>` element itself would now be inserted into the DOM immediately (nothing about it depends on the pending value), while the inner text binding — the one that calls `use(p)` — still withholds its own commit, so it contributes no text either way. `target.textContent` reads `''` under both the old and new behavior, so this test's literal assertion should still pass; only its *meaning* shifts, from "the boundary chose to render nothing" to "the boundary rendered its content, and the one pending binding inside happens to show nothing yet." Worth renaming when this lands, since the old name describes intent that's no longer accurate. The other bare `<Loading>` usages found in `test/dom/loading-atomic.test.tsx` (6 occurrences) all drive the `LoadingScope` directly via manual `register()`/`report()` calls and assert against a `commits` array or `scope.active()`, never against `target.textContent` or DOM structure tied to the swap decision — unaffected by this change. This needs confirming against the real test run once implemented, not just this trace, the same way Part 2's `effect.ts` test claim was confirmed by running rather than only reasoned through.
+
 ## Explicitly out of scope
 
-- `<Loading>` getting the equivalent compound-sugar treatment (`Loading.Pending`, or similar) — `useLoading()` already exists as the read-based primitive; only the sugar layer is new territory here, and only for `<Failed>`. Worth revisiting for symmetry later, not built by this design.
-- Changing `<Failed>`'s `reset`/retry semantics for the `fallback`-swap path — unchanged.
+- Changing `<Failed>`'s or `<Loading>`'s `reset`/retry semantics for their respective `fallback`-swap paths — unchanged for both.
 - `resetFailure`'s existing gap (does not cross a `use()`-linked separate `computed()` call) — untouched, pre-existing, separately tracked in `docs/follow-ups.md`.
+- A `Loading.Pending`-style compound component mirroring `Failed.Error` — `useLoading()` alone covers the same ground `useFailed()` does for `<Failed>` (a single boolean, no error/retry payload to wrap), so there's no equivalent gap to fill with sugar. Can be added later if a concrete need shows up.
 
 ## Resolved during review
 
@@ -166,3 +201,4 @@ The default `FailedScope` installed by `createRoot()` calls `console.error(repor
 - **Hook is the primitive; `Failed.Error` is sugar built on it, not a second, independent mechanism.** Matches the one existing precedent in this codebase (`useLoading()`) — `useFailed()` is what everything reads from, and the compound component is a small convenience wrapper around it, not an alternative API with its own registration logic.
 - **The root-boundary fallback applies uniformly to `action()` and to `effect()`'s computed/signal failure path, not to `action()` alone.** The two already share the same registration mechanism deliberately; carving out an action-only fallback would preserve an asymmetry that exists only because `effect.ts`'s synchronous-throw path predates `<Failed>`, not because the two kinds of failure need different treatment. Confirmed the three tests this could have affected do not use `createRoot()` and are unaffected.
 - **The root scope always `console.error`s its reports, unconditionally** — not only when nothing is reading `useFailed()` — matching `routeErrorFromRerun`'s existing behavior and keeping a failure exactly as visible by default as it is today.
+- **`<Loading>` gets the same context-only mode as `<Failed>`, folded into this same document (Part 3), rather than staying a separate follow-up.** Raised after Part 1/2 were already approved; the mechanism turned out to compose cleanly with `<Loading>`'s existing atomic-commit gate (the gate lives in the bindings, not in the swap decision), so it was small enough to include rather than defer. The `=== undefined` check (rather than a truthiness check) is what keeps "swap to an explicit blank" (`fallback={null}`) distinguishable from "don't swap at all" (prop omitted) — raised directly by the user before the change was written down, not discovered afterward.
