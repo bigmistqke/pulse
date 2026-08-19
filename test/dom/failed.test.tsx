@@ -1064,3 +1064,34 @@ test('useFailed() with no explicit <Failed> reports the implicit root boundary, 
   expect((state.error() as Error).message).toBe('boom')
   spy.mockRestore()
 })
+
+test('<Failed> with a declining for lets a computed rejection propagate to a farther, accepting <Failed>', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+  const c = computed(() => Promise.reject(new TypeError('boom')))
+
+  render(
+    () => (
+      <Failed
+        for={(e: unknown): e is Error => e instanceof Error}
+        fallback={(error) => <p data-testid="outer-panel">{(error as Error).message}</p>}
+      >
+        {() => (
+          <Failed
+            for={(e: unknown): e is RangeError => e instanceof RangeError}
+            fallback={() => <p data-testid="inner-panel">inner</p>}
+          >
+            {() => <span>{() => use(c)}</span>}
+          </Failed>
+        )}
+      </Failed>
+    ),
+    target,
+  )
+
+  await tick()
+  flush()
+
+  expect(target.querySelector('[data-testid="inner-panel"]')).toBeNull()
+  expect(target.querySelector('[data-testid="outer-panel"]')?.textContent).toBe('boom')
+})

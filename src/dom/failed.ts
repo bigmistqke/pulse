@@ -10,7 +10,7 @@ import {
 } from '../owner'
 import type { Accessor } from '../signal'
 
-export interface FailedProps {
+export interface FailedProps<E = unknown> {
   /** Function child REQUIRED — defers JSX construction until inside the boundary
    *  owner, so descendants register with the right scope. Same contract as
    *  `<Loading>`. */
@@ -20,7 +20,18 @@ export interface FailedProps {
    *  active. When omitted, `<Failed>` is pure scoping — children stay
    *  mounted always, and `useFailed()` (or `Failed.Error`) is how a
    *  descendant shows the failure without unmounting anything. */
-  fallback?: (error: unknown, reset: () => void) => unknown
+  fallback?: (error: E, reset: () => void) => unknown
+  /** Optional. When given, this boundary only claims an error if `for`
+   *  returns true for it — anything else is treated as if this boundary did
+   *  not exist, and the search continues to the next ancestor `<Failed>` (or
+   *  `catchError`) instead. Omitted means "accepts everything", exactly the
+   *  behaviour without this prop.
+   *
+   *  Written as a type guard (`(value: unknown) => value is E`), `fallback`'s
+   *  own `error` parameter is narrowed to `E`. A plain boolean predicate
+   *  still works when there's nothing to narrow to (filtering by message, by
+   *  a custom `.code` property, etc.) — just without the narrowing. */
+  for?: ((value: unknown) => value is E) | ((value: unknown) => boolean)
 }
 
 export interface FailedState {
@@ -82,10 +93,10 @@ export function useFailed(): FailedState {
  * Suspension is NOT a failure: `NotReadyYet` is handled by `<Loading>` and never
  * reaches here.
  */
-export function Failed(props: FailedProps): Accessor<unknown> {
+export function Failed<E = unknown>(props: FailedProps<E>): Accessor<unknown> {
   const parentOwner = getOwner()
   const boundaryOwner: Owner = createSubOwner(parentOwner)
-  const scope = createFailedScope()
+  const scope = createFailedScope(undefined, props.for)
   boundaryOwner.boundaries.failed = scope
 
   // Construct the guarded subtree once, inside boundaryOwner — same
@@ -95,7 +106,11 @@ export function Failed(props: FailedProps): Accessor<unknown> {
   return () => {
     if (props.fallback === undefined) return subtree
     if (!scope.active()) return subtree
-    return props.fallback(scope.error(), scope.reset)
+    // Safe: fallback only runs while scope.active() is true, meaning
+    // something registered a 'failed' report that findNearestFailedScope/
+    // action() already checked against this exact scope.for before ever
+    // calling register() — see FailedScope.for's own doc comment.
+    return props.fallback(scope.error() as E, scope.reset)
   }
 }
 
