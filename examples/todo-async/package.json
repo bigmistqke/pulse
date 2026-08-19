@@ -10,6 +10,10 @@
     "test": "playwright test"
   },
   "devDependencies": {
+    "@babel/core": "^8.0.1",
+    "@babel/plugin-syntax-jsx": "^8.0.1",
+    "@babel/plugin-transform-react-jsx": "^8.0.1",
+    "@babel/preset-typescript": "^8.0.1",
     "@playwright/test": "^1.60.0",
     "typescript": "^5.8.3",
     "vite": "^6.0.0"
