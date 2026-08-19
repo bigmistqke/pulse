@@ -151,7 +151,7 @@ function ServerPanel() {
         is in flight, and snaps back to it if the server refuses.
       </p>
       <ul class="canonical" data-testid="canonical-list">
-        <For each={() => latest(todos)}>
+        <For each={latest(todos)}>
           {(todo: Todo) => (
             <li class:done={todo.done} data-testid="canonical-row">
               {todo.text}
@@ -363,7 +363,7 @@ function App() {
                           if ((e as KeyboardEvent).key === 'Enter') addTodo()
                         }}
                       />
-                      <Loading initial={<Skeleton/>}>{() => <TodoList/>}</Loading>
+                      <Loading initial={<Skeleton/>}>{<TodoList/>}</Loading>
                     </div>
                   )
                 }}
