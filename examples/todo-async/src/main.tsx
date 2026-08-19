@@ -28,9 +28,11 @@ const [version, setVersion] = signal(0)
 /**
  * The load, and the write target once a mutation's request confirms — one
  * signal, two sources, so there is no separate mirror to keep in sync. A
- * generator stage: `read` resolves the promise, and the stage suspends until
- * it settles. Because `version` is read before the pause, it is a dependency
- * — bumping it discards any in-flight generator and starts over.
+ * plain function stage: it returns the fetch's promise directly, with
+ * nothing to do after it resolves, so there is no need for a generator —
+ * those are for a stage that keeps running after an `await`, not for a bare
+ * fetch. Because `version` is read before the fetch starts, it is a
+ * dependency — bumping it discards any in-flight request and starts over.
  *
  * This is canonical server truth. `setTodos` is called only with what the
  * server actually confirmed; the speculative guess a mutation shows before
@@ -39,12 +41,14 @@ const [version, setVersion] = signal(0)
  * The `[]` default seeds `latest(todos)`'s fallback, so every tolerant read
  * below can drop its own `?? []` — `latest(todos)` reports `[]` on its own
  * until the first load resolves, exactly as if that had already happened.
- * The strict read (`todos()`, `use(todos)`) is unaffected: it still stays a
- * Promise while the load is genuinely in flight.
+ * `setTodos`'s update form gets the same substitution, so a mutation below
+ * can write `(prev) => [...prev, x]` directly with no `?? []` of its own
+ * either. The strict read (`todos()`, `use(todos)`) is unaffected: it still
+ * stays a Promise while the load is genuinely in flight.
  */
-const [todos, setTodos] = signal(function* () {
+const [todos, setTodos] = signal(() => {
   version()
-  return yield* read(api.list())
+  return api.list()
 }, [] as Todo[])
 
 /**
@@ -94,7 +98,7 @@ function submitTodo(text: string) {
   action(function* () {
     setOverlay([...committed(() => latest(todos)), pending])
     const saved = yield* read(api.add(text))
-    setTodos((prev) => [...(prev ?? []), saved])
+    setTodos((prev) => [...prev, saved])
   })
 }
 
@@ -113,7 +117,7 @@ function toggleTodo(todo: Todo) {
       ),
     )
     const saved = yield* read(api.toggle(todo.id))
-    setTodos((prev) => (prev ?? []).map((each) => (each.id === saved.id ? saved : each)))
+    setTodos((prev) => prev.map((each) => (each.id === saved.id ? saved : each)))
   })
 }
 
@@ -121,7 +125,7 @@ function removeTodo(todo: Todo) {
   action(function* () {
     setOverlay(committed(() => latest(todos)).filter((each) => each.id !== todo.id))
     yield* read(api.remove(todo.id))
-    setTodos((prev) => (prev ?? []).filter((each) => each.id !== todo.id))
+    setTodos((prev) => prev.filter((each) => each.id !== todo.id))
   })
 }
 
