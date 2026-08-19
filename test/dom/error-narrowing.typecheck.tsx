@@ -1,8 +1,8 @@
 // This file exists purely to be typechecked (pnpm typecheck) — it has no
-// runtime assertions and is not a vitest test. If <Failed>'s `for` stops
+// runtime assertions and is not a vitest test. If <Errored>'s `for` stops
 // narrowing `fallback`'s `error` parameter, the `.message`/`.code` accesses
 // below stop compiling.
-import { Failed } from '../../src/index'
+import { Errored } from '../../src/index'
 
 class HttpError extends Error {
   readonly code: number
@@ -14,18 +14,18 @@ class HttpError extends Error {
 
 function _typeGuardNarrowsFallbackError() {
   return (
-    <Failed
+    <Errored
       for={(e: unknown): e is HttpError => e instanceof HttpError}
       fallback={(error) => <p>{error.code}: {error.message}</p>}
     >
       {() => <span>content</span>}
-    </Failed>
+    </Errored>
   )
 }
 
 function _plainPredicateDoesNotNarrow() {
   return (
-    <Failed
+    <Errored
       // A predicate with no narrowable shape — filtering by a property
       // value rather than by `instanceof`/`typeof` — so there is nothing
       // for TypeScript to infer a type predicate from. (A bare
@@ -40,18 +40,18 @@ function _plainPredicateDoesNotNarrow() {
       fallback={(error) => <p>{error.code}</p>}
     >
       {() => <span>content</span>}
-    </Failed>
+    </Errored>
   )
 }
 
 function _omittingForKeepsErrorUnknown() {
   return (
-    <Failed
+    <Errored
       // @ts-expect-error — no `for` at all means `E` stays the default
       // `unknown`, so `error.code` does not exist here either.
       fallback={(error) => <p>{error.code}</p>}
     >
       {() => <span>content</span>}
-    </Failed>
+    </Errored>
   )
 }

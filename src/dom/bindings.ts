@@ -53,7 +53,7 @@ function reactiveCommit<T>(
         ensureController()?.report({ status: 'throwing' })
         throw e
       }
-      // A real failure is not a pending state: a binding that fails must leave
+      // A real error is not a pending state: a binding that fails must leave
       // the boundary's pending collection, or the boundary can never see its
       // pending count reach zero and its gate stays shut forever.
       controller?.report({ status: 'idle' })
@@ -170,7 +170,7 @@ export function insertChild(parent: Node, value: unknown): void {
           // bypasses the outer scope registration.
           throw e
         }
-        // A real failure is not a pending state: a binding that fails must
+        // A real error is not a pending state: a binding that fails must
         // leave the boundary's pending collection, or the boundary can never
         // see its pending count reach zero and its gate stays shut forever.
         controller?.report({ status: 'idle' })

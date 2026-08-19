@@ -25,9 +25,9 @@ Latency and failure rate are adjustable in the page, and can be seeded from the 
 
 **`onSettled` reports the discard.** It fires once when the action closes, with which face closed it, and the demo uses the discarded case to explain what happened rather than leaving the row's disappearance unexplained.
 
-**`<Failed>` is a selection, not a latch.** Set the failure rate to 1 and reload: the load fails and the boundary renders in place of the subtree. Set it back to 0 and press Try again. The boundary shows its fallback exactly while something beneath it is currently failed, so it also clears on its own when an upstream change makes the stage succeed.
+**`<Errored>` is a selection, not a latch.** Set the failure rate to 1 and reload: the load fails and the boundary renders in place of the subtree. Set it back to 0 and press Try again. The boundary shows its fallback exactly while something beneath it is currently failed, so it also clears on its own when an upstream change makes the stage succeed.
 
-**`latest` is the tolerant read.** `todos` is a fetch, so its raw value is a list or a promise of one; `latest` returns the last resolved value and never throws, so `optimistic`'s canonical view and the server panel's list can read it as a plain array without suspending or swallowing a load failure. The failure is the bindings' business, and they route it to `<Failed>`.
+**`latest` is the tolerant read.** `todos` is a fetch, so its raw value is a list or a promise of one; `latest` returns the last resolved value and never throws, so `optimistic`'s canonical view and the server panel's list can read it as a plain array without suspending or swallowing a load error. The error is the bindings' business, and they route it to `<Errored>`.
 
 **`isPending`** drives the loading cue, and the third value `optimistic` returns drives the saving cue.
 
@@ -37,6 +37,6 @@ Latency and failure rate are adjustable in the page, and can be seeded from the 
 
 Both are recorded in `docs/follow-ups.md`, and the demo does what those entries recommend rather than hiding the seam.
 
-A component sitting directly inside the function child of `<Loading>` or `<Failed>` is wrapped under the *outer* hole's owner and never finds the boundary's scope, so there is a static `<div>` between the boundary and its children.
+A component sitting directly inside the function child of `<Loading>` or `<Errored>` is wrapped under the *outer* hole's owner and never finds the boundary's scope, so there is a static `<div>` between the boundary and its children.
 
 The fake server reads its latency and failure rate from plain module variables rather than signals. They are read inside the request helper, which runs while a reactive computation is on the stack, and reading a signal there would make every request a dependency of the stage that issued it — so moving the latency slider would trigger a refetch.

@@ -1,6 +1,6 @@
 import { isPromise } from './is-promise'
 import { isPending, promiseOf } from './pending'
-import { rawValueOf } from './failure'
+import { rawValueOf } from './error'
 import { NODE, type Accessor, type Signal } from './signal'
 import { markUsedInBinding } from './transition-tracker'
 
@@ -43,8 +43,8 @@ export function latest<T, D>(s: Accessor<T>, fallback?: D): Awaited<T> | D | und
   // The TOLERANT read: it NEVER throws. A failed node still holds the value it
   // last resolved to, so read it raw — bypassing the accessor's error conversion —
   // and degrade to it. (The raw accessor throws; that is the strict view, and it is
-  // what feeds an error boundary through `use`. The failure itself is queried with
-  // `failure(s)`, so degrading here is not the same as ignoring it.)
+  // what feeds an error boundary through `use`. The error itself is queried with
+  // `error(s)`, so degrading here is not the same as ignoring it.)
   const value = rawValueOf(s)
   if (isPromise(value)) {
     const state = track(value as Promise<unknown>) // current state for this promise (re-read each call; track replaces the entry on settle)

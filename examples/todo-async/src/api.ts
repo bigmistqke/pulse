@@ -3,7 +3,7 @@
  * of this example — the coordination pulse does is invisible against an instant,
  * reliable backend.
  *
- * Latency and failure rate are plain mutable module state rather than signals,
+ * Latency and error rate are plain mutable module state rather than signals,
  * deliberately. They are read inside `delay`, which runs while a reactive
  * computation is on the stack, and reading a signal there would make every
  * request a dependency of the stage that issued it — so changing the latency
@@ -19,8 +19,8 @@ export type Todo = {
   done: boolean
 }
 
-/** Thrown only by `list()`. Distinguishes a load failure from a mutation
- *  failure by type, so the two can be routed to different boundaries. */
+/** Thrown only by `list()`. Distinguishes a load error from a mutation
+ *  error by type, so the two can be routed to different boundaries. */
 export class LoadFailedError extends Error {}
 
 function fromQuery(key: string, fallback: number): number {

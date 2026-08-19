@@ -1,6 +1,6 @@
 export { latest, read, settled, use, NotReadyYet, type PipelineRead, type Resolved } from './async'
 export { isPending, promiseOf } from './pending'
-export { failure } from './failure'
+export { error } from './error'
 export { computed } from './computed'
 export { effect } from './effect'
 export {
@@ -24,4 +24,4 @@ export { type Accessor, type Setter, type Signal } from './signal'
 export { signal, type DerivedSetter } from './derived-signal'
 export { optimistic } from './optimistic'
 export { action, committed, onSettled, type ActionHandle, type SettleOutcome } from './scope'
-export { Failed, For, Fragment, h, Loading, Match, render, Show, Switch, useFailed, useLoading, type FailedState, type Truthy } from './dom'
+export { Errored, For, Fragment, h, Loading, Match, render, Show, Switch, useErrored, useLoading, type ErroredState, type Truthy } from './dom'

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, expect, test } from 'vitest'
 import {
   catchError,
   computed,
-  failure,
+  error,
   flush,
   microtaskScheduler,
   render,
@@ -68,7 +68,7 @@ test('a pending use() is NOT reported to an error boundary', async () => {
   await tick()
   flush()
 
-  // A loading state is not a failure.
+  // A loading state is not an error.
   expect(caught).toEqual([])
 })
 
@@ -80,7 +80,7 @@ test('a pending use() is NOT reported to an error boundary', async () => {
  * inside it, and `routeError`'s walk up the owner chain cannot reach the handler.
  * The boundary belongs in the tree it is guarding.
  */
-test('an error boundary inside render catches a real failure', async () => {
+test('an error boundary inside render catches a real error', async () => {
   const target = document.createElement('section')
   document.body.append(target)
 
@@ -107,13 +107,13 @@ test('an error boundary inside render catches a real failure', async () => {
  * under the sync scheduler that write re-runs the consuming binding immediately —
  * still inside the settle handler's stack. The binding re-reads, throws, and with
  * no boundary above it `routeError` re-throws. That throw used to unwind the settle
- * handler itself, skipping the `setFailureSig` line below it: the computed silently
- * lost its failure (`failure(c) === null`) and the rejection surfaced as an
+ * handler itself, skipping the `setErrorSig` line below it: the computed silently
+ * lost its error (`error(c) === null`) and the rejection surfaced as an
  * unhandled rejection.
  *
- * The failure is graph state. It parks whether or not anyone is listening.
+ * The error is graph state. It parks whether or not anyone is listening.
  */
-test('a rejected computed parks its failure even when the consumer has no boundary', async () => {
+test('a rejected computed parks its error even when the consumer has no boundary', async () => {
   const target = document.createElement('section')
   document.body.append(target)
 
@@ -124,5 +124,5 @@ test('a rejected computed parks its failure even when the consumer has no bounda
   await tick()
   flush()
 
-  expect((failure(c) as Error)?.message).toBe('boom')
+  expect((error(c) as Error)?.message).toBe('boom')
 })

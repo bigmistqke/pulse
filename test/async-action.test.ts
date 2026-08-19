@@ -6,7 +6,7 @@ import {
   createSubOwner,
   getOwner,
   runWithOwner,
-  type FailedScope,
+  type ErrorScope,
 } from '../src/owner'
 
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
@@ -20,7 +20,7 @@ const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
  * discards (rolling back every speculative write) when it throws.
  *
  * `action()` returns an ActionHandle rather than a promise that rejects: `settled`
- * resolves either way, and a failure is reported through `error()` instead.
+ * resolves either way, and an error is reported through `error()` instead.
  */
 
 test('an async action holds the speculation open across the await and commits on success', async () => {
@@ -148,7 +148,7 @@ test('two concurrent async actions are isolated from each other', async () => {
 
 // ---- ActionHandle-specific behaviour ----
 
-test('a sync body that throws does not throw synchronously; the failure is reported through error()', async () => {
+test('a sync body that throws does not throw synchronously; the error is reported through error()', async () => {
   let ran = false
   const handle = action(() => {
     ran = true
@@ -160,7 +160,7 @@ test('a sync body that throws does not throw synchronously; the failure is repor
   expect((handle.error() as Error).message).toBe('sync boom')
 })
 
-test('retry() re-runs the action from scratch after a failure', async () => {
+test('retry() re-runs the action from scratch after an error', async () => {
   const [name, setName] = signal('alice')
   let attempt = 0
   const save = () =>
@@ -229,7 +229,7 @@ test('retry() clears error() synchronously, before the new attempt has settled',
   handle.retry()
   // The retried attempt is still in flight (parked on resolveSecond below),
   // but error() must already be cleared rather than stuck on the previous
-  // attempt's failure.
+  // attempt's error.
   expect(handle.error()).toBeNull()
 
   resolveSecond!()
@@ -265,20 +265,20 @@ test('a superseded attempt settling later does not overwrite the outcome of a ne
   expect((handle.error() as Error).message).toBe('third failed') // unchanged
 })
 
-test('action() skips a nearer FailedScope whose for declines the error, registering with a farther one that accepts', async () => {
+test('action() skips a nearer ErrorScope whose for declines the error, registering with a farther one that accepts', async () => {
   const outerReports: unknown[] = []
   const innerReports: unknown[] = []
 
   const handle = createRoot(() => {
     const outer = createSubOwner(getOwner())
-    outer.boundaries.failed = {
-      kind: 'failed',
+    outer.boundaries.error = {
+      kind: 'error',
       active: () => false,
       error: () => null,
       reports: () => [],
       register: () => ({
         report: (state) => {
-          if (state.status === 'failed') outerReports.push(state.error)
+          if (state.status === 'error') outerReports.push(state.error)
         },
         unregister: () => {},
       }),
@@ -288,15 +288,15 @@ test('action() skips a nearer FailedScope whose for declines the error, register
 
     return runWithOwner(outer, () => {
       const inner = createSubOwner(getOwner())
-      inner.boundaries.failed = {
-        kind: 'failed',
+      inner.boundaries.error = {
+        kind: 'error',
         active: () => false,
         error: () => null,
         reports: () => [],
         for: (e): e is RangeError => e instanceof RangeError,
         register: () => ({
           report: (state) => {
-            if (state.status === 'failed') innerReports.push(state.error)
+            if (state.status === 'error') innerReports.push(state.error)
           },
           unregister: () => {},
         }),
@@ -319,7 +319,7 @@ test('action() skips a nearer FailedScope whose for declines the error, register
   expect((outerReports[0] as Error).message).toBe('boom')
 })
 
-test('action() with no explicit <Failed> anywhere still reaches the implicit root, unaffected by candidate collection', async () => {
+test('action() with no explicit <Errored> anywhere still reaches the implicit root, unaffected by candidate collection', async () => {
   const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
   const handle = createRoot(() =>
     action(function* () {
@@ -335,7 +335,7 @@ test('action() with no explicit <Failed> anywhere still reaches the implicit roo
   spy.mockRestore()
 })
 
-test('action() stops candidate-collection at the nearest catchError, never reaching a farther <Failed> (the implicit root)', async () => {
+test('action() stops candidate-collection at the nearest catchError, never reaching a farther <Errored> (the implicit root)', async () => {
   const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
   let handle!: ReturnType<typeof action>
   createRoot(() => {
@@ -353,7 +353,7 @@ test('action() stops candidate-collection at the nearest catchError, never reach
   spy.mockRestore()
 })
 
-test('action() moves a claim to a boundary that now accepts a retry, releasing the one that claimed an earlier, differently-typed failure', async () => {
+test('action() moves a claim to a boundary that now accepts a retry, releasing the one that claimed an earlier, differently-typed error', async () => {
   const outerReports: unknown[] = []
   const outerUnregisters: number[] = []
   const innerReports: unknown[] = []
@@ -362,14 +362,14 @@ test('action() moves a claim to a boundary that now accepts a retry, releasing t
 
   const handle = createRoot(() => {
     const outer = createSubOwner(getOwner())
-    outer.boundaries.failed = {
-      kind: 'failed',
+    outer.boundaries.error = {
+      kind: 'error',
       active: () => false,
       error: () => null,
       reports: () => [],
       register: () => ({
         report: (state) => {
-          if (state.status === 'failed') outerReports.push(state.error)
+          if (state.status === 'error') outerReports.push(state.error)
         },
         unregister: () => outerUnregisters.push(1),
       }),
@@ -379,15 +379,15 @@ test('action() moves a claim to a boundary that now accepts a retry, releasing t
 
     return runWithOwner(outer, () => {
       const inner = createSubOwner(getOwner())
-      inner.boundaries.failed = {
-        kind: 'failed',
+      inner.boundaries.error = {
+        kind: 'error',
         active: () => false,
         error: () => null,
         reports: () => [],
         for: (e): e is RangeError => e instanceof RangeError,
         register: () => ({
           report: (state) => {
-            if (state.status === 'failed') innerReports.push(state.error)
+            if (state.status === 'error') innerReports.push(state.error)
           },
           unregister: () => innerUnregisters.push(1),
         }),
@@ -419,26 +419,26 @@ test('action() moves a claim to a boundary that now accepts a retry, releasing t
   expect(outerUnregisters).toEqual([]) // outer was never claimed-then-released
   // inner WAS claimed and then released: this is the actual release the
   // claim's move depends on — without it, inner would stay latched active
-  // on a failure that now belongs to a different boundary.
+  // on an error that now belongs to a different boundary.
   expect(innerUnregisters).toEqual([1])
 })
 
-test('action() moves a claim back to a nearer boundary once a retry fails with an error that boundary accepts, even though a farther boundary already claimed an earlier failure', async () => {
+test('action() moves a claim back to a nearer boundary once a retry fails with an error that boundary accepts, even though a farther boundary already claimed an earlier error', async () => {
   const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
   const innerReports: unknown[] = []
   let attempt = 0
 
   const handle = createRoot(() => {
     const inner = createSubOwner(getOwner())
-    inner.boundaries.failed = {
-      kind: 'failed',
+    inner.boundaries.error = {
+      kind: 'error',
       active: () => false,
       error: () => null,
       reports: () => [],
       for: (e): e is RangeError => e instanceof RangeError,
       register: () => ({
         report: (state) => {
-          if (state.status === 'failed') innerReports.push(state.error)
+          if (state.status === 'error') innerReports.push(state.error)
         },
         unregister: () => {},
       }),
@@ -456,13 +456,13 @@ test('action() moves a claim back to a nearer boundary once a retry fails with a
 
   await handle.settled
   // Nothing explicit accepts a TypeError here — the implicit root (the only
-  // farther candidate) claims it, exactly like any other unboundaried failure.
+  // farther candidate) claims it, exactly like any other unboundaried error.
   expect(innerReports).toEqual([])
   expect(spy).toHaveBeenCalledTimes(1)
 
   handle.retry() // fails with a RangeError this time — the inner, nearer,
   // explicit boundary accepts it, even though the farther implicit root
-  // (which accepts everything) already holds the claim from the first failure.
+  // (which accepts everything) already holds the claim from the first error.
   await handle.settled
 
   expect(innerReports).toHaveLength(1)

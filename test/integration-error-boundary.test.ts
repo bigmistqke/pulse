@@ -43,7 +43,7 @@ test('end-to-end: signal -> throwing computed -> effect -> catchError catches an
 
   expect(renders).toEqual(['user-0']) // initial
 
-  // User-driven failure: setting id to -1 makes the computed throw.
+  // User-driven error: setting id to -1 makes the computed throw.
   setId(-1)
   // Handler caught; error signal was set; effect re-ran via error signal change.
   expect(renders).toEqual(['user-0', 'ERROR: bad id: -1'])

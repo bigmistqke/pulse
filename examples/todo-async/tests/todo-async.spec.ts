@@ -120,7 +120,7 @@ test('a refetch holds the current list on screen while it is in flight', async (
   await expect(rows(page)).toHaveCount(before)
 })
 
-test('a failed load shows the failure boundary, and retry recovers', async ({ page }) => {
+test('a failed load shows the error boundary, and retry recovers', async ({ page }) => {
   await open(page, { latency: 80, fail: 1 })
 
   await expect(page.getByTestId('error-panel')).toBeVisible({ timeout: 5000 })

@@ -3,7 +3,7 @@ import { computed } from '../src/computed'
 import { signal } from '../src/signal'
 import { latest, read, use } from '../src/async'
 import { createRoot } from '../src/owner'
-import { failure, resetFailure } from '../src/failure'
+import { error, resetError } from '../src/error'
 
 /** Resolve after all microtasks have drained (a macrotask boundary). */
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
@@ -76,7 +76,7 @@ test('a generator with two inline pauses converges and builds each promise once'
 })
 
 test('a signal read before a pause stays a dependency across a resume', async () => {
-  // The failure this guards against: resuming runs only the code after the
+  // The error this guards against: resuming runs only the code after the
   // pause, so r3 would drop `a` unless the recorded dependencies are replayed.
   const [a, setA] = signal(1)
   let runs = 0
@@ -224,12 +224,12 @@ test('a finally block reading a signal during a discard adds no dependency', asy
   expect(runs).toBe(runsWhilePaused)
 })
 
-test('resetting a parked failure discards a generator that has since re-paused', async () => {
-  // Covers the `discardGen()` call in the failure entry's `reset`. Reaching a
+test('resetting a parked error discards a generator that has since re-paused', async () => {
+  // Covers the `discardGen()` call in the error entry's `reset`. Reaching a
   // live generator there takes three steps: the stage fails and parks the
-  // failure (which leaves no retained generator); an unrelated dependency
+  // error (which leaves no retained generator); an unrelated dependency
   // change then reruns the body, which starts a fresh generator and pauses,
-  // without clearing the stale parked failure; and only then does a reset
+  // without clearing the stale parked error; and only then does a reset
   // arrive, landing on a generator that is genuinely mid-pause.
   const [a, setA] = signal(1)
   let attempt = 0
@@ -254,15 +254,15 @@ test('resetting a parked failure discards a generator that has since re-paused',
 
   c()
   await ticks(5)
-  expect(failure(c)).toBeInstanceOf(Error) // parked, no generator retained
-  const closedAfterFailure = closed
+  expect(error(c)).toBeInstanceOf(Error) // parked, no generator retained
+  const closedAfterError = closed
 
   setA(2) // unrelated change: a fresh generator starts and pauses
   await tick()
-  expect(closed).toBe(closedAfterFailure) // still paused, finally has not run
+  expect(closed).toBe(closedAfterError) // still paused, finally has not run
 
-  resetFailure(c) // must tear down the live generator
-  expect(closed).toBe(closedAfterFailure + 1)
+  resetError(c) // must tear down the live generator
+  expect(closed).toBe(closedAfterError + 1)
 })
 
 test('disposing the owner runs a paused generator finally block', async () => {
@@ -409,7 +409,7 @@ test('a discarded generator does not leave its abandoned promise able to re-run 
   setA(2) // discards the paused generator; the fresh one throws synchronously
   await tick()
   expect(bodyRuns).toBe(2)
-  expect(failure(c)).toBeInstanceOf(Error)
+  expect(error(c)).toBeInstanceOf(Error)
 
   // Let the abandoned first generator's promise settle.
   await ticks(80)
@@ -474,7 +474,7 @@ test('a generator stage that pauses, resumes, then returns a promise stays react
   expect(bodyRuns).toBe(2)
 })
 
-test('a generator stage whose returned promise rejects parks the failure', async () => {
+test('a generator stage whose returned promise rejects parks the error', async () => {
   // The rejected half of the same decision. A generator that has already
   // returned cannot catch its returned promise's rejection — the try/catch
   // below is around the `return`, and by the time the promise settles the body
@@ -488,8 +488,8 @@ test('a generator stage whose returned promise rejects parks the failure', async
   rejecting()
   await ticks(30)
 
-  expect(failure(rejecting)).toBeInstanceOf(Error)
-  expect((failure(rejecting) as Error).message).toBe('server said no')
+  expect(error(rejecting)).toBeInstanceOf(Error)
+  expect((error(rejecting) as Error).message).toBe('server said no')
 })
 
 test('a generator stage returning a pending promise stays reactive to its dependencies', async () => {

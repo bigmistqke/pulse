@@ -206,7 +206,7 @@ function signalFromStages(
       // rather than the stale one it is meant to clear.
       for (let i = built.length - 1; i >= 0; i--) {
         built[i].abandonRun()
-        built[i].clearFailure()
+        built[i].clearError()
       }
 
       // Last, so nothing written here is touched again. A written promise

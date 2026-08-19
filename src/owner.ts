@@ -10,7 +10,7 @@ import {
 } from 'r3'
 import type { Accessor } from './signal'
 import { currentGeneratorCleanups } from './generator-cleanup'
-import { resetFailure } from './failure'
+import { resetError } from './error'
 
 /**
  * Per-binding state reports flow into a Loading boundary via this shape.
@@ -26,10 +26,10 @@ export type BindingState =
   | { readonly status: 'ready'; readonly commit: () => void }
   | { readonly status: 'idle' }
   /** The binding threw a real error (not a suspension). `source` is the node whose
-   *  parked failure was thrown, if the throw came from one; `retry` re-runs the
+   *  parked error was thrown, if the throw came from one; `retry` re-runs the
    *  binding. */
   | {
-      readonly status: 'failed'
+      readonly status: 'error'
       readonly error: unknown
       readonly source: Accessor<unknown> | null
       readonly retry: () => void
@@ -45,14 +45,14 @@ export interface BindingController {
 }
 
 /** The statuses a binding reports to a boundary. One boundary collects one status. */
-export type BindingStatus = 'pending' | 'failed'
+export type BindingStatus = 'pending' | 'error'
 
 /**
  * A boundary that collects the bindings beneath it carrying one status, and
  * exposes whether that collection is non-empty.
  *
  * This is the part that generalises. `<Loading>` layers atomic-commit
- * coordination on top of it (see `LoadingScope.deferOrCommit`); a failure
+ * coordination on top of it (see `LoadingScope.deferOrCommit`); an error
  * boundary has nothing to commit atomically, so it uses the collection alone.
  */
 export interface BoundaryScope {
@@ -80,25 +80,25 @@ export interface LoadingScope extends BoundaryScope {
 }
 
 /** The failed collection. */
-export interface FailedScope extends BoundaryScope {
-  readonly kind: 'failed'
+export interface ErrorScope extends BoundaryScope {
+  readonly kind: 'error'
   /** The first failed report's error, or `null` while healthy. Same value a
-   *  `<Failed>` with a `fallback` passes as that fallback's first argument.
+   *  `<Errored>` with a `fallback` passes as that fallback's first argument.
    *  Always `reports()[0]?.error ?? null`. */
   readonly error: Accessor<unknown>
-  /** Set from `<Failed>`'s own `for` prop. Undefined means "accepts
+  /** Set from `<Errored>`'s own `for` prop. Undefined means "accepts
    *  everything" — the existing, unconditional behaviour. Read by the
-   *  walk (`findNearestFailedScope`) and by `action()`'s candidate
+   *  walk (`findNearestErrorScope`) and by `action()`'s candidate
    *  selection, both of which check this BEFORE registering a report,
    *  never inside `register()`/`report()` themselves. */
   readonly for?: (error: unknown) => boolean
   /** Every currently-failed report this scope holds, in registration
-   *  order. `useFailed(predicate)`/`Failed.Error` filter this to find a
+   *  order. `useErrored(predicate)`/`Errored.Error` filter this to find a
    *  report that is not necessarily first — `error`/`active` above stay
    *  based on the first entry specifically, unaffected by anything
    *  reading this. */
-  readonly reports: Accessor<readonly FailureReport[]>
-  /** Clear the collection and retry every binding in it. A `<Failed>` with a
+  readonly reports: Accessor<readonly ErrorReport[]>
+  /** Clear the collection and retry every binding in it. An `<Errored>` with a
    *  `fallback` hands this straight to user code as `reset` — often wired
    *  directly to a DOM event handler (`<button on:click={reset}>`) — so
    *  this must stay a strict zero-argument function. `resetMatching` below
@@ -116,7 +116,7 @@ export interface FailedScope extends BoundaryScope {
 /** Maps a status to the scope interface that collects it. */
 interface ScopeOfKind {
   pending: LoadingScope
-  failed: FailedScope
+  error: ErrorScope
 }
 
 /**
@@ -148,8 +148,8 @@ export interface Owner {
   /** True once this owner has been disposed. Use-after-dispose throws. */
   disposed: boolean
   /** Boundary scopes installed on this owner, keyed by the status each collects.
-   *  Set by `<Loading>` and `<Failed>` on their own boundary owner. */
-  boundaries: { pending: LoadingScope | null; failed: FailedScope | null }
+   *  Set by `<Loading>` and `<Errored>` on their own boundary owner. */
+  boundaries: { pending: LoadingScope | null; error: ErrorScope | null }
 }
 
 let currentOwner: Owner | null = null
@@ -164,7 +164,7 @@ function newOwner(
     children: [],
     cleanups: [],
     disposed: false,
-    boundaries: { pending: null, failed: null },
+    boundaries: { pending: null, error: null },
   }
 }
 
@@ -200,30 +200,30 @@ export function routeError(start: Owner | null, error: unknown): void {
 }
 
 /**
- * The nearest `<Failed>` boundary that accepts `error` — or `null` if a
+ * The nearest `<Errored>` boundary that accepts `error` — or `null` if a
  * `catchError` handler that accepts it is nearer, or if nothing along the
  * way accepts it at all. Returns the boundary's own owner alongside its
  * scope: a caller that needs to know when the BOUNDARY itself (as opposed
  * to whatever owner it started walking from) goes away — e.g. to anchor an
  * `onCleanup` there instead of on the calling owner — needs that owner
- * directly, since `FailedScope` alone does not expose it.
+ * directly, since `ErrorScope` alone does not expose it.
  *
- * `<Failed>` and `catchError` are peers in ONE walk up the owner chain, and
- * the nearest one that ACCEPTS `error` wins. A `<Failed for={...}>` or
+ * `<Errored>` and `catchError` are peers in ONE walk up the owner chain, and
+ * the nearest one that ACCEPTS `error` wins. An `<Errored for={...}>` or
  * `catchError(fn, handler, { for: ... })` that declines `error` is treated
  * as if it were not there at all for this specific error, and the walk
  * continues past it — including past a nearer, declining `catchError`, to
- * check a farther `<Failed>` or `catchError`. Returning `null` when the
+ * check a farther `<Errored>` or `catchError`. Returning `null` when the
  * nearest accepting thing is a `catchError` is what lets the caller fall
  * through to `routeError`, which walks the same chain and finds it.
  */
-export function findNearestFailedScope(
+export function findNearestErrorScope(
   start: Owner | null,
   error: unknown,
-): { owner: Owner; scope: FailedScope } | null {
+): { owner: Owner; scope: ErrorScope } | null {
   let owner = start
   while (owner !== null) {
-    const scope = owner.boundaries.failed
+    const scope = owner.boundaries.error
     if (scope !== null && (scope.for === undefined || scope.for(error))) {
       return { owner, scope }
     }
@@ -245,9 +245,9 @@ export function findNearestFailedScope(
  * on a re-run. A re-run is triggered by a write, and that write may come from inside
  * another node's settle handler — so an un-handled throw would unwind the writer
  * mid-update, aborting bookkeeping that has nothing to do with the failing consumer.
- * (This is precisely how a rejected computed used to lose its parked failure: its
+ * (This is precisely how a rejected computed used to lose its parked error: its
  * consumer had no boundary, and the re-throw unwound the settle handler before it
- * could record the failure.)
+ * could record the error.)
  *
  * A node's state must not depend on whether its consumers have error boundaries. So
  * on a re-run we route as usual, and an error nobody handled is reported rather than
@@ -285,48 +285,48 @@ export function runWithOwner<T>(owner: Owner | null, fn: () => T): T {
   }
 }
 
-/** What a failed binding reported: the error, the node whose parked failure it
+/** What a failed binding reported: the error, the node whose parked error it
  *  threw (if any), and how to re-run it. Mirrors the shape `src/effect.ts`
- *  reports through `BindingState`'s `'failed'` case. */
-export interface FailureReport {
+ *  reports through `BindingState`'s `'error'` case. */
+export interface ErrorReport {
   readonly error: unknown
   readonly source: Accessor<unknown> | null
   readonly retry: () => void
 }
 
 /**
- * Build a `FailedScope`: the collection/report/reset logic shared by every
- * `<Failed>` boundary and by the default boundary `createRoot()` installs on
+ * Build a `ErrorScope`: the collection/report/reset logic shared by every
+ * `<Errored>` boundary and by the default boundary `createRoot()` installs on
  * every root (below).
  *
  * Built directly on raw r3 primitives, not pulse's `signal()` wrapper —
  * `src/signal.ts` imports from `src/scope.ts`, which already imports from
- * this file (`findNearestFailedScope`/`getOwner`/`onCleanup`), so importing
+ * this file (`findNearestErrorScope`/`getOwner`/`onCleanup`), so importing
  * `signal()` back here would cycle. `src/scope.ts`'s own `makeErrorCell()`
  * solves the identical problem the same way. Same reason `error`/`active`
  * are raw r3 `computed`s below rather than pulse's own `computed()`.
  *
- * `onFailedReport`, if given, runs once for every `'failed'` report this
+ * `onErrorReport`, if given, runs once for every `'error'` report this
  * scope receives, regardless of whether anything is reading its `active`/
  * `error` — used by `createRoot()`'s default scope to `console.error` every
- * failure, matching `routeErrorFromRerun`'s existing "always log" behaviour.
- * An explicit `<Failed>` passes nothing, matching its existing silent
- * behaviour (the app is assumed to be handling it via `fallback`/`useFailed()`).
+ * error, matching `routeErrorFromRerun`'s existing "always log" behaviour.
+ * An explicit `<Errored>` passes nothing, matching its existing silent
+ * behaviour (the app is assumed to be handling it via `fallback`/`useErrored()`).
  */
-export function createFailedScope(
-  onFailedReport?: (error: unknown) => void,
+export function createErrorScope(
+  onErrorReport?: (error: unknown) => void,
   filterFor?: (error: unknown) => boolean,
-): FailedScope {
+): ErrorScope {
   // One entry per currently-failed binding, keyed on its controller — so a
   // binding that re-runs and re-reports stays ONE entry.
-  const failedSet = new Map<BindingController, FailureReport>()
+  const errorSet = new Map<BindingController, ErrorReport>()
 
-  const reportsNode = r3Signal<readonly FailureReport[]>([])
+  const reportsNode = r3Signal<readonly ErrorReport[]>([])
 
   // Mirrors `makeErrorCell`'s top-level-read behaviour (`src/scope.ts`):
   // inside an r3 context, read through it directly; outside one, stabilize
   // first so the value is never stale.
-  const readReports = (): readonly FailureReport[] => {
+  const readReports = (): readonly ErrorReport[] => {
     if (getContext() !== null) return r3Read(reportsNode)
     stabilize()
     return reportsNode.value
@@ -335,7 +335,7 @@ export function createFailedScope(
   // `error`/`active` derive from `reportsNode` through their own raw r3
   // `computed`s rather than being read inline off `reportsNode` on every
   // call. `reportsNode` itself publishes a fresh array on every genuine
-  // change to ANY entry — `useFailed(predicate)` needs to see a change to
+  // change to ANY entry — `useErrored(predicate)` needs to see a change to
   // a non-first entry too, so it cannot skip that write. A computed node
   // re-runs its own body whenever its dependency changes, but only
   // notifies ITS OWN subscribers when the value it produces actually
@@ -362,30 +362,30 @@ export function createFailedScope(
   }
 
   const recompute = (): void => {
-    r3SetSignal(reportsNode, Array.from(failedSet.values()))
+    r3SetSignal(reportsNode, Array.from(errorSet.values()))
   }
 
-  const resetEntries = (entries: Array<[BindingController, FailureReport]>): void => {
-    for (const [controller] of entries) failedSet.delete(controller)
+  const resetEntries = (entries: Array<[BindingController, ErrorReport]>): void => {
+    for (const [controller] of entries) errorSet.delete(controller)
     recompute()
     for (const [, report] of entries) {
-      // Clear the parked failure at its root first — otherwise the binding
+      // Clear the parked error at its root first — otherwise the binding
       // just re-reads a still-failed node and throws again.
-      if (report.source !== null) resetFailure(report.source)
+      if (report.source !== null) resetError(report.source)
       report.retry()
     }
   }
 
   const reset = (): void => {
-    resetEntries(Array.from(failedSet.entries()))
+    resetEntries(Array.from(errorSet.entries()))
   }
 
   const resetMatching = (predicate: (error: unknown) => boolean): void => {
-    resetEntries(Array.from(failedSet.entries()).filter(([, report]) => predicate(report.error)))
+    resetEntries(Array.from(errorSet.entries()).filter(([, report]) => predicate(report.error)))
   }
 
   return {
-    kind: 'failed',
+    kind: 'error',
     error: readError,
     active: readActive,
     reports: readReports,
@@ -393,10 +393,10 @@ export function createFailedScope(
     register(): BindingController {
       const controller: BindingController = {
         report(state): void {
-          if (state.status === 'failed') {
-            onFailedReport?.(state.error)
+          if (state.status === 'error') {
+            onErrorReport?.(state.error)
             // A single rejection re-runs a binding several times, and it
-            // re-reports 'failed' each time with the identical error. The
+            // re-reports 'error' each time with the identical error. The
             // stored report is always refreshed — source/retry can differ
             // between reports of the "same" error (a pending-to-failed
             // settle reports before the source is attached, and a later
@@ -404,9 +404,9 @@ export function createFailedScope(
             // only rewritten, and consumers only re-notified, when the error
             // itself changed. Load-bearing: consumers must not re-render for
             // a report that changes nothing they read.
-            const existing = failedSet.get(controller)
+            const existing = errorSet.get(controller)
             const isNoOpReport = existing !== undefined && Object.is(existing.error, state.error)
-            failedSet.set(controller, {
+            errorSet.set(controller, {
               error: state.error,
               source: state.source,
               retry: state.retry,
@@ -416,13 +416,13 @@ export function createFailedScope(
             // Any other status means this binding is no longer failed. In
             // practice only 'idle' is ever sent to a failed-scope controller
             // (see src/effect.ts) — 'throwing'/'ready' go to a pending scope.
-            if (!failedSet.has(controller)) return
-            failedSet.delete(controller)
+            if (!errorSet.has(controller)) return
+            errorSet.delete(controller)
           }
           recompute()
         },
         unregister(): void {
-          failedSet.delete(controller)
+          errorSet.delete(controller)
           recompute()
         },
       }
@@ -443,17 +443,17 @@ export function createFailedScope(
  */
 export function createRoot<T>(fn: (dispose: () => void) => T): T {
   const owner = newOwner()
-  // Every root gets a default FailedScope, so findNearestFailedScope/
-  // findBoundaryScope('failed') always finds something once it reaches the
-  // root — an explicit <Failed> anywhere between the failing binding and the
+  // Every root gets a default ErrorScope, so findNearestErrorScope/
+  // findBoundaryScope('error') always finds something once it reaches the
+  // root — an explicit <Errored> anywhere between the failing binding and the
   // root still wins (nearest match), and a nearer catchError still wins over
-  // any FailedScope, explicit or implicit, exactly as before. This is what
-  // lets useFailed() always return real state, and what lets action() (see
+  // any ErrorScope, explicit or implicit, exactly as before. This is what
+  // lets useErrored() always return real state, and what lets action() (see
   // src/scope.ts) and a failed computed/signal binding (see src/effect.ts)
   // register with something instead of throwing/logging with nowhere for the
-  // failure to be queried from — console.error keeps it exactly as visible
+  // error to be queried from — console.error keeps it exactly as visible
   // by default as routeErrorFromRerun already made it.
-  owner.boundaries.failed = createFailedScope((error) => console.error(error))
+  owner.boundaries.error = createErrorScope((error) => console.error(error))
   const dispose = () => disposeOwner(owner)
   return runWithOwner(owner, () => fn(dispose))
 }

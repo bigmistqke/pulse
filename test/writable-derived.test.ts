@@ -3,7 +3,7 @@ import { signal } from '../src/derived-signal'
 import { latest, read, use } from '../src/async'
 import { isPending } from '../src/pending'
 import { onCleanup } from '../src/owner'
-import { failure } from '../src/failure'
+import { error } from '../src/error'
 import { action } from '../src/scope'
 import { effect } from '../src/effect'
 
@@ -525,7 +525,7 @@ test('W12: a write abandons every stage that has work, and resuming reissues bot
   expect(listRequests).toBe(1)
 })
 
-test('W5: a write clears a parked failure on a single stage', async () => {
+test('W5: a write clears a parked error on a single stage', async () => {
   const [version, setVersion] = signal(1)
   const [todos, setTodos] = signal(function* () {
     version()
@@ -533,14 +533,14 @@ test('W5: a write clears a parked failure on a single stage', async () => {
   })
 
   await tick()
-  expect(failure(todos)).toBeInstanceOf(Error)
+  expect(error(todos)).toBeInstanceOf(Error)
 
   setTodos(['pushed'])
-  expect(failure(todos)).toBeNull()
+  expect(error(todos)).toBeNull()
   expect(use(todos)).toEqual(['pushed'])
 })
 
-test('W5: a write clears a failure parked on an earlier stage', async () => {
+test('W5: a write clears an error parked on an earlier stage', async () => {
   const [version, setVersion] = signal(1)
   const [todos, setTodos] = signal(
     () => version(),
@@ -551,16 +551,16 @@ test('W5: a write clears a failure parked on an earlier stage', async () => {
   )
 
   await tick()
-  expect(failure(todos)).toBeInstanceOf(Error)
+  expect(error(todos)).toBeInstanceOf(Error)
 
   setTodos(['pushed'])
-  expect(failure(todos)).toBeNull() // the query walks upstream
+  expect(error(todos)).toBeNull() // the query walks upstream
   expect(use(todos)).toEqual(['pushed'])
 })
 
-test('W5: a write clears the failure through more than one never-resolved stage', async () => {
-  // A regression test. An earlier version of the failure-clearing fix adopted
-  // a rejected upstream as a stage's own new failure whenever that stage had
+test('W5: a write clears the error through more than one never-resolved stage', async () => {
+  // A regression test. An earlier version of the error-clearing fix adopted
+  // a rejected upstream as a stage's own new error whenever that stage had
   // never resolved anything of its own. With two such stages between the
   // rejection and the tail, each independently rediscovered and re-parked
   // the same rejection the moment the pipeline was next read, which poisoned
@@ -578,10 +578,10 @@ test('W5: a write clears the failure through more than one never-resolved stage'
   )
 
   await tick()
-  expect(failure(todos)).toBeInstanceOf(Error)
+  expect(error(todos)).toBeInstanceOf(Error)
 
   setTodos(['pushed'])
-  expect(failure(todos)).toBeNull()
+  expect(error(todos)).toBeNull()
   expect(use(todos)).toEqual(['pushed'])
 })
 
@@ -641,7 +641,7 @@ test('W7: a dependency change supersedes a written promise that has not settled'
   expect(use(todos)).toEqual(['server 2']) // the superseded write published nothing
 })
 
-test('W6: a rejected written promise parks as a failure', async () => {
+test('W6: a rejected written promise parks as an error', async () => {
   const [todos, setTodos] = signal(function* () {
     return yield* read(Promise.resolve(['a']))
   })
@@ -649,7 +649,7 @@ test('W6: a rejected written promise parks as a failure', async () => {
 
   setTodos(Promise.reject(new Error('save failed')))
   await tick()
-  expect(failure(todos)).toBeInstanceOf(Error)
+  expect(error(todos)).toBeInstanceOf(Error)
   expect(latest(todos)).toEqual(['a'])
 })
 
@@ -825,7 +825,7 @@ test('W22: a write from inside the derivation own body does not raise', async ()
   // raises. This is not observable as a throw or a wrong value on its own:
   // without the guard, discarding a still-running generator still raises
   // internally, but the raise is caught and immediately overwritten by the
-  // write's own clearFailure call, which runs moments later in the same
+  // write's own clearError call, which runs moments later in the same
   // pass — so it never surfaces here. What breaks silently instead is the
   // generator's normal completion bookkeeping: the driver's own "the
   // generator finished, run its cleanups" step is skipped, because

@@ -7,9 +7,9 @@ import { getOwner, routeError, registerWithOwner } from './owner'
 import { peekValue, writeValue } from './scope'
 import { makeAccessor, NODE, signal, signalWithNode, type Accessor, type Signal } from './signal'
 import { registerPending, lookupPending } from './pending'
-import { registerFailure, lookupFailure } from './failure'
+import { registerError, lookupError } from './error'
 import { requestFlush } from './scheduler'
-import { markFailureSource } from './transition-tracker'
+import { markErrorSource } from './transition-tracker'
 
 /** A pipeline stage of any shape: sync, async, or generator. The return type
  *  is whatever the function returns — sync `R`, async `Promise<R>`, or
@@ -113,7 +113,7 @@ export type StageHandle = {
   withdrawQueuedRun: (isTail: boolean) => void
   markNeedsRecomputation: () => void
   abandonRun: () => void
-  clearFailure: () => void
+  clearError: () => void
 }
 
 /** Resumption strategy for a suspended stage — see the `computed` JSDoc. */
@@ -232,7 +232,7 @@ function makeStageNode(
       try {
         routeError(myOwner, e)
       } catch (rethrown) {
-        setFailureSig(rethrown)
+        setErrorSig(rethrown)
       }
     }
   }
@@ -261,13 +261,13 @@ function makeStageNode(
   // so that a generator holding something across its pause releases it.
   registerWithOwner({ dispose: discardGen })
 
-  // The parked failure, as reactive graph state — the mirror of pendingSig. A
+  // The parked error, as reactive graph state — the mirror of pendingSig. A
   // consumer subscribes to it through the accessor, so it re-runs when this node
-  // fails or recovers. Crucially the failure lives HERE and not in publishedValue:
+  // fails or recovers. Crucially the error lives HERE and not in publishedValue:
   // the published value keeps holding the last resolved value, so a tolerant read
   // (`latest`) can degrade to it instead of blowing up. Pending already works this
   // way — it holds the prior value and tracks the in-flight promise out of band.
-  const [failureSig, setFailureSig] = signal<unknown>(null)
+  const [errorSig, setErrorSig] = signal<unknown>(null)
 
   // Published view value: settle handler updates this DIRECTLY (out-of-band)
   // so body doesn't re-run on settle. Consumers reading the accessor get this.
@@ -379,34 +379,34 @@ function makeStageNode(
             // The upstream is not in flight — it settled, and settled to a
             // rejection. This is reachable even though a failed upstream's
             // accessor normally throws before this point: a write clears the
-            // failure on every stage of the pipeline (see the setter in
+            // error on every stage of the pipeline (see the setter in
             // derived-signal.ts), which can leave an upstream stage healthy
-            // (failureSig null) while its publishedValue still holds the
+            // (errorSig null) while its publishedValue still holds the
             // promise that rejected — it never got a value to replace it with,
             // because the write landed on a later stage. Reading that promise
             // here must not be mistaken for "still pending"; nothing is
             // in-flight.
             //
-            // This stage does NOT adopt the rejection as its own new failure,
+            // This stage does NOT adopt the rejection as its own new error,
             // even when it has never resolved anything of its own. Adopting
-            // would reintroduce exactly the failure a write just cleared: a
+            // would reintroduce exactly the error a write just cleared: a
             // pipeline with more than one stage between the rejection and the
             // tail has more than one stage whose lastResolvedValue is
             // UNRESOLVED, and each of them would independently rediscover and
             // re-park the same rejection the moment it is next pulled — which
             // then poisons every stage downstream of IT through the ordinary
             // unshielded-throw path, including the tail, which does have a
-            // value. A write clearing the failure has to stay cleared.
+            // value. A write clearing the error has to stay cleared.
             //
-            // No stage needs to keep a local copy of an upstream's failure for
-            // a `<Failed>` boundary to see it, in either direction. If the
-            // failure is still genuinely live (nothing has cleared it), the
+            // No stage needs to keep a local copy of an upstream's error for
+            // an `<Errored>` boundary to see it, in either direction. If the
+            // error is still genuinely live (nothing has cleared it), the
             // ordinary path above already reaches it: reading `inputAccessor()`
             // on that stage throws, and this stage's own outer catch parks it.
-            // If the failure HAS been cleared by a write, as in the case this
+            // If the error HAS been cleared by a write, as in the case this
             // comment is about, the registry's own upstream walk
-            // (`src/failure.ts`) already reports null — every stage's
-            // `failureSig` was cleared directly by that same write, this
+            // (`src/error.ts`) already reports null — every stage's
+            // `errorSig` was cleared directly by that same write, this
             // stage's included. So a rejected input is treated exactly like a
             // pending one: nothing published, nothing parked, only the pending
             // flag (which is not accurate here — the upstream is not in
@@ -442,13 +442,13 @@ function makeStageNode(
           suspendedOn = null
           setPendingSig(false)
           if (r.kind === 'rejected') {
-            // Park the failure as graph state; leave publishedValue holding the
+            // Park the error as graph state; leave publishedValue holding the
             // stale value so a tolerant read can still degrade to it.
-            setFailureSig(r.reason)
+            setErrorSig(r.reason)
             return null
           }
           lastResolvedValue = r.value
-          setFailureSig(null)
+          setErrorSig(null)
           setPublishedValue(resolvedPromise(r.value))
           return null
         }
@@ -576,7 +576,7 @@ function makeStageNode(
               !lastPublishedShapeIsPromise
             ) {
               lastResolvedValue = state.value
-              setFailureSig(null)
+              setErrorSig(null)
               publishResolvedPromise(state.value)
             }
             // else: same value, already a promise — no downstream invalidation
@@ -592,11 +592,11 @@ function makeStageNode(
               setKick(++kickCount)
               return
             }
-            // Park the failure as graph state. Do NOT publish the reason over the
+            // Park the error as graph state. Do NOT publish the reason over the
             // value: that used to destroy the last resolved value, which is what a
             // tolerant read (`latest`) needs to degrade to. Consumers are dirtied
-            // by the failure signal instead, which the accessor reads.
-            setFailureSig(state.reason)
+            // by the error signal instead, which the accessor reads.
+            setErrorSig(state.reason)
           }
         })
         // No body return value — view is via publishedValue.
@@ -629,7 +629,7 @@ function makeStageNode(
           setPublishedValue(outcome.value)
         }
       }
-      setFailureSig(null)
+      setErrorSig(null)
       return null
     } catch (e) {
       if (e instanceof NotReadyYet) {
@@ -664,7 +664,7 @@ function makeStageNode(
               !Object.is(lastResolvedValue, state.value)
             ) {
               lastResolvedValue = state.value
-              setFailureSig(null)
+              setErrorSig(null)
               // Publish the prior as a BARE value, not a promise: a use()-suspended
               // stage is sync-typed (use erases the async colour), so it must not
               // look async to a downstream stage. The kick below re-runs the body
@@ -675,7 +675,7 @@ function makeStageNode(
           } else if (state.status === 'rejected') {
             suspendedOn = null
             setPendingSig(false)
-            setFailureSig(state.reason)
+            setErrorSig(state.reason)
             setKick(++kickCount)
           }
         })
@@ -685,7 +685,7 @@ function makeStageNode(
         discardGen()
         routeError(myOwner, e)
       } catch (rethrown) {
-        setFailureSig(rethrown)
+        setErrorSig(rethrown)
       }
       return null
     }
@@ -775,7 +775,7 @@ function makeStageNode(
       setPendingSig(false)
       const state = track(written)
       if (state.status === 'rejected') {
-        setFailureSig(state.reason)
+        setErrorSig(state.reason)
         return
       }
       if (
@@ -783,7 +783,7 @@ function makeStageNode(
         !Object.is(lastResolvedValue, state.value)
       ) {
         lastResolvedValue = state.value
-        setFailureSig(null)
+        setErrorSig(null)
         publishResolvedPromise(state.value)
       }
     }
@@ -881,12 +881,12 @@ function makeStageNode(
     setPendingSig(false)
   }
 
-  /** Clear this stage's parked failure. Called on every stage of a pipeline by a
-   *  write, because the failure query walks upstream — clearing only the stage a
+  /** Clear this stage's parked error. Called on every stage of a pipeline by a
+   *  write, because the error query walks upstream — clearing only the stage a
    *  write lands on leaves a boundary rendering its fallback over a signal that
    *  now holds a value. */
-  const clearFailure = (): void => {
-    setFailureSig(null)
+  const clearError = (): void => {
+    setErrorSig(null)
   }
 
   // User-facing accessor: reads depTracker (to register as sub so dep
@@ -897,24 +897,24 @@ function makeStageNode(
     //  - depTracker triggers the lazy first eval (its own value is always null, so
     //    it never fires on its own),
     //  - publishedValue changes when this computed produces a new value,
-    //  - failureSig changes when it fails or recovers.
+    //  - errorSig changes when it fails or recovers.
     // Throwing before those reads would leave a consumer that catches the error
     // with no subscription, so a later successful refetch could never reach it and
-    // a single transient failure would be permanent. (Same reasoning as `use()`,
+    // a single transient error would be permanent. (Same reasoning as `use()`,
     // which calls the accessor before its pending check.) Reading depTracker can
-    // also set or clear the failure via the lazy eval, so the check belongs after.
+    // also set or clear the error via the lazy eval, so the check belongs after.
     //
-    // This is the STRICT view of the failure state: the raw read throws. The
+    // This is the STRICT view of the error state: the raw read throws. The
     // tolerant view (`latest`) reads publishedValue directly and degrades to it;
-    // the query view is `failure(x)`.
+    // the query view is `error(x)`.
     r3Read(depTracker as R3Computed<unknown>)
     const value = publishedValue()
-    const err = failureSig()
+    const err = errorSig()
     if (err !== null) {
       // Tell the binding that catches this WHICH node failed, so it can reset the
-      // right one. The failure may be parked on a computed created far outside the
+      // right one. The error may be parked on a computed created far outside the
       // boundary that ends up collecting the binding.
-      markFailureSource(accessor)
+      markErrorSource(accessor)
       throw err
     }
     return value
@@ -933,11 +933,11 @@ function makeStageNode(
     upstream: upstreamEntry,
   })
 
-  // Register with the failure tracker — the same shape, walked the same way.
+  // Register with the error tracker — the same shape, walked the same way.
   // `value` is the raw, non-throwing read of the published value, which is what
   // lets a tolerant read degrade to the stale value instead of throwing.
-  registerFailure(accessor, {
-    error: failureSig,
+  registerError(accessor, {
+    error: errorSig,
     // The raw read: the same subscriptions the accessor makes (lazy first eval via
     // depTracker, plus the value) but WITHOUT the throw. Reading publishedValue
     // alone would not trigger the lazy eval, so a never-read node would hand back
@@ -946,18 +946,18 @@ function makeStageNode(
       r3Read(depTracker as R3Computed<unknown>)
       return publishedValue()
     },
-    // Clear the parked failure and re-run the body. The kick is a dep of the body,
+    // Clear the parked error and re-run the body. The kick is a dep of the body,
     // so the stage re-executes from the top and suspends on a fresh promise —
     // a genuine retry with unchanged inputs.
     reset: () => {
       // A retry starts the computation over rather than resuming a generator
       // that failed part-way through.
       discardGen()
-      setFailureSig(null)
+      setErrorSig(null)
       setKick(++kickCount)
     },
     upstream: inputAccessor
-      ? lookupFailure(inputAccessor as Accessor<unknown>)
+      ? lookupError(inputAccessor as Accessor<unknown>)
       : undefined,
   })
 
@@ -970,6 +970,6 @@ function makeStageNode(
     withdrawQueuedRun,
     markNeedsRecomputation,
     abandonRun,
-    clearFailure,
+    clearError,
   }
 }

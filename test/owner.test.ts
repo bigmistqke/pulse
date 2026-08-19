@@ -2,16 +2,16 @@ import { afterEach, expect, test, vi } from 'vitest'
 import { computed as r3Computed, stabilize } from 'r3'
 import {
   catchError,
-  createFailedScope,
+  createErrorScope,
   createRoot,
   createSubOwner,
   findBoundaryScope,
-  findNearestFailedScope,
+  findNearestErrorScope,
   getOwner,
   onCleanup,
   runWithOwner,
-  type FailedScope,
-  type FailureReport,
+  type ErrorScope,
+  type ErrorReport,
   type LoadingScope,
 } from '../src/owner'
 import { flush, microtaskScheduler, setScheduler } from '../src/scheduler'
@@ -247,11 +247,11 @@ test('catchError omitting for still accepts everything, exactly as before', () =
   expect(caught).toHaveLength(1)
 })
 
-test('findNearestFailedScope skips a FailedScope whose for declines the error, finding a farther one that accepts', () => {
+test('findNearestErrorScope skips a ErrorScope whose for declines the error, finding a farther one that accepts', () => {
   createRoot(() => {
     const outer = createSubOwner(getOwner())
-    const outerScope: FailedScope = {
-      kind: 'failed',
+    const outerScope: ErrorScope = {
+      kind: 'error',
       active: () => false,
       error: () => null,
       reports: () => [],
@@ -259,12 +259,12 @@ test('findNearestFailedScope skips a FailedScope whose for declines the error, f
       reset: () => {},
       resetMatching: () => {},
     }
-    outer.boundaries.failed = outerScope
+    outer.boundaries.error = outerScope
 
     const found = runWithOwner(outer, () => {
       const inner = createSubOwner(getOwner())
-      const innerScope: FailedScope = {
-        kind: 'failed',
+      const innerScope: ErrorScope = {
+        kind: 'error',
         active: () => false,
         error: () => null,
         reports: () => [],
@@ -273,21 +273,21 @@ test('findNearestFailedScope skips a FailedScope whose for declines the error, f
         reset: () => {},
         resetMatching: () => {},
       }
-      inner.boundaries.failed = innerScope
-      return runWithOwner(inner, () => findNearestFailedScope(getOwner(), new TypeError('boom')))
+      inner.boundaries.error = innerScope
+      return runWithOwner(inner, () => findNearestErrorScope(getOwner(), new TypeError('boom')))
     })
 
     expect(found?.scope).toBe(outerScope)
   })
 })
 
-test('findNearestFailedScope claims the error at the nearest FailedScope whose for accepts it', () => {
+test('findNearestErrorScope claims the error at the nearest ErrorScope whose for accepts it', () => {
   createRoot(() => {
-    let innerScope!: FailedScope
+    let innerScope!: ErrorScope
     const found = runWithOwner(createSubOwner(getOwner()), () => {
       const inner = createSubOwner(getOwner())
       innerScope = {
-        kind: 'failed',
+        kind: 'error',
         active: () => false,
         error: () => null,
         reports: () => [],
@@ -296,26 +296,26 @@ test('findNearestFailedScope claims the error at the nearest FailedScope whose f
         reset: () => {},
         resetMatching: () => {},
       }
-      inner.boundaries.failed = innerScope
-      return runWithOwner(inner, () => findNearestFailedScope(getOwner(), new TypeError('boom')))
+      inner.boundaries.error = innerScope
+      return runWithOwner(inner, () => findNearestErrorScope(getOwner(), new TypeError('boom')))
     })
 
     expect(found?.scope).toBe(innerScope)
   })
 })
 
-test('findNearestFailedScope omitting for still accepts everything, exactly as before', () => {
+test('findNearestErrorScope omitting for still accepts everything, exactly as before', () => {
   createRoot(() => {
-    const found = findNearestFailedScope(getOwner(), new Error('x'))
+    const found = findNearestErrorScope(getOwner(), new Error('x'))
     expect(found).not.toBeNull()
   })
 })
 
-test('a nearer, accepting catchError still wins over a farther FailedScope, exactly as before', () => {
+test('a nearer, accepting catchError still wins over a farther ErrorScope, exactly as before', () => {
   createRoot(() => {
     const outer = createSubOwner(getOwner())
-    outer.boundaries.failed = {
-      kind: 'failed',
+    outer.boundaries.error = {
+      kind: 'error',
       active: () => false,
       error: () => null,
       reports: () => [],
@@ -326,7 +326,7 @@ test('a nearer, accepting catchError still wins over a farther FailedScope, exac
 
     const found = runWithOwner(outer, () =>
       catchError(
-        () => findNearestFailedScope(getOwner(), new Error('boom')),
+        () => findNearestErrorScope(getOwner(), new Error('boom')),
         () => {},
       ),
     )
@@ -335,11 +335,11 @@ test('a nearer, accepting catchError still wins over a farther FailedScope, exac
   })
 })
 
-test('a nearer catchError that declines the error lets a farther FailedScope claim it', () => {
+test('a nearer catchError that declines the error lets a farther ErrorScope claim it', () => {
   createRoot(() => {
     const outer = createSubOwner(getOwner())
-    const outerScope: FailedScope = {
-      kind: 'failed',
+    const outerScope: ErrorScope = {
+      kind: 'error',
       active: () => false,
       error: () => null,
       reports: () => [],
@@ -347,11 +347,11 @@ test('a nearer catchError that declines the error lets a farther FailedScope cla
       reset: () => {},
       resetMatching: () => {},
     }
-    outer.boundaries.failed = outerScope
+    outer.boundaries.error = outerScope
 
     const found = runWithOwner(outer, () =>
       catchError(
-        () => findNearestFailedScope(getOwner(), new TypeError('boom')),
+        () => findNearestErrorScope(getOwner(), new TypeError('boom')),
         () => {},
         { for: (e): e is RangeError => e instanceof RangeError },
       ),
@@ -368,22 +368,22 @@ test('Owner.boundaries.pending defaults to null', () => {
   })
 })
 
-test('createRoot installs a default FailedScope on the root owner', () => {
+test('createRoot installs a default ErrorScope on the root owner', () => {
   createRoot(() => {
     const owner = getOwner()!
-    expect(owner.boundaries.failed).not.toBeNull()
+    expect(owner.boundaries.error).not.toBeNull()
   })
 })
 
-test('the default FailedScope tracks active/error like any other FailedScope', () => {
+test('the default ErrorScope tracks active/error like any other ErrorScope', () => {
   createRoot(() => {
-    const found = findNearestFailedScope(getOwner(), new Error('x'))!
+    const found = findNearestErrorScope(getOwner(), new Error('x'))!
     expect(found.scope.active()).toBe(false)
     expect(found.scope.error()).toBeNull()
 
     const error = new Error('x')
     const controller = found.scope.register()
-    controller.report({ status: 'failed', error, source: null, retry: () => {} })
+    controller.report({ status: 'error', error, source: null, retry: () => {} })
     expect(found.scope.active()).toBe(true)
     expect(found.scope.error()).toBe(error)
 
@@ -393,24 +393,24 @@ test('the default FailedScope tracks active/error like any other FailedScope', (
   })
 })
 
-test('the default FailedScope logs every failed report to console.error', () => {
+test('the default ErrorScope logs every failed report to console.error', () => {
   const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
   const error = new Error('boom')
   createRoot(() => {
-    const found = findNearestFailedScope(getOwner(), error)!
+    const found = findNearestErrorScope(getOwner(), error)!
     const controller = found.scope.register()
-    controller.report({ status: 'failed', error, source: null, retry: () => {} })
+    controller.report({ status: 'error', error, source: null, retry: () => {} })
   })
   expect(spy).toHaveBeenCalledWith(error)
   spy.mockRestore()
 })
 
-test('an explicit FailedScope nested inside createRoot still wins over the root default', () => {
+test('an explicit ErrorScope nested inside createRoot still wins over the root default', () => {
   createRoot(() => {
-    const rootFound = findNearestFailedScope(getOwner(), new Error('x'))!
+    const rootFound = findNearestErrorScope(getOwner(), new Error('x'))!
     const sub = createSubOwner(getOwner())
-    const nestedScope: FailedScope = {
-      kind: 'failed',
+    const nestedScope: ErrorScope = {
+      kind: 'error',
       active: () => false,
       error: () => null,
       reports: () => [],
@@ -418,8 +418,8 @@ test('an explicit FailedScope nested inside createRoot still wins over the root 
       reset: () => {},
       resetMatching: () => {},
     }
-    sub.boundaries.failed = nestedScope
-    const found = runWithOwner(sub, () => findNearestFailedScope(getOwner(), new Error('x')))!
+    sub.boundaries.error = nestedScope
+    const found = runWithOwner(sub, () => findNearestErrorScope(getOwner(), new Error('x')))!
     expect(found.scope).toBe(nestedScope)
     expect(found.scope).not.toBe(rootFound.scope)
   })
@@ -452,15 +452,15 @@ test('findBoundaryScope returns null when no scope on chain', () => {
   expect(captured).toBe(null)
 })
 
-test('FailedScope.reports() reflects every currently-registered failed controller, in registration order', () => {
-  const scope = createFailedScope()
+test('ErrorScope.reports() reflects every currently-registered failed controller, in registration order', () => {
+  const scope = createErrorScope()
   const errorA = new Error('a')
   const errorB = new Error('b')
   const controllerA = scope.register()
   const controllerB = scope.register()
 
-  controllerA.report({ status: 'failed', error: errorA, source: null, retry: () => {} })
-  controllerB.report({ status: 'failed', error: errorB, source: null, retry: () => {} })
+  controllerA.report({ status: 'error', error: errorA, source: null, retry: () => {} })
+  controllerB.report({ status: 'error', error: errorB, source: null, retry: () => {} })
 
   const reports = scope.reports()
   expect(reports).toHaveLength(2)
@@ -468,15 +468,15 @@ test('FailedScope.reports() reflects every currently-registered failed controlle
   expect(reports[1].error).toBe(errorB)
 })
 
-test('FailedScope.reports() removes an entry once its controller reports idle or unregisters', () => {
-  const scope = createFailedScope()
+test('ErrorScope.reports() removes an entry once its controller reports idle or unregisters', () => {
+  const scope = createErrorScope()
   const errorA = new Error('a')
   const errorB = new Error('b')
   const controllerA = scope.register()
   const controllerB = scope.register()
 
-  controllerA.report({ status: 'failed', error: errorA, source: null, retry: () => {} })
-  controllerB.report({ status: 'failed', error: errorB, source: null, retry: () => {} })
+  controllerA.report({ status: 'error', error: errorA, source: null, retry: () => {} })
+  controllerB.report({ status: 'error', error: errorB, source: null, retry: () => {} })
   expect(scope.reports()).toHaveLength(2)
 
   controllerA.report({ status: 'idle' })
@@ -488,21 +488,21 @@ test('FailedScope.reports() removes an entry once its controller reports idle or
 })
 
 test('a controller re-reporting the identical error does not publish a new reports array', () => {
-  const scope = createFailedScope()
+  const scope = createErrorScope()
   const error = new Error('boom')
   const controller = scope.register()
 
-  controller.report({ status: 'failed', error, source: null, retry: () => {} })
+  controller.report({ status: 'error', error, source: null, retry: () => {} })
   const first = scope.reports()
 
-  controller.report({ status: 'failed', error, source: null, retry: () => {} })
+  controller.report({ status: 'error', error, source: null, retry: () => {} })
   const second = scope.reports()
 
   expect(second).toBe(first)
 })
 
 test('a later report of the identical error still refreshes source/retry, even though the published collection is not rewritten', () => {
-  const scope = createFailedScope()
+  const scope = createErrorScope()
   const error = new Error('boom')
   const controller = scope.register()
   let firstRetryCalls = 0
@@ -514,10 +514,10 @@ test('a later report of the identical error still refreshes source/retry, even t
   // recovers it. The published collection does not change between these
   // two reports (that is the no-op-report guarantee above), but reset()
   // must still act on the second report's retry, not the first.
-  controller.report({ status: 'failed', error, source: null, retry: () => { firstRetryCalls++ } })
+  controller.report({ status: 'error', error, source: null, retry: () => { firstRetryCalls++ } })
   const published = scope.reports()
 
-  controller.report({ status: 'failed', error, source: null, retry: () => { secondRetryCalls++ } })
+  controller.report({ status: 'error', error, source: null, retry: () => { secondRetryCalls++ } })
   expect(scope.reports()).toBe(published)
 
   scope.reset()
@@ -525,20 +525,20 @@ test('a later report of the identical error still refreshes source/retry, even t
   expect(secondRetryCalls).toBe(1)
 })
 
-test('onFailedReport still fires on every failed report, even one that does not change the published collection', () => {
+test('onErrorReport still fires on every failed report, even one that does not change the published collection', () => {
   const seen: unknown[] = []
-  const scope = createFailedScope((error) => seen.push(error))
+  const scope = createErrorScope((error) => seen.push(error))
   const error = new Error('boom')
   const controller = scope.register()
 
-  controller.report({ status: 'failed', error, source: null, retry: () => {} })
-  controller.report({ status: 'failed', error, source: null, retry: () => {} })
+  controller.report({ status: 'error', error, source: null, retry: () => {} })
+  controller.report({ status: 'error', error, source: null, retry: () => {} })
 
   expect(seen).toEqual([error, error])
 })
 
-test('FailedScope.error()/active() still report the first entry, unaffected by reports() existing', () => {
-  const scope = createFailedScope()
+test('ErrorScope.error()/active() still report the first entry, unaffected by reports() existing', () => {
+  const scope = createErrorScope()
   const errorA = new Error('a')
   const errorB = new Error('b')
   const controllerA = scope.register()
@@ -547,18 +547,18 @@ test('FailedScope.error()/active() still report the first entry, unaffected by r
   expect(scope.active()).toBe(false)
   expect(scope.error()).toBe(null)
 
-  controllerA.report({ status: 'failed', error: errorA, source: null, retry: () => {} })
-  controllerB.report({ status: 'failed', error: errorB, source: null, retry: () => {} })
+  controllerA.report({ status: 'error', error: errorA, source: null, retry: () => {} })
+  controllerB.report({ status: 'error', error: errorB, source: null, retry: () => {} })
 
   expect(scope.active()).toBe(true)
   expect(scope.error()).toBe(errorA)
 })
 
 test('a change to a non-first report does not re-notify a consumer that only reads error()/active()', () => {
-  const scope = createFailedScope()
+  const scope = createErrorScope()
   const controllerA = scope.register()
   const controllerB = scope.register()
-  controllerA.report({ status: 'failed', error: new Error('a'), source: null, retry: () => {} })
+  controllerA.report({ status: 'error', error: new Error('a'), source: null, retry: () => {} })
 
   let runs = 0
   const c = r3Computed(() => {
@@ -581,16 +581,16 @@ test('a change to a non-first report does not re-notify a consumer that only rea
 
   // B reports a genuinely new error. The full reports() set changes, but
   // the first entry (A's) does not, so error()/active() must not re-notify.
-  controllerB.report({ status: 'failed', error: new Error('b1'), source: null, retry: () => {} })
+  controllerB.report({ status: 'error', error: new Error('b1'), source: null, retry: () => {} })
   stabilize()
   expect(runs).toBe(baseline)
 
-  controllerB.report({ status: 'failed', error: new Error('b2'), source: null, retry: () => {} })
+  controllerB.report({ status: 'error', error: new Error('b2'), source: null, retry: () => {} })
   stabilize()
   expect(runs).toBe(baseline)
 
   // A's own report changing is what should actually re-notify.
-  controllerA.report({ status: 'failed', error: new Error('a2'), source: null, retry: () => {} })
+  controllerA.report({ status: 'error', error: new Error('a2'), source: null, retry: () => {} })
   stabilize()
   expect(runs).toBe(baseline + 1)
 })

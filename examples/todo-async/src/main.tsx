@@ -1,7 +1,7 @@
 import {
   action,
   committed,
-  Failed,
+  Errored,
   For,
   isPending,
   latest,
@@ -82,8 +82,8 @@ const remaining = () => overlay().filter((todo) => !todo.done).length
  * Every mutation has the same shape: write the speculative list, then wait for
  * the server and fold its answer into canonical truth. If the server refuses,
  * the generator throws, the action is discarded, and the overlay disappears
- * with it — a refused write's failure is picked up automatically by the
- * nearest `<Failed>` boundary below, with no wiring needed here.
+ * with it — a refused write's error is picked up automatically by the
+ * nearest `<Errored>` boundary below, with no wiring needed here.
  *
  * The overlay is built from `committed(...)` rather than from `overlay()` so it
  * layers on server truth rather than on another in-flight action's guess. Read
@@ -201,15 +201,15 @@ function Controls() {
 }
 
 /**
- * A mutation failure's inline banner. Reads the nearest `<Failed>` boundary
- * via `Failed.Error` — the mutation boundary in `App`, since that is what
+ * A mutation error's inline banner. Reads the nearest `<Errored>` boundary
+ * via `Errored.Error` — the mutation boundary in `App`, since that is what
  * wraps this component — and shows it without unmounting anything else in
  * `TodoList`: unlike the load boundary's `fallback`, this never swaps the
  * list out, only overlays a message above it.
  */
 function MutationError() {
   return (
-    <Failed.Error>
+    <Errored.Error>
       {(error: unknown, retry: () => void) => (
         <div class="mutation-error" data-testid="mutation-error-panel">
           <p>{String((error as Error)?.message ?? error)}</p>
@@ -218,7 +218,7 @@ function MutationError() {
           </button>
         </div>
       )}
-    </Failed.Error>
+    </Errored.Error>
   )
 }
 
@@ -315,15 +315,15 @@ function App() {
             rather than by position — the load and every mutation both
             originate from inside the same subtree below (`use(todos)` and
             the row buttons both live in `<TodoList>`), so which one claims
-            a given failure depends entirely on `for`, not on where either
+            a given error depends entirely on `for`, not on where either
             boundary sits. The outer boundary only accepts a LoadFailedError
             (`list()`'s own error class) and swaps the whole column for it —
             there is nothing useful to show once the load itself failed. The
-            inner boundary accepts everything else (every mutation failure)
+            inner boundary accepts everything else (every mutation error)
             and has no `fallback`: it is pure scoping, so `<MutationError>`
-            inside `TodoList` can show the failure without unmounting
-            anything, and a mutation failure never reaches the outer swap. */}
-        <Failed
+            inside `TodoList` can show the error without unmounting
+            anything, and a mutation error never reaches the outer swap. */}
+        <Errored
           for={(e: unknown): e is LoadFailedError => e instanceof LoadFailedError}
           fallback={(error: unknown, reset: () => void) => (
             <div class="error" data-testid="error-panel">
@@ -339,7 +339,7 @@ function App() {
             // component sitting directly in the fragment here would be wrapped
             // under the outer hole's owner and never find the boundary's scope.
             <div class="main-column">
-              <Failed for={(e: unknown) => !(e instanceof LoadFailedError)}>
+              <Errored for={(e: unknown) => !(e instanceof LoadFailedError)}>
                 {() => (
                   // Same reason as the outer boundary's own static element:
                   // this inner boundary needs one too, between itself and
@@ -358,10 +358,10 @@ function App() {
                     <Loading initial={<Skeleton/>}>{() => <TodoList/>}</Loading>
                   </div>
                 )}
-              </Failed>
+              </Errored>
             </div>
           )}
-        </Failed>
+        </Errored>
 
         <ServerPanel/>
       </div>

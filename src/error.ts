@@ -1,8 +1,8 @@
-// src/failure.ts
+// src/error.ts
 import type { Accessor } from './signal'
 
 /**
- * A failure is graph state, exactly like pending — parked out of band, propagating
+ * An error is graph state, exactly like pending — parked out of band, propagating
  * along the upstream chain, and NOT destroying the value the node last resolved
  * to. This is the mirror of `pending.ts`.
  *
@@ -16,40 +16,40 @@ import type { Accessor } from './signal'
  * `upstream` points at the immediate upstream stage's entry; the walk follows the
  * chain, the same way `isPending` does.
  */
-export interface FailureEntry {
+export interface ErrorEntry {
   error: Accessor<unknown>
   value: Accessor<unknown>
-  /** Clear this node's parked failure and recompute it. */
+  /** Clear this node's parked error and recompute it. */
   reset: () => void
-  upstream?: FailureEntry
+  upstream?: ErrorEntry
 }
 
-const registry = new WeakMap<Accessor<unknown>, FailureEntry>()
+const registry = new WeakMap<Accessor<unknown>, ErrorEntry>()
 
-/** Register a node with the failure tracker. Called by `computed`. */
-export function registerFailure(accessor: Accessor<unknown>, entry: FailureEntry): void {
+/** Register a node with the error tracker. Called by `computed`. */
+export function registerError(accessor: Accessor<unknown>, entry: ErrorEntry): void {
   registry.set(accessor, entry)
 }
 
-/** Look up a node's failure entry, if registered. Internal. */
-export function lookupFailure(accessor: Accessor<unknown>): FailureEntry | undefined {
+/** Look up a node's error entry, if registered. Internal. */
+export function lookupError(accessor: Accessor<unknown>): ErrorEntry | undefined {
   return registry.get(accessor)
 }
 
 /**
  * Has this node — or anything upstream — failed? Returns the error, or `null` when
- * healthy. Reactive: it reads the underlying failure signals, so calling it inside
- * a tracking context subscribes, and it re-fires on failure or recovery.
+ * healthy. Reactive: it reads the underlying error signals, so calling it inside
+ * a tracking context subscribes, and it re-fires on error or recovery.
  *
  * Reads DIRECTLY, like `latest` — not as an accessor-returning factory. (`isPending`
  * still has that older shape; it is the odd one out.)
  *
- * This is the *query* projection of the failure state. The others: `latest(x)`
+ * This is the *query* projection of the error state. The others: `latest(x)`
  * projects the value (and so never throws), and `use(x)` is the strict combinator
  * that treats "unavailable" as fatal and throws — which is what feeds an error
  * boundary.
  */
-export function failure<T>(x: Accessor<T>): unknown {
+export function error<T>(x: Accessor<T>): unknown {
   let cur = registry.get(x as Accessor<unknown>)
   while (cur !== undefined) {
     const e = cur.error()
@@ -68,19 +68,19 @@ export function rawValueOf<T>(x: Accessor<T>): T {
 }
 
 /**
- * Clear the failure at the ROOT of this node's upstream chain and recompute it.
+ * Clear the error at the ROOT of this node's upstream chain and recompute it.
  *
- * A downstream stage only propagates its upstream's failure. Resetting it alone
+ * A downstream stage only propagates its upstream's error. Resetting it alone
  * would leave the real source parked, and the retry would fail identically. So walk
- * the chain the way `failure()` does and reset the deepest stage that is actually
- * failed — the one the failure originated in.
+ * the chain the way `error()` does and reset the deepest stage that is actually
+ * failed — the one the error originated in.
  *
  * A no-op if nothing in the chain is failed, or the node is not registered (a plain
- * signal, which never parks a failure).
+ * signal, which never parks an error).
  */
-export function resetFailure<T>(x: Accessor<T>): void {
+export function resetError<T>(x: Accessor<T>): void {
   let cur = registry.get(x as Accessor<unknown>)
-  let root: FailureEntry | undefined
+  let root: ErrorEntry | undefined
   while (cur !== undefined) {
     const e = cur.error()
     if (e !== null && e !== undefined) root = cur

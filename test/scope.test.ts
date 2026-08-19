@@ -374,7 +374,7 @@ test('G4: inner discards, outer continues and commits', () => {
         throw new Error('inner fails')  // inner discards → y1 dropped
       })
     } catch {
-      // swallow inner failure; outer continues
+      // swallow inner error; outer continues
     }
     writeValue(x, 'x1')
   })

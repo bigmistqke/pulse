@@ -4,16 +4,16 @@ import type { Resolved } from './async'
 import { computed } from './computed'
 import {
   findBoundaryScope,
-  findNearestFailedScope,
+  findNearestErrorScope,
   getOwner,
   routeError,
   routeErrorFromRerun,
   registerWithOwner,
   type BindingController,
-  type FailedScope,
+  type ErrorScope,
 } from './owner'
 import { signal } from './signal'
-import { clearFailureSource, runBindingCompute, takeFailureSource } from './transition-tracker'
+import { clearErrorSource, runBindingCompute, takeErrorSource } from './transition-tracker'
 
 /** A pipeline stage: takes the prior stage's resolved value, returns sync/Promise/generator. */
 type Stage<In, Out> = (value: In) => Out
@@ -79,13 +79,13 @@ function stagedEffect(
   let disposed = false
   let suspendedOn: Promise<unknown> | null = null
   let controller: BindingController | null = null
-  let failedController: BindingController | null = null
-  // Which scope failedController is currently registered with — a later
-  // failure of the same binding can find a DIFFERENT accepting scope (its
+  let errorController: BindingController | null = null
+  // Which scope errorController is currently registered with — a later
+  // error of the same binding can find a DIFFERENT accepting scope (its
   // error is a different type, and the previously-claimed scope's own for
   // now declines it, or a nearer scope newly exists), and the controller
   // must move with it rather than keep reporting into the old collection.
-  let failedControllerScope: FailedScope | null = null
+  let errorControllerScope: ErrorScope | null = null
   const UNSET = Symbol('unset')
   let lastCommitted: unknown = UNSET
   // See the identical flag in `singleArgEffect`: throw out of the caller's own
@@ -100,16 +100,16 @@ function stagedEffect(
     return controller
   }
 
-  const ensureFailedController = (scope: FailedScope): BindingController => {
-    if (failedController !== null && failedControllerScope !== scope) {
-      failedController.unregister()
-      failedController = null
+  const ensureErrorController = (scope: ErrorScope): BindingController => {
+    if (errorController !== null && errorControllerScope !== scope) {
+      errorController.unregister()
+      errorController = null
     }
-    if (failedController === null) {
-      failedController = scope.register()
-      failedControllerScope = scope
+    if (errorController === null) {
+      errorController = scope.register()
+      errorControllerScope = scope
     }
-    return failedController
+    return errorController
   }
 
   const body = () => {
@@ -137,21 +137,21 @@ function stagedEffect(
         ensureController()?.report({ status: 'throwing' })
         return
       }
-      // A real failure is not a pending state: this binding registered a
+      // A real error is not a pending state: this binding registered a
       // pending controller above when it threw NotReadyYet, and it must
       // leave that collection now, or the boundary's pending count can never
       // reach zero and its gate stays shut forever.
       controller?.report({ status: 'idle' })
       // It is graph state, not an event: report it to the nearest
-      // <Failed> boundary, which collects it and selects its fallback. The same
+      // <Errored> boundary, which collects it and selects its fallback. The same
       // controller reporting repeatedly is one entry, so a single rejection that
       // re-runs this body several times still renders one fallback.
-      const failedScope = findNearestFailedScope(myOwner, e)
-      if (failedScope !== null) {
-        ensureFailedController(failedScope.scope).report({
-          status: 'failed',
+      const errorScope = findNearestErrorScope(myOwner, e)
+      if (errorScope !== null) {
+        ensureErrorController(errorScope.scope).report({
+          status: 'error',
           error: e,
-          source: takeFailureSource(),
+          source: takeErrorSource(),
           retry: () => setKick(++kickCount),
         })
         return
@@ -162,7 +162,7 @@ function stagedEffect(
     }
     suspendedOn = null
     // Recovered: leave the failed collection, so the boundary can unlatch.
-    failedController?.report({ status: 'idle' })
+    errorController?.report({ status: 'idle' })
     // Dedupe: if the resolved value is the same as what we last committed,
     // skip — this guards against double-fire from use()'s pendingSig + value
     // signals both triggering re-runs under syncScheduler when a promise settles.
@@ -192,9 +192,9 @@ function stagedEffect(
       unwatched(node as R3Computed<unknown>)
       controller?.unregister()
       controller = null
-      failedController?.unregister()
-      failedController = null
-      failedControllerScope = null
+      errorController?.unregister()
+      errorController = null
+      errorControllerScope = null
     },
   })
 }
@@ -219,13 +219,13 @@ function singleArgEffect(fn: () => void): void {
   let kickCount = 0
   let suspendedOn: Promise<unknown> | null = null
   let controller: BindingController | null = null
-  let failedController: BindingController | null = null
-  // Which scope failedController is currently registered with — a later
-  // failure of the same binding can find a DIFFERENT accepting scope (its
+  let errorController: BindingController | null = null
+  // Which scope errorController is currently registered with — a later
+  // error of the same binding can find a DIFFERENT accepting scope (its
   // error is a different type, and the previously-claimed scope's own for
   // now declines it, or a nearer scope newly exists), and the controller
   // must move with it rather than keep reporting into the old collection.
-  let failedControllerScope: FailedScope | null = null
+  let errorControllerScope: ErrorScope | null = null
   // r3 runs the body eagerly on creation, so the first run happens inside the
   // caller's own stack: an error nobody handles is theirs to see, and is thrown.
   // Every later run is driven by a graph write, where throwing would unwind the
@@ -240,35 +240,35 @@ function singleArgEffect(fn: () => void): void {
     return controller
   }
 
-  const ensureFailedController = (scope: FailedScope): BindingController => {
-    if (failedController !== null && failedControllerScope !== scope) {
-      failedController.unregister()
-      failedController = null
+  const ensureErrorController = (scope: ErrorScope): BindingController => {
+    if (errorController !== null && errorControllerScope !== scope) {
+      errorController.unregister()
+      errorController = null
     }
-    if (failedController === null) {
-      failedController = scope.register()
-      failedControllerScope = scope
+    if (errorController === null) {
+      errorController = scope.register()
+      errorControllerScope = scope
     }
-    return failedController
+    return errorController
   }
 
   const body = () => {
     kick()
-    // Invariant: every consumer of the module-level failure source clears it on
+    // Invariant: every consumer of the module-level error source clears it on
     // entry, so a source can never survive past the binding compute that set it.
     // `runBindingCompute` does this for DOM bindings; a plain effect calls `fn()`
     // directly instead of going through `runBindingCompute`, so it has to clear the
-    // source itself here. Without this, a failure this effect swallows (no
-    // `<Failed>` boundary above it, so `takeFailureSource()` is never reached below)
+    // source itself here. Without this, an error this effect swallows (no
+    // `<Errored>` boundary above it, so `takeErrorSource()` is never reached below)
     // would leave `poisoned`'s accessor parked in module state, and a later,
-    // unrelated failure under a real boundary would inherit it as its `source`.
-    clearFailureSource()
+    // unrelated error under a real boundary would inherit it as its `source`.
+    clearErrorSource()
     try {
       fn()
       suspendedOn = null
       controller?.report({ status: 'idle' })
       // Recovered: leave the failed collection, so the boundary can unlatch.
-      failedController?.report({ status: 'idle' })
+      errorController?.report({ status: 'idle' })
     } catch (e) {
       if (e instanceof NotReadyYet) {
         const alreadySuspendedOnSame = suspendedOn === e.promise
@@ -286,17 +286,17 @@ function singleArgEffect(fn: () => void): void {
         ensureController()?.report({ status: 'throwing' })
         return
       }
-      // A real failure. It is graph state, not an event: report it to the nearest
-      // <Failed> boundary, which collects it and selects its fallback. The same
+      // A real error. It is graph state, not an event: report it to the nearest
+      // <Errored> boundary, which collects it and selects its fallback. The same
       // controller reporting repeatedly is one entry, so a single rejection that
       // re-runs this body several times still renders one fallback.
       controller?.report({ status: 'idle' }) // failed is not pending
-      const failedScope = findNearestFailedScope(myOwner, e)
-      if (failedScope !== null) {
-        ensureFailedController(failedScope.scope).report({
-          status: 'failed',
+      const errorScope = findNearestErrorScope(myOwner, e)
+      if (errorScope !== null) {
+        ensureErrorController(errorScope.scope).report({
+          status: 'error',
           error: e,
-          source: takeFailureSource(),
+          source: takeErrorSource(),
           retry: () => setKick(++kickCount),
         })
         return
@@ -313,9 +313,9 @@ function singleArgEffect(fn: () => void): void {
       unwatched(node as R3Computed<unknown>)
       controller?.unregister()
       controller = null
-      failedController?.unregister()
-      failedController = null
-      failedControllerScope = null
+      errorController?.unregister()
+      errorController = null
+      errorControllerScope = null
     },
   })
 }

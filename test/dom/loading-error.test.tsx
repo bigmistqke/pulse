@@ -3,7 +3,7 @@ import {
   catchError,
   computed,
   effect,
-  Failed,
+  Errored,
   flush,
   Loading,
   microtaskScheduler,
@@ -30,7 +30,7 @@ const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
  * when nothing is registered as pending.
  */
 
-test('Loading wrapping Failed: a rejecting computed renders the failure fallback, not a stuck spinner', async () => {
+test('Loading wrapping Errored: a rejecting computed renders the error fallback, not a stuck spinner', async () => {
   const target = document.createElement('section')
   document.body.append(target)
   const c = computed(() => Promise.reject(new Error('boom')))
@@ -39,9 +39,9 @@ test('Loading wrapping Failed: a rejecting computed renders the failure fallback
     () => (
       <Loading fallback={<p>loading</p>}>
         {() => (
-          <Failed fallback={(error) => <p>{(error as Error).message}</p>}>
+          <Errored fallback={(error) => <p>{(error as Error).message}</p>}>
             {() => <span>{() => use(c)}</span>}
-          </Failed>
+          </Errored>
         )}
       </Loading>
     ),
@@ -59,7 +59,7 @@ test('Loading wrapping Failed: a rejecting computed renders the failure fallback
   expect(target.textContent).toBe('boom')
 })
 
-test('Failed wrapping Loading: a rejecting computed renders the failure fallback and useLoading() returns to false', async () => {
+test('Errored wrapping Loading: a rejecting computed renders the error fallback and useLoading() returns to false', async () => {
   const target = document.createElement('section')
   document.body.append(target)
   const c = computed(() => Promise.reject(new Error('boom')))
@@ -67,7 +67,7 @@ test('Failed wrapping Loading: a rejecting computed renders the failure fallback
 
   render(
     () => (
-      <Failed fallback={(error) => <p>{(error as Error).message}</p>}>
+      <Errored fallback={(error) => <p>{(error as Error).message}</p>}>
         {() => (
           <Loading fallback={<p>loading</p>}>
             {() => {
@@ -76,7 +76,7 @@ test('Failed wrapping Loading: a rejecting computed renders the failure fallback
             }}
           </Loading>
         )}
-      </Failed>
+      </Errored>
     ),
     target,
   )
@@ -92,7 +92,7 @@ test('Failed wrapping Loading: a rejecting computed renders the failure fallback
   expect(pending()).toBe(false)
 })
 
-test('Loading with catchError (no Failed): the rejection is caught and the loading fallback clears', async () => {
+test('Loading with catchError (no Errored): the rejection is caught and the loading fallback clears', async () => {
   const target = document.createElement('section')
   document.body.append(target)
   const c = computed(() => Promise.reject(new Error('boom')))
@@ -118,12 +118,12 @@ test('Loading with catchError (no Failed): the rejection is caught and the loadi
   flush()
 
   // One rejection re-runs the consuming binding several times (the pending
-  // signal flipping false, the failure signal parking, the settle-kick), and
+  // signal flipping false, the error signal parking, the settle-kick), and
   // catchError has no dedup collection, so it may see more than one call —
   // what matters here is that it sees the error at all.
   expect(caught.length).toBeGreaterThan(0)
   expect((caught[0] as Error).message).toBe('boom')
-  // No <Failed> boundary means there is no fallback content to take the
+  // No <Errored> boundary means there is no fallback content to take the
   // loading fallback's place — but the fallback itself must clear.
   expect(target.textContent).toBe('')
 })

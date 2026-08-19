@@ -266,12 +266,12 @@ test('a consumer recovers after a computed fails once and later succeeds', async
     })
   })
   await tick()
-  // Failed: the consumer has seen the error and nothing else.
+  // Errored: the consumer has seen the error and nothing else.
   expect(seen.length).toBeGreaterThan(0)
   expect(seen.every((s) => s === 'ERR:boom')).toBe(true)
 
   // Fixing the input must REACH the consumer. A read that threw still has to
-  // subscribe, or a later success can never propagate and the failure is permanent
+  // subscribe, or a later success can never propagate and the error is permanent
   // — before the fix, 'recovered' never arrived at all and this stayed 'ERR:boom'.
   //
   // (The error may be re-emitted while the refetch is in flight: the computed keeps

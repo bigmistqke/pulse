@@ -76,7 +76,7 @@ test('snapshotDeps leaves out the excluded dependency', () => {
 })
 
 test('an excluded control signal does not make replayDeps report a change', () => {
-  // The failure this guards against: a caller that bumps its own control signal
+  // The error this guards against: a caller that bumps its own control signal
   // to force a run would see every run as someone else's change.
   const a = r3Signal(1)
   const control = r3Signal(0)
