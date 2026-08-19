@@ -1,6 +1,7 @@
 import {
   createFailedScope,
   createSubOwner,
+  findBoundaryScope,
   getOwner,
   runWithOwner,
   type Owner,
@@ -18,6 +19,38 @@ export interface FailedProps {
    *  mounted always, and `useFailed()` (or `Failed.Error`) is how a
    *  descendant shows the failure without unmounting anything. */
   fallback?: (error: unknown, reset: () => void) => unknown
+}
+
+export interface FailedState {
+  /** True while the nearest boundary's collection is non-empty. */
+  readonly active: Accessor<boolean>
+  /** The first failed report's error, or `null`. Same value `fallback`
+   *  receives as its first argument when a `<Failed>` swaps for it. */
+  readonly error: Accessor<unknown>
+  /** Retry every failed report the boundary is currently holding — the exact
+   *  same operation a `<Failed>`'s own `reset` performs. Exposed under the
+   *  name `retry` for symmetry with `ActionHandle.retry()`. */
+  retry(): void
+}
+
+const CONST_FAILED_STATE: FailedState = {
+  active: () => false,
+  error: () => null,
+  retry: () => {},
+}
+
+/**
+ * Reads the nearest enclosing `<Failed>` boundary's state — active/error/retry
+ * — without swapping anything, the same way `useLoading()` reads a `<Loading>`
+ * boundary's pending state. Returns a safe, always-inactive state when called
+ * outside any owner at all (mirrors `useLoading()`'s `CONST_FALSE_ACCESSOR`).
+ * Every root created via `createRoot()` always has a real boundary to find —
+ * see `createFailedScope()`'s installation there.
+ */
+export function useFailed(): FailedState {
+  const scope = findBoundaryScope(getOwner(), 'failed')
+  if (scope === null) return CONST_FAILED_STATE
+  return { active: scope.active, error: scope.error, retry: scope.reset }
 }
 
 /**

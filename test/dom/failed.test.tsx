@@ -19,6 +19,7 @@ import {
   signal,
   syncScheduler,
   use,
+  useFailed,
 } from '../../src/index'
 
 beforeEach(() => setScheduler(syncScheduler(flush)))
@@ -779,4 +780,72 @@ test('<Failed> without a fallback keeps its children mounted through a failure',
   expect(target.querySelector('[data-testid="content"]')).toBe(before)
   expect(spy).not.toHaveBeenCalled()
   spy.mockRestore()
+})
+
+test('useFailed() reflects the nearest boundary reactively, with nothing swapped', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+  const c = computed(() => Promise.reject(new Error('boom')))
+  let state!: ReturnType<typeof useFailed>
+
+  render(
+    () => (
+      <Failed>
+        {() => {
+          state = useFailed()
+          return <p>{() => use(c)}</p>
+        }}
+      </Failed>
+    ),
+    target,
+  )
+
+  expect(state.active()).toBe(false)
+
+  await tick()
+  flush()
+
+  expect(state.active()).toBe(true)
+  expect((state.error() as Error).message).toBe('boom')
+})
+
+test('useFailed().retry retries every failed report, the same operation reset() performs', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+  let attempt = 0
+  const c = computed(() => {
+    attempt++
+    return attempt === 1 ? Promise.reject(new Error('boom')) : Promise.resolve('ok')
+  })
+  let state!: ReturnType<typeof useFailed>
+
+  render(
+    () => (
+      <Failed>
+        {() => {
+          state = useFailed()
+          return <p>{() => use(c)}</p>
+        }}
+      </Failed>
+    ),
+    target,
+  )
+
+  await tick()
+  flush()
+  expect(state.active()).toBe(true)
+
+  state.retry()
+  await tick()
+  flush()
+
+  expect(state.active()).toBe(false)
+  expect(attempt).toBe(2)
+})
+
+test('useFailed() called with no owner at all returns a safe, always-inactive state', () => {
+  const state = useFailed()
+  expect(state.active()).toBe(false)
+  expect(state.error()).toBeNull()
+  expect(() => state.retry()).not.toThrow()
 })
