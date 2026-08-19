@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, expect, test } from 'vitest'
+import { afterEach, beforeEach, expect, test, vi } from 'vitest'
 import {
   action,
   catchError,
@@ -741,4 +741,42 @@ test('an action that fails after its <Failed> boundary itself unmounted does not
 
   // Nothing left to register with, and nothing stuck: no fallback anywhere.
   expect(target.querySelector('[data-testid="error-panel"]')).toBeNull()
+})
+
+test('<Failed> without a fallback keeps its children mounted through a failure', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+  const c = computed(() => Promise.reject(new Error('boom')))
+  // Without this spy, the pre-fix crash (calling undefined as a function) is
+  // silently swallowed by routeErrorFromRerun's console.error, leaving the
+  // DOM untouched and this test passing for the wrong reason — nothing ever
+  // attempted to swap it out, rather than <Failed> correctly declining to.
+  const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+  render(
+    () => (
+      <Failed>
+        {() => (
+          <div>
+            <span data-testid="content">static</span>
+            <p>{() => use(c)}</p>
+          </div>
+        )}
+      </Failed>
+    ),
+    target,
+  )
+
+  const before = target.querySelector('[data-testid="content"]')
+  expect(before).not.toBeNull()
+
+  await tick()
+  flush()
+
+  // Something inside failed, but <Failed> has no fallback to swap to — the
+  // exact same node is still there, not torn down and rebuilt, and nothing
+  // crashed trying to call a fallback that doesn't exist.
+  expect(target.querySelector('[data-testid="content"]')).toBe(before)
+  expect(spy).not.toHaveBeenCalled()
+  spy.mockRestore()
 })

@@ -1,6 +1,15 @@
-import { getContext, type Disposable, onCleanup as r3OnCleanup } from 'r3'
+import {
+  getContext,
+  read as r3Read,
+  setSignal as r3SetSignal,
+  signal as r3Signal,
+  stabilize,
+  type Disposable,
+  onCleanup as r3OnCleanup,
+} from 'r3'
 import type { Accessor } from './signal'
 import { currentGeneratorCleanups } from './generator-cleanup'
+import { resetFailure } from './failure'
 
 /**
  * Per-binding state reports flow into a Loading boundary via this shape.
@@ -72,6 +81,9 @@ export interface LoadingScope extends BoundaryScope {
 /** The failed collection. */
 export interface FailedScope extends BoundaryScope {
   readonly kind: 'failed'
+  /** The first failed report's error, or `null` while healthy. Same value a
+   *  `<Failed>` with a `fallback` passes as that fallback's first argument. */
+  readonly error: Accessor<unknown>
   /** Clear the collection and retry every binding in it. */
   reset(): void
 }
@@ -217,6 +229,118 @@ export function runWithOwner<T>(owner: Owner | null, fn: () => T): T {
     return fn()
   } finally {
     currentOwner = prev
+  }
+}
+
+/** What a failed binding reported: the error, the node whose parked failure it
+ *  threw (if any), and how to re-run it. Mirrors the shape `src/effect.ts`
+ *  reports through `BindingState`'s `'failed'` case. */
+interface FailureReport {
+  error: unknown
+  source: Accessor<unknown> | null
+  retry: () => void
+}
+
+/** One signal holding both fields together, so a change is one atomic write —
+ *  not two separate signals for `active`/`error`, which would let a consumer
+ *  observe one updated and the other still stale between two writes. */
+interface Collection {
+  readonly active: boolean
+  readonly error: unknown
+}
+
+/**
+ * Build a `FailedScope`: the collection/report/reset logic shared by every
+ * `<Failed>` boundary and by the default boundary `createRoot()` installs on
+ * every root (below).
+ *
+ * Built directly on raw r3 primitives, not pulse's `signal()` wrapper —
+ * `src/signal.ts` imports from `src/scope.ts`, which already imports from
+ * this file (`findNearestFailedScope`/`getOwner`/`onCleanup`), so importing
+ * `signal()` back here would cycle. `src/scope.ts`'s own `makeErrorCell()`
+ * solves the identical problem the same way.
+ *
+ * `onFailedReport`, if given, runs once for every `'failed'` report this
+ * scope receives, regardless of whether anything is reading its `active`/
+ * `error` — used by `createRoot()`'s default scope to `console.error` every
+ * failure, matching `routeErrorFromRerun`'s existing "always log" behaviour.
+ * An explicit `<Failed>` passes nothing, matching its existing silent
+ * behaviour (the app is assumed to be handling it via `fallback`/`useFailed()`).
+ */
+export function createFailedScope(onFailedReport?: (error: unknown) => void): FailedScope {
+  // One entry per currently-failed binding, keyed on its controller — so a
+  // binding that re-runs and re-reports stays ONE entry.
+  const failedSet = new Map<BindingController, FailureReport>()
+
+  let current: Collection = { active: false, error: null }
+  const collectionNode = r3Signal<Collection>(current)
+
+  // Mirrors `makeErrorCell`'s top-level-read behaviour (`src/scope.ts`):
+  // inside an r3 context, read through it directly; outside one, stabilize
+  // first so the value is never stale.
+  const readCollection = (): Collection => {
+    if (getContext() !== null) return r3Read(collectionNode)
+    stabilize()
+    return collectionNode.value
+  }
+
+  // Skip a no-op write without an untracked read. Load-bearing: a single
+  // rejection re-runs a binding several times and it re-reports 'failed'
+  // each time, and consumers must not re-render for reports that change
+  // nothing.
+  const recompute = (): void => {
+    const first: FailureReport | undefined = failedSet.values().next().value
+    const next: Collection = {
+      active: failedSet.size > 0,
+      error: first === undefined ? null : first.error,
+    }
+    if (next.active === current.active && Object.is(next.error, current.error)) return
+    current = next
+    r3SetSignal(collectionNode, next)
+  }
+
+  const reset = (): void => {
+    const reports = Array.from(failedSet.values())
+    failedSet.clear()
+    recompute()
+    for (const report of reports) {
+      // Clear the parked failure at its root first — otherwise the binding
+      // just re-reads a still-failed node and throws again.
+      if (report.source !== null) resetFailure(report.source)
+      report.retry()
+    }
+  }
+
+  return {
+    kind: 'failed',
+    active: () => readCollection().active,
+    error: () => readCollection().error,
+    register(): BindingController {
+      const controller: BindingController = {
+        report(state): void {
+          if (state.status === 'failed') {
+            failedSet.set(controller, {
+              error: state.error,
+              source: state.source,
+              retry: state.retry,
+            })
+            onFailedReport?.(state.error)
+          } else {
+            // Any other status means this binding is no longer failed. In
+            // practice only 'idle' is ever sent to a failed-scope controller
+            // (see src/effect.ts) — 'throwing'/'ready' go to a pending scope.
+            failedSet.delete(controller)
+          }
+          recompute()
+        },
+        unregister(): void {
+          failedSet.delete(controller)
+          recompute()
+        },
+      }
+      return controller
+    },
+    reset,
   }
 }
 
