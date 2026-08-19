@@ -69,7 +69,10 @@ function transformToCalls(source: string): string {
     plugins: [
       '@babel/plugin-syntax-jsx',
       pulsePropsToGetters,
-      ['@babel/plugin-transform-react-jsx', { runtime: 'automatic', importSource: 'pulse' }],
+      [
+        '@babel/plugin-transform-react-jsx',
+        { runtime: 'automatic', importSource: 'pulse', throwIfNamespace: false },
+      ],
     ],
     babelrc: false,
     configFile: false,
@@ -88,4 +91,10 @@ test('wraps identically whether the tag is a DOM element or a component', () => 
   const code = transform('<Foo c={count()} />; <div c={count()} />;')
   const matches = code.match(/c=\{\(\) => count\(\)\}/g) ?? []
   expect(matches.length).toBe(2)
+})
+
+test('a namespaced attribute survives the full pipeline as a plain string-keyed, unwrapped prop', () => {
+  const code = transformToCalls('<div on:click={handler} class:done={todo.done} />;')
+  expect(code).toContain('"on:click": handler')
+  expect(code).toContain('"class:done": () => todo.done')
 })
