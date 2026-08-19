@@ -61,3 +61,31 @@ test('leaves a literal or function-expression JSX child untouched', () => {
   expect(code).not.toContain('{() => 5}')
   expect(code).not.toContain('{() => () => bar()}')
 })
+
+function transformToCalls(source: string): string {
+  const result = transformSync(source, {
+    filename: 'test.tsx',
+    presets: [['@babel/preset-typescript', {}]],
+    plugins: [
+      '@babel/plugin-syntax-jsx',
+      pulsePropsToGetters,
+      ['@babel/plugin-transform-react-jsx', { runtime: 'automatic', importSource: 'pulse' }],
+    ],
+    babelrc: false,
+    configFile: false,
+  })
+  if (!result?.code) throw new Error('transform produced no code')
+  return result.code
+}
+
+test('running alongside @babel/plugin-transform-react-jsx produces a jsx() call with the wrapped thunk as the prop value', () => {
+  const code = transformToCalls('const el = <div c={count()} />;')
+  expect(code).toContain('_jsx(')
+  expect(code).toContain('c: () => count()')
+})
+
+test('wraps identically whether the tag is a DOM element or a component', () => {
+  const code = transform('<Foo c={count()} />; <div c={count()} />;')
+  const matches = code.match(/c=\{\(\) => count\(\)\}/g) ?? []
+  expect(matches.length).toBe(2)
+})

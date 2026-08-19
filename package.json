@@ -30,6 +30,7 @@
   "devDependencies": {
     "@babel/core": "^8.0.1",
     "@babel/plugin-syntax-jsx": "^8.0.1",
+    "@babel/plugin-transform-react-jsx": "^8.0.1",
     "@babel/preset-typescript": "^8.0.1",
     "@babel/types": "^8.0.4",
     "@vitest/browser": "^3.2.4",
