@@ -107,6 +107,13 @@ h2 {
   font: inherit;
 }
 
+/* Driven by useErrored(), not by the mutation-error banner directly — the
+   input stays marked while the mutation boundary is active, matching the
+   banner shown above the list rather than swapping anything of its own. */
+.new-todo.has-error {
+  border-color: var(--danger);
+}
+
 .columns {
   display: grid;
   grid-template-columns: 1fr 16rem;

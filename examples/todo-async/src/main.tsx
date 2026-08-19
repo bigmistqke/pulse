@@ -12,6 +12,7 @@ import {
   Show,
   signal,
   use,
+  useErrored,
 } from 'pulse'
 import { api, config, LoadFailedError, type Todo } from './api'
 
@@ -340,24 +341,32 @@ function App() {
             // under the outer hole's owner and never find the boundary's scope.
             <div class="main-column">
               <Errored for={(e: unknown) => !(e instanceof LoadFailedError)}>
-                {() => (
-                  // Same reason as the outer boundary's own static element:
-                  // this inner boundary needs one too, between itself and
-                  // the components below.
-                  <div class="mutation-scope">
-                    <input
-                      class="new-todo"
-                      data-testid="new-todo"
-                      attr:placeholder="What needs doing?"
-                      prop:value={draft}
-                      on:input={(e: Event) => setDraft((e.target as HTMLInputElement).value)}
-                      on:keydown={(e: Event) => {
-                        if ((e as KeyboardEvent).key === 'Enter') addTodo()
-                      }}
-                    />
-                    <Loading initial={<Skeleton/>}>{() => <TodoList/>}</Loading>
-                  </div>
-                )}
+                {() => {
+                  // Unfiltered: reads the same boundary MutationError does,
+                  // just to drive a CSS class rather than to render
+                  // anything — active() is exactly "is a mutation
+                  // currently failing", with no swap involved.
+                  const mutationFailed = useErrored()
+                  return (
+                    // Same reason as the outer boundary's own static
+                    // element: this inner boundary needs one too, between
+                    // itself and the components below.
+                    <div class="mutation-scope">
+                      <input
+                        class="new-todo"
+                        class:has-error={mutationFailed.active}
+                        data-testid="new-todo"
+                        attr:placeholder="What needs doing?"
+                        prop:value={draft}
+                        on:input={(e: Event) => setDraft((e.target as HTMLInputElement).value)}
+                        on:keydown={(e: Event) => {
+                          if ((e as KeyboardEvent).key === 'Enter') addTodo()
+                        }}
+                      />
+                      <Loading initial={<Skeleton/>}>{() => <TodoList/>}</Loading>
+                    </div>
+                  )
+                }}
               </Errored>
             </div>
           )}

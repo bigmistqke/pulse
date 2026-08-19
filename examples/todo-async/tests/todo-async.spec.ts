@@ -84,6 +84,11 @@ test('a rejected write shows an inline banner without hiding the list, and its r
   )
   await expect(page.getByTestId('todo-list')).toBeAttached()
   await expect(page.getByTestId('error-panel')).not.toBeAttached()
+
+  // useErrored() on the same boundary also marks the input itself, driven
+  // by active() rather than by the banner's own presence in the DOM.
+  await expect(page.getByTestId('new-todo')).toHaveClass(/has-error/)
+
   const retryButton = page.getByTestId('mutation-retry')
 
   // Fix the server, then press retry — the same request is issued again.
@@ -94,6 +99,7 @@ test('a rejected write shows an inline banner without hiding the list, and its r
   await expect(
     page.getByTestId('todo-row').filter({ hasText: 'retry me' }),
   ).toBeVisible({ timeout: 5000 })
+  await expect(page.getByTestId('new-todo')).not.toHaveClass(/has-error/)
 })
 
 test('a refetch holds the current list on screen while it is in flight', async ({ page }) => {
