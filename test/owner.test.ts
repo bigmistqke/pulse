@@ -247,7 +247,7 @@ test('catchError omitting for still accepts everything, exactly as before', () =
   expect(caught).toHaveLength(1)
 })
 
-test('findNearestErrorScope skips a ErrorScope whose for declines the error, finding a farther one that accepts', () => {
+test('findNearestErrorScope skips an ErrorScope whose for declines the error, finding a farther one that accepts', () => {
   createRoot(() => {
     const outer = createSubOwner(getOwner())
     const outerScope: ErrorScope = {

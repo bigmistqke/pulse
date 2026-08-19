@@ -136,7 +136,7 @@ export function Errored<E = unknown>(props: ErroredProps<E>): Accessor<unknown> 
     if (props.fallback === undefined) return subtree
     if (!scope.active()) return subtree
     // Safe: fallback only runs while scope.active() is true, meaning
-    // something registered a 'error' report that already checked this
+    // something registered an 'error' report that already checked this
     // exact scope.for against that report's own error before ever calling
     // register() — see ErrorScope.for's own doc comment. Both effect.ts
     // (findNearestErrorScope) and action()'s candidate selection

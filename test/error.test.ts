@@ -10,9 +10,9 @@ const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
  * propagates along the upstream chain, and it does NOT destroy the value the node
  * last resolved to. Each read verb takes its own stance on it:
  *
- *   use(c)     -> throws the reason   (fatal read; feeds an error boundary)
- *   latest(c)  -> the stale value     (tolerant read; never throws)
- *   error(c) -> the error, or null  (query)
+ *   use(c)    -> throws the reason   (fatal read; feeds an error boundary)
+ *   latest(c) -> the stale value     (tolerant read; never throws)
+ *   error(c)  -> the error, or null  (query)
  */
 
 test('a failed refetch keeps the stale value readable through latest', async () => {

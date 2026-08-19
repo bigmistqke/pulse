@@ -295,7 +295,7 @@ export interface ErrorReport {
 }
 
 /**
- * Build a `ErrorScope`: the collection/report/reset logic shared by every
+ * Build an `ErrorScope`: the collection/report/reset logic shared by every
  * `<Errored>` boundary and by the default boundary `createRoot()` installs on
  * every root (below).
  *
