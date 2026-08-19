@@ -13,7 +13,7 @@ import {
   signal,
   use,
 } from 'pulse'
-import { api, config, type Todo } from './api'
+import { api, config, LoadFailedError, type Todo } from './api'
 
 type Filter = 'all' | 'active' | 'completed'
 
@@ -200,9 +200,32 @@ function Controls() {
   )
 }
 
+/**
+ * A mutation failure's inline banner. Reads the nearest `<Failed>` boundary
+ * via `Failed.Error` — the mutation boundary in `App`, since that is what
+ * wraps this component — and shows it without unmounting anything else in
+ * `TodoList`: unlike the load boundary's `fallback`, this never swaps the
+ * list out, only overlays a message above it.
+ */
+function MutationError() {
+  return (
+    <Failed.Error>
+      {(error: unknown, retry: () => void) => (
+        <div class="mutation-error" data-testid="mutation-error-panel">
+          <p>{String((error as Error)?.message ?? error)}</p>
+          <button data-testid="mutation-retry" on:click={retry}>
+            Try again
+          </button>
+        </div>
+      )}
+    </Failed.Error>
+  )
+}
+
 function TodoList() {
   return (
     <div class="list-area">
+      <MutationError/>
       <ul class="todo-list" class:speculative={speculating} data-testid="todo-list">
         <For
           each={() => {
@@ -288,7 +311,20 @@ function App() {
       <Controls/>
 
       <div class="columns">
+        {/* Two boundaries at the same wrapping point, split by error type
+            rather than by position — the load and every mutation both
+            originate from inside the same subtree below (`use(todos)` and
+            the row buttons both live in `<TodoList>`), so which one claims
+            a given failure depends entirely on `for`, not on where either
+            boundary sits. The outer boundary only accepts a LoadFailedError
+            (`list()`'s own error class) and swaps the whole column for it —
+            there is nothing useful to show once the load itself failed. The
+            inner boundary accepts everything else (every mutation failure)
+            and has no `fallback`: it is pure scoping, so `<MutationError>`
+            inside `TodoList` can show the failure without unmounting
+            anything, and a mutation failure never reaches the outer swap. */}
         <Failed
+          for={(e: unknown): e is LoadFailedError => e instanceof LoadFailedError}
           fallback={(error: unknown, reset: () => void) => (
             <div class="error" data-testid="error-panel">
               <p>{String((error as Error)?.message ?? error)}</p>
@@ -303,17 +339,26 @@ function App() {
             // component sitting directly in the fragment here would be wrapped
             // under the outer hole's owner and never find the boundary's scope.
             <div class="main-column">
-              <input
-                class="new-todo"
-                data-testid="new-todo"
-                attr:placeholder="What needs doing?"
-                prop:value={draft}
-                on:input={(e: Event) => setDraft((e.target as HTMLInputElement).value)}
-                on:keydown={(e: Event) => {
-                  if ((e as KeyboardEvent).key === 'Enter') addTodo()
-                }}
-              />
-              <Loading initial={<Skeleton/>}>{() => <TodoList/>}</Loading>
+              <Failed for={(e: unknown) => !(e instanceof LoadFailedError)}>
+                {() => (
+                  // Same reason as the outer boundary's own static element:
+                  // this inner boundary needs one too, between itself and
+                  // the components below.
+                  <div class="mutation-scope">
+                    <input
+                      class="new-todo"
+                      data-testid="new-todo"
+                      attr:placeholder="What needs doing?"
+                      prop:value={draft}
+                      on:input={(e: Event) => setDraft((e.target as HTMLInputElement).value)}
+                      on:keydown={(e: Event) => {
+                        if ((e as KeyboardEvent).key === 'Enter') addTodo()
+                      }}
+                    />
+                    <Loading initial={<Skeleton/>}>{() => <TodoList/>}</Loading>
+                  </div>
+                )}
+              </Failed>
             </div>
           )}
         </Failed>

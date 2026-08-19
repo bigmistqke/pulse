@@ -69,25 +69,28 @@ test('a rejected write rolls the optimistic row back', async ({ page }) => {
   await expect(canonicalRows(page)).toHaveCount(before)
 })
 
-test('a rejected write shows the failure boundary, and its retry button resubmits the same request', async ({ page }) => {
+test('a rejected write shows an inline banner without hiding the list, and its retry button resubmits the same request', async ({ page }) => {
   await open(page, { latency: 200, fail: 0 })
   await expect(page.getByTestId('todo-list')).toBeAttached({ timeout: 5000 })
 
   await page.getByTestId('fail-rate').fill('1')
   await addTodo(page, 'retry me')
 
-  // The write is refused; the action registers with the same <Failed> boundary
-  // the initial load uses, so its fallback replaces the whole list.
-  await expect(page.getByTestId('error-panel')).toBeVisible({ timeout: 5000 })
-  await expect(page.getByTestId('error-panel')).toContainText('the server refused this request')
-  const retryButton = page.getByTestId('retry')
+  // The write is refused. It registers with the mutation boundary, not the
+  // load boundary, so the list stays attached and only a banner appears.
+  await expect(page.getByTestId('mutation-error-panel')).toBeVisible({ timeout: 5000 })
+  await expect(page.getByTestId('mutation-error-panel')).toContainText(
+    'the server refused this request',
+  )
+  await expect(page.getByTestId('todo-list')).toBeAttached()
+  await expect(page.getByTestId('error-panel')).not.toBeAttached()
+  const retryButton = page.getByTestId('mutation-retry')
 
   // Fix the server, then press retry — the same request is issued again.
   await page.getByTestId('fail-rate').fill('0')
   await retryButton.click()
 
-  await expect(page.getByTestId('error-panel')).not.toBeAttached({ timeout: 5000 })
-  await expect(page.getByTestId('todo-list')).toBeAttached()
+  await expect(page.getByTestId('mutation-error-panel')).not.toBeAttached({ timeout: 5000 })
   await expect(
     page.getByTestId('todo-row').filter({ hasText: 'retry me' }),
   ).toBeVisible({ timeout: 5000 })

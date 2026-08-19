@@ -19,6 +19,10 @@ export type Todo = {
   done: boolean
 }
 
+/** Thrown only by `list()`. Distinguishes a load failure from a mutation
+ *  failure by type, so the two can be routed to different boundaries. */
+export class LoadFailedError extends Error {}
+
 function fromQuery(key: string, fallback: number): number {
   const raw = new URLSearchParams(window.location.search).get(key)
   if (raw === null) return fallback
@@ -47,14 +51,19 @@ export const config = {
 let store: Todo[] = []
 let nextId = 1
 
-/** Resolve with `produce()` after the configured latency, or reject. */
-function respond<T>(produce: () => T): Promise<T> {
+/** Resolve with `produce()` after the configured latency, or reject with
+ *  `makeError()` — a plain server-refused `Error` unless the caller needs a
+ *  different class, the way `list()` does below. */
+function respond<T>(
+  produce: () => T,
+  makeError: () => Error = () => new Error('the server refused this request'),
+): Promise<T> {
   const ms = latencyMs
   const rate = failureRate
   return new Promise<T>((resolve, reject) => {
     setTimeout(() => {
       if (Math.random() < rate) {
-        reject(new Error('the server refused this request'))
+        reject(makeError())
         return
       }
       resolve(produce())
@@ -64,7 +73,11 @@ function respond<T>(produce: () => T): Promise<T> {
 
 export const api = {
   /** A fresh array of fresh objects every time, as a real endpoint would give. */
-  list: (): Promise<Todo[]> => respond(() => store.map((todo) => ({ ...todo }))),
+  list: (): Promise<Todo[]> =>
+    respond(
+      () => store.map((todo) => ({ ...todo })),
+      () => new LoadFailedError('the server refused this request'),
+    ),
 
   add: (text: string): Promise<Todo> =>
     respond(() => {
