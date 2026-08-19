@@ -12,13 +12,17 @@
     "./jsx-runtime": {
       "types": "./dist/jsx-runtime.d.ts",
       "import": "./dist/jsx-runtime.js"
+    },
+    "./babel-plugin": {
+      "types": "./dist/babel-plugin.d.ts",
+      "import": "./dist/babel-plugin.js"
     }
   },
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "build": "tsdown --dts src/index.ts"
+    "build": "tsdown --dts src/index.ts src/babel-plugin.ts"
   },
   "dependencies": {
     "r3": "github:bigmistqke/r3#b1d23b8947f161975d0a54460f8acf5760ad9278"
