@@ -966,3 +966,50 @@ test('Failed.Error\'s retry() clears the failure, the same as useFailed().retry(
   expect(target.querySelector('[data-testid="retry"]')).toBeNull()
   expect(attempt).toBe(2)
 })
+
+test('Failed.Error does not reconstruct its content while the boundary stays active, even if the underlying error changes', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+  const [failA, setFailA] = signal(true)
+  const a = computed(() =>
+    failA() ? Promise.reject(new Error('first')) : Promise.resolve('ok'),
+  )
+  const b = computed(() => Promise.reject(new Error('second')))
+  let renders = 0
+
+  render(
+    () => (
+      <Failed>
+        {() => (
+          <div>
+            <Failed.Error>
+              {() => {
+                renders++
+                return <p data-testid="error-ui">shown</p>
+              }}
+            </Failed.Error>
+            <span>{() => use(a)}</span>
+            <span>{() => use(b)}</span>
+          </div>
+        )}
+      </Failed>
+    ),
+    target,
+  )
+
+  await tick()
+  flush()
+  expect(target.querySelector('[data-testid="error-ui"]')).not.toBeNull()
+  expect(renders).toBe(1)
+
+  // `a` recovers while `b` is still failing — the collection shrinks from
+  // two entries to one, its reported error changes from a's message to
+  // b's, but `active` never goes false in between. The render prop must
+  // not be re-invoked for a change that isn't an active/inactive transition.
+  setFailA(false)
+  await tick()
+  flush()
+
+  expect(target.querySelector('[data-testid="error-ui"]')).not.toBeNull()
+  expect(renders).toBe(1)
+})
