@@ -173,6 +173,77 @@ test('catchError throws when called inside a disposed owner', () => {
   })
 })
 
+test('catchError with a declining for lets the error propagate to an outer catchError', () => {
+  const outerCaught: unknown[] = []
+  const innerCaught: unknown[] = []
+  createRoot(() => {
+    catchError(
+      () => {
+        catchError(
+          () => {
+            throw new TypeError('boom')
+          },
+          (e) => innerCaught.push(e),
+          { for: (e): e is RangeError => e instanceof RangeError },
+        )
+      },
+      (e) => outerCaught.push(e),
+    )
+  })
+  expect(innerCaught).toEqual([])
+  expect(outerCaught).toHaveLength(1)
+  expect((outerCaught[0] as Error).message).toBe('boom')
+})
+
+test('catchError with an accepting for claims the error itself, not an outer catchError', () => {
+  const outerCaught: unknown[] = []
+  const innerCaught: unknown[] = []
+  createRoot(() => {
+    catchError(
+      () => {
+        catchError(
+          () => {
+            throw new TypeError('boom')
+          },
+          (e) => innerCaught.push(e),
+          { for: (e): e is TypeError => e instanceof TypeError },
+        )
+      },
+      (e) => outerCaught.push(e),
+    )
+  })
+  expect(innerCaught).toHaveLength(1)
+  expect((innerCaught[0] as Error).message).toBe('boom')
+  expect(outerCaught).toEqual([])
+})
+
+test('catchError with a declining for and no outer handler re-throws, same as no handler at all', () => {
+  expect(() => {
+    createRoot(() => {
+      catchError(
+        () => {
+          throw new TypeError('boom')
+        },
+        () => {},
+        { for: (e): e is RangeError => e instanceof RangeError },
+      )
+    })
+  }).toThrow('boom')
+})
+
+test('catchError omitting for still accepts everything, exactly as before', () => {
+  const caught: unknown[] = []
+  createRoot(() => {
+    catchError(
+      () => {
+        throw new Error('boom')
+      },
+      (e) => caught.push(e),
+    )
+  })
+  expect(caught).toHaveLength(1)
+})
+
 test('Owner.boundaries.pending defaults to null', () => {
   createRoot(() => {
     const owner = getOwner()!

@@ -94,14 +94,28 @@ interface ScopeOfKind {
   failed: FailedScope
 }
 
+/**
+ * An error handler installed by `catchError`, optionally filtered to only
+ * some errors via `for`. A handler that declines an error (`for` returns
+ * `false`) is treated as absent for that error — the walk continues to the
+ * next owner with the same error, exactly as if this handler were not
+ * installed.
+ */
+export interface ErrorHandlerEntry {
+  handle(error: unknown): void
+  /** If given, this handler only claims errors for which it returns `true`.
+   *  Omitted, it claims every error, matching the pre-filter behaviour. */
+  for?: (error: unknown) => boolean
+}
+
 /** A lifecycle scope. Owns reactive nodes created within it and their cleanup callbacks. */
 export interface Owner {
   /** The parent owner in the lifecycle tree, or `null` for a root. */
   readonly parent: Owner | null
   /** Optional error handler (set by `catchError`). When a reactive node owned
    *  by this owner (or a descendant) throws, the throw walks up via `parent`
-   *  links to find the nearest handler. */
-  readonly errorHandler: ((error: unknown) => void) | null
+   *  links to find the nearest handler that accepts it. */
+  readonly errorHandler: ErrorHandlerEntry | null
   /** Disposers for owned reactive nodes (effects, computeds) and sub-owners. */
   readonly children: Array<{ dispose: () => void }>
   /** Owner-level cleanup callbacks registered via `onCleanup` outside any r3 context. */
@@ -117,7 +131,7 @@ let currentOwner: Owner | null = null
 
 function newOwner(
   parent: Owner | null = null,
-  errorHandler: ((error: unknown) => void) | null = null,
+  errorHandler: ErrorHandlerEntry | null = null,
 ): Owner {
   return {
     parent,
@@ -141,9 +155,9 @@ export function routeError(start: Owner | null, error: unknown): void {
   let owner = start
   while (owner !== null) {
     const handler = owner.errorHandler
-    if (handler !== null) {
+    if (handler !== null && (handler.for === undefined || handler.for(error))) {
       try {
-        handler(error)
+        handler.handle(error)
         return // handled
       } catch (newError) {
         owner = owner.parent
@@ -379,7 +393,7 @@ export function createRoot<T>(fn: (dispose: () => void) => T): T {
  */
 export function createSubOwner(
   parent: Owner | null,
-  errorHandler: ((error: unknown) => void) | null = null,
+  errorHandler: ErrorHandlerEntry | null = null,
 ): Owner {
   if (parent !== null && parent.disposed) {
     throw new Error('cannot create a sub-owner inside a disposed owner')
@@ -408,8 +422,10 @@ export function createSubOwner(
 export function catchError<T>(
   fn: () => T,
   handler: (error: unknown) => void,
+  options?: { for?: (error: unknown) => boolean },
 ): T | undefined {
-  const sub = createSubOwner(currentOwner, handler)
+  const entry: ErrorHandlerEntry = { handle: handler, for: options?.for }
+  const sub = createSubOwner(currentOwner, entry)
   return runWithOwner(sub, () => {
     try {
       return fn()
