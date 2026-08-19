@@ -84,6 +84,12 @@ export interface FailedScope extends BoundaryScope {
   /** The first failed report's error, or `null` while healthy. Same value a
    *  `<Failed>` with a `fallback` passes as that fallback's first argument. */
   readonly error: Accessor<unknown>
+  /** Set from `<Failed>`'s own `for` prop. Undefined means "accepts
+   *  everything" — the existing, unconditional behaviour. Read by the
+   *  walk (`findNearestFailedScope`) and by `action()`'s candidate
+   *  selection, both of which check this BEFORE registering a report,
+   *  never inside `register()`/`report()` themselves. */
+  readonly for?: (error: unknown) => boolean
   /** Clear the collection and retry every binding in it. */
   reset(): void
 }
@@ -175,26 +181,37 @@ export function routeError(start: Owner | null, error: unknown): void {
 }
 
 /**
- * The nearest `<Failed>` boundary — or `null` if a `catchError` handler is nearer,
- * or if there is neither. Returns the boundary's own owner alongside its scope: a
- * caller that needs to know when the BOUNDARY itself (as opposed to whatever owner
- * it started walking from) goes away — e.g. to anchor an `onCleanup` there instead
- * of on the calling owner — needs that owner directly, since `FailedScope` alone
- * does not expose it.
+ * The nearest `<Failed>` boundary that accepts `error` — or `null` if a
+ * `catchError` handler that accepts it is nearer, or if nothing along the
+ * way accepts it at all. Returns the boundary's own owner alongside its
+ * scope: a caller that needs to know when the BOUNDARY itself (as opposed
+ * to whatever owner it started walking from) goes away — e.g. to anchor an
+ * `onCleanup` there instead of on the calling owner — needs that owner
+ * directly, since `FailedScope` alone does not expose it.
  *
- * `<Failed>` and `catchError` are peers in ONE walk up the owner chain, and the
- * nearest wins. Returning `null` when a handler is nearer is what lets the caller
- * fall through to `routeError`, which walks the same chain and finds that handler.
- * So a `catchError` nested inside a `<Failed>` intercepts first, and the boundary
- * catches whatever the inner handler does not.
+ * `<Failed>` and `catchError` are peers in ONE walk up the owner chain, and
+ * the nearest one that ACCEPTS `error` wins. A `<Failed for={...}>` or
+ * `catchError(fn, handler, { for: ... })` that declines `error` is treated
+ * as if it were not there at all for this specific error, and the walk
+ * continues past it — including past a nearer, declining `catchError`, to
+ * check a farther `<Failed>` or `catchError`. Returning `null` when the
+ * nearest accepting thing is a `catchError` is what lets the caller fall
+ * through to `routeError`, which walks the same chain and finds it.
  */
 export function findNearestFailedScope(
   start: Owner | null,
+  error: unknown,
 ): { owner: Owner; scope: FailedScope } | null {
   let owner = start
   while (owner !== null) {
-    if (owner.boundaries.failed !== null) return { owner, scope: owner.boundaries.failed }
-    if (owner.errorHandler !== null) return null // a nearer catchError wins
+    const scope = owner.boundaries.failed
+    if (scope !== null && (scope.for === undefined || scope.for(error))) {
+      return { owner, scope }
+    }
+    const handler = owner.errorHandler
+    if (handler !== null && (handler.for === undefined || handler.for(error))) {
+      return null // a nearer, accepting catchError wins
+    }
     owner = owner.parent
   }
   return null
@@ -284,7 +301,10 @@ interface Collection {
  * An explicit `<Failed>` passes nothing, matching its existing silent
  * behaviour (the app is assumed to be handling it via `fallback`/`useFailed()`).
  */
-export function createFailedScope(onFailedReport?: (error: unknown) => void): FailedScope {
+export function createFailedScope(
+  onFailedReport?: (error: unknown) => void,
+  filterFor?: (error: unknown) => boolean,
+): FailedScope {
   // One entry per currently-failed binding, keyed on its controller — so a
   // binding that re-runs and re-reports stays ONE entry.
   const failedSet = new Map<BindingController, FailureReport>()
@@ -332,6 +352,7 @@ export function createFailedScope(onFailedReport?: (error: unknown) => void): Fa
     kind: 'failed',
     active: () => readCollection().active,
     error: () => readCollection().error,
+    for: filterFor,
     register(): BindingController {
       const controller: BindingController = {
         report(state): void {

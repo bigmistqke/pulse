@@ -244,6 +244,110 @@ test('catchError omitting for still accepts everything, exactly as before', () =
   expect(caught).toHaveLength(1)
 })
 
+test('findNearestFailedScope skips a FailedScope whose for declines the error, finding a farther one that accepts', () => {
+  createRoot(() => {
+    const outer = createSubOwner(getOwner())
+    const outerScope: FailedScope = {
+      kind: 'failed',
+      active: () => false,
+      error: () => null,
+      register: () => ({ report: () => {}, unregister: () => {} }),
+      reset: () => {},
+    }
+    outer.boundaries.failed = outerScope
+
+    const found = runWithOwner(outer, () => {
+      const inner = createSubOwner(getOwner())
+      const innerScope: FailedScope = {
+        kind: 'failed',
+        active: () => false,
+        error: () => null,
+        for: (e): e is RangeError => e instanceof RangeError,
+        register: () => ({ report: () => {}, unregister: () => {} }),
+        reset: () => {},
+      }
+      inner.boundaries.failed = innerScope
+      return runWithOwner(inner, () => findNearestFailedScope(getOwner(), new TypeError('boom')))
+    })
+
+    expect(found?.scope).toBe(outerScope)
+  })
+})
+
+test('findNearestFailedScope claims the error at the nearest FailedScope whose for accepts it', () => {
+  createRoot(() => {
+    let innerScope!: FailedScope
+    const found = runWithOwner(createSubOwner(getOwner()), () => {
+      const inner = createSubOwner(getOwner())
+      innerScope = {
+        kind: 'failed',
+        active: () => false,
+        error: () => null,
+        for: (e): e is TypeError => e instanceof TypeError,
+        register: () => ({ report: () => {}, unregister: () => {} }),
+        reset: () => {},
+      }
+      inner.boundaries.failed = innerScope
+      return runWithOwner(inner, () => findNearestFailedScope(getOwner(), new TypeError('boom')))
+    })
+
+    expect(found?.scope).toBe(innerScope)
+  })
+})
+
+test('findNearestFailedScope omitting for still accepts everything, exactly as before', () => {
+  createRoot(() => {
+    const found = findNearestFailedScope(getOwner(), new Error('x'))
+    expect(found).not.toBeNull()
+  })
+})
+
+test('a nearer, accepting catchError still wins over a farther FailedScope, exactly as before', () => {
+  createRoot(() => {
+    const outer = createSubOwner(getOwner())
+    outer.boundaries.failed = {
+      kind: 'failed',
+      active: () => false,
+      error: () => null,
+      register: () => ({ report: () => {}, unregister: () => {} }),
+      reset: () => {},
+    }
+
+    const found = runWithOwner(outer, () =>
+      catchError(
+        () => findNearestFailedScope(getOwner(), new Error('boom')),
+        () => {},
+      ),
+    )
+
+    expect(found).toBeNull()
+  })
+})
+
+test('a nearer catchError that declines the error lets a farther FailedScope claim it', () => {
+  createRoot(() => {
+    const outer = createSubOwner(getOwner())
+    const outerScope: FailedScope = {
+      kind: 'failed',
+      active: () => false,
+      error: () => null,
+      register: () => ({ report: () => {}, unregister: () => {} }),
+      reset: () => {},
+    }
+    outer.boundaries.failed = outerScope
+
+    const found = runWithOwner(outer, () =>
+      catchError(
+        () => findNearestFailedScope(getOwner(), new TypeError('boom')),
+        () => {},
+        { for: (e): e is RangeError => e instanceof RangeError },
+      ),
+    )
+
+    expect(found?.scope).toBe(outerScope)
+  })
+})
+
 test('Owner.boundaries.pending defaults to null', () => {
   createRoot(() => {
     const owner = getOwner()!
@@ -260,7 +364,7 @@ test('createRoot installs a default FailedScope on the root owner', () => {
 
 test('the default FailedScope tracks active/error like any other FailedScope', () => {
   createRoot(() => {
-    const found = findNearestFailedScope(getOwner())!
+    const found = findNearestFailedScope(getOwner(), new Error('x'))!
     expect(found.scope.active()).toBe(false)
     expect(found.scope.error()).toBeNull()
 
@@ -280,7 +384,7 @@ test('the default FailedScope logs every failed report to console.error', () => 
   const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
   const error = new Error('boom')
   createRoot(() => {
-    const found = findNearestFailedScope(getOwner())!
+    const found = findNearestFailedScope(getOwner(), error)!
     const controller = found.scope.register()
     controller.report({ status: 'failed', error, source: null, retry: () => {} })
   })
@@ -290,7 +394,7 @@ test('the default FailedScope logs every failed report to console.error', () => 
 
 test('an explicit FailedScope nested inside createRoot still wins over the root default', () => {
   createRoot(() => {
-    const rootFound = findNearestFailedScope(getOwner())!
+    const rootFound = findNearestFailedScope(getOwner(), new Error('x'))!
     const sub = createSubOwner(getOwner())
     const nestedScope: FailedScope = {
       kind: 'failed',
@@ -300,7 +404,7 @@ test('an explicit FailedScope nested inside createRoot still wins over the root 
       reset: () => {},
     }
     sub.boundaries.failed = nestedScope
-    const found = runWithOwner(sub, () => findNearestFailedScope(getOwner()))!
+    const found = runWithOwner(sub, () => findNearestFailedScope(getOwner(), new Error('x')))!
     expect(found.scope).toBe(nestedScope)
     expect(found.scope).not.toBe(rootFound.scope)
   })
