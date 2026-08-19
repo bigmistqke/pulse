@@ -507,6 +507,14 @@ export function action(body: () => unknown): ActionHandle {
   const candidates = collectFailedCandidates(getOwner())
   let claimedCandidate: FailedCandidate | null = null
   let controller: BindingController | null = null
+  // Which candidates already have their claim-released-on-dispose cleanup
+  // installed. A candidate can be claimed, released (a later failure moves
+  // on to a different one), and re-claimed by a further failure — the
+  // cleanup from its first claim still covers every later one, since it
+  // checks claimedCandidate at the moment it actually fires, not at
+  // install time. Without this set, every re-claim would install another,
+  // permanently inert once the earlier one already released the claim.
+  const cleanupInstalledFor = new Set<FailedCandidate>()
   let currentSettled: Promise<void>
   // Bumped at the start of every attempt (the initial run and every retry).
   // Read back inside the settle handlers below to tell whether the attempt
@@ -545,23 +553,24 @@ export function action(body: () => unknown): ActionHandle {
       (e: unknown) => {
         if (myGeneration !== generation) return
         setError(e)
-        // A previously-claimed candidate that no longer accepts this
-        // error (its owner disposed, or its for declines this specific
-        // error even though it accepted an earlier one) releases its
-        // claim, so the search below can find whichever candidate
-        // actually accepts THIS error.
-        if (claimedCandidate !== null && !accepts(claimedCandidate, e)) {
+        // Re-picks the nearest accepting candidate on EVERY failure, not
+        // only when the current claim declines — candidates is already
+        // nearest-first (collectFailedCandidates' own walk order), so a
+        // retry whose error a NEARER candidate now accepts must move
+        // there too, even if the currently-claimed, farther candidate
+        // would still accept it. Without this, once a farther candidate
+        // (most commonly the always-accepting implicit root) claims one
+        // failure, a nearer, filtered <Failed> could never win a later
+        // retry back, since the always-accepting root never itself
+        // declines. Mirrors findNearestFailedScope's own unconditional,
+        // every-failure walk in effect.ts.
+        const winner = candidates.find((c) => accepts(c, e)) ?? null
+        if (winner !== claimedCandidate) {
           controller?.unregister()
           controller = null
-          claimedCandidate = null
-        }
-        if (claimedCandidate === null) {
-          const candidate = candidates.find((c) => accepts(c, e)) ?? null
-          claimedCandidate = candidate
-          if (candidate !== null) {
-            // One cleanup, installed now that the candidate is actually
-            // claimed and its owner is confirmed alive — not one per
-            // candidate at call time, most of which are never claimed.
+          claimedCandidate = winner
+          if (winner !== null && !cleanupInstalledFor.has(winner)) {
+            cleanupInstalledFor.add(winner)
             // Safe to install lazily here specifically because accepts()
             // just confirmed the owner is not disposed. This is hygiene,
             // not correctness: accepts() already reads owner.disposed
@@ -571,9 +580,9 @@ export function action(body: () => unknown): ActionHandle {
             // releases is the controller's own registration in that
             // now-gone scope's collection, so it does not sit there
             // unregistered until something else disposes the scope.
-            runWithOwner(candidate.owner, () => {
+            runWithOwner(winner.owner, () => {
               onCleanup(() => {
-                if (claimedCandidate === candidate) {
+                if (claimedCandidate === winner) {
                   controller?.unregister()
                   controller = null
                   claimedCandidate = null

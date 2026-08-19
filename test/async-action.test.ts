@@ -348,3 +348,111 @@ test('action() stops candidate-collection at the nearest catchError, never reach
   expect(spy).not.toHaveBeenCalled()
   spy.mockRestore()
 })
+
+test('action() moves a claim to a boundary that now accepts a retry, releasing the one that claimed an earlier, differently-typed failure', async () => {
+  const outerReports: unknown[] = []
+  const outerUnregisters: number[] = []
+  const innerReports: unknown[] = []
+  let attempt = 0
+
+  const handle = createRoot(() => {
+    const outer = createSubOwner(getOwner())
+    outer.boundaries.failed = {
+      kind: 'failed',
+      active: () => false,
+      error: () => null,
+      register: () => ({
+        report: (state) => {
+          if (state.status === 'failed') outerReports.push(state.error)
+        },
+        unregister: () => outerUnregisters.push(1),
+      }),
+      reset: () => {},
+    }
+
+    return runWithOwner(outer, () => {
+      const inner = createSubOwner(getOwner())
+      inner.boundaries.failed = {
+        kind: 'failed',
+        active: () => false,
+        error: () => null,
+        for: (e): e is RangeError => e instanceof RangeError,
+        register: () => ({
+          report: (state) => {
+            if (state.status === 'failed') innerReports.push(state.error)
+          },
+          unregister: () => {},
+        }),
+        reset: () => {},
+      }
+
+      return runWithOwner(inner, () =>
+        action(function* () {
+          attempt++
+          yield* read(
+            Promise.reject(attempt === 1 ? new RangeError('r') : new TypeError('t')),
+          )
+        }),
+      )
+    })
+  })
+
+  await handle.settled
+  expect(innerReports).toHaveLength(1) // inner claimed the RangeError
+  expect(outerReports).toEqual([])
+
+  handle.retry() // fails with a TypeError this time — inner declines it
+  await handle.settled
+
+  expect(innerReports).toHaveLength(1) // inner never received the TypeError
+  expect(outerReports).toHaveLength(1) // outer received it instead
+  expect((outerReports[0] as Error).message).toBe('t')
+  expect(outerUnregisters).toEqual([]) // outer was never claimed-then-released
+})
+
+test('action() moves a claim back to a nearer boundary once a retry fails with an error that boundary accepts, even though a farther boundary already claimed an earlier failure', async () => {
+  const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+  const innerReports: unknown[] = []
+  let attempt = 0
+
+  const handle = createRoot(() => {
+    const inner = createSubOwner(getOwner())
+    inner.boundaries.failed = {
+      kind: 'failed',
+      active: () => false,
+      error: () => null,
+      for: (e): e is RangeError => e instanceof RangeError,
+      register: () => ({
+        report: (state) => {
+          if (state.status === 'failed') innerReports.push(state.error)
+        },
+        unregister: () => {},
+      }),
+      reset: () => {},
+    }
+
+    return runWithOwner(inner, () =>
+      action(function* () {
+        attempt++
+        yield* read(Promise.reject(attempt === 1 ? new TypeError('t') : new RangeError('r')))
+      }),
+    )
+  })
+
+  await handle.settled
+  // Nothing explicit accepts a TypeError here — the implicit root (the only
+  // farther candidate) claims it, exactly like any other unboundaried failure.
+  expect(innerReports).toEqual([])
+  expect(spy).toHaveBeenCalledTimes(1)
+
+  handle.retry() // fails with a RangeError this time — the inner, nearer,
+  // explicit boundary accepts it, even though the farther implicit root
+  // (which accepts everything) already holds the claim from the first failure.
+  await handle.settled
+
+  expect(innerReports).toHaveLength(1)
+  expect((innerReports[0] as Error).message).toBe('r')
+  // The root must not receive a second report — the claim moved, not copied.
+  expect(spy).toHaveBeenCalledTimes(1)
+  spy.mockRestore()
+})
