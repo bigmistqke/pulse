@@ -1,4 +1,4 @@
-import type { PluginObj } from '@babel/core'
+import type { PluginObject } from '@babel/core'
 import * as t from '@babel/types'
 
 function isExcludedAttributeName(name: t.JSXIdentifier | t.JSXNamespacedName): boolean {
@@ -17,7 +17,7 @@ function isStaticOrFunction(expr: t.Expression): boolean {
   )
 }
 
-export default function pulsePropsToGetters(): PluginObj {
+export default function pulsePropsToGetters(): PluginObject {
   return {
     name: 'pulse-props-to-getters',
     visitor: {
