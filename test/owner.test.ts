@@ -1,6 +1,7 @@
 import { afterEach, expect, test, vi } from 'vitest'
 import {
   catchError,
+  createFailedScope,
   createRoot,
   createSubOwner,
   findBoundaryScope,
@@ -9,6 +10,7 @@ import {
   onCleanup,
   runWithOwner,
   type FailedScope,
+  type FailureReport,
   type LoadingScope,
 } from '../src/owner'
 import { flush, microtaskScheduler, setScheduler } from '../src/scheduler'
@@ -251,6 +253,7 @@ test('findNearestFailedScope skips a FailedScope whose for declines the error, f
       kind: 'failed',
       active: () => false,
       error: () => null,
+      reports: () => [],
       register: () => ({ report: () => {}, unregister: () => {} }),
       reset: () => {},
     }
@@ -262,6 +265,7 @@ test('findNearestFailedScope skips a FailedScope whose for declines the error, f
         kind: 'failed',
         active: () => false,
         error: () => null,
+        reports: () => [],
         for: (e): e is RangeError => e instanceof RangeError,
         register: () => ({ report: () => {}, unregister: () => {} }),
         reset: () => {},
@@ -283,6 +287,7 @@ test('findNearestFailedScope claims the error at the nearest FailedScope whose f
         kind: 'failed',
         active: () => false,
         error: () => null,
+        reports: () => [],
         for: (e): e is TypeError => e instanceof TypeError,
         register: () => ({ report: () => {}, unregister: () => {} }),
         reset: () => {},
@@ -309,6 +314,7 @@ test('a nearer, accepting catchError still wins over a farther FailedScope, exac
       kind: 'failed',
       active: () => false,
       error: () => null,
+      reports: () => [],
       register: () => ({ report: () => {}, unregister: () => {} }),
       reset: () => {},
     }
@@ -331,6 +337,7 @@ test('a nearer catchError that declines the error lets a farther FailedScope cla
       kind: 'failed',
       active: () => false,
       error: () => null,
+      reports: () => [],
       register: () => ({ report: () => {}, unregister: () => {} }),
       reset: () => {},
     }
@@ -400,6 +407,7 @@ test('an explicit FailedScope nested inside createRoot still wins over the root 
       kind: 'failed',
       active: () => false,
       error: () => null,
+      reports: () => [],
       register: () => ({ report: () => {}, unregister: () => {} }),
       reset: () => {},
     }
@@ -435,4 +443,82 @@ test('findBoundaryScope returns null when no scope on chain', () => {
     captured = findBoundaryScope(getOwner(), 'pending')
   })
   expect(captured).toBe(null)
+})
+
+test('FailedScope.reports() reflects every currently-registered failed controller, in registration order', () => {
+  const scope = createFailedScope()
+  const errorA = new Error('a')
+  const errorB = new Error('b')
+  const controllerA = scope.register()
+  const controllerB = scope.register()
+
+  controllerA.report({ status: 'failed', error: errorA, source: null, retry: () => {} })
+  controllerB.report({ status: 'failed', error: errorB, source: null, retry: () => {} })
+
+  const reports = scope.reports()
+  expect(reports).toHaveLength(2)
+  expect(reports[0].error).toBe(errorA)
+  expect(reports[1].error).toBe(errorB)
+})
+
+test('FailedScope.reports() removes an entry once its controller reports idle or unregisters', () => {
+  const scope = createFailedScope()
+  const errorA = new Error('a')
+  const errorB = new Error('b')
+  const controllerA = scope.register()
+  const controllerB = scope.register()
+
+  controllerA.report({ status: 'failed', error: errorA, source: null, retry: () => {} })
+  controllerB.report({ status: 'failed', error: errorB, source: null, retry: () => {} })
+  expect(scope.reports()).toHaveLength(2)
+
+  controllerA.report({ status: 'idle' })
+  expect(scope.reports()).toHaveLength(1)
+  expect(scope.reports()[0].error).toBe(errorB)
+
+  controllerB.unregister()
+  expect(scope.reports()).toHaveLength(0)
+})
+
+test('a controller re-reporting the identical error does not publish a new reports array', () => {
+  const scope = createFailedScope()
+  const error = new Error('boom')
+  const controller = scope.register()
+
+  controller.report({ status: 'failed', error, source: null, retry: () => {} })
+  const first = scope.reports()
+
+  controller.report({ status: 'failed', error, source: null, retry: () => {} })
+  const second = scope.reports()
+
+  expect(second).toBe(first)
+})
+
+test('onFailedReport still fires on every failed report, even one that does not change the published collection', () => {
+  const seen: unknown[] = []
+  const scope = createFailedScope((error) => seen.push(error))
+  const error = new Error('boom')
+  const controller = scope.register()
+
+  controller.report({ status: 'failed', error, source: null, retry: () => {} })
+  controller.report({ status: 'failed', error, source: null, retry: () => {} })
+
+  expect(seen).toEqual([error, error])
+})
+
+test('FailedScope.error()/active() still report the first entry, unaffected by reports() existing', () => {
+  const scope = createFailedScope()
+  const errorA = new Error('a')
+  const errorB = new Error('b')
+  const controllerA = scope.register()
+  const controllerB = scope.register()
+
+  expect(scope.active()).toBe(false)
+  expect(scope.error()).toBe(null)
+
+  controllerA.report({ status: 'failed', error: errorA, source: null, retry: () => {} })
+  controllerB.report({ status: 'failed', error: errorB, source: null, retry: () => {} })
+
+  expect(scope.active()).toBe(true)
+  expect(scope.error()).toBe(errorA)
 })

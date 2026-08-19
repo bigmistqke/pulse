@@ -82,7 +82,8 @@ export interface LoadingScope extends BoundaryScope {
 export interface FailedScope extends BoundaryScope {
   readonly kind: 'failed'
   /** The first failed report's error, or `null` while healthy. Same value a
-   *  `<Failed>` with a `fallback` passes as that fallback's first argument. */
+   *  `<Failed>` with a `fallback` passes as that fallback's first argument.
+   *  Always `reports()[0]?.error ?? null`. */
   readonly error: Accessor<unknown>
   /** Set from `<Failed>`'s own `for` prop. Undefined means "accepts
    *  everything" — the existing, unconditional behaviour. Read by the
@@ -90,6 +91,12 @@ export interface FailedScope extends BoundaryScope {
    *  selection, both of which check this BEFORE registering a report,
    *  never inside `register()`/`report()` themselves. */
   readonly for?: (error: unknown) => boolean
+  /** Every currently-failed report this scope holds, in registration
+   *  order. `useFailed(predicate)`/`Failed.Error` filter this to find a
+   *  report that is not necessarily first — `error`/`active` above stay
+   *  based on the first entry specifically, unaffected by anything
+   *  reading this. */
+  readonly reports: Accessor<readonly FailureReport[]>
   /** Clear the collection and retry every binding in it. */
   reset(): void
 }
@@ -269,18 +276,17 @@ export function runWithOwner<T>(owner: Owner | null, fn: () => T): T {
 /** What a failed binding reported: the error, the node whose parked failure it
  *  threw (if any), and how to re-run it. Mirrors the shape `src/effect.ts`
  *  reports through `BindingState`'s `'failed'` case. */
-interface FailureReport {
-  error: unknown
-  source: Accessor<unknown> | null
-  retry: () => void
+export interface FailureReport {
+  readonly error: unknown
+  readonly source: Accessor<unknown> | null
+  readonly retry: () => void
 }
 
-/** One signal holding both fields together, so a change is one atomic write —
- *  not two separate signals for `active`/`error`, which would let a consumer
- *  observe one updated and the other still stale between two writes. */
+/** One signal holding the whole collection together, so a change is one
+ *  atomic write — not separate signals per field, which would let a
+ *  consumer observe one updated and another still stale between writes. */
 interface Collection {
-  readonly active: boolean
-  readonly error: unknown
+  readonly reports: readonly FailureReport[]
 }
 
 /**
@@ -309,7 +315,7 @@ export function createFailedScope(
   // binding that re-runs and re-reports stays ONE entry.
   const failedSet = new Map<BindingController, FailureReport>()
 
-  let current: Collection = { active: false, error: null }
+  let current: Collection = { reports: [] }
   const collectionNode = r3Signal<Collection>(current)
 
   // Mirrors `makeErrorCell`'s top-level-read behaviour (`src/scope.ts`):
@@ -321,19 +327,9 @@ export function createFailedScope(
     return collectionNode.value
   }
 
-  // Skip a no-op write without an untracked read. Load-bearing: a single
-  // rejection re-runs a binding several times and it re-reports 'failed'
-  // each time, and consumers must not re-render for reports that change
-  // nothing.
   const recompute = (): void => {
-    const first: FailureReport | undefined = failedSet.values().next().value
-    const next: Collection = {
-      active: failedSet.size > 0,
-      error: first === undefined ? null : first.error,
-    }
-    if (next.active === current.active && Object.is(next.error, current.error)) return
-    current = next
-    r3SetSignal(collectionNode, next)
+    current = { reports: Array.from(failedSet.values()) }
+    r3SetSignal(collectionNode, current)
   }
 
   const reset = (): void => {
@@ -350,23 +346,31 @@ export function createFailedScope(
 
   return {
     kind: 'failed',
-    active: () => readCollection().active,
-    error: () => readCollection().error,
+    error: () => readCollection().reports[0]?.error ?? null,
+    active: () => readCollection().reports.length > 0,
+    reports: () => readCollection().reports,
     for: filterFor,
     register(): BindingController {
       const controller: BindingController = {
         report(state): void {
           if (state.status === 'failed') {
+            onFailedReport?.(state.error)
+            // Skip a no-op write without an untracked read. Load-bearing: a
+            // single rejection re-runs a binding several times and it
+            // re-reports 'failed' each time with the identical error, and
+            // consumers must not re-render for reports that change nothing.
+            const existing = failedSet.get(controller)
+            if (existing !== undefined && Object.is(existing.error, state.error)) return
             failedSet.set(controller, {
               error: state.error,
               source: state.source,
               retry: state.retry,
             })
-            onFailedReport?.(state.error)
           } else {
             // Any other status means this binding is no longer failed. In
             // practice only 'idle' is ever sent to a failed-scope controller
             // (see src/effect.ts) — 'throwing'/'ready' go to a pending scope.
+            if (!failedSet.has(controller)) return
             failedSet.delete(controller)
           }
           recompute()

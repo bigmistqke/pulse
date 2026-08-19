@@ -275,6 +275,7 @@ test('action() skips a nearer FailedScope whose for declines the error, register
       kind: 'failed',
       active: () => false,
       error: () => null,
+      reports: () => [],
       register: () => ({
         report: (state) => {
           if (state.status === 'failed') outerReports.push(state.error)
@@ -290,6 +291,7 @@ test('action() skips a nearer FailedScope whose for declines the error, register
         kind: 'failed',
         active: () => false,
         error: () => null,
+        reports: () => [],
         for: (e): e is RangeError => e instanceof RangeError,
         register: () => ({
           report: (state) => {
@@ -362,6 +364,7 @@ test('action() moves a claim to a boundary that now accepts a retry, releasing t
       kind: 'failed',
       active: () => false,
       error: () => null,
+      reports: () => [],
       register: () => ({
         report: (state) => {
           if (state.status === 'failed') outerReports.push(state.error)
@@ -377,6 +380,7 @@ test('action() moves a claim to a boundary that now accepts a retry, releasing t
         kind: 'failed',
         active: () => false,
         error: () => null,
+        reports: () => [],
         for: (e): e is RangeError => e instanceof RangeError,
         register: () => ({
           report: (state) => {
@@ -426,6 +430,7 @@ test('action() moves a claim back to a nearer boundary once a retry fails with a
       kind: 'failed',
       active: () => false,
       error: () => null,
+      reports: () => [],
       for: (e): e is RangeError => e instanceof RangeError,
       register: () => ({
         report: (state) => {
