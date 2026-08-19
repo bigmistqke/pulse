@@ -1013,3 +1013,18 @@ test('Failed.Error does not reconstruct its content while the boundary stays act
   expect(target.querySelector('[data-testid="error-ui"]')).not.toBeNull()
   expect(renders).toBe(1)
 })
+
+test('a computed failure with no explicit <Failed> anywhere still registers with the implicit root boundary, and still logs', async () => {
+  const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+  const target = document.createElement('section')
+  document.body.append(target)
+  const c = computed(() => Promise.reject(new Error('boom')))
+
+  render(() => <span>{() => use(c)}</span>, target)
+
+  await tick()
+  flush()
+
+  expect(spy).toHaveBeenCalledWith(expect.objectContaining({ message: 'boom' }))
+  spy.mockRestore()
+})

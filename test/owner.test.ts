@@ -1,5 +1,16 @@
-import { afterEach, expect, test } from 'vitest'
-import { catchError, createRoot, getOwner, onCleanup, runWithOwner, findBoundaryScope, type LoadingScope } from '../src/owner'
+import { afterEach, expect, test, vi } from 'vitest'
+import {
+  catchError,
+  createRoot,
+  createSubOwner,
+  findBoundaryScope,
+  findNearestFailedScope,
+  getOwner,
+  onCleanup,
+  runWithOwner,
+  type FailedScope,
+  type LoadingScope,
+} from '../src/owner'
 import { flush, microtaskScheduler, setScheduler } from '../src/scheduler'
 
 afterEach(() => setScheduler(microtaskScheduler(flush)))
@@ -166,6 +177,61 @@ test('Owner.boundaries.pending defaults to null', () => {
   createRoot(() => {
     const owner = getOwner()!
     expect(owner.boundaries.pending).toBe(null)
+  })
+})
+
+test('createRoot installs a default FailedScope on the root owner', () => {
+  createRoot(() => {
+    const owner = getOwner()!
+    expect(owner.boundaries.failed).not.toBeNull()
+  })
+})
+
+test('the default FailedScope tracks active/error like any other FailedScope', () => {
+  createRoot(() => {
+    const found = findNearestFailedScope(getOwner())!
+    expect(found.scope.active()).toBe(false)
+    expect(found.scope.error()).toBeNull()
+
+    const error = new Error('x')
+    const controller = found.scope.register()
+    controller.report({ status: 'failed', error, source: null, retry: () => {} })
+    expect(found.scope.active()).toBe(true)
+    expect(found.scope.error()).toBe(error)
+
+    controller.report({ status: 'idle' })
+    expect(found.scope.active()).toBe(false)
+    expect(found.scope.error()).toBeNull()
+  })
+})
+
+test('the default FailedScope logs every failed report to console.error', () => {
+  const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+  const error = new Error('boom')
+  createRoot(() => {
+    const found = findNearestFailedScope(getOwner())!
+    const controller = found.scope.register()
+    controller.report({ status: 'failed', error, source: null, retry: () => {} })
+  })
+  expect(spy).toHaveBeenCalledWith(error)
+  spy.mockRestore()
+})
+
+test('an explicit FailedScope nested inside createRoot still wins over the root default', () => {
+  createRoot(() => {
+    const rootFound = findNearestFailedScope(getOwner())!
+    const sub = createSubOwner(getOwner())
+    const nestedScope: FailedScope = {
+      kind: 'failed',
+      active: () => false,
+      error: () => null,
+      register: () => ({ report: () => {}, unregister: () => {} }),
+      reset: () => {},
+    }
+    sub.boundaries.failed = nestedScope
+    const found = runWithOwner(sub, () => findNearestFailedScope(getOwner()))!
+    expect(found.scope).toBe(nestedScope)
+    expect(found.scope).not.toBe(rootFound.scope)
   })
 })
 

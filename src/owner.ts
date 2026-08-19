@@ -354,6 +354,17 @@ export function createFailedScope(onFailedReport?: (error: unknown) => void): Fa
  */
 export function createRoot<T>(fn: (dispose: () => void) => T): T {
   const owner = newOwner()
+  // Every root gets a default FailedScope, so findNearestFailedScope/
+  // findBoundaryScope('failed') always finds something once it reaches the
+  // root — an explicit <Failed> anywhere between the failing binding and the
+  // root still wins (nearest match), and a nearer catchError still wins over
+  // any FailedScope, explicit or implicit, exactly as before. This is what
+  // lets useFailed() always return real state, and what lets action() (see
+  // src/scope.ts) and a failed computed/signal binding (see src/effect.ts)
+  // register with something instead of throwing/logging with nowhere for the
+  // failure to be queried from — console.error keeps it exactly as visible
+  // by default as routeErrorFromRerun already made it.
+  owner.boundaries.failed = createFailedScope((error) => console.error(error))
   const dispose = () => disposeOwner(owner)
   return runWithOwner(owner, () => fn(dispose))
 }
