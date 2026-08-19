@@ -98,8 +98,19 @@ export interface FailedScope extends BoundaryScope {
    *  based on the first entry specifically, unaffected by anything
    *  reading this. */
   readonly reports: Accessor<readonly FailureReport[]>
-  /** Clear the collection and retry every binding in it. */
+  /** Clear the collection and retry every binding in it. A `<Failed>` with a
+   *  `fallback` hands this straight to user code as `reset` — often wired
+   *  directly to a DOM event handler (`<button on:click={reset}>`) — so
+   *  this must stay a strict zero-argument function. `resetMatching` below
+   *  is the filtered version. */
   reset(): void
+  /** Clear and retry only the reports matching `predicate`, leaving the rest
+   *  of the collection exactly as it was. Reads the live, always up-to-date
+   *  report set, not the possibly-stale `reports()` snapshot (a no-op
+   *  report refreshes its own entry without republishing `reports()` — see
+   *  `register()`'s `report()`), so this always retries with whichever
+   *  `source`/`retry` a report most recently carried. */
+  resetMatching(predicate: (error: unknown) => boolean): void
 }
 
 /** Maps a status to the scope interface that collects it. */
@@ -354,16 +365,23 @@ export function createFailedScope(
     r3SetSignal(reportsNode, Array.from(failedSet.values()))
   }
 
-  const reset = (): void => {
-    const reports = Array.from(failedSet.values())
-    failedSet.clear()
+  const resetEntries = (entries: Array<[BindingController, FailureReport]>): void => {
+    for (const [controller] of entries) failedSet.delete(controller)
     recompute()
-    for (const report of reports) {
+    for (const [, report] of entries) {
       // Clear the parked failure at its root first — otherwise the binding
       // just re-reads a still-failed node and throws again.
       if (report.source !== null) resetFailure(report.source)
       report.retry()
     }
+  }
+
+  const reset = (): void => {
+    resetEntries(Array.from(failedSet.entries()))
+  }
+
+  const resetMatching = (predicate: (error: unknown) => boolean): void => {
+    resetEntries(Array.from(failedSet.entries()).filter(([, report]) => predicate(report.error)))
   }
 
   return {
@@ -411,6 +429,7 @@ export function createFailedScope(
       return controller
     },
     reset,
+    resetMatching,
   }
 }
 

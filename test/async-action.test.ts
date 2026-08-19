@@ -283,6 +283,7 @@ test('action() skips a nearer FailedScope whose for declines the error, register
         unregister: () => {},
       }),
       reset: () => {},
+      resetMatching: () => {},
     }
 
     return runWithOwner(outer, () => {
@@ -300,6 +301,7 @@ test('action() skips a nearer FailedScope whose for declines the error, register
           unregister: () => {},
         }),
         reset: () => {},
+        resetMatching: () => {},
       }
 
       return runWithOwner(inner, () =>
@@ -372,6 +374,7 @@ test('action() moves a claim to a boundary that now accepts a retry, releasing t
         unregister: () => outerUnregisters.push(1),
       }),
       reset: () => {},
+      resetMatching: () => {},
     }
 
     return runWithOwner(outer, () => {
@@ -389,6 +392,7 @@ test('action() moves a claim to a boundary that now accepts a retry, releasing t
           unregister: () => innerUnregisters.push(1),
         }),
         reset: () => {},
+        resetMatching: () => {},
       }
 
       return runWithOwner(inner, () =>
@@ -439,6 +443,7 @@ test('action() moves a claim back to a nearer boundary once a retry fails with a
         unregister: () => {},
       }),
       reset: () => {},
+      resetMatching: () => {},
     }
 
     return runWithOwner(inner, () =>

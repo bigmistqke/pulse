@@ -257,6 +257,7 @@ test('findNearestFailedScope skips a FailedScope whose for declines the error, f
       reports: () => [],
       register: () => ({ report: () => {}, unregister: () => {} }),
       reset: () => {},
+      resetMatching: () => {},
     }
     outer.boundaries.failed = outerScope
 
@@ -270,6 +271,7 @@ test('findNearestFailedScope skips a FailedScope whose for declines the error, f
         for: (e): e is RangeError => e instanceof RangeError,
         register: () => ({ report: () => {}, unregister: () => {} }),
         reset: () => {},
+        resetMatching: () => {},
       }
       inner.boundaries.failed = innerScope
       return runWithOwner(inner, () => findNearestFailedScope(getOwner(), new TypeError('boom')))
@@ -292,6 +294,7 @@ test('findNearestFailedScope claims the error at the nearest FailedScope whose f
         for: (e): e is TypeError => e instanceof TypeError,
         register: () => ({ report: () => {}, unregister: () => {} }),
         reset: () => {},
+        resetMatching: () => {},
       }
       inner.boundaries.failed = innerScope
       return runWithOwner(inner, () => findNearestFailedScope(getOwner(), new TypeError('boom')))
@@ -318,6 +321,7 @@ test('a nearer, accepting catchError still wins over a farther FailedScope, exac
       reports: () => [],
       register: () => ({ report: () => {}, unregister: () => {} }),
       reset: () => {},
+      resetMatching: () => {},
     }
 
     const found = runWithOwner(outer, () =>
@@ -341,6 +345,7 @@ test('a nearer catchError that declines the error lets a farther FailedScope cla
       reports: () => [],
       register: () => ({ report: () => {}, unregister: () => {} }),
       reset: () => {},
+      resetMatching: () => {},
     }
     outer.boundaries.failed = outerScope
 
@@ -411,6 +416,7 @@ test('an explicit FailedScope nested inside createRoot still wins over the root 
       reports: () => [],
       register: () => ({ report: () => {}, unregister: () => {} }),
       reset: () => {},
+      resetMatching: () => {},
     }
     sub.boundaries.failed = nestedScope
     const found = runWithOwner(sub, () => findNearestFailedScope(getOwner(), new Error('x')))!

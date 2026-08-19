@@ -1262,3 +1262,154 @@ test('a mutation triggered from a reference-keyed row still reaches a filtered <
   // fix this exact scenario exists to guard.
   expect(target.querySelector('[data-testid="error-panel"]')).not.toBeNull()
 })
+
+test('useFailed(predicate) finds a match that is not the first-registered report, under one unfiltered boundary', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+  let rejectA!: (e: Error) => void
+  let rejectB!: (e: Error) => void
+  const a = computed(() => new Promise<never>((_, reject) => { rejectA = reject }))
+  const b = computed(() => new Promise<never>((_, reject) => { rejectB = reject }))
+  let filtered!: ReturnType<typeof useFailed<TypeError>>
+  let unfiltered!: ReturnType<typeof useFailed>
+
+  render(
+    () => (
+      <Failed>
+        {() => (
+          <div>
+            <span>{() => use(a)}</span>
+            <span>{() => use(b)}</span>
+            <p>
+              {() => {
+                filtered = useFailed((e): e is TypeError => e instanceof TypeError)
+                unfiltered = useFailed()
+                return 'x'
+              }}
+            </p>
+          </div>
+        )}
+      </Failed>
+    ),
+    target,
+  )
+
+  flush()
+
+  // a fails first, becoming the boundary's own "first" report.
+  rejectA(new RangeError('a-failed'))
+  await tick()
+  flush()
+
+  // b fails second, with the type the predicate actually wants.
+  rejectB(new TypeError('b-failed'))
+  await tick()
+  flush()
+
+  // The boundary's own, unfiltered error() is a's — it registered first.
+  expect(unfiltered.error()).toBeInstanceOf(RangeError)
+  // The predicate correctly finds b's, even though it is not first.
+  expect(filtered.active()).toBe(true)
+  expect(filtered.error()).toBeInstanceOf(TypeError)
+  expect((filtered.error() as TypeError).message).toBe('b-failed')
+})
+
+test('useFailed(predicate).retry() retries only matching reports, leaving a non-matching one still active', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+  let attemptA = 0
+  let attemptB = 0
+  const a = computed(() => {
+    attemptA++
+    return attemptA === 1 ? Promise.reject(new RangeError('a-failed')) : Promise.resolve('a-ok')
+  })
+  const b = computed(() => {
+    attemptB++
+    return Promise.reject(new TypeError('b-failed'))
+  })
+  let filtered!: ReturnType<typeof useFailed<RangeError>>
+  let unfiltered!: ReturnType<typeof useFailed>
+
+  render(
+    () => (
+      <Failed>
+        {() => (
+          <div>
+            <span>{() => use(a)}</span>
+            <span>{() => use(b)}</span>
+            <p>
+              {() => {
+                filtered = useFailed((e): e is RangeError => e instanceof RangeError)
+                unfiltered = useFailed()
+                return 'x'
+              }}
+            </p>
+          </div>
+        )}
+      </Failed>
+    ),
+    target,
+  )
+
+  await tick()
+  flush()
+
+  expect(filtered.active()).toBe(true)
+  expect(attemptA).toBe(1)
+  expect(attemptB).toBe(1)
+
+  filtered.retry()
+  await tick()
+  flush()
+
+  // Only a's RangeError-matching report was retried.
+  expect(attemptA).toBe(2)
+  // b's TypeError report was never touched.
+  expect(attemptB).toBe(1)
+  // a recovered, so the predicate no longer finds a match.
+  expect(filtered.active()).toBe(false)
+  // The boundary as a whole is still active — b's failure is still there.
+  expect(unfiltered.active()).toBe(true)
+})
+
+test("Failed.Error's for prop narrows what it displays to reports matching it", async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+  let rejectA!: (e: Error) => void
+  let rejectB!: (e: Error) => void
+  const a = computed(() => new Promise<never>((_, reject) => { rejectA = reject }))
+  const b = computed(() => new Promise<never>((_, reject) => { rejectB = reject }))
+
+  render(
+    () => (
+      <Failed>
+        {() => (
+          <div>
+            <span>{() => use(a)}</span>
+            <span>{() => use(b)}</span>
+            <Failed.Error for={(e: unknown): e is TypeError => e instanceof TypeError}>
+              {/* error is narrowed to TypeError by the type-guard for prop
+                  above — .message reads directly, no cast needed. */}
+              {(error) => <p data-testid="type-error-only">{error.message}</p>}
+            </Failed.Error>
+          </div>
+        )}
+      </Failed>
+    ),
+    target,
+  )
+
+  flush()
+  rejectA(new RangeError('a-failed'))
+  await tick()
+  flush()
+
+  // Only a (RangeError) has failed so far — the TypeError-only display stays hidden.
+  expect(target.querySelector('[data-testid="type-error-only"]')).toBeNull()
+
+  rejectB(new TypeError('b-failed'))
+  await tick()
+  flush()
+
+  expect(target.querySelector('[data-testid="type-error-only"]')?.textContent).toBe('b-failed')
+})

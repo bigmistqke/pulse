@@ -6,6 +6,7 @@ import {
   findBoundaryScope,
   getOwner,
   runWithOwner,
+  type FailureReport,
   type Owner,
 } from '../owner'
 import type { Accessor } from '../signal'
@@ -34,19 +35,22 @@ export interface FailedProps<E = unknown> {
   for?: ((value: unknown) => value is E) | ((value: unknown) => boolean)
 }
 
-export interface FailedState {
-  /** True while the nearest boundary's collection is non-empty. */
+export interface FailedState<E = unknown> {
+  /** True while whatever this reads — the whole boundary, or only reports
+   *  matching a given predicate — is non-empty. */
   readonly active: Accessor<boolean>
-  /** The first failed report's error, or `null`. Same value `fallback`
-   *  receives as its first argument when a `<Failed>` swaps for it. */
-  readonly error: Accessor<unknown>
-  /** Retry every failed report the boundary is currently holding — the exact
-   *  same operation a `<Failed>`'s own `reset` performs. Exposed under the
-   *  name `retry` for symmetry with `ActionHandle.retry()`. */
+  /** The first matching failed report's error, or `null`. Same value
+   *  `fallback` receives as its first argument when a `<Failed>` swaps for
+   *  it, when no predicate narrows what "matching" means. */
+  readonly error: Accessor<E | null>
+  /** Retry every matching failed report — the same per-report operation a
+   *  `<Failed>`'s own `reset` performs, but only over the reports this
+   *  state actually reflects. Exposed under the name `retry` for symmetry
+   *  with `ActionHandle.retry()`. */
   retry(): void
 }
 
-const CONST_FAILED_STATE: FailedState = {
+const CONST_FAILED_STATE: FailedState<unknown> = {
   active: () => false,
   error: () => null,
   retry: () => {},
@@ -67,11 +71,36 @@ const CONST_FAILED_STATE: FailedState = {
  * a `catchError` between this call and a `<Failed>` does not hide that
  * `<Failed>`'s state from `useFailed()`, since that boundary still owns
  * whatever DOM this call's descendants sit inside.
+ *
+ * `predicate`, if given, narrows what `active`/`error` mean and what
+ * `retry()` re-runs to only the boundary's reports matching it, instead of
+ * its first report and its whole collection — for when one boundary
+ * legitimately holds more than one kind of failure at once and a specific
+ * reader only cares about one of them. It does not change WHICH boundary is
+ * found — that stays purely positional, the same walk as with no predicate
+ * at all. Written as a type guard, `error()` narrows to `E`, the same
+ * convenience `<Failed>`'s own `for` gives its `fallback`.
  */
-export function useFailed(): FailedState {
+export function useFailed<E = unknown>(
+  predicate?: ((value: unknown) => value is E) | ((value: unknown) => boolean),
+): FailedState<E> {
   const scope = findBoundaryScope(getOwner(), 'failed')
-  if (scope === null) return CONST_FAILED_STATE
-  return { active: scope.active, error: scope.error, retry: scope.reset }
+  if (scope === null) return CONST_FAILED_STATE as FailedState<E>
+  // active()/error() read the published reports() snapshot — a no-op report
+  // (the identical error reported again) never changes what these mean, so
+  // the snapshot lagging behind the live failedSet in that one case is not
+  // observable here. retry() cannot use the same snapshot: it needs
+  // whichever source/retry a report MOST RECENTLY carried, which a no-op
+  // report refreshes internally without republishing reports() — so it
+  // delegates to scope.reset()/resetMatching(), the same live-data
+  // operations an unfiltered <Failed>'s own reset performs.
+  const matching = (): readonly FailureReport[] =>
+    predicate === undefined ? scope.reports() : scope.reports().filter((r) => predicate(r.error))
+  return {
+    active: () => matching().length > 0,
+    error: () => (matching()[0]?.error as E | undefined) ?? null,
+    retry: () => (predicate === undefined ? scope.reset() : scope.resetMatching(predicate)),
+  }
 }
 
 /**
@@ -119,16 +148,20 @@ export function Failed<E = unknown>(props: FailedProps<E>): Accessor<unknown> {
   }
 }
 
-export interface FailedErrorProps {
+export interface FailedErrorProps<E = unknown> {
+  /** Optional. When given, narrows which reports the boundary's state
+   *  reflects — same predicate shape and same narrowing behaviour as
+   *  `<Failed>`'s own `for`, passed straight through to `useFailed`. */
+  for?: ((value: unknown) => value is E) | ((value: unknown) => boolean)
   /** Called once per active-transition (branch-cached, the same way `Show`'s
    *  children are — see `src/dom/show.ts`) — not re-invoked on every change
    *  to the boundary's collection. If the underlying error changes while the
    *  boundary stays active (a second failure supersedes the first while this
    *  is still showing), reflecting that needs its own nested reactive read
-   *  inside the render prop's body (e.g. call `useFailed()` again there),
-   *  the same way `Show`'s own docs recommend for a value that changes
-   *  without a truthy/falsy transition. */
-  children: (error: unknown, retry: () => void) => unknown
+   *  inside the render prop's body (e.g. call `useFailed(props.for)` again
+   *  there), the same way `Show`'s own docs recommend for a value that
+   *  changes without a truthy/falsy transition. */
+  children: (error: E, retry: () => void) => unknown
 }
 
 /**
@@ -149,9 +182,9 @@ export interface FailedErrorProps {
  * property unless it's declared this way.
  */
 export namespace Failed {
-  export function Error(props: FailedErrorProps): Accessor<unknown> {
+  export function Error<E = unknown>(props: FailedErrorProps<E>): Accessor<unknown> {
     const parentOwner = getOwner()
-    const { active, error, retry } = useFailed()
+    const { active, error, retry } = useFailed(props.for)
     let branchOwner: Owner | null = null
     let lastActive: boolean | null = null
     let cached: unknown
@@ -166,8 +199,12 @@ export namespace Failed {
       // Without untrack, those would route to the calling binding-effect's
       // r3 per-run cleanup instead of branchOwner, disposing them on the
       // very next re-run — same pattern as Show/mapArray.
+      //
+      // error() as E is safe here: isActive is only true while matching()
+      // is non-empty, and error() only returns null when matching() is
+      // empty.
       cached = isActive
-        ? untrack(() => runWithOwner(branchOwner!, () => props.children(error(), retry)))
+        ? untrack(() => runWithOwner(branchOwner!, () => props.children(error() as E, retry)))
         : null
       lastActive = isActive
       return cached
