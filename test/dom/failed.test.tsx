@@ -849,3 +849,120 @@ test('useFailed() called with no owner at all returns a safe, always-inactive st
   expect(state.error()).toBeNull()
   expect(() => state.retry()).not.toThrow()
 })
+
+test('Failed.Error renders nothing while the boundary is healthy, and the error UI once it fails', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+  const c = computed(() => Promise.reject(new Error('boom')))
+
+  render(
+    () => (
+      <Failed>
+        {() => (
+          <div>
+            <Failed.Error>
+              {(error) => <p data-testid="error-ui">{(error as Error).message}</p>}
+            </Failed.Error>
+            <span>{() => use(c)}</span>
+          </div>
+        )}
+      </Failed>
+    ),
+    target,
+  )
+
+  expect(target.querySelector('[data-testid="error-ui"]')).toBeNull()
+
+  await tick()
+  flush()
+
+  expect(target.querySelector('[data-testid="error-ui"]')?.textContent).toBe('boom')
+})
+
+test('Failed.Error disposes what its render prop constructed when the failure clears', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+  const [id, setId] = signal(1)
+  const c = computed(() =>
+    id() === 1 ? Promise.reject(new Error('boom')) : Promise.resolve('ok'),
+  )
+  let disposals = 0
+
+  render(
+    () => (
+      <Failed>
+        {() => (
+          <div>
+            <Failed.Error>
+              {() => {
+                onCleanup(() => {
+                  disposals++
+                })
+                return <p data-testid="error-ui">failed</p>
+              }}
+            </Failed.Error>
+            <span>{() => use(c)}</span>
+          </div>
+        )}
+      </Failed>
+    ),
+    target,
+  )
+
+  await tick()
+  flush()
+  expect(target.querySelector('[data-testid="error-ui"]')).not.toBeNull()
+  expect(disposals).toBe(0)
+
+  setId(2)
+  await tick()
+  flush()
+
+  // The failure cleared — Failed.Error's own content must be GONE, and its
+  // onCleanup must actually have fired, not just have been hidden while
+  // still alive underneath.
+  expect(target.querySelector('[data-testid="error-ui"]')).toBeNull()
+  expect(disposals).toBe(1)
+})
+
+test('Failed.Error\'s retry() clears the failure, the same as useFailed().retry()', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+  let attempt = 0
+  const c = computed(() => {
+    attempt++
+    return attempt === 1 ? Promise.reject(new Error('boom')) : Promise.resolve('ok')
+  })
+
+  render(
+    () => (
+      <Failed>
+        {() => (
+          <div>
+            <Failed.Error>
+              {(_error, retry) => (
+                <button data-testid="retry" on:click={retry}>
+                  retry
+                </button>
+              )}
+            </Failed.Error>
+            <span>{() => use(c)}</span>
+          </div>
+        )}
+      </Failed>
+    ),
+    target,
+  )
+
+  await tick()
+  flush()
+  const button = target.querySelector('[data-testid="retry"]') as HTMLButtonElement
+  expect(button).not.toBeNull()
+
+  button.click()
+  await tick()
+  flush()
+
+  expect(target.querySelector('[data-testid="retry"]')).toBeNull()
+  expect(attempt).toBe(2)
+})

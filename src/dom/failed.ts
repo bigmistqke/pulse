@@ -1,6 +1,8 @@
+import { untrack } from 'r3'
 import {
   createFailedScope,
   createSubOwner,
+  disposeOwner,
   findBoundaryScope,
   getOwner,
   runWithOwner,
@@ -94,5 +96,61 @@ export function Failed(props: FailedProps): Accessor<unknown> {
     if (props.fallback === undefined) return subtree
     if (!scope.active()) return subtree
     return props.fallback(scope.error(), scope.reset)
+  }
+}
+
+export interface FailedErrorProps {
+  /** Called once per active-transition (branch-cached, the same way `Show`'s
+   *  children are — see `src/dom/show.ts`) — not re-invoked on every change
+   *  to the boundary's collection. If the underlying error changes while the
+   *  boundary stays active (a second failure supersedes the first while this
+   *  is still showing), reflecting that needs its own nested reactive read
+   *  inside the render prop's body (e.g. call `useFailed()` again there),
+   *  the same way `Show`'s own docs recommend for a value that changes
+   *  without a truthy/falsy transition. */
+  children: (error: unknown, retry: () => void) => unknown
+}
+
+/**
+ * Compound sugar for showing the nearest `<Failed>` boundary's error inline,
+ * anywhere, with no unmounting of anything around it — built entirely on
+ * `useFailed()`, nothing more.
+ *
+ * Gets its own sub-owner, disposed on each active/inactive transition — the
+ * same pattern `Show` uses internally — so that whatever the render prop
+ * constructs (its own effects, its own owner-sensitive registrations) is
+ * torn down cleanly when the failure clears, not merely removed from the DOM
+ * while still alive underneath.
+ *
+ * Declared via `namespace Failed { ... }` merged with the `function Failed`
+ * declaration above — the standard TypeScript pattern for attaching a typed
+ * static property to a function. A plain `Failed.Error = ...` assignment
+ * after the fact does not typecheck: `Failed`'s inferred type has no `Error`
+ * property unless it's declared this way.
+ */
+export namespace Failed {
+  export function Error(props: FailedErrorProps): Accessor<unknown> {
+    const parentOwner = getOwner()
+    const { active, error, retry } = useFailed()
+    let branchOwner: Owner | null = null
+    let lastActive: boolean | null = null
+    let cached: unknown
+
+    return () => {
+      const isActive = active()
+      if (isActive === lastActive) return cached
+
+      if (branchOwner !== null) disposeOwner(branchOwner)
+      branchOwner = createSubOwner(parentOwner)
+      // untrack: the render prop may call onCleanup or create effects.
+      // Without untrack, those would route to the calling binding-effect's
+      // r3 per-run cleanup instead of branchOwner, disposing them on the
+      // very next re-run — same pattern as Show/mapArray.
+      cached = isActive
+        ? untrack(() => runWithOwner(branchOwner!, () => props.children(error(), retry)))
+        : null
+      lastActive = isActive
+      return cached
+    }
   }
 }
