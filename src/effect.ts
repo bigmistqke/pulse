@@ -133,7 +133,7 @@ function stagedEffect(
       // <Failed> boundary, which collects it and selects its fallback. The same
       // controller reporting repeatedly is one entry, so a single rejection that
       // re-runs this body several times still renders one fallback.
-      const failedScope = findNearestFailedScope(myOwner)
+      const failedScope = findNearestFailedScope(myOwner, e)
       if (failedScope !== null) {
         ensureFailedController(failedScope.scope).report({
           status: 'failed',
@@ -264,7 +264,7 @@ function singleArgEffect(fn: () => void): void {
       // controller reporting repeatedly is one entry, so a single rejection that
       // re-runs this body several times still renders one fallback.
       controller?.report({ status: 'idle' }) // failed is not pending
-      const failedScope = findNearestFailedScope(myOwner)
+      const failedScope = findNearestFailedScope(myOwner, e)
       if (failedScope !== null) {
         ensureFailedController(failedScope.scope).report({
           status: 'failed',
