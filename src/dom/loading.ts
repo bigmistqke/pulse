@@ -35,8 +35,15 @@ export interface LoadingProps {
  * pending state with this boundary; Loading aggregates and selects:
  *
  * - All settled → loaded subtree.
- * - Pending and never-loaded → `initial ?? fallback`.
- * - Pending and previously loaded → `fallback ?? loaded subtree (hold-prior)`.
+ * - Pending, neither `initial` nor `fallback` given → loaded subtree anyway
+ *   (context-only: nothing to swap to, so nothing swaps — see `useLoading()`
+ *   for reading pending state without a swap at all). A binding inside still
+ *   withholds its own commit exactly as in every other case; only whatever
+ *   doesn't depend on the pending value is visible while it waits.
+ * - Pending and never-loaded (with at least one of the two given) →
+ *   `initial ?? fallback`.
+ * - Pending and previously loaded (with at least one of the two given) →
+ *   `fallback ?? loaded subtree (hold-prior)`.
  *
  * Components inside run once (per pulse's components-run-once invariant);
  * only individual bindings re-run on their own promises settling.
