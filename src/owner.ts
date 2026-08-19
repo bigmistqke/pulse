@@ -377,17 +377,23 @@ export function createFailedScope(
         report(state): void {
           if (state.status === 'failed') {
             onFailedReport?.(state.error)
-            // Skip a no-op write without an untracked read. Load-bearing: a
-            // single rejection re-runs a binding several times and it
-            // re-reports 'failed' each time with the identical error, and
-            // consumers must not re-render for reports that change nothing.
+            // A single rejection re-runs a binding several times, and it
+            // re-reports 'failed' each time with the identical error. The
+            // stored report is always refreshed — source/retry can differ
+            // between reports of the "same" error (a pending-to-failed
+            // settle reports before the source is attached, and a later
+            // re-run reports it correctly) — but the published collection is
+            // only rewritten, and consumers only re-notified, when the error
+            // itself changed. Load-bearing: consumers must not re-render for
+            // a report that changes nothing they read.
             const existing = failedSet.get(controller)
-            if (existing !== undefined && Object.is(existing.error, state.error)) return
+            const isNoOpReport = existing !== undefined && Object.is(existing.error, state.error)
             failedSet.set(controller, {
               error: state.error,
               source: state.source,
               retry: state.retry,
             })
+            if (isNoOpReport) return
           } else {
             // Any other status means this binding is no longer failed. In
             // practice only 'idle' is ever sent to a failed-scope controller

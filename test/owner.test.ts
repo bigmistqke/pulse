@@ -495,6 +495,30 @@ test('a controller re-reporting the identical error does not publish a new repor
   expect(second).toBe(first)
 })
 
+test('a later report of the identical error still refreshes source/retry, even though the published collection is not rewritten', () => {
+  const scope = createFailedScope()
+  const error = new Error('boom')
+  const controller = scope.register()
+  let firstRetryCalls = 0
+  let secondRetryCalls = 0
+
+  // A pending-to-failed settle can report before the source it will act on
+  // is attached, and a later re-run of the same binding reports the
+  // identical error again but this time with the retry that actually
+  // recovers it. The published collection does not change between these
+  // two reports (that is the no-op-report guarantee above), but reset()
+  // must still act on the second report's retry, not the first.
+  controller.report({ status: 'failed', error, source: null, retry: () => { firstRetryCalls++ } })
+  const published = scope.reports()
+
+  controller.report({ status: 'failed', error, source: null, retry: () => { secondRetryCalls++ } })
+  expect(scope.reports()).toBe(published)
+
+  scope.reset()
+  expect(firstRetryCalls).toBe(0)
+  expect(secondRetryCalls).toBe(1)
+})
+
 test('onFailedReport still fires on every failed report, even one that does not change the published collection', () => {
   const seen: unknown[] = []
   const scope = createFailedScope((error) => seen.push(error))
