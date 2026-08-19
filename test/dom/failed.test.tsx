@@ -1028,3 +1028,39 @@ test('a computed failure with no explicit <Failed> anywhere still registers with
   expect(spy).toHaveBeenCalledWith(expect.objectContaining({ message: 'boom' }))
   spy.mockRestore()
 })
+
+test('useFailed() with no explicit <Failed> reports the implicit root boundary, aggregating unrelated failures', async () => {
+  const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+  const target = document.createElement('section')
+  document.body.append(target)
+  const c = computed(() => Promise.reject(new Error('boom')))
+  let state!: ReturnType<typeof useFailed>
+
+  render(
+    () => (
+      <div>
+        <span>{() => use(c)}</span>
+        <p data-testid="unrelated">
+          {() => {
+            state = useFailed()
+            return 'unrelated content'
+          }}
+        </p>
+      </div>
+    ),
+    target,
+  )
+
+  expect(state.active()).toBe(false)
+
+  await tick()
+  flush()
+
+  // Nothing explicit connects these two siblings — no <Failed> boundary
+  // scopes either of them. With no explicit boundary anywhere, useFailed()
+  // reports the implicit root boundary, which aggregates every unboundaried
+  // failure in the whole root, not just ones structurally "near" this call.
+  expect(state.active()).toBe(true)
+  expect((state.error() as Error).message).toBe('boom')
+  spy.mockRestore()
+})
