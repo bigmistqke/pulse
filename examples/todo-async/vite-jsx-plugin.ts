@@ -7,9 +7,10 @@ export function pulseJsx(): Plugin {
     name: 'pulse-jsx',
     enforce: 'pre',
     async transform(code, id) {
-      if (!id.endsWith('.tsx') && !id.endsWith('.jsx')) return null
+      const filename = id.split('?')[0]
+      if (!filename.endsWith('.tsx') && !filename.endsWith('.jsx')) return null
       const result = await transformAsync(code, {
-        filename: id,
+        filename,
         presets: [['@babel/preset-typescript', {}]],
         plugins: [
           '@babel/plugin-syntax-jsx',
@@ -24,7 +25,10 @@ export function pulseJsx(): Plugin {
         sourceMaps: true,
       })
       if (!result?.code) return null
-      return { code: result.code, map: result.map }
+      // Babel's EncodedSourceMap types `file` as `string | null | undefined`; Rollup's
+      // SourceMapInput wants `string | undefined`. Both are the same JSON shape at
+      // runtime - this is a type-only mismatch between the two ecosystems' definitions.
+      return { code: result.code, map: result.map as any }
     },
   }
 }

@@ -363,7 +363,7 @@ function App() {
                           if ((e as KeyboardEvent).key === 'Enter') addTodo()
                         }}
                       />
-                      <Loading initial={<Skeleton/>}>{<TodoList/>}</Loading>
+                      <Loading initial={<Skeleton/>}>{() => <TodoList/>}</Loading>
                     </div>
                   )
                 }}
