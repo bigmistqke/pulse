@@ -679,7 +679,8 @@ test('an action that fails after its owning row unmounted (but the boundary is s
   expect(target.querySelector('[data-testid="error-panel"]')).not.toBeNull()
 })
 
-test('an action that fails after its <Failed> boundary itself unmounted does not register a stale entry anywhere', async () => {
+test('an action that fails after its <Failed> boundary itself unmounted escalates to the implicit root instead of registering a stale entry', async () => {
+  const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
   const target = document.createElement('section')
   document.body.append(target)
 
@@ -740,8 +741,14 @@ test('an action that fails after its <Failed> boundary itself unmounted does not
   await tick()
   flush()
 
-  // Nothing left to register with, and nothing stuck: no fallback anywhere.
+  // The explicit boundary is gone, so its fallback never shows...
   expect(target.querySelector('[data-testid="error-panel"]')).toBeNull()
+  // ...but the failure is not silently dropped: candidate collection walks
+  // past the now-disposed boundary to the next one, which is always the
+  // implicit root createRoot() installs — the same place any other
+  // unboundaried failure ends up, logged the same way.
+  expect(spy).toHaveBeenCalledWith(expect.objectContaining({ message: 'too late' }))
+  spy.mockRestore()
 })
 
 test('<Failed> without a fallback keeps its children mounted through a failure', async () => {
@@ -1094,6 +1101,52 @@ test('<Failed> with a declining for lets a computed rejection propagate to a far
 
   expect(target.querySelector('[data-testid="inner-panel"]')).toBeNull()
   expect(target.querySelector('[data-testid="outer-panel"]')?.textContent).toBe('boom')
+})
+
+test('a computed that re-fails with a different error type re-routes to the boundary that accepts it, not the one that claimed its earlier failure', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+  const [errorKind, setErrorKind] = signal<'range' | 'type'>('range')
+  const c = computed(() =>
+    errorKind() === 'range'
+      ? Promise.reject(new RangeError('range boom'))
+      : Promise.reject(new TypeError('type boom')),
+  )
+
+  render(
+    () => (
+      <Failed
+        for={(e: unknown): e is TypeError => e instanceof TypeError}
+        fallback={(error) => <p data-testid="outer-panel">{(error as Error).message}</p>}
+      >
+        {() => (
+          <Failed
+            for={(e: unknown): e is RangeError => e instanceof RangeError}
+            fallback={(error) => <p data-testid="inner-panel">{(error as Error).message}</p>}
+          >
+            {() => <span>{() => use(c)}</span>}
+          </Failed>
+        )}
+      </Failed>
+    ),
+    target,
+  )
+
+  await tick()
+  flush()
+
+  expect(target.querySelector('[data-testid="inner-panel"]')?.textContent).toBe('range boom')
+  expect(target.querySelector('[data-testid="outer-panel"]')).toBeNull()
+
+  setErrorKind('type')
+  await tick()
+  flush()
+
+  // The second failure is a different type. The inner boundary already
+  // claimed the first one, but it declines this one — the report must
+  // move to the outer boundary, not stay latched onto the inner one.
+  expect(target.querySelector('[data-testid="inner-panel"]')).toBeNull()
+  expect(target.querySelector('[data-testid="outer-panel"]')?.textContent).toBe('type boom')
 })
 
 test('action() skips a nearer <Failed> whose for declines the error, and registers with a farther one that accepts', async () => {

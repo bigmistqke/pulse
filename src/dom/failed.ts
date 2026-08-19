@@ -107,13 +107,14 @@ export function Failed<E = unknown>(props: FailedProps<E>): Accessor<unknown> {
     if (props.fallback === undefined) return subtree
     if (!scope.active()) return subtree
     // Safe: fallback only runs while scope.active() is true, meaning
-    // something registered a 'failed' report that findNearestFailedScope
-    // already checked against this exact scope.for before ever calling
-    // register() — see FailedScope.for's own doc comment. This does not
-    // yet hold for action() (src/scope.ts): it still resolves its
-    // boundary once at call time, before the failing error exists, so it
-    // cannot check scope.for against the real error yet. That is what the
-    // next commit in this series fixes.
+    // something registered a 'failed' report that already checked this
+    // exact scope.for against that report's own error before ever calling
+    // register() — see FailedScope.for's own doc comment. Both effect.ts
+    // (findNearestFailedScope) and action()'s candidate selection
+    // (src/scope.ts) re-check this on every failure, including a retry
+    // that fails with a different error type than an earlier attempt, so
+    // scope.error() is always a value this exact for accepted (or E is
+    // unknown, since for was never given).
     return props.fallback(scope.error() as E, scope.reset)
   }
 }

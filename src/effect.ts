@@ -80,6 +80,12 @@ function stagedEffect(
   let suspendedOn: Promise<unknown> | null = null
   let controller: BindingController | null = null
   let failedController: BindingController | null = null
+  // Which scope failedController is currently registered with — a later
+  // failure of the same binding can find a DIFFERENT accepting scope (its
+  // error is a different type, and the previously-claimed scope's own for
+  // now declines it, or a nearer scope newly exists), and the controller
+  // must move with it rather than keep reporting into the old collection.
+  let failedControllerScope: FailedScope | null = null
   const UNSET = Symbol('unset')
   let lastCommitted: unknown = UNSET
   // See the identical flag in `singleArgEffect`: throw out of the caller's own
@@ -95,7 +101,14 @@ function stagedEffect(
   }
 
   const ensureFailedController = (scope: FailedScope): BindingController => {
-    if (failedController === null) failedController = scope.register()
+    if (failedController !== null && failedControllerScope !== scope) {
+      failedController.unregister()
+      failedController = null
+    }
+    if (failedController === null) {
+      failedController = scope.register()
+      failedControllerScope = scope
+    }
     return failedController
   }
 
@@ -181,6 +194,7 @@ function stagedEffect(
       controller = null
       failedController?.unregister()
       failedController = null
+      failedControllerScope = null
     },
   })
 }
@@ -206,6 +220,12 @@ function singleArgEffect(fn: () => void): void {
   let suspendedOn: Promise<unknown> | null = null
   let controller: BindingController | null = null
   let failedController: BindingController | null = null
+  // Which scope failedController is currently registered with — a later
+  // failure of the same binding can find a DIFFERENT accepting scope (its
+  // error is a different type, and the previously-claimed scope's own for
+  // now declines it, or a nearer scope newly exists), and the controller
+  // must move with it rather than keep reporting into the old collection.
+  let failedControllerScope: FailedScope | null = null
   // r3 runs the body eagerly on creation, so the first run happens inside the
   // caller's own stack: an error nobody handles is theirs to see, and is thrown.
   // Every later run is driven by a graph write, where throwing would unwind the
@@ -221,7 +241,14 @@ function singleArgEffect(fn: () => void): void {
   }
 
   const ensureFailedController = (scope: FailedScope): BindingController => {
-    if (failedController === null) failedController = scope.register()
+    if (failedController !== null && failedControllerScope !== scope) {
+      failedController.unregister()
+      failedController = null
+    }
+    if (failedController === null) {
+      failedController = scope.register()
+      failedControllerScope = scope
+    }
     return failedController
   }
 
@@ -288,6 +315,7 @@ function singleArgEffect(fn: () => void): void {
       controller = null
       failedController?.unregister()
       failedController = null
+      failedControllerScope = null
     },
   })
 }

@@ -316,6 +316,7 @@ test('action() skips a nearer FailedScope whose for declines the error, register
 })
 
 test('action() with no explicit <Failed> anywhere still reaches the implicit root, unaffected by candidate collection', async () => {
+  const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
   const handle = createRoot(() =>
     action(function* () {
       yield* read(Promise.reject(new Error('boom')))
@@ -323,6 +324,11 @@ test('action() with no explicit <Failed> anywhere still reaches the implicit roo
   )
   await handle.settled
   expect(handle.error()).toBeInstanceOf(Error)
+  // handle.error() is set unconditionally by the settle handler regardless
+  // of candidate collection — the implicit root actually being reached is
+  // what this test is about, so assert its own, distinct signal too.
+  expect(spy).toHaveBeenCalledWith(expect.objectContaining({ message: 'boom' }))
+  spy.mockRestore()
 })
 
 test('action() stops candidate-collection at the nearest catchError, never reaching a farther <Failed> (the implicit root)', async () => {
