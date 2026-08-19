@@ -20,6 +20,17 @@ export type DerivedSetter<T> = (
   next: T | Awaited<T> | ((prev: Awaited<T> | undefined) => T | Awaited<T>),
 ) => void
 
+/**
+ * The setter of a writable derivation constructed with a fallback
+ * (`signal(fn, default)`). The update form is handed `default` in place of
+ * `undefined` before anything has resolved — the same substitution
+ * `latest()` already makes for a plain read, extended to the write side so a
+ * call site that always wants a value does not need its own `?? default`.
+ */
+export type DerivedSetterWithFallback<T, D> = (
+  next: T | Awaited<T> | ((prev: Awaited<T> | D) => T | Awaited<T>),
+) => void
+
 // The pipeline overloads are listed before the plain-value overload.
 // TypeScript resolves a call against overloads in declaration order and stops
 // at the first one that matches — it does not pick the most specific match
@@ -41,15 +52,18 @@ export function signal<A>(
 // accessor is branded (`WithFallback`) so `latest(thatAccessor)` picks up
 // `Resolved<A>` as its return type with no second argument needed. This does
 // not change the accessor's own read (still `PipelineRead<[], A>`, still a
-// Promise while genuinely pending) — only the tolerant read's fallback.
-// `Resolved<A>` — stage 0's own resolved value type — is what `fallback`
-// must match, and what a resolved `latest()` read reports once settled.
+// Promise while genuinely pending) — only the tolerant read's fallback. The
+// setter's update form gets the same substitution on the write side, so
+// `Resolved<A>` also replaces `undefined` there — `Resolved<A>`, stage 0's
+// own resolved value type, is what `fallback` must match, what a resolved
+// `latest()` read reports once settled, and what an update function sees in
+// place of `undefined` before that.
 export function signal<A>(
   s0: () => A,
   fallback: Resolved<A>,
 ): [
   WithFallback<Accessor<PipelineRead<[], A>>, Resolved<A>>,
-  DerivedSetter<PipelineRead<[], A>>,
+  DerivedSetterWithFallback<PipelineRead<[], A>, Resolved<A>>,
 ]
 export function signal<A, B>(
   s0: () => A,
@@ -86,9 +100,19 @@ export function signal(...args: any[]): [Accessor<any>, any] {
   // real stage is always itself a function, so this never misreads a
   // genuine two-stage call.
   if (args.length === 2 && typeof args[1] !== 'function') {
-    const built = signalFromStages(args[0])
-    seedLatest(built[0], args[1])
-    return built
+    const fallback = args[1]
+    const [accessor, setter] = signalFromStages(args[0])
+    seedLatest(accessor, fallback)
+    // The same fallback, substituted for `undefined` on the write side: an
+    // update function's `prev` sees it in place of `undefined` before
+    // anything has resolved, exactly like `latest()` already does for a
+    // plain read.
+    const setterWithFallback: DerivedSetterWithFallback<unknown, unknown> = (next) => {
+      if (typeof next !== 'function') return setter(next)
+      const update = next as (prev: unknown) => unknown
+      return setter((prev: unknown) => update(prev === undefined ? fallback : prev))
+    }
+    return [accessor, setterWithFallback]
   }
   return signalFromStages(...(args as Array<(value: any) => unknown>))
 }

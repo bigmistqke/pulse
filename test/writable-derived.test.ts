@@ -199,6 +199,57 @@ test('signal(fn, default): latest(todos) needs no second argument to type as non
   expect(withoutDefaultValue).toBeUndefined()
 })
 
+test('signal(fn, default): an update function sees the default in place of undefined before the first resolution', () => {
+  let seen: unknown = 'not called'
+  const [, setTodos] = signal(function* () {
+    return yield* read(new Promise<string[]>(() => {})) // never resolves
+  }, [] as string[])
+  setTodos((prev) => {
+    seen = prev
+    return ['seeded']
+  })
+  expect(seen).toEqual([])
+})
+
+test('signal(fn, default): an update function still sees the real resolved value once one exists, not the default', async () => {
+  const [todos, setTodos] = signal(function* () {
+    return yield* read(Promise.resolve(['a']))
+  }, [] as string[])
+  await tick()
+  let seen: unknown = 'not called'
+  setTodos((prev) => {
+    seen = prev
+    return prev
+  })
+  expect(seen).toEqual(['a'])
+  expect(latest(todos)).toEqual(['a'])
+})
+
+test('signal(fn, default): an update function needs no ?? default to type as non-optional (compile-time)', () => {
+  // This is mostly a typecheck-only assertion — the `const … : T = …` lines
+  // are the compile-time checks; a wrong type would fail to compile.
+  const [, setWithDefault] = signal(function* () {
+    return yield* read(new Promise<string[]>(() => {}))
+  }, [] as string[])
+  const [, setWithoutDefault] = signal(function* () {
+    return yield* read(new Promise<string[]>(() => {}))
+  })
+
+  setWithDefault((prev) => {
+    // string[], not string[] | undefined — no ?? [] needed
+    const noNullCheckNeeded: string[] = prev
+    return noNullCheckNeeded
+  })
+  setWithoutDefault((prev) => {
+    // without a construction-time default, prev still includes undefined
+    const stillOptional: string[] | undefined = prev
+    // @ts-expect-error a plain accessor's update function is not narrowed
+    const shouldError: string[] = prev
+    void shouldError
+    return stillOptional ?? []
+  })
+})
+
 test('W1: a write abandons the fetch in flight and it never publishes', async () => {
   let resolveList: (v: string[]) => void = () => {}
   const [version, setVersion] = signal(1)
