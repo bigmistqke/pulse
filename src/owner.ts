@@ -1,4 +1,5 @@
 import {
+  computed as r3Computed,
   getContext,
   read as r3Read,
   setSignal as r3SetSignal,
@@ -282,13 +283,6 @@ export interface FailureReport {
   readonly retry: () => void
 }
 
-/** One signal holding the whole collection together, so a change is one
- *  atomic write — not separate signals per field, which would let a
- *  consumer observe one updated and another still stale between writes. */
-interface Collection {
-  readonly reports: readonly FailureReport[]
-}
-
 /**
  * Build a `FailedScope`: the collection/report/reset logic shared by every
  * `<Failed>` boundary and by the default boundary `createRoot()` installs on
@@ -298,7 +292,8 @@ interface Collection {
  * `src/signal.ts` imports from `src/scope.ts`, which already imports from
  * this file (`findNearestFailedScope`/`getOwner`/`onCleanup`), so importing
  * `signal()` back here would cycle. `src/scope.ts`'s own `makeErrorCell()`
- * solves the identical problem the same way.
+ * solves the identical problem the same way. Same reason `error`/`active`
+ * are raw r3 `computed`s below rather than pulse's own `computed()`.
  *
  * `onFailedReport`, if given, runs once for every `'failed'` report this
  * scope receives, regardless of whether anything is reading its `active`/
@@ -315,21 +310,48 @@ export function createFailedScope(
   // binding that re-runs and re-reports stays ONE entry.
   const failedSet = new Map<BindingController, FailureReport>()
 
-  let current: Collection = { reports: [] }
-  const collectionNode = r3Signal<Collection>(current)
+  const reportsNode = r3Signal<readonly FailureReport[]>([])
 
   // Mirrors `makeErrorCell`'s top-level-read behaviour (`src/scope.ts`):
   // inside an r3 context, read through it directly; outside one, stabilize
   // first so the value is never stale.
-  const readCollection = (): Collection => {
-    if (getContext() !== null) return r3Read(collectionNode)
+  const readReports = (): readonly FailureReport[] => {
+    if (getContext() !== null) return r3Read(reportsNode)
     stabilize()
-    return collectionNode.value
+    return reportsNode.value
+  }
+
+  // `error`/`active` derive from `reportsNode` through their own raw r3
+  // `computed`s rather than being read inline off `reportsNode` on every
+  // call. `reportsNode` itself publishes a fresh array on every genuine
+  // change to ANY entry — `useFailed(predicate)` needs to see a change to
+  // a non-first entry too, so it cannot skip that write. A computed node
+  // re-runs its own body whenever its dependency changes, but only
+  // notifies ITS OWN subscribers when the value it produces actually
+  // changed (r3's own `value !== el.value` check) — so a change to a
+  // non-first entry re-runs these two computeds' bodies (cheap: just an
+  // array index and a length check) without re-notifying whatever reads
+  // `error()`/`active()`, as long as the first entry itself is unchanged.
+  // Reading `reportsNode` directly inline, instead of through a memoizing
+  // computed, would lose exactly this — every subscriber of one shared
+  // signal is marked dirty on every write to it, with nothing downstream
+  // to absorb a change that does not affect what that subscriber reads.
+  const errorNode = r3Computed<unknown>(() => readReports()[0]?.error ?? null)
+  const activeNode = r3Computed<boolean>(() => readReports().length > 0)
+
+  const readError = (): unknown => {
+    if (getContext() !== null) return r3Read(errorNode)
+    stabilize()
+    return errorNode.value
+  }
+  const readActive = (): boolean => {
+    if (getContext() !== null) return r3Read(activeNode)
+    stabilize()
+    return activeNode.value
   }
 
   const recompute = (): void => {
-    current = { reports: Array.from(failedSet.values()) }
-    r3SetSignal(collectionNode, current)
+    r3SetSignal(reportsNode, Array.from(failedSet.values()))
   }
 
   const reset = (): void => {
@@ -346,9 +368,9 @@ export function createFailedScope(
 
   return {
     kind: 'failed',
-    error: () => readCollection().reports[0]?.error ?? null,
-    active: () => readCollection().reports.length > 0,
-    reports: () => readCollection().reports,
+    error: readError,
+    active: readActive,
+    reports: readReports,
     for: filterFor,
     register(): BindingController {
       const controller: BindingController = {

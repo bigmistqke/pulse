@@ -1,4 +1,5 @@
 import { afterEach, expect, test, vi } from 'vitest'
+import { computed as r3Computed, stabilize } from 'r3'
 import {
   catchError,
   createFailedScope,
@@ -521,4 +522,45 @@ test('FailedScope.error()/active() still report the first entry, unaffected by r
 
   expect(scope.active()).toBe(true)
   expect(scope.error()).toBe(errorA)
+})
+
+test('a change to a non-first report does not re-notify a consumer that only reads error()/active()', () => {
+  const scope = createFailedScope()
+  const controllerA = scope.register()
+  const controllerB = scope.register()
+  controllerA.report({ status: 'failed', error: new Error('a'), source: null, retry: () => {} })
+
+  let runs = 0
+  const c = r3Computed(() => {
+    runs++
+    return scope.error()
+  })
+  // Outside any ambient reactive context, read() does not force settlement
+  // (it only does that dance when called from inside another computed) —
+  // stabilize() is what actually walks and recomputes anything dirty,
+  // mirroring exactly how error()/active()/reports() read themselves
+  // outside a context. A computed created after its own dependency already
+  // changed (errorNode/activeNode were created while reportsNode was still
+  // empty, then reportsNode changed once before c was ever created) settles
+  // its value correctly, but r3 may still charge one extra, value-identical
+  // recompute the first time something actually reads through it — a
+  // scheduling artifact of that ordering, not a bug in this file. Baseline
+  // against the count AFTER this first settle, not against a fixed number.
+  stabilize()
+  const baseline = runs
+
+  // B reports a genuinely new error. The full reports() set changes, but
+  // the first entry (A's) does not, so error()/active() must not re-notify.
+  controllerB.report({ status: 'failed', error: new Error('b1'), source: null, retry: () => {} })
+  stabilize()
+  expect(runs).toBe(baseline)
+
+  controllerB.report({ status: 'failed', error: new Error('b2'), source: null, retry: () => {} })
+  stabilize()
+  expect(runs).toBe(baseline)
+
+  // A's own report changing is what should actually re-notify.
+  controllerA.report({ status: 'failed', error: new Error('a2'), source: null, retry: () => {} })
+  stabilize()
+  expect(runs).toBe(baseline + 1)
 })
