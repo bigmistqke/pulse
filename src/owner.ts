@@ -145,9 +145,12 @@ function newOwner(
 
 /**
  * Walk up the owner chain from `start`, invoking the first `errorHandler`
- * encountered. If the handler itself throws, continue walking from that
- * owner's `parent` with the new error. If no handler eventually catches,
- * the final error is re-thrown.
+ * that accepts `error` — one whose `for`, if given, returns `true` for it, or
+ * that has no `for` at all. A handler that declines is skipped exactly as if
+ * it were absent, and the walk continues to its owner's `parent` with the
+ * same error. If the handler itself throws, continue walking from that
+ * owner's `parent` with the new error instead. If no handler eventually
+ * catches, the final error is re-thrown.
  *
  * Internal: called by `effect`/`computed` wrappers on a non-`NotReadyYet` throw.
  */
@@ -409,7 +412,15 @@ export function createSubOwner(
  * Create a sub-owner with an error handler attached, then run `fn` with the
  * sub-owner as ambient. Reactive nodes (effects, computeds) created inside
  * `fn` parent to this sub-owner; when they throw a non-`NotReadyYet` error,
- * the throw walks up the owner chain and the nearest handler is invoked.
+ * the throw walks up the owner chain and the nearest accepting handler is
+ * invoked.
+ *
+ * `options.for`, if given, restricts `handler` to only the errors for which
+ * it returns `true`. An error it declines is treated as if this `catchError`
+ * were not here at all: the walk continues to the next ancestor handler (a
+ * farther `catchError`, or nothing, in which case the error propagates same
+ * as if there were no handler anywhere). Omitting `options.for` accepts
+ * every error, matching the pre-filter behavior.
  *
  * The sub-owner is registered as a disposable child of `currentOwner` — so
  * the parent's `dispose()` cascades down to it automatically. If called
