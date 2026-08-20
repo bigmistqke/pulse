@@ -54,7 +54,7 @@ export function SpinnerFlash() {
     <TabFrame
       title="FM2 · Spinner flash"
       quality="A boundary should hold prior content across a refetch — no fallback flash for content already shown — regardless of when the boundary was mounted."
-      actual="Solid 2.x: latest() reads the committed _value across re-fetches and remounted boundaries; the Loading boundary only shows fallback on first load."
+      actual="Fails on remount, same as pulse — verified empirically, not assumed. latest() correctly holds the stale value across a plain refetch, but <Loading>'s own fallback-vs-hold-prior state is still scoped to the boundary instance: a genuine unmount+remount re-triggers the fallback even though the data settled before. Not addressed in the 2.0 RFCs or docs."
       scenario={scenario}
       controls={<LatencyControls knobs={[knob]} />}
       timeline={<EventTimeline log={log} />}
