@@ -20,8 +20,6 @@ export function AtomicSteps() {
     setPayment('')
     setOrder('')
     setMode(label)
-    // flush() commits the reset on its own — without it these writes would
-    // share the tick with the action below and be swept into its transition.
     flush()
   }
 
@@ -32,8 +30,6 @@ export function AtomicSteps() {
   const confirm = () =>
     mockFetch({ log, knob: confirmKnob, generation: 'confirm', produce: () => 'ORD-7' })
 
-  // Plain async: three awaits, three independent commits. Each setter lands on
-  // its own flush, so the UI shows the workflow half-applied between steps.
   async function runPlain() {
     log.emit('action', 'plain async run', 'p0')
     reset('plain async')
@@ -43,8 +39,6 @@ export function AtomicSteps() {
     log.emit('action', 'plain run done (committed in 3 frames)', 'p0')
   }
 
-  // action(): one transition spanning all three awaits. Every write is held
-  // and commits together when the generator returns — one frame, never torn.
   const checkout = action(function* () {
     const ticket: string = yield reserve()
     setReservation(ticket)

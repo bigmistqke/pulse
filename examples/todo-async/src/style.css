@@ -107,9 +107,6 @@ h2 {
   font: inherit;
 }
 
-/* Driven by useErrored(), not by the mutation-error banner directly — the
-   input stays marked while the mutation boundary is active, matching the
-   banner shown above the list rather than swapping anything of its own. */
 .new-todo.has-error {
   border-color: var(--danger);
 }
@@ -145,7 +142,6 @@ ul {
   flex: 1;
 }
 
-/* The list is showing an in-flight guess rather than server truth. */
 .todo-list.speculative {
   border-left: 2px solid var(--accent);
   padding-left: 0.6rem;
@@ -255,14 +251,10 @@ ul {
   font: inherit;
 }
 
-/* Structural only — a mutation error's boundary needs its own static
-   wrapper (see main.tsx), but should not add a layout box of its own. */
 .mutation-scope {
   display: contents;
 }
 
-/* A mutation error, shown inline above the list rather than in place of
-   it — the list itself is never touched by this. */
 .mutation-error {
   display: flex;
   align-items: center;

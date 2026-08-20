@@ -15,8 +15,6 @@ export function Entanglement() {
   async function updateBio() {
     log.emit('action', 'update-bio started', 'user')
     await mockFetch({ log, knob: bioKnob, generation: 'user', produce: () => null })
-    // Read displayName at write time, not capture time — the committed name as
-    // it stands now, so a concurrent rename mid-flight is reflected, not lost.
     const current = displayName()
     setBio(`bio for ${current}`)
     log.emit('action', `update-bio wrote bio for "${current}"`, current)

@@ -12,11 +12,6 @@ export function SupersedeAction() {
   let gen = 0
   let inflight: AbortController | null = null
 
-  // E1 re-done with action(). action() does NOT auto-supersede concurrent
-  // invocations the way an async createMemo discards stale results — each call
-  // is its own transition. So cancellation is wired explicitly: a new save
-  // aborts the previous one's request. The aborted fetch rejects, the
-  // superseded action throws, and its commit + side effect never run.
   const save = action(function* () {
     const myGen = ++gen
     inflight?.abort()
@@ -29,14 +24,12 @@ export function SupersedeAction() {
       signal: ctrl.signal,
       produce: () => ({ text: `saved #${myGen}` }),
     })
-    // Reached only by the save that was not superseded.
     setCommitted(result.text)
     setSideEffects((n) => n + 1)
     log.emit('action', `committed ${result.text}`, `v${myGen}`)
   })
 
   function doSave() {
-    // A superseded save rejects when its request is aborted — expected.
     save().catch(() => {})
   }
 

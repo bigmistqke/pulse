@@ -29,7 +29,6 @@ body {
 }
 .btn-row { display: flex; gap: 8px; }
 
-/* generation color-coding — torn state is a literally multi-coloured card */
 .pane, .list-card, .payload { padding: 8px 10px; border-radius: 6px; margin: 4px 0; }
 [data-gen='alice'], [data-gen='active'], [data-gen='current'] { background: #1d3a52; }
 [data-gen='bob'], [data-gen='archived'], [data-gen='superseded'] { background: #1d5238; }

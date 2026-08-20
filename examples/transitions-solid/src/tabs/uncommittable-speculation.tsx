@@ -21,10 +21,6 @@ export function UncommittableSpeculation() {
   })
 
   function toggle() {
-    // Functional updater: reading `archived()` directly would return the
-    // committed value. The write feeds an async memo, so it is transition-
-    // scoped — until the fetch settles the new value lives in a lane. A second
-    // rapid toggle reading the committed value would flip the same direction.
     setArchived((a) => {
       const next = !a
       log.emit('action', `toggle → ${next ? 'archived' : 'active'}`, next ? 'archived' : 'active')

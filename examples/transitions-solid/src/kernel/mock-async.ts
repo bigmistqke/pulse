@@ -18,7 +18,6 @@ export interface MockFetchOptions<T> {
   generation: string
   produce: () => T
   signal?: AbortSignal
-  /** When true the request rejects after its latency instead of resolving. */
   fail?: boolean
 }
 
@@ -27,9 +26,6 @@ export function mockFetch<T>(options: MockFetchOptions<T>): Promise<T> {
   const ms = knob.ms()
   log.emit('request', `${knob.name} (${ms}ms)`, generation)
   return new Promise<T>((resolve, reject) => {
-    // Once the request settles, a later abort is a no-op — matching real
-    // AbortController semantics and keeping the timeline free of spurious
-    // "cancelled" entries for work that already finished.
     let settled = false
     const timer = setTimeout(() => {
       if (settled) return

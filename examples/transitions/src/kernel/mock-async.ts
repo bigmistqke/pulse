@@ -17,16 +17,9 @@ export interface MockFetchOptions<T> {
   knob: LatencyKnob
   generation: string
   produce: () => T
-  /** Optional abort signal. If it aborts before the latency timer fires,
-   *  `produce` is skipped and the promise rejects. */
   signal?: AbortSignal
 }
 
-/**
- * Emit `request`, wait `knob.ms()` (sampled now), emit `resolve`, return
- * `produce()`. If `signal` aborts first: skip `produce`, emit a `(cancelled)`
- * resolve event, and reject.
- */
 export function mockFetch<T>(options: MockFetchOptions<T>): Promise<T> {
   const { log, knob, generation, produce, signal } = options
   const ms = knob.ms()

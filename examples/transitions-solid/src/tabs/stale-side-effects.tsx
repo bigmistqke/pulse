@@ -21,18 +21,11 @@ export function StaleSideEffects() {
   createEffect(
     () => save(),
     () => {
-      // Block body: the effect must return void (or a cleanup fn), not the
-      // number that setSideEffectsRan would otherwise hand back.
       setSideEffectsRan((n) => n + 1)
     },
   )
 
   function doSave() {
-    // Read-modify-write via the functional updater. Reading `version()` here
-    // directly would return the committed value — a write that feeds an async
-    // memo is transition-scoped and not committed until the memo settles, so a
-    // second rapid click would recompute the same `next`. The updater receives
-    // the latest lane-aware value instead.
     setVersion((v) => {
       const next = v + 1
       log.emit('action', `save → v${next}`, `v${next}`)

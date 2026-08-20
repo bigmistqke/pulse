@@ -20,10 +20,6 @@ export function OptimisticAction() {
   const knob = latencyKnob('save', 900)
   let tempSeq = 0
 
-  // serverComments is the committed truth. comments is an optimistic overlay
-  // derived from it: a write to setComments inside an action is tentative —
-  // shown at once, then reverted when the action's transition settles. The
-  // real commit goes to serverComments, which the overlay falls back to.
   const [serverComments, setServerComments] = createSignal<Comment[]>(
     SERVER_LIST.map((c) => ({ ...c })),
   )
@@ -33,10 +29,7 @@ export function OptimisticAction() {
     const tempId = `temp-${tempSeq++}`
     const text = `${fail ? 'doomed' : 'optimistic'} comment ${tempId}`
     log.emit('action', `add (optimistic) ${tempId}`, fail ? 'fail' : 'ok')
-    // Optimistic overlay — shows the pending comment immediately.
     setComments((c) => [...c, { id: tempId, text, pending: true }])
-    // yield is the commit boundary; if the request rejects, the transition
-    // fails — the overlay reverts and serverComments is never written.
     const saved: Comment = yield mockFetch({
       log,
       knob,
@@ -44,7 +37,6 @@ export function OptimisticAction() {
       fail,
       produce: (): Comment => ({ id: `srv-${tempId}`, text, pending: false }),
     })
-    // Committed truth — the overlay reverts to this when the action settles.
     setServerComments((c) => [...c, saved])
     log.emit('action', `add committed ${saved.id}`, 'ok')
     return saved

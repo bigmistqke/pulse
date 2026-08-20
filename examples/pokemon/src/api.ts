@@ -13,8 +13,6 @@ export type Pokemon = {
 
 const cache = new Map<string, Promise<unknown>>()
 
-// Artificial delay so transitions are observable during manual testing and
-// reliably visible in Playwright assertions. Set to 0 in production.
 const FETCH_DELAY_MS = 500
 
 function delay(ms: number): Promise<void> {
