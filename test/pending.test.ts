@@ -6,38 +6,34 @@ import { isPending, promiseOf, registerPending, type PendingEntry } from '../src
 import { computed } from '../src/computed'
 
 describe('pending tracker — basics', () => {
-  test('isPending returns a reactive accessor; false for plain signal', () => {
+  test('isPending is false for a plain signal, called fresh (not an accessor)', () => {
     const [s] = signal(42)
-    const acc = isPending(s)
-    expect(typeof acc).toBe('function')
-    expect(acc()).toBe(false)
+    expect(isPending(s)).toBe(false)
   })
 
-  test('promiseOf returns a reactive accessor; null for plain signal', () => {
+  test('promiseOf is null for a plain signal, called fresh (not an accessor)', () => {
     const [s] = signal(42)
-    const acc = promiseOf(s)
-    expect(typeof acc).toBe('function')
-    expect(acc()).toBe(null)
+    expect(promiseOf(s)).toBe(null)
   })
 })
 
 describe('pending tracker — value-as-promise fallback', () => {
   test('isPending true for a signal holding a pending promise', () => {
     const [s] = signal(new Promise(() => {}))
-    expect(isPending(s)()).toBe(true)
+    expect(isPending(s)).toBe(true)
   })
 
   test('isPending false for a signal holding a resolved promise (after track)', async () => {
     const p = Promise.resolve('x')
     const [s] = signal<unknown>(p)
     await p
-    expect(isPending(s)()).toBe(false)
+    expect(isPending(s)).toBe(false)
   })
 
   test('promiseOf returns the pending promise for a signal holding one', () => {
     const p = new Promise<number>(() => {})
     const [s] = signal(p)
-    expect(promiseOf(s)()).toBe(p)
+    expect(promiseOf(s)).toBe(p)
   })
 })
 
@@ -56,7 +52,7 @@ describe('pending tracker — pipeline-OR walk', () => {
       upstream,
     })
 
-    expect(isPending(down)()).toBe(true)
+    expect(isPending(down)).toBe(true)
   })
 
   test('promiseOf walks upstream when local is null', () => {
@@ -69,7 +65,7 @@ describe('pending tracker — pipeline-OR walk', () => {
     const down = (() => 42) as Accessor<number>
     registerPending(down, { pending: downPending, promise: downPromise, upstream })
 
-    expect(promiseOf(down)()).toBe(upP)
+    expect(promiseOf(down)).toBe(upP)
   })
 })
 
@@ -78,12 +74,12 @@ describe('pending tracker — computed integration', () => {
     let resolve!: (v: number) => void
     const p = new Promise<number>((r) => (resolve = r))
     const c = computed(() => p)
-    expect(isPending(c)()).toBe(true)
+    expect(isPending(c)).toBe(true)
     resolve(42)
     await p
     // Allow the stage's settle handler + scheduler tick.
     await new Promise((r) => queueMicrotask(() => r(undefined)))
-    expect(isPending(c)()).toBe(false)
+    expect(isPending(c)).toBe(false)
   })
 
   test('isPending walks across pipeline stages', async () => {
@@ -91,10 +87,10 @@ describe('pending tracker — computed integration', () => {
     const p = new Promise<number>((r) => (resolve = r))
     const upstream = computed(() => p)
     const downstream = computed(upstream, (n) => n * 2)
-    expect(isPending(downstream)()).toBe(true)
+    expect(isPending(downstream)).toBe(true)
     resolve(21)
     await p
     await new Promise((r) => queueMicrotask(() => r(undefined)))
-    expect(isPending(downstream)()).toBe(false)
+    expect(isPending(downstream)).toBe(false)
   })
 })

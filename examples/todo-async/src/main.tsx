@@ -64,9 +64,6 @@ const [todos, setTodos] = signal(() => {
  */
 const [overlay, setOverlay, speculating] = optimistic(() => latest(todos))
 
-/** True while the load is in flight, including a refetch over a visible list. */
-const loading = isPending(todos)
-
 const visible = () => {
 	const all = overlay()
 	const f = filter()
@@ -285,7 +282,8 @@ function App() {
 		<div class="app">
 			<header class="top">
 				<h1>todos</h1>
-				<Show when={loading()}>
+				{/* True while the load is in flight, including a refetch over a visible list. */}
+				<Show when={isPending(todos)}>
 					<span class="inflight" data-testid="inflight">
 						loading…
 					</span>

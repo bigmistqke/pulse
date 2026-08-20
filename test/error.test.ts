@@ -34,7 +34,7 @@ test('a failed refetch keeps the stale value readable through latest', async () 
   setId(2)
   await tick()
   expect(latest(c)).toBe('v1') // degrade, do not throw
-  expect(isPending(c)()).toBe(false)
+  expect(isPending(c)).toBe(false)
 })
 
 test('error() reports the error, and null while healthy', async () => {

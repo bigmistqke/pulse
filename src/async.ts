@@ -142,8 +142,8 @@ export function resolvedPromise<T>(value: T): Promise<T> {
 
 /**
  * Resolve a possibly-async value synchronously.
- * - Accessor argument: if `isPending(x)()` is true (this stage OR any
- *   upstream stage is in-flight), throws `NotReadyYet(promiseOf(x)()!)` so
+ * - Accessor argument: if `isPending(x)` is true (this stage OR any
+ *   upstream stage is in-flight), throws `NotReadyYet(promiseOf(x)!)` so
  *   the surrounding effect/binding can suspend. Otherwise returns the
  *   accessor's current value (possibly a Promise — handled by the next
  *   branches just like a plain Promise argument).
@@ -174,8 +174,8 @@ export function use(x: unknown): unknown {
     // computeds when their sub count drops to 0, mid-flow"), and new values
     // would never propagate after a refetch.
     x = accessor()
-    if (isPending(accessor)()) {
-      throw new NotReadyYet(promiseOf(accessor)()!)
+    if (isPending(accessor)) {
+      throw new NotReadyYet(promiseOf(accessor)!)
     }
   }
   if (!isPromise(x)) return x
@@ -216,14 +216,14 @@ use.latest = function <T>(x: Accessor<T>): Awaited<T> {
     // in-flight promise out so the nearest <Loading> scope's isLoading()
     // still reflects the background refresh, without withholding this
     // binding's own commit the way a throw would.
-    if (isPending(x)()) {
-      const inFlight = promiseOf(x)()
+    if (isPending(x)) {
+      const inFlight = promiseOf(x)
       if (inFlight !== null) markBackgroundPromise(inFlight)
     }
     return value as Awaited<T>
   }
   // Genuinely nothing has ever resolved for this accessor.
-  throw new NotReadyYet(promiseOf(x)()!)
+  throw new NotReadyYet(promiseOf(x)!)
 }
 
 /**
@@ -369,7 +369,7 @@ export function* settled<T extends readonly unknown[]>(
   for (const x of inputs) {
     if (isSignalAccessor(x)) {
       const v = x() // establish the dependency (re-run when this input changes)
-      const p = isPending(x)() ? promiseOf(x)() : null
+      const p = isPending(x) ? promiseOf(x) : null
       if (p) inflight.push(p)
       else if (isPromise(v) && track(v as Promise<unknown>).status === 'pending') {
         inflight.push(v as Promise<unknown>)

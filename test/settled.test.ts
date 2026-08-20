@@ -15,16 +15,16 @@ test('settled waits for ALL inputs, then produces the combined frame atomically'
   })
   preview() // kick first eval
   await tick()
-  expect(isPending(preview)()).toBe(true) // both inputs pending
+  expect(isPending(preview)).toBe(true) // both inputs pending
 
   ra(10)
   await tick()
   // Only A has settled — the barrier must still hold (no half-updated frame).
-  expect(isPending(preview)()).toBe(true)
+  expect(isPending(preview)).toBe(true)
 
   rb(20)
   await tick()
-  expect(isPending(preview)()).toBe(false)
+  expect(isPending(preview)).toBe(false)
   expect(use(preview)).toBe(30) // both settled → the combined frame appears at once
 })
 
@@ -116,7 +116,7 @@ test('settled re-runs and re-coordinates when an input refetches', async () => {
   // Refetch A; the barrier must wait for the new A before swapping the frame.
   setSeed(1)
   await tick()
-  expect(isPending(preview)()).toBe(true) // A refetching — barrier holds
+  expect(isPending(preview)).toBe(true) // A refetching — barrier holds
   ra(9)
   await tick()
   expect(use(preview)).toBe('9:2')

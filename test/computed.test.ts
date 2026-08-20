@@ -71,7 +71,7 @@ test('an async stage suspends the pipeline; the value flips to the resolved valu
   await tick()
   // After settle: the view is a fresh fulfilled promise carrying the resolved
   // value; read it through the verbs.
-  expect(isPending(c)()).toBe(false)
+  expect(isPending(c)).toBe(false)
   expect(latest(c)).toBe(11)
 })
 
@@ -85,7 +85,7 @@ test('a sync final stage fed by an async upstream reads as a Promise, not bare',
   // last stage is synchronous — the raw read is honest to the async colour, and
   // the verbs resolve it.
   expect(c()).toBeInstanceOf(Promise)
-  expect(isPending(c)()).toBe(false)
+  expect(isPending(c)).toBe(false)
   expect(use(c)).toBe(2)
   expect(latest(c)).toBe(2)
 })
@@ -505,11 +505,11 @@ test('isPending(computed) true during initial load, false after settle', async (
 
   await createRoot(async (dispose) => {
     const c = computed(() => p)
-    expect(isPending(c)()).toBe(true)
+    expect(isPending(c)).toBe(true)
     resolveP(42)
     await Promise.resolve()
     flush()
-    expect(isPending(c)()).toBe(false)
+    expect(isPending(c)).toBe(false)
     dispose()
   })
 
@@ -533,16 +533,16 @@ test('isPending(computed) true during refetch (after first settle)', async () =>
     resolvers[0](1)
     await Promise.resolve()
     flush()
-    expect(isPending(c)()).toBe(false)
+    expect(isPending(c)).toBe(false)
 
     setPage(1)
     flush()
-    expect(isPending(c)()).toBe(true)
+    expect(isPending(c)).toBe(true)
 
     resolvers[1](2)
     await Promise.resolve()
     flush()
-    expect(isPending(c)()).toBe(false)
+    expect(isPending(c)).toBe(false)
     dispose()
   })
 
@@ -690,13 +690,13 @@ test('promiseOf(computed) returns the in-flight Promise during refetch', async (
   expect(use(list)).toBe('v:1')
 
   setId(2)
-  expect(isPending(list)()).toBe(true)
-  expect(promiseOf(list)()).toBeInstanceOf(Promise)
+  expect(isPending(list)).toBe(true)
+  expect(promiseOf(list)).toBeInstanceOf(Promise)
 
   release('v:2')
   await tick()
-  expect(isPending(list)()).toBe(false)
-  expect(promiseOf(list)()).toBeNull()
+  expect(isPending(list)).toBe(false)
+  expect(promiseOf(list)).toBeNull()
 })
 
 import { describe } from 'vitest'
@@ -712,11 +712,11 @@ describe('computed — NotReadyYet absorbed as suspension (Plan B)', () => {
     // publishes the bare resolved value.
     const first = c() as unknown
     expect(first).toBeInstanceOf(Promise)
-    expect(isPending(c)()).toBe(true)
+    expect(isPending(c)).toBe(true)
     resolve(41)
     await new Promise<void>((r) => queueMicrotask(() => r()))
     expect(c()).toBe(42)
-    expect(isPending(c)()).toBe(false)
+    expect(isPending(c)).toBe(false)
   })
 
   test('two-stage pipeline: stage 0 throws NotReadyYet; downstream stage sees the suspension', async () => {
@@ -724,7 +724,7 @@ describe('computed — NotReadyYet absorbed as suspension (Plan B)', () => {
     const p = new Promise<number>((r) => (resolve = r))
     const stage0 = computed(() => use(p))
     const stage1 = computed(stage0, (v) => v * 2)
-    expect(isPending(stage1)()).toBe(true)
+    expect(isPending(stage1)).toBe(true)
     resolve(7)
     await new Promise<void>((r) => queueMicrotask(() => r()))
     expect(stage1()).toBe(14)
@@ -749,7 +749,7 @@ describe('computed — NotReadyYet absorbed as suspension (Plan B)', () => {
     setSrc(2)
     await new Promise<void>((r) => queueMicrotask(() => r()))
     expect(latest(c)).toBe(10) // SWR-stale
-    expect(isPending(c)()).toBe(true)
+    expect(isPending(c)).toBe(true)
     activeResolve(20)
     await new Promise<void>((r) => queueMicrotask(() => r()))
     expect(latest(c)).toBe(20)

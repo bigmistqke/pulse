@@ -174,7 +174,7 @@ test('signal(fn, default) does not change the raw read — still a promise while
   // the default only seeds the tolerant read; the strict read stays honest
   // about the pipeline still being in flight
   expect(todos()).toBeInstanceOf(Promise)
-  expect(isPending(todos)()).toBe(true)
+  expect(isPending(todos)).toBe(true)
 })
 
 test('signal(fn, default): latest(todos) needs no second argument to type as non-optional (compile-time)', () => {
@@ -259,7 +259,7 @@ test('W1: a write abandons the fetch in flight and it never publishes', async ()
   })
 
   // start the first load and let it settle
-  expect(isPending(todos)()).toBe(true)
+  expect(isPending(todos)).toBe(true)
   resolveList(['a'])
   await tick()
   expect(use(todos)).toEqual(['a'])
@@ -267,11 +267,11 @@ test('W1: a write abandons the fetch in flight and it never publishes', async ()
   // a refresh starts a second fetch
   setVersion(2)
   await tick()
-  expect(isPending(todos)()).toBe(true)
+  expect(isPending(todos)).toBe(true)
 
   // the write abandons it
   setTodos(['a', 'saved'])
-  expect(isPending(todos)()).toBe(false)
+  expect(isPending(todos)).toBe(false)
   expect(use(todos)).toEqual(['a', 'saved'])
 
   resolveList(['a', 'b'])
@@ -288,7 +288,7 @@ test('W13: abandoning a paused stage runs its cleanups', async () => {
     return yield* from(new Promise<string[]>(() => {}))
   })
 
-  expect(isPending(todos)()).toBe(true)
+  expect(isPending(todos)).toBe(true)
   setTodos(['written'])
   expect(aborted).toEqual(['run 1'])
 })
@@ -376,9 +376,9 @@ test('W9: a write abandons a fetch that is in a middle stage', async () => {
     (server: string[]) => server.filter((t) => t !== 'done'),
   )
 
-  expect(isPending(todos)()).toBe(true)
+  expect(isPending(todos)).toBe(true)
   setTodos(['written'])
-  expect(isPending(todos)()).toBe(false)
+  expect(isPending(todos)).toBe(false)
 
   resolveList(['from', 'server'])
   await tick()
@@ -400,7 +400,7 @@ test('W10: a stage whose request was abandoned refetches when the tail next need
     (server: string[]) => (showAll() ? server : server.filter((t) => t !== 'done')),
   )
 
-  expect(isPending(todos)()).toBe(true)
+  expect(isPending(todos)).toBe(true)
   resolveList(['keep', 'done'])
   await tick()
   expect(use(todos)).toEqual(['keep'])
@@ -424,7 +424,7 @@ test('W10: a stage whose request was abandoned refetches when the tail next need
 
   // not stuck: the abandoned stage restarted
   expect(requests).toBe(3)
-  expect(isPending(todos)()).toBe(true)
+  expect(isPending(todos)).toBe(true)
 
   resolveList(['fresh', 'done'])
   await tick()
@@ -453,12 +453,12 @@ test('W11: a later change to the abandoned stage own dependency restarts it', as
   setVersion(2)
   await tick()
   setTodos(['written'])
-  expect(isPending(todos)()).toBe(false)
+  expect(isPending(todos)).toBe(false)
 
   setVersion(3)
   await tick()
   expect(requests).toBe(3)
-  expect(isPending(todos)()).toBe(true)
+  expect(isPending(todos)).toBe(true)
   expect(latest(todos)).toEqual(['written']) // held while reloading
 
   resolveList(['third'])
@@ -476,9 +476,9 @@ test('W8: a write behaves the same when the fetch is in the tail', async () => {
     },
   )
 
-  expect(isPending(todos)()).toBe(true)
+  expect(isPending(todos)).toBe(true)
   setTodos(['written'])
-  expect(isPending(todos)()).toBe(false)
+  expect(isPending(todos)).toBe(false)
 
   resolveList(['from server'])
   await tick()
@@ -506,10 +506,10 @@ test('W12: a write abandons every stage that has work, and resuming reissues bot
 
   // the first stage is fetching and the second mirrors its suspension
   expect(sessionRequests).toBe(1)
-  expect(isPending(todos)()).toBe(true)
+  expect(isPending(todos)).toBe(true)
 
   setTodos(['written'])
-  expect(isPending(todos)()).toBe(false)
+  expect(isPending(todos)).toBe(false)
 
   resolveSession({ id: 1 })
   await tick()
@@ -595,12 +595,12 @@ test('W6: a written promise reports as pending and then resolves', async () => {
   let resolveAdd: (v: string[]) => void = () => {}
   setTodos(new Promise<string[]>((r) => (resolveAdd = r)))
 
-  expect(isPending(todos)()).toBe(true)
+  expect(isPending(todos)).toBe(true)
   expect(latest(todos)).toEqual(['a']) // the tolerant read degrades to the prior value
 
   resolveAdd(['a', 'saved'])
   await tick()
-  expect(isPending(todos)()).toBe(false)
+  expect(isPending(todos)).toBe(false)
   expect(use(todos)).toEqual(['a', 'saved'])
 })
 
@@ -630,7 +630,7 @@ test('W7: a dependency change supersedes a written promise that has not settled'
 
   let resolveWrite: (v: string[]) => void = () => {}
   setTodos(new Promise<string[]>((r) => (resolveWrite = r)))
-  expect(isPending(todos)()).toBe(true)
+  expect(isPending(todos)).toBe(true)
 
   setVersion(2)
   await tick()
@@ -683,7 +683,7 @@ test('W15: a discarded action leaves the reload alive', async () => {
   resolveList = () => {}
   setVersion(2)
   await tick()
-  expect(isPending(todos)()).toBe(true)
+  expect(isPending(todos)).toBe(true)
 
   const handle = action(function* () {
     setTodos(['a', 'walk'])
@@ -694,7 +694,7 @@ test('W15: a discarded action leaves the reload alive', async () => {
   expect((handle.error() as Error).message).toBe('save failed')
 
   // the write rolled back and the reload was never abandoned
-  expect(isPending(todos)()).toBe(true)
+  expect(isPending(todos)).toBe(true)
   resolveList(['a', 'b'])
   await tick()
   expect(use(todos)).toEqual(['a', 'b'])
@@ -722,7 +722,7 @@ test('W16: cancelling waits until the value reaches the committed world', async 
   expect((handle.error() as Error).message).toBe('outer failed')
 
   // the inner commit only promoted to the outer scope, which then rolled back
-  expect(isPending(todos)()).toBe(true)
+  expect(isPending(todos)).toBe(true)
 })
 
 test('W17: a reload that lands while an action is open is replaced at commit', async () => {
@@ -910,7 +910,7 @@ test('a read from inside an effect while an earlier stage is waiting to reload',
 
   // not stuck: the abandoned stage was pulled up to date and restarted
   expect(requests).toBe(3)
-  expect(isPending(todos)()).toBe(true)
+  expect(isPending(todos)).toBe(true)
 
   resolveList(['fresh', 'refetched'])
   await tick()

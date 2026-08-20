@@ -12,14 +12,14 @@ test('a promise-holding signal flows through an effect via use', async () => {
 
   // initially suspended — the promise is pending from use's point of view
   expect(seen).toEqual([])
-  expect(isPending(user)()).toBe(true)
+  expect(isPending(user)).toBe(true)
 
   await tick()
 
   // Settle: the effect's .then(rerun) re-fires, use(p) returns the resolved
   // value (via track()), isPending is no longer true.
   expect(seen).toEqual(['ada'])
-  expect(isPending(user)()).toBe(false)
+  expect(isPending(user)).toBe(false)
   expect(use(user())).toEqual({ name: 'ada' }) // use of a settled value is synchronous
 })
 

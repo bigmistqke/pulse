@@ -43,7 +43,7 @@ test('a signal stores a Promise value as-is (no auto-resolve)', async () => {
   // Write-back was removed: signal stores exactly what you put in it. For
   // async derivations use computed; for one-shot reads use `use(s())`.
   const [s] = signal(Promise.resolve(42))
-  expect(isPending(s)()).toBe(true)
+  expect(isPending(s)).toBe(true)
   await tick()
   expect(s()).toBeInstanceOf(Promise)
   expect(await s()).toBe(42)
@@ -54,9 +54,9 @@ test('a signal written a promise reads back as the plain promise it was given', 
   const p = Promise.resolve(42)
   setS(p)
   expect(s()).toBe(p) // the plain promise, not a wrapper
-  expect(isPending(s)()).toBe(true)
+  expect(isPending(s)).toBe(true)
   await tick()
-  expect(isPending(s)()).toBe(false)
+  expect(isPending(s)).toBe(false)
   expect(latest(s)).toBe(42)
 })
 
@@ -65,6 +65,6 @@ test('SWR: while a refetch is pending the prior resolved value stays available v
   setS(Promise.resolve(1))
   await tick()
   setS(new Promise(() => {})) // never settles
-  expect(isPending(s)()).toBe(true)
+  expect(isPending(s)).toBe(true)
   expect(latest(s)).toBe(1) // prior held (seeded from the current node value)
 })

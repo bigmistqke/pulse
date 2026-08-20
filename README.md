@@ -40,8 +40,8 @@ plain reactive accessors (`isPending`, `promiseOf`). No hidden async coloring.
 - **`<Loading>` is the atomic-commit boundary.** It gathers per-binding commits
   and flushes them in one pass once nothing inside is pending — that *is* the
   transition mechanism.
-- **Pending state is just reactive data.** `isPending(x)()` and
-  `promiseOf(x)()` read from an external registry; no branded signals.
+- **Pending state is just reactive data.** `isPending(x)` and
+  `promiseOf(x)` read from an external registry; no branded signals.
 
 For the full design rationale and a point-by-point comparison with Solid 2.x,
 see [`docs/solid-2x-comparison.md`](./docs/solid-2x-comparison.md) and
@@ -239,7 +239,7 @@ function Pokemon(props: { name: string }) {
   for in-flight cues (`class:loading={useLoading()}`).
 
 Related helpers: `latest(x)` (last resolved value, never throws),
-`isPending(x)()`, `promiseOf(x)()`, and `read(x)` for `yield* read(x)` inside
+`isPending(x)`, `promiseOf(x)`, and `from(x)` for `yield* from(x)` inside
 generator stages.
 
 See [`CONTEXT.md`](./CONTEXT.md) for the full language and transition model.

@@ -48,14 +48,14 @@ A derived signal. Defined as a Pipeline of one or more Stages:
 just a one-stage pipeline. Async stages publish via **stale-while-revalidate**:
 the prior resolved value stays visible during a refetch, and downstream is
 invalidated only when the new resolved value differs (`Object.is`) from the
-prior one. Observe the refetch window with `isPending(computed)()`. Sync stage
+prior one. Observe the refetch window with `isPending(computed)`. Sync stage
 bodies that throw `NotReadyYet` (via `use(pending)`) are absorbed as
 suspension — symmetric with `effect` — and re-run on settle.
 
 **Pipeline**:
 The ordered list of Stages passed to `computed`. The runtime threads a value
 through it: stage N receives stage N-1's (unwrapped) return value. Each stage
-registers with the external pending tracker; `isPending(downstream)()` walks
+registers with the external pending tracker; `isPending(downstream)` walks
 the chain (pipeline-OR).
 
 Conceptually, **pipelines are delimited continuations split at user-chosen
@@ -128,8 +128,8 @@ bridge AND the transition-engagement marker. Two behaviors fire on every call:
    in atomic-commit routing later.
 2. **Resolve or throw**:
    - Accessor argument: the accessor is called first (to establish the r3
-     dep edge), then `isPending(accessor)()` is checked; if pending, throws
-     `NotReadyYet(promiseOf(accessor)()!)`.
+     dep edge), then `isPending(accessor)` is checked; if pending, throws
+     `NotReadyYet(promiseOf(accessor)!)`.
    - Promise argument: pending → throws `NotReadyYet(p)`; settled → returns
      the resolved value (or re-throws the settled rejection).
    - Plain value: returned as-is.
@@ -159,7 +159,7 @@ is explicit, local, and grep-able.
 top-level export. Composes directly on `latest(x)`: call it; if the result is
 not `undefined`, return it (marking engagement the same as `use`, and handing
 the in-flight promise to the nearest `<Loading>` scope's background-tracking
-set if `isPending(x)()` is also true); if it IS `undefined` — genuinely
+set if `isPending(x)` is also true); if it IS `undefined` — genuinely
 nothing has ever resolved for this accessor — throw `NotReadyYet`, exactly
 like `use`.
 
@@ -177,11 +177,19 @@ _Avoid_: a separate top-level primitive for this (`warm`, `hold`, `keep`,
 and rejected; see the ADR).
 
 **isPending / promiseOf**:
-External reactive accessors over the pending tracker, exposed scheduler-style
-(`src/pending.ts`). `isPending<T>(x: Accessor<T>): Accessor<boolean>` returns
-a function — call it to read the current pending state, tracks for re-runs.
-`promiseOf<T>(x: Accessor<T>): Accessor<Promise<T> | null>` similarly returns
-a reactive accessor for the in-flight Promise (or `null`).
+Reactive reads over the pending tracker (`src/pending.ts`). `isPending<T>(x:
+Accessor<T>): boolean` and `promiseOf<T>(x: Accessor<T>): Promise<T> | null`
+both take an explicit accessor argument and return their value directly —
+call fresh at each read site (an effect body, a getter-converted prop), the
+same way `latest(x)`/`isLoading()` are called fresh rather than stored.
+Neither has an accessor-returning form, unlike `useLoading`/`isLoading`:
+`useLoading()` genuinely needs one, because it takes no argument and has to
+capture an ambient `getOwner()` lookup at the point it's called, so reading it
+later requires deferring that lookup into a returned accessor. `isPending`/
+`promiseOf` take the accessor to inspect as an explicit argument and consult
+only `src/pending.ts`'s `WeakMap<Accessor, PendingEntry>` — no ambient
+context — so there is nothing to capture ahead of time, and no reason to
+return anything but the answer itself.
 
 Both walk upstream via the entry's `upstream` chain (pipeline-OR): a
 downstream stage is pending if any upstream stage is. Fallback path for plain
@@ -222,7 +230,7 @@ participates in any enclosing `<Loading>` boundary).
 `Show` and `For` take a local `fallback` prop. It is an *empty-state* prop —
 shown when content is empty (`Show`: falsy condition; `For`: zero rows). One
 `fallback` therefore conflates "genuinely empty" with "still pending";
-distinguishing them needs `isPending(x)()` checks or wrapping in `<Loading>`.
+distinguishing them needs `isPending(x)` checks or wrapping in `<Loading>`.
 
 **Loading boundary** (`src/dom/loading.ts`):
 The atomic-commit boundary. Children's bindings register per-binding

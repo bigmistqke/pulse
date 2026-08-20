@@ -34,46 +34,46 @@ export function lookupPending(accessor: Accessor<unknown>): PendingEntry | undef
   return registry.get(accessor)
 }
 
-/** Reactive accessor: is this signal/computed (or anything upstream) pending?
- *  Returns `() => boolean`. Read inside a tracking context to subscribe. */
-export function isPending<T>(x: Accessor<T>): Accessor<boolean> {
-  return () => {
-    const entry = registry.get(x as Accessor<unknown>)
-    if (entry !== undefined) {
-      // Walk the chain: pending if this stage OR any upstream is.
-      let cur: PendingEntry | undefined = entry
-      while (cur !== undefined) {
-        if (cur.pending()) return true
-        cur = cur.upstream
-      }
-      return false
+/** Is this signal/computed (or anything upstream) pending right now? Reactive
+ *  — reads the underlying tracked accessors, so calling this inside a
+ *  tracking context subscribes. Call fresh at each read site (an effect
+ *  body, a getter-converted prop) rather than storing the result, the same
+ *  way a `signal()` read is meant to be called fresh. */
+export function isPending<T>(x: Accessor<T>): boolean {
+  const entry = registry.get(x as Accessor<unknown>)
+  if (entry !== undefined) {
+    // Walk the chain: pending if this stage OR any upstream is.
+    let cur: PendingEntry | undefined = entry
+    while (cur !== undefined) {
+      if (cur.pending()) return true
+      cur = cur.upstream
     }
-    // Fallback: inspect the value — signals holding a Promise are pending
-    // until that Promise settles.
-    const value = x()
-    if (!isPromise(value)) return false
-    return track(value).status === 'pending'
+    return false
   }
+  // Fallback: inspect the value — signals holding a Promise are pending
+  // until that Promise settles.
+  const value = x()
+  if (!isPromise(value)) return false
+  return track(value).status === 'pending'
 }
 
-/** Reactive accessor: the in-flight Promise for this stage, or anything
- *  upstream that is pending. Returns `null` when nothing is pending. */
-export function promiseOf<T>(x: Accessor<T>): Accessor<Promise<T> | null> {
-  return () => {
-    const entry = registry.get(x as Accessor<unknown>)
-    if (entry !== undefined) {
-      // Returns the in-flight Promise — most-local takes precedence over
-      // upstream (we walk this stage first, then up the chain).
-      let cur: PendingEntry | undefined = entry
-      while (cur !== undefined) {
-        const p = cur.promise()
-        if (p !== null) return p as Promise<T> | null
-        cur = cur.upstream
-      }
-      return null
+/** The in-flight Promise for this stage, or anything upstream that is
+ *  pending — `null` when nothing is pending. Reactive; call fresh at each
+ *  read site, same as `isPending`. */
+export function promiseOf<T>(x: Accessor<T>): Promise<T> | null {
+  const entry = registry.get(x as Accessor<unknown>)
+  if (entry !== undefined) {
+    // Returns the in-flight Promise — most-local takes precedence over
+    // upstream (we walk this stage first, then up the chain).
+    let cur: PendingEntry | undefined = entry
+    while (cur !== undefined) {
+      const p = cur.promise()
+      if (p !== null) return p as Promise<T> | null
+      cur = cur.upstream
     }
-    const value = x()
-    if (!isPromise(value)) return null
-    return track(value).status === 'pending' ? (value as Promise<T>) : null
+    return null
   }
+  const value = x()
+  if (!isPromise(value)) return null
+  return track(value).status === 'pending' ? (value as Promise<T>) : null
 }

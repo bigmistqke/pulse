@@ -27,7 +27,7 @@ exactly what doesn't.
 ## Considered and rejected: a dedicated "ever settled" tracker
 
 The first design built a private `WeakMap<Accessor, boolean>` — keyed on the accessor
-argument, set the first time `isPending(accessor)()` read false, consulted on every
+argument, set the first time `isPending(accessor)` read false, consulted on every
 call to decide throw-vs-return. It worked for the common case (a stable
 `computed()`/`signal()` reference) but broke silently for any caller that reaches the
 accessor through a freshly-constructed closure — an inline `use.latest(() => data())`,
@@ -52,7 +52,7 @@ machinery:
 
 1. Call `latest(x)`.
 2. If it's not `undefined`: mark the binding engaged (same flag `use()` sets,
-   unconditionally); if `isPending(x)()` is also true, hand the in-flight promise to
+   unconditionally); if `isPending(x)` is also true, hand the in-flight promise to
    the boundary's background-tracking set instead of throwing it; return the value.
 3. If it's `undefined`: throw `NotReadyYet`, exactly like `use()`.
 
@@ -113,7 +113,7 @@ swap check, and the `hasEverLoaded` tracking effect.
 
 That combination reopens the FM2 bug this ADR exists to close. On a boundary remount
 with a genuine refetch in flight, `use.latest(x)` returns its stale value immediately
-(no throw — the fix works as designed) — but if `isPending(x)()` is also true, it
+(no throw — the fix works as designed) — but if `isPending(x)` is also true, it
 hands the in-flight promise to `trackBackground`, which adds it to `backgroundPromises`
 and sets the shared signal true. Because that signal is also what `hasEverLoaded`
 watches, `hasEverLoaded` cannot flip true until the background promise itself settles

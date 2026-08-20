@@ -11,12 +11,12 @@ const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
 
 test('isPending is false for a signal holding a plain value', () => {
   const [s] = signal(0)
-  expect(isPending(s)()).toBe(false)
+  expect(isPending(s)).toBe(false)
 })
 
 test('isPending is true for a signal holding a pending promise', () => {
   const [s] = signal(new Promise<number>(() => {}))
-  expect(isPending(s)()).toBe(true)
+  expect(isPending(s)).toBe(true)
 })
 
 test('latest is undefined before the first resolution', () => {
@@ -183,7 +183,7 @@ test('use() accessor form unwraps pending promises (throws NotReadyYet)', () => 
 })
 
 
-// Plan B: use(accessor) now throws NotReadyYet when isPending(accessor)() is true.
+// Plan B: use(accessor) now throws NotReadyYet when isPending(accessor) is true.
 // For the "give me stale" semantics, use `latest(c)` instead.
 test('use(accessor) throws NotReadyYet during SWR refetch (Plan B behavior; use latest() for stale)', async () => {
   const [id, setId] = signal(1)
@@ -197,9 +197,9 @@ test('use(accessor) throws NotReadyYet during SWR refetch (Plan B behavior; use 
   expect(use(c)).toBe(10)
 
   setId(2)
-  // SWR: c() returns stale 10, but use(c) now throws because isPending(c)() is true.
+  // SWR: c() returns stale 10, but use(c) now throws because isPending(c) is true.
   // Callers that want the stale value should use latest(c) instead.
-  expect(isPending(c)()).toBe(true)
+  expect(isPending(c)).toBe(true)
   expect(latest(c)).toBe(10) // latest() still gives the stale value
   expect(() => use(c)).toThrow(NotReadyYet) // use() now throws on pipeline-pending
 
@@ -231,7 +231,7 @@ describe('use(accessor) — Plan B: throws on isPending', () => {
     expect(latest(c)).toBe('v1') // SWR-stale
 
     // BUT use(c) must throw NotReadyYet now, carrying the in-flight promise.
-    expect(isPending(c)()).toBe(true)
+    expect(isPending(c)).toBe(true)
     let threw: unknown = null
     try {
       use(c)
@@ -240,7 +240,7 @@ describe('use(accessor) — Plan B: throws on isPending', () => {
     }
     expect(threw).toBeInstanceOf(NotReadyYet)
     const { promiseOf } = await import('../src/pending')
-    expect((threw as NotReadyYet).promise).toBe(promiseOf(c)())
+    expect((threw as NotReadyYet).promise).toBe(promiseOf(c))
   })
 })
 
@@ -264,7 +264,7 @@ describe('use.latest(accessor) — throws only before the first value, tolerant 
     }
     expect(threw).toBeInstanceOf(NotReadyYet)
     const { promiseOf } = await import('../src/pending')
-    expect((threw as NotReadyYet).promise).toBe(promiseOf(s)())
+    expect((threw as NotReadyYet).promise).toBe(promiseOf(s))
   })
 
   test('returns the resolved value once settled, same as use()', async () => {
@@ -285,7 +285,7 @@ describe('use.latest(accessor) — throws only before the first value, tolerant 
     expect(use.latest(c)).toBe(10)
 
     setId(2)
-    expect(isPending(c)()).toBe(true)
+    expect(isPending(c)).toBe(true)
     // use(c) would throw here (see the Plan B test above) — use.latest(c) does not.
     expect(use.latest(c)).toBe(10)
     expect(() => use(c)).toThrow(NotReadyYet)
@@ -310,7 +310,7 @@ describe('use.latest(accessor) — throws only before the first value, tolerant 
 
     setPage(2)
     await new Promise<void>((r) => queueMicrotask(r))
-    expect(isPending(c)()).toBe(true)
+    expect(isPending(c)).toBe(true)
     expect(() => use(c)).toThrow(NotReadyYet)
     expect(use.latest(c)).toBe('v1')
   })

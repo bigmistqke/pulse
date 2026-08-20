@@ -20,7 +20,7 @@ Both libraries share more than is obvious on the surface:
 - **Owner-scoped error boundary.** Pulse's `catchError(fn, handler)` and Solid 2.x's `createErrorBoundary` / `<Errored>` create a sub-owner with an error handler; non-`NotReady` throws walk up via the owner chain.
 - **Push-pull hybrid reactive graph.** Topological dirty-propagation; no diamond glitches.
 - **`<For>` / `<Show>` with per-branch sub-owners.** Both create sub-owners for the branch, dispose on toggle.
-- **Transitive pending propagation via a dep-graph walk.** Solid 2.x's `isPending(fn)` walks reactive reads inside the thunk to determine pending status. Pulse's `isPending(x)()` walks the pending registry's `upstream` chain. Different mechanism, same idea: "downstream is pending iff itself OR any upstream is." This shape — *a graph of producer→consumer state-tracking with transitive walks* — is the same structural primitive Solid 2.x's lane-entanglement uses; in pulse it's currently applied only to value-propagation pending, but the bones generalize (see §2.13).
+- **Transitive pending propagation via a dep-graph walk.** Solid 2.x's `isPending(fn)` walks reactive reads inside the thunk to determine pending status. Pulse's `isPending(x)` walks the pending registry's `upstream` chain. Different mechanism, same idea: "downstream is pending iff itself OR any upstream is." This shape — *a graph of producer→consumer state-tracking with transitive walks* — is the same structural primitive Solid 2.x's lane-entanglement uses; in pulse it's currently applied only to value-propagation pending, but the bones generalize (see §2.13).
 
 ### 2. Where pulse diverges — mechanical
 
@@ -232,7 +232,7 @@ Issues that surfaced during pulse's development; tracked in [`follow-ups.md`](./
 | SWR | Opt-in via `latest(fn)` | Default for every async computed |
 | Suspension boundary | `<Loading fallback={…}>` + `on={…}` reset | `<Loading initial={…} fallback={…}>` (first vs subsequent) |
 | Transitions | Built-in, runtime-managed, implicit | Per-binding via `use()` engagement + boundary's atomic-commit gather |
-| Pending observation | `isPending(fn)` (tracked-call walk) | `isPending(x)()` (registry walk via upstream chain) |
+| Pending observation | `isPending(fn)` (tracked-call walk) | `isPending(x)` (registry walk via upstream chain) |
 | Cross-boundary coordination | `<Reveal order="…">` | None |
 | Cache invalidation | `refresh(target)` | None (write to deps) |
 | Mutations | `action(function* …)` + transitions | None (manual signal writes) |

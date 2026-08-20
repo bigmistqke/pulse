@@ -475,7 +475,7 @@ test('use.latest() holds prior across a Loading boundary remount, even while a b
 
   // Trigger a refetch: data is pending again, but use.latest(data) already has 'v0'.
   setVersion(1)
-  expect(isPending(data)()).toBe(true)
+  expect(isPending(data)).toBe(true)
   expect(latest(data)).toBe('v0')
 
   // Remount the boundary WHILE that refetch is still in flight.
