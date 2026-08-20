@@ -2,7 +2,7 @@ import { expect, test } from 'vitest'
 import { signal } from '../src/signal'
 import { computed } from '../src/computed'
 import { isPending } from '../src/pending'
-import { latest } from '../src/async'
+import { peek } from '../src/async'
 
 /** Resolve after all microtasks have drained (a macrotask boundary). */
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
@@ -57,14 +57,14 @@ test('a signal written a promise reads back as the plain promise it was given', 
   expect(isPending(s)).toBe(true)
   await tick()
   expect(isPending(s)).toBe(false)
-  expect(latest(s)).toBe(42)
+  expect(peek(s)).toBe(42)
 })
 
-test('SWR: while a refetch is pending the prior resolved value stays available via latest', async () => {
+test('SWR: while a refetch is pending the prior resolved value stays available via peek', async () => {
   const [s, setS] = signal<number | Promise<number>>(0)
   setS(Promise.resolve(1))
   await tick()
   setS(new Promise(() => {})) // never settles
   expect(isPending(s)).toBe(true)
-  expect(latest(s)).toBe(1) // prior held (seeded from the current node value)
+  expect(peek(s)).toBe(1) // prior held (seeded from the current node value)
 })

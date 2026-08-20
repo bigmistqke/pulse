@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest'
 import { computed } from '../src/computed'
 import { signal } from '../src/signal'
-import { latest, from, use } from '../src/async'
+import { peek, from, use } from '../src/async'
 import { createRoot } from '../src/owner'
 import { error, resetError } from '../src/error'
 
@@ -26,7 +26,7 @@ test('a generator stage that builds its promise inside the body converges', asyn
   c()
   await ticks(10)
 
-  expect(latest(c)).toBe(107)
+  expect(peek(c)).toBe(107)
   expect(promisesCreated).toBe(1)
 })
 
@@ -43,7 +43,7 @@ test('the code before a pause runs once, not once per settle', async () => {
   c()
   await ticks(10)
 
-  expect(latest(c)).toBe(1)
+  expect(peek(c)).toBe(1)
   expect(before).toBe(1)
 })
 
@@ -70,7 +70,7 @@ test('a generator with two inline pauses converges and builds each promise once'
   c()
   await ticks(10)
 
-  expect(latest(c)).toBe(3)
+  expect(peek(c)).toBe(3)
   expect(firstCreated).toBe(1)
   expect(secondCreated).toBe(1)
 })
@@ -92,11 +92,11 @@ test('a signal read before a pause stays a dependency across a resume', async ()
 
   c()
   await ticks(10)
-  expect(latest(c)).toBe(11)
+  expect(peek(c)).toBe(11)
 
   setA(2)
   await ticks(10)
-  expect(latest(c)).toBe(12)
+  expect(peek(c)).toBe(12)
   expect(runs).toBeGreaterThan(1)
 })
 
@@ -135,7 +135,7 @@ test('a dependency changing mid-pause discards the generator and restarts', asyn
   await ticks(80)
   // 12, not 11: the restart used the new value of `a`. A resumed stale
   // generator would still be holding 1.
-  expect(latest(c)).toBe(12)
+  expect(peek(c)).toBe(12)
 })
 
 test('a rejected inline promise reaches the generator try/catch', async () => {
@@ -155,7 +155,7 @@ test('a rejected inline promise reaches the generator try/catch', async () => {
   c()
   await ticks(10)
 
-  expect(latest(c)).toBe('caught: boom')
+  expect(peek(c)).toBe('caught: boom')
 })
 
 test('a discarded generator runs its finally block', async () => {
@@ -184,7 +184,7 @@ test('a discarded generator runs its finally block', async () => {
 
   expect(opened).toBe(2)
   expect(closed).toBe(2) // the discarded generator's finally ran, and the second one's
-  expect(latest(c)).toBe(12)
+  expect(peek(c)).toBe(12)
 })
 
 test('a finally block reading a signal during a discard adds no dependency', async () => {
@@ -342,7 +342,7 @@ test('a generator stage repeatedly hitting use() on the same still-pending promi
   resolveP(42)
   await ticks(10)
 
-  expect(latest(c)).toBe(42)
+  expect(peek(c)).toBe(42)
 })
 
 test('use(promise) inside a generator stage resolves and the stage publishes the derived result', async () => {
@@ -360,7 +360,7 @@ test('use(promise) inside a generator stage resolves and the stage publishes the
   c()
   await ticks(10)
 
-  expect(latest(c)).toBe(10)
+  expect(peek(c)).toBe(10)
 })
 
 test('use(...) then yield* from(...) inside a generator stage converges', async () => {
@@ -375,11 +375,11 @@ test('use(...) then yield* from(...) inside a generator stage converges', async 
 
   c()
   await ticks(10)
-  expect(latest(c)).toBe(11)
+  expect(peek(c)).toBe(11)
 
   setA(2)
   await ticks(10)
-  expect(latest(c)).toBe(12)
+  expect(peek(c)).toBe(12)
 })
 
 test('a discarded generator does not leave its abandoned promise able to re-run the stage', async () => {
@@ -425,7 +425,7 @@ test('a generator stage that returns a pending promise resolves to its value', a
   c()
   await ticks(20)
 
-  expect(latest(c)).toBe(7)
+  expect(peek(c)).toBe(7)
 })
 
 test('a generator stage that pauses and then returns a pending promise resolves to its value', async () => {
@@ -443,7 +443,7 @@ test('a generator stage that pauses and then returns a pending promise resolves 
   c()
   await ticks(30)
 
-  expect(latest(c)).toBe(30)
+  expect(peek(c)).toBe(30)
 })
 
 test('a generator stage that pauses, resumes, then returns a promise stays reactive', async () => {
@@ -465,12 +465,12 @@ test('a generator stage that pauses, resumes, then returns a promise stays react
 
   c()
   await ticks(30)
-  expect(latest(c)).toBe(21)
+  expect(peek(c)).toBe(21)
 
   setA(5)
   await ticks(30)
 
-  expect(latest(c)).toBe(51)
+  expect(peek(c)).toBe(51)
   expect(bodyRuns).toBe(2)
 })
 
@@ -505,10 +505,10 @@ test('a generator stage returning a pending promise stays reactive to its depend
 
   c()
   await ticks(20)
-  expect(latest(c)).toBe(20)
+  expect(peek(c)).toBe(20)
 
   setA(5)
   await ticks(20)
 
-  expect(latest(c)).toBe(50)
+  expect(peek(c)).toBe(50)
 })

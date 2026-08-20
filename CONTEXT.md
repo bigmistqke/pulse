@@ -199,13 +199,38 @@ The implementation lives in `src/pending.ts` with a `WeakMap<Accessor, PendingEn
 registered by `computed`. There is no `[PENDING]` symbol on accessor functions
 anymore (Plan A removed it).
 
-**latest**:
-`latest<T>(s: Accessor<T>): Awaited<T> | undefined` returns the most recent
+**peek / latest**:
+`peek<T>(s: Accessor<T>): Awaited<T> | undefined` returns the most recent
 *resolved* value: `undefined` until the signal first resolves, then always the
 last resolved value; does not revert to `undefined` while a newer promise is
-pending. Use when you want stale-but-stable explicit data (vs. `use` which
-throws on pending). `use.latest` (see above) composes directly on this —
-throwing only while `latest` itself would still report `undefined`.
+pending. Zero side effects — safe to call from anywhere (a helper function, a
+`computed`, a test), not just a binding. The true escape hatch: use when you
+want stale-but-stable explicit data with no coordination of any kind (vs.
+`use` which throws on pending).
+
+`latest<T>(s: Accessor<T>): Awaited<T> | undefined` reads `peek(s)`'s exact
+value, and additionally — while `s` is pending — hands its in-flight promise
+to the nearest `<Loading>` boundary's background-tracking set, ambiently
+participating in `isLoading()`/`useLoading()`. Never calls
+`markUsedInBinding()`, so it can never withhold a commit or reopen a
+boundary's fallback — only the loading *indicator* hears about it, never the
+swap decision. `use.latest` (see above) composes directly on this — throwing
+only while `latest` itself would still report `undefined`, and getting the
+same background hand-off for free by calling `latest` internally.
+
+Displaying a value and propagating loading state are two separate
+capabilities — `peek`/`latest` is the "which value" axis, `use`/`use.latest`
+is the "does this gate a commit" axis, and they compose independently rather
+than one primitive doing double duty. See [ADR 0015](docs/adr/0015-peek-latest-split-ambient-loading-participation.md)
+for the design history, including two rejected shapes that tried to fold both
+axes into one call, and a known scheduler bug uncovered (not caused) while
+applying this split to `examples/todo-async` — see
+[`docs/follow-ups.md`](docs/follow-ups.md).
+_Avoid_: reaching for `use`/`use.latest` purely to make a binding "participate"
+without needing its value (call `latest` instead, if a throw isn't wanted) or
+purely to gate a commit without displaying anything at that call site (a
+value-less leaf calling `use` and returning nothing is the honest shape for
+that, not a discarded value next to a real read).
 
 **Component**:
 A function that runs once and returns a DOM node tree (or an accessor that
@@ -473,6 +498,21 @@ together when `list` settles.
   call sites; `LoadingScope` gains `backgroundPromises`/`trackBackground()` and
   splits its pending signal into `gatePending`/`activeSig` (see the Loading
   boundary entry above).
+- **v1.2** (shipped): `isPending(x)`/`promiseOf(x)` return their value directly
+  instead of `Accessor<boolean>`/`Accessor<Promise<T> | null>` — no more
+  `isPending(x)()` double-call anywhere. Unlike `useLoading`/`isLoading`, no
+  accessor-returning form is kept at all: `isPending`/`promiseOf` take the
+  accessor to inspect as an explicit argument and have no ambient-owner lookup
+  to defer, so there was no structural reason for the double form to begin
+  with.
+- **v1.3** (shipped, [ADR 0015](docs/adr/0015-peek-latest-split-ambient-loading-participation.md)):
+  `latest(x)`'s old implementation renamed to `peek(x)` (zero side effects,
+  unchanged); `latest(x)` takes the name for a new behavior — `peek(x)`'s
+  value, plus ambient hand-off to the nearest `<Loading>` boundary's
+  background-tracking set while `x` is pending, never gating a commit.
+  `use.latest()` simplifies to compose on the new `latest(x)` directly. The
+  `examples/todo-async` migration this enables is blocked on a scheduler bug
+  uncovered while applying it — see `docs/follow-ups.md`.
 - **later**: structural-mount gating in `<Loading>` (current bug: `<Show>`/
   `<For>` mount/unmount commits don't defer with the boundary — only content
   hole commits do); optimistic store; explicit `transition()` value for

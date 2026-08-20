@@ -6,6 +6,7 @@ import {
   isLoading,
   isPending,
   latest,
+  peek,
   Loading,
   microtaskScheduler,
   onCleanup,
@@ -500,7 +501,7 @@ test('use.latest() holds prior across a Loading boundary remount, even while a b
   dispose()
 })
 
-test('a bare latest() read never registers with the enclosing Loading boundary', async () => {
+test('a bare peek() read never registers with the enclosing Loading boundary', async () => {
   const target = document.createElement('section')
   document.body.append(target)
 
@@ -521,7 +522,7 @@ test('a bare latest() read never registers with the enclosing Loading boundary',
       <Loading initial={<p>fallback</p>}>
         {() => {
           loading = useLoading()
-          return <span>{() => latest(data) ?? 'empty'}</span>
+          return <span>{() => peek(data) ?? 'empty'}</span>
         }}
       </Loading>
     ),
@@ -534,8 +535,9 @@ test('a bare latest() read never registers with the enclosing Loading boundary',
   flush()
   expect(target.textContent).toBe('v0')
 
-  // A background refresh behind a bare latest() read never surfaces through
-  // the boundary's active()/isLoading() either — only use()/use.latest() feed it.
+  // A background refresh behind a bare peek() read never surfaces through
+  // the boundary's active()/isLoading() either — peek is the true escape
+  // hatch, zero side effects. See ADR 0015.
   setVersion(1)
   expect(loading()).toBe(false)
   expect(target.textContent).toBe('v0')
@@ -543,6 +545,54 @@ test('a bare latest() read never registers with the enclosing Loading boundary',
   release('v1')
   await tick()
   flush()
+  expect(target.textContent).toBe('v1')
+  dispose()
+})
+
+test('a bare latest() read ambiently feeds isLoading() during a refresh, without ever gating the fallback', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+
+  const [version, setVersion] = signal(0)
+  let release!: (v: string) => void
+  const data = computed<Promise<string>>(() => {
+    const v = version()
+    if (v === 0) return Promise.resolve('v0')
+    return new Promise<string>((r) => { release = r })
+  })
+
+  let loading!: () => boolean
+  const dispose = render(
+    () => (
+      <Loading initial={<p>fallback</p>}>
+        {() => {
+          loading = useLoading()
+          return <span>{() => latest(data) ?? 'empty'}</span>
+        }}
+      </Loading>
+    ),
+    target,
+  )
+
+  expect(target.textContent).toBe('empty')
+  await tick()
+  flush()
+  expect(target.textContent).toBe('v0')
+  expect(loading()).toBe(false) // settled — nothing pending
+
+  // A background refresh behind a bare latest() read DOES surface through
+  // isLoading() — the ambient hand-off latest() makes on every pending read
+  // (see ADR 0015) — but never reopens the fallback: the value stays 'v0'
+  // the whole time, held by latest()'s own stale-while-revalidate value, not
+  // by any atomic-commit gating (latest() never calls markUsedInBinding()).
+  setVersion(1)
+  expect(loading()).toBe(true)
+  expect(target.textContent).toBe('v0')
+
+  release('v1')
+  await tick()
+  flush()
+  expect(loading()).toBe(false)
   expect(target.textContent).toBe('v1')
   dispose()
 })

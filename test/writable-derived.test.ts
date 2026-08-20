@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
 import { signal } from '../src/derived-signal'
-import { latest, from, use } from '../src/async'
+import { peek, from, use } from '../src/async'
 import { isPending } from '../src/pending'
 import { onCleanup } from '../src/owner'
 import { error } from '../src/error'
@@ -149,22 +149,22 @@ test('a generator stage colours its read by what it actually reads, not by being
 /** Resolve after all microtasks have drained (a macrotask boundary). */
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
 
-test('signal(fn, default): latest() reports the default before the first resolution', () => {
+test('signal(fn, default): peek() reports the default before the first resolution', () => {
   const [todos] = signal(function* () {
     return yield* from(new Promise<string[]>(() => {})) // never resolves
   }, [] as string[])
-  expect(latest(todos)).toEqual([])
+  expect(peek(todos)).toEqual([])
 })
 
-test('signal(fn, default): latest() reports the real value once resolved, not the default', async () => {
+test('signal(fn, default): peek() reports the real value once resolved, not the default', async () => {
   let resolveList: (v: string[]) => void = () => {}
   const [todos] = signal(function* () {
     return yield* from(new Promise<string[]>((r) => (resolveList = r)))
   }, [] as string[])
-  expect(latest(todos)).toEqual([])
+  expect(peek(todos)).toEqual([])
   resolveList(['a'])
   await tick()
-  expect(latest(todos)).toEqual(['a'])
+  expect(peek(todos)).toEqual(['a'])
 })
 
 test('signal(fn, default) does not change the raw read — still a promise while pending', () => {
@@ -177,7 +177,7 @@ test('signal(fn, default) does not change the raw read — still a promise while
   expect(isPending(todos)).toBe(true)
 })
 
-test('signal(fn, default): latest(todos) needs no second argument to type as non-optional (compile-time)', () => {
+test('signal(fn, default): peek(todos) needs no second argument to type as non-optional (compile-time)', () => {
   // This is mostly a typecheck-only assertion — the `const … : T = …` lines
   // are the compile-time checks; a wrong type would fail to compile.
   const [withDefault] = signal(function* () {
@@ -188,11 +188,11 @@ test('signal(fn, default): latest(todos) needs no second argument to type as non
   })
 
   // string[], not string[] | undefined — no ?? [] or second argument needed
-  const withDefaultValue: string[] = latest(withDefault)
-  // without a construction-time default, latest() still includes undefined
-  const withoutDefaultValue: string[] | undefined = latest(withoutDefault)
-  // @ts-expect-error a plain accessor's latest() is not narrowed to string[]
-  const shouldError: string[] = latest(withoutDefault)
+  const withDefaultValue: string[] = peek(withDefault)
+  // without a construction-time default, peek() still includes undefined
+  const withoutDefaultValue: string[] | undefined = peek(withoutDefault)
+  // @ts-expect-error a plain accessor's peek() is not narrowed to string[]
+  const shouldError: string[] = peek(withoutDefault)
   void shouldError
 
   expect(withDefaultValue).toEqual([])
@@ -222,7 +222,7 @@ test('signal(fn, default): an update function still sees the real resolved value
     return prev
   })
   expect(seen).toEqual(['a'])
-  expect(latest(todos)).toEqual(['a'])
+  expect(peek(todos)).toEqual(['a'])
 })
 
 test('signal(fn, default): an update function needs no ?? default to type as non-optional (compile-time)', () => {
@@ -296,7 +296,7 @@ test('W13: abandoning a paused stage runs its cleanups', async () => {
 test('a cleanup fired by a write sees the value that was written', () => {
   const seen: unknown[] = []
   const [todos, setTodos] = signal(function* () {
-    onCleanup(() => seen.push(latest(todos)))
+    onCleanup(() => seen.push(peek(todos)))
     return yield* from(new Promise<string[]>(() => {}))
   })
 
@@ -342,7 +342,7 @@ test('W19: invalidating then writing with an update function also makes no reque
   await tick()
 
   expect(requests).toBe(1) // the queued run was withdrawn before readPrev could reach it
-  expect(latest(todos)).toEqual(['from server', 'pushed'])
+  expect(peek(todos)).toEqual(['from server', 'pushed'])
 })
 
 test('W20: writing then invalidating in one tick lets the request win', async () => {
@@ -459,7 +459,7 @@ test('W11: a later change to the abandoned stage own dependency restarts it', as
   await tick()
   expect(requests).toBe(3)
   expect(isPending(todos)).toBe(true)
-  expect(latest(todos)).toEqual(['written']) // held while reloading
+  expect(peek(todos)).toEqual(['written']) // held while reloading
 
   resolveList(['third'])
   await tick()
@@ -482,7 +482,7 @@ test('W8: a write behaves the same when the fetch is in the tail', async () => {
 
   resolveList(['from server'])
   await tick()
-  expect(latest(todos)).toEqual(['written'])
+  expect(peek(todos)).toEqual(['written'])
 })
 
 test('W12: a write abandons every stage that has work, and resuming reissues both', async () => {
@@ -514,7 +514,7 @@ test('W12: a write abandons every stage that has work, and resuming reissues bot
   resolveSession({ id: 1 })
   await tick()
   expect(listRequests).toBe(0) // the abandoned first stage published nothing
-  expect(latest(todos)).toEqual(['written'])
+  expect(peek(todos)).toEqual(['written'])
 
   // a later change resumes the whole chain, which costs both requests
   setVersion(2)
@@ -596,7 +596,7 @@ test('W6: a written promise reports as pending and then resolves', async () => {
   setTodos(new Promise<string[]>((r) => (resolveAdd = r)))
 
   expect(isPending(todos)).toBe(true)
-  expect(latest(todos)).toEqual(['a']) // the tolerant read degrades to the prior value
+  expect(peek(todos)).toEqual(['a']) // the tolerant read degrades to the prior value
 
   resolveAdd(['a', 'saved'])
   await tick()
@@ -650,7 +650,7 @@ test('W6: a rejected written promise parks as an error', async () => {
   setTodos(Promise.reject(new Error('save failed')))
   await tick()
   expect(error(todos)).toBeInstanceOf(Error)
-  expect(latest(todos)).toEqual(['a'])
+  expect(peek(todos)).toEqual(['a'])
 })
 
 test('W14: a write inside an action is invisible until it commits', async () => {
@@ -859,7 +859,7 @@ test('W4: a dependency change after a write takes the derivation back over', asy
   expect(use(todos)).toEqual(['written'])
 
   setVersion(2)
-  expect(latest(todos)).toEqual(['written']) // held while it reloads
+  expect(peek(todos)).toEqual(['written']) // held while it reloads
   await tick()
   expect(use(todos)).toEqual(['server 2'])
 })
@@ -893,7 +893,7 @@ test('a read from inside an effect while an earlier stage is waiting to reload',
 
   const seen: unknown[] = []
   effect(() => {
-    seen.push(latest(todos))
+    seen.push(peek(todos))
   })
   await tick()
 

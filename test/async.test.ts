@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { latest, use, NotReadyYet, from, track, resolvedPromise } from '../src/async'
+import { peek, use, NotReadyYet, from, track, resolvedPromise } from '../src/async'
 import { isPending } from '../src/pending'
 import { effect } from '../src/effect'
 import { flush, microtaskScheduler, setScheduler, syncScheduler } from '../src/scheduler'
@@ -19,60 +19,60 @@ test('isPending is true for a signal holding a pending promise', () => {
   expect(isPending(s)).toBe(true)
 })
 
-test('latest is undefined before the first resolution', () => {
+test('peek is undefined before the first resolution', () => {
   const [s] = signal(new Promise<number>(() => {})) // never resolves
-  expect(latest(s)).toBeUndefined()
+  expect(peek(s)).toBeUndefined()
 })
 
-test('latest returns the resolved value after the promise settles', async () => {
+test('peek returns the resolved value after the promise settles', async () => {
   const [s] = signal(Promise.resolve(1))
-  expect(latest(s)).toBeUndefined()
+  expect(peek(s)).toBeUndefined()
   await tick()
-  expect(latest(s)).toBe(1)
+  expect(peek(s)).toBe(1)
 })
 
-test('latest keeps the last resolved value while a newer promise is pending', async () => {
+test('peek keeps the last resolved value while a newer promise is pending', async () => {
   const [s, setS] = signal<Promise<number>>(Promise.resolve(1))
   await tick()
-  expect(latest(s)).toBe(1)
+  expect(peek(s)).toBe(1)
 
   let release!: (v: number) => void
   setS(new Promise<number>((resolve) => { release = resolve }))
-  expect(latest(s)).toBe(1) // still 1 — does NOT revert to undefined
+  expect(peek(s)).toBe(1) // still 1 — does NOT revert to undefined
 
   release(2)
   await tick()
-  expect(latest(s)).toBe(2) // now the new resolved value
+  expect(peek(s)).toBe(2) // now the new resolved value
 })
 
-test('latest(s, fallback) returns the fallback before the first resolution', () => {
+test('peek(s, fallback) returns the fallback before the first resolution', () => {
   const [s] = signal(new Promise<number[]>(() => {})) // never resolves
-  expect(latest(s, [] as number[])).toEqual([])
+  expect(peek(s, [] as number[])).toEqual([])
 })
 
-test('latest(s, fallback) reports the real value once resolved, not the fallback', async () => {
+test('peek(s, fallback) reports the real value once resolved, not the fallback', async () => {
   const [s] = signal(Promise.resolve([1, 2]))
-  expect(latest(s, [] as number[])).toEqual([])
+  expect(peek(s, [] as number[])).toEqual([])
   await tick()
-  expect(latest(s, [] as number[])).toEqual([1, 2])
+  expect(peek(s, [] as number[])).toEqual([1, 2])
 })
 
-test('latest(s, fallback) falls back again after a rejection with nothing seeded', () => {
+test('peek(s, fallback) falls back again after a rejection with nothing seeded', () => {
   const [s] = signal(Promise.reject(new Error('nope')))
-  expect(latest(s, 'fallback')).toBe('fallback')
+  expect(peek(s, 'fallback')).toBe('fallback')
 })
 
-test('latest is reactive — updates when the signal is written to a new value', () => {
-  // latest re-runs the effect when the signal *value* changes (a write). It does
+test('peek is reactive — updates when the signal is written to a new value', () => {
+  // peek re-runs the effect when the signal *value* changes (a write). It does
   // NOT push on the same-Promise-settling, since signal stores values as-is and
   // r3 dirties only on writes. For "push on settle," reach for `computed(() => p)`.
   setScheduler(syncScheduler(flush))
   const [s, setS] = signal<Promise<number>>(new Promise<number>(() => {}))
   const seen: Array<number | undefined> = []
-  effect(() => { seen.push(latest(s)) })
+  effect(() => { seen.push(peek(s)) })
   expect(seen).toEqual([undefined]) // pending — no prior resolution
   setS(Promise.resolve(1))           // write: effect re-runs
-  // latest will see 'pending' synchronously (state not yet drained), so still undefined
+  // peek will see 'pending' synchronously (state not yet drained), so still undefined
   expect(seen).toEqual([undefined, undefined])
   setScheduler(microtaskScheduler(flush))
 })
@@ -184,8 +184,8 @@ test('use() accessor form unwraps pending promises (throws NotReadyYet)', () => 
 
 
 // Plan B: use(accessor) now throws NotReadyYet when isPending(accessor) is true.
-// For the "give me stale" semantics, use `latest(c)` instead.
-test('use(accessor) throws NotReadyYet during SWR refetch (Plan B behavior; use latest() for stale)', async () => {
+// For the "give me stale" semantics, use `peek(c)` instead.
+test('use(accessor) throws NotReadyYet during SWR refetch (Plan B behavior; use peek() for stale)', async () => {
   const [id, setId] = signal(1)
   let release!: (v: number) => void
   const c = computed(() => {
@@ -198,9 +198,9 @@ test('use(accessor) throws NotReadyYet during SWR refetch (Plan B behavior; use 
 
   setId(2)
   // SWR: c() returns stale 10, but use(c) now throws because isPending(c) is true.
-  // Callers that want the stale value should use latest(c) instead.
+  // Callers that want the stale value should use peek(c) instead.
   expect(isPending(c)).toBe(true)
-  expect(latest(c)).toBe(10) // latest() still gives the stale value
+  expect(peek(c)).toBe(10) // peek() still gives the stale value
   expect(() => use(c)).toThrow(NotReadyYet) // use() now throws on pipeline-pending
 
   release(20)
@@ -222,13 +222,13 @@ describe('use(accessor) — Plan B: throws on isPending', () => {
     await new Promise<void>((r) => queueMicrotask(r))
     activeResolve('v1')
     await new Promise<void>((r) => queueMicrotask(r))
-    // Plain-promise read model: after settle the view reads as fulfilled via latest().
-    expect(latest(c)).toBe('v1')
+    // Plain-promise read model: after settle the view reads as fulfilled via peek().
+    expect(peek(c)).toBe('v1')
 
     // Trigger refetch.
     setPage(2)
     await new Promise<void>((r) => queueMicrotask(r))
-    expect(latest(c)).toBe('v1') // SWR-stale
+    expect(peek(c)).toBe('v1') // SWR-stale
 
     // BUT use(c) must throw NotReadyYet now, carrying the in-flight promise.
     expect(isPending(c)).toBe(true)
@@ -330,12 +330,12 @@ describe('from — post-Plan-A (no brand suspension)', () => {
     await new Promise<void>((r) => queueMicrotask(r))
     activeResolve('v1')
     await new Promise<void>((r) => queueMicrotask(r))
-    expect(latest(c)).toBe('v1')
+    expect(peek(c)).toBe('v1')
 
     // Trigger refetch — accessor goes SWR-stale, suspendedOn becomes new Promise.
     setPage(2)
     await new Promise<void>((r) => queueMicrotask(r))
-    expect(latest(c)).toBe('v1') // SWR-stale
+    expect(peek(c)).toBe('v1') // SWR-stale
 
     // Plan A: read yields the stale value directly. The view is now a plain
     // promise whose WeakMap state is fulfilled/stale, carrying the stale value —

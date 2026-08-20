@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest'
 import { computed } from '../src/computed'
 import { signal } from '../src/signal'
-import { latest, from } from '../src/async'
+import { peek, from } from '../src/async'
 import { createRoot, onCleanup } from '../src/owner'
 
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
@@ -24,7 +24,7 @@ test('onCleanup before a pause does not fire when the generator resumes', async 
   c()
   await ticks(10)
 
-  expect(latest(c)).toBe(1)
+  expect(peek(c)).toBe(1)
   // The cleanup must not have run before the code after the pause.
   expect(events).toEqual(['after-pause', 'cleanup'])
 })
@@ -42,7 +42,7 @@ test('onCleanup fires when the generator completes', async () => {
   c()
   await ticks(10)
 
-  expect(latest(c)).toBe(1)
+  expect(peek(c)).toBe(1)
   expect(cleaned).toBe(1)
 })
 
@@ -66,7 +66,7 @@ test('onCleanup fires when the generator is discarded on a dependency change', a
   setA(2)
   await ticks(10)
 
-  expect(latest(c)).toBe(12)
+  expect(peek(c)).toBe(12)
   expect(cleaned).toBe(2) // the discarded generator's, then the replacement's
 })
 
@@ -130,7 +130,7 @@ test('onCleanup fires when a generator completes without ever pausing', () => {
     return 42
   })
 
-  expect(latest(c)).toBe(42)
+  expect(peek(c)).toBe(42)
   expect(cleaned).toBe(1)
 })
 

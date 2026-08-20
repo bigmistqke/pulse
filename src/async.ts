@@ -11,35 +11,42 @@ import { markBackgroundPromise, markUsedInBinding } from './transition-tracker'
 const lastResolved = new WeakMap<object, unknown>()
 
 /** A compile-time-only marker key. Never read at runtime — `WithFallback`
- *  uses it purely so `latest`'s overloads can tell a `signal(fn, default)`
- *  accessor apart from a plain one; nothing ever writes this property onto
- *  the actual accessor object. */
+ *  uses it purely so `peek`/`latest`'s overloads can tell a `signal(fn,
+ *  default)` accessor apart from a plain one; nothing ever writes this
+ *  property onto the actual accessor object. */
 declare const FALLBACK: unique symbol
 
 /** An accessor that carries a construction-time fallback of type `D` for
- *  `latest` to report before anything has resolved. `signal(fn, default)`
- *  returns an accessor typed this way; `latest`'s single-argument overload
- *  below matches it specifically so the fallback shows up in the return type
- *  without needing to be passed again at the call site. */
+ *  `peek`/`latest` to report before anything has resolved. `signal(fn,
+ *  default)` returns an accessor typed this way; the single-argument
+ *  overload below matches it specifically so the fallback shows up in the
+ *  return type without needing to be passed again at the call site. */
 export type WithFallback<A, D> = A & { readonly [FALLBACK]: D }
 
 /**
- * The latest *resolved* value of a signal. Returns `undefined` until the signal
- * first resolves, then always the most recent resolved value — it does NOT
- * revert to `undefined` while a newer promise is pending (stale-while-revalidate).
- * Reactive: reads `s()`, so it re-evaluates when the signal changes.
+ * The most recent *resolved* value of a signal, with zero side effects —
+ * safe to call from anywhere (a helper function, a `computed`, a test), not
+ * just a binding. Returns `undefined` until the signal first resolves, then
+ * always the most recent resolved value — it does NOT revert to `undefined`
+ * while a newer promise is pending (stale-while-revalidate). Reactive: reads
+ * `s()`, so it re-evaluates when the signal changes.
  *
  * A `signal(fn, default)` accessor reports `default` instead of `undefined`
  * here, with no second argument needed — the first overload below matches
  * that accessor's branded type. For any other accessor, the two-argument
  * form returns `fallback` instead of `undefined` before the first
- * resolution, so a call site that always wants a value (`latest(x, [])`)
- * does not need its own `?? []`.
+ * resolution, so a call site that always wants a value (`peek(x, [])`) does
+ * not need its own `?? []`.
+ *
+ * `latest(x)` (below) reads the same value but additionally participates in
+ * the nearest `<Loading>` boundary's ambient `isLoading()` signal while `x`
+ * is refreshing. Reach for `peek` specifically when that participation is
+ * unwanted — the true escape hatch. See ADR 0015.
  */
-export function latest<T, D>(s: WithFallback<Accessor<T>, D>): Awaited<T> | D
-export function latest<T>(s: Accessor<T>): Awaited<T> | undefined
-export function latest<T, D>(s: Accessor<T>, fallback: D): Awaited<T> | D
-export function latest<T, D>(s: Accessor<T>, fallback?: D): Awaited<T> | D | undefined {
+export function peek<T, D>(s: WithFallback<Accessor<T>, D>): Awaited<T> | D
+export function peek<T>(s: Accessor<T>): Awaited<T> | undefined
+export function peek<T, D>(s: Accessor<T>, fallback: D): Awaited<T> | D
+export function peek<T, D>(s: Accessor<T>, fallback?: D): Awaited<T> | D | undefined {
   // The TOLERANT read: it NEVER throws. A failed node still holds the value it
   // last resolved to, so read it raw — bypassing the accessor's error conversion —
   // and degrade to it. (The raw accessor throws; that is the strict view, and it is
@@ -55,7 +62,7 @@ export function latest<T, D>(s: Accessor<T>, fallback?: D): Awaited<T> | D | und
     if (state.status === 'rejected') {
       // A rejected promise carries no value of its own, but may still hold a
       // stale-while-revalidate prior seeded at write time (see `track`) — read
-      // that first, and only fall back to the last value `latest` itself
+      // that first, and only fall back to the last value `peek` itself
       // observed if nothing was ever seeded (a raw promise passed to `signal()`
       // that rejects before anything else reads it).
       const swr = state.value
@@ -74,11 +81,35 @@ export function latest<T, D>(s: Accessor<T>, fallback?: D): Awaited<T> | D | und
   return value as Awaited<T>
 }
 
-/** Seed `latest`'s fallback for `s` before anything has resolved. Internal —
- *  used by `signal(fn, default)` so every caller of `latest(thatSignal)`
- *  gets `default` back for free, without passing it at each call site.
- *  `latest` overwrites this the moment the signal genuinely resolves, so the
- *  seed only ever matters until then. */
+/**
+ * `peek(x)`'s value, plus ambient participation: while `x` is pending, hands
+ * its in-flight promise to the nearest `<Loading>` boundary's background-
+ * tracking set — the same hand-off `use.latest()`'s SWR branch already makes
+ * — so `isLoading()`/`useLoading()` reflect the refresh. Never marks the
+ * binding engaged (`markUsedInBinding()` is NOT called here), so this can
+ * never withhold a commit or reopen a boundary's fallback — only
+ * `isLoading()` hears about it. A no-op outside any binding context (the
+ * hand-off target is simply unread by anything), but it is meant to be
+ * called from one — that participation is the whole reason to reach for
+ * `latest` over `peek`. See ADR 0015.
+ */
+export function latest<T, D>(s: WithFallback<Accessor<T>, D>): Awaited<T> | D
+export function latest<T>(s: Accessor<T>): Awaited<T> | undefined
+export function latest<T, D>(s: Accessor<T>, fallback: D): Awaited<T> | D
+export function latest<T, D>(s: Accessor<T>, fallback?: D): Awaited<T> | D | undefined {
+  const value = peek(s, fallback as D)
+  if (isPending(s)) {
+    const inFlight = promiseOf(s)
+    if (inFlight !== null) markBackgroundPromise(inFlight)
+  }
+  return value
+}
+
+/** Seed `peek`/`latest`'s fallback for `s` before anything has resolved.
+ *  Internal — used by `signal(fn, default)` so every caller gets `default`
+ *  back for free, without passing it at each call site. Overwritten the
+ *  moment the signal genuinely resolves, so the seed only ever matters until
+ *  then. */
 export function seedLatest<T>(s: Accessor<T>, value: Awaited<T>): void {
   lastResolved.set(s, value)
 }
@@ -209,19 +240,10 @@ use.latest = function <T>(x: Accessor<T>): Awaited<T> {
   // still participates in the nearest <Loading> boundary's atomic-commit
   // gate via deferOrCommit, even on a run where it doesn't throw.
   markUsedInBinding()
+  // latest(x) already makes the ambient isLoading() hand-off itself (see
+  // ADR 0015) when x is pending — nothing further needed here for that.
   const value = latest(x)
-  if (value !== undefined) {
-    // Has a value to show — but if the underlying accessor is ALSO currently
-    // pending (a refetch in flight behind the stale value), hand the
-    // in-flight promise out so the nearest <Loading> scope's isLoading()
-    // still reflects the background refresh, without withholding this
-    // binding's own commit the way a throw would.
-    if (isPending(x)) {
-      const inFlight = promiseOf(x)
-      if (inFlight !== null) markBackgroundPromise(inFlight)
-    }
-    return value as Awaited<T>
-  }
+  if (value !== undefined) return value as Awaited<T>
   // Genuinely nothing has ever resolved for this accessor.
   throw new NotReadyYet(promiseOf(x)!)
 }

@@ -1,4 +1,4 @@
-export { latest, from, settled, use, NotReadyYet, type PipelineRead, type Resolved } from './async'
+export { latest, peek, from, settled, use, NotReadyYet, type PipelineRead, type Resolved } from './async'
 export { isPending, promiseOf } from './pending'
 export { error } from './error'
 export { computed } from './computed'
