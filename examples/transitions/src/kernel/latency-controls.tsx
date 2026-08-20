@@ -5,7 +5,7 @@ export function LatencyControls(props: { knobs: LatencyKnob[] }) {
   return (
     <div class="latency-controls">
       <h3>latency</h3>
-      <For each={() => props.knobs}>
+      <For each={props.knobs}>
         {(knob) => (
           <label class="knob">
             <span class="knob-name">{knob.name}</span>
@@ -15,7 +15,7 @@ export function LatencyControls(props: { knobs: LatencyKnob[] }) {
               attr:max="2000"
               attr:step="50"
               attr:data-testid={`latency-${knob.name}`}
-              prop:value={() => knob.ms()}
+              prop:value={knob.ms()}
               on:input={(e: Event) =>
                 knob.setMs(Number((e.currentTarget as HTMLInputElement).value))
               }

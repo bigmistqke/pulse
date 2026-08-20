@@ -51,7 +51,7 @@ function App() {
               <div class="tab-group-buttons">
                 {TABS.filter((t) => t.group === g.group).map((tab) => (
                   <button
-                    class:active={() => active() === tab.id}
+                    class:active={active() === tab.id}
                     attr:data-testid={`tab-${tab.id}`}
                     on:click={() => setActive(tab.id)}
                   >
@@ -64,14 +64,14 @@ function App() {
         </nav>
       </header>
       <main class="tab-host">
-        <Show when={() => active() === 'torn-state'}>{() => <TornState />}</Show>
-        <Show when={() => active() === 'spinner-flash'}>{() => <SpinnerFlash />}</Show>
-        <Show when={() => active() === 'lost-interactivity'}>{() => <LostInteractivity />}</Show>
-        <Show when={() => active() === 'uncommittable'}>{() => <UncommittableSpeculation />}</Show>
-        <Show when={() => active() === 'stale-side-effects'}>{() => <StaleSideEffects />}</Show>
-        <Show when={() => active() === 'torn-across-boundaries'}>{() => <TornAcrossBoundaries />}</Show>
-        <Show when={() => active() === 'optimistic-clobbered'}>{() => <OptimisticClobbered />}</Show>
-        <Show when={() => active() === 'entanglement'}>{() => <Entanglement />}</Show>
+        <Show when={active() === 'torn-state'}><TornState /></Show>
+        <Show when={active() === 'spinner-flash'}><SpinnerFlash /></Show>
+        <Show when={active() === 'lost-interactivity'}><LostInteractivity /></Show>
+        <Show when={active() === 'uncommittable'}><UncommittableSpeculation /></Show>
+        <Show when={active() === 'stale-side-effects'}><StaleSideEffects /></Show>
+        <Show when={active() === 'torn-across-boundaries'}><TornAcrossBoundaries /></Show>
+        <Show when={active() === 'optimistic-clobbered'}><OptimisticClobbered /></Show>
+        <Show when={active() === 'entanglement'}><Entanglement /></Show>
       </main>
     </div>
   )

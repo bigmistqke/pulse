@@ -41,9 +41,9 @@ export function LostInteractivity() {
           <ul
             class="list-card"
             attr:data-testid="results"
-            attr:data-result-query={() => use(results).query}
+            attr:data-result-query={use(results).query}
           >
-            <For each={() => use(results).items}>{(item) => <li>{item}</li>}</For>
+            <For each={use(results).items}>{(item) => <li>{item}</li>}</For>
           </ul>
         )}
       </Loading>

@@ -37,10 +37,10 @@ export function Entanglement() {
         <button attr:data-testid="rename" on:click={rename}>rename</button>
       </div>
       <div class="pane" attr:data-testid="display-name" attr:data-gen="current">
-        name: {() => displayName()}
+        name: {displayName()}
       </div>
       <div class="pane" attr:data-testid="bio" attr:data-gen="current">
-        {() => bio()}
+        {bio()}
       </div>
     </div>
   )

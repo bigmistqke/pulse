@@ -8,6 +8,8 @@ import {
   type Owner,
 } from '../owner'
 import type { Child } from './h'
+import { mergeProps } from './merge-props'
+import { readDynamic } from './resolve'
 import type { Truthy } from './show'
 
 const MATCH: unique symbol = Symbol('Match')
@@ -32,7 +34,12 @@ export interface MatchData<T> extends MatchProps<T> {
  * it via the `MATCH` symbol brand.
  */
 export function Match<T>(props: MatchProps<T>): Node {
-  return { [MATCH]: true, ...props } as unknown as Node
+  // Not native spread: {...props} reads every property through its getter
+  // once and copies the resulting VALUE as a plain property, permanently
+  // flattening a dynamic `when`/`children` (see merge-props.ts). mergeProps
+  // copies descriptors instead, so Switch reading `m.when` later still
+  // triggers the original live getter.
+  return mergeProps(props, { [MATCH]: true }) as unknown as Node
 }
 
 export interface SwitchProps {
@@ -73,9 +80,7 @@ export function Switch(props: SwitchProps): () => unknown {
       if (typeof item !== 'object') continue
       if ((item as MatchData<unknown>)[MATCH] !== true) continue
       const m = item as MatchData<unknown>
-      const r = typeof m.when === 'function'
-        ? (m.when as () => unknown)()
-        : m.when
+      const r = readDynamic(m, 'when')
       if (r && !isPromise(r)) {
         winner = m
         winnerValue = r
@@ -90,9 +95,7 @@ export function Switch(props: SwitchProps): () => unknown {
     branchOwner = createSubOwner(parentOwner)
     cachedNode = untrack(() => runWithOwner(branchOwner!, () => {
       if (winner === null) return props.fallback
-      return typeof winner.children === 'function'
-        ? (winner.children as (v: Truthy<unknown>) => unknown)(winnerValue as Truthy<unknown>)
-        : winner.children
+      return readDynamic(winner, 'children', winnerValue as Truthy<unknown>)
     }))
     lastKey = key
     return cachedNode

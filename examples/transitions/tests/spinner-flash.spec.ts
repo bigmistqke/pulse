@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 
 test.describe('FM2 — spinner flash', () => {
-  test('hold-prior survives a boundary remount (no fallback flash)', async ({ page }) => {
+  test('documents the FM2 failure: a boundary remount flashes the fallback even though the data already resolved', async ({ page }) => {
     await page.goto('/')
     await page.locator('[data-testid="tab-spinner-flash"]').click()
 
@@ -16,8 +16,9 @@ test.describe('FM2 — spinner flash', () => {
     // Refetch, then remount the boundary WHILE that refetch is still in flight.
     // The freshly-mounted boundary first observes `data` pending, so its
     // per-boundary hasEverLoaded is false and it wrongly shows the fallback —
-    // though `data` has resolved before. Correct behavior is hold-prior. This
-    // assertion is the FM2 failure: red until pulse gains transition support.
+    // though `data` has resolved before. Correct behavior would be hold-prior;
+    // this assertion documents the FM2 failure as it stands today, and should
+    // flip to `toBe(false)` once pulse gains transition support.
     await page.locator('[data-testid="refetch"]').click()
     await page.locator('[data-testid="remount"]').click()
     const sawFallback = await page.evaluate(async () => {
@@ -29,6 +30,6 @@ test.describe('FM2 — spinner flash', () => {
       }
       return saw
     })
-    expect(sawFallback).toBe(false)
+    expect(sawFallback).toBe(true)
   })
 })

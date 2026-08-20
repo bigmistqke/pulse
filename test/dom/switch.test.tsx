@@ -72,7 +72,7 @@ test('Match function child receives narrowed value', () => {
   const dispose = render(
     () => (
       <Switch fallback={<p>none</p>}>
-        <Match when={user}>{(u) => <span>{u.name}</span>}</Match>
+        <Match when={user()}>{(u) => <span>{u.name}</span>}</Match>
       </Switch>
     ),
     target,

@@ -31,16 +31,16 @@ export function UncommittableSpeculation() {
   const scenario = (
     <div class="scenario">
       <button attr:data-testid="toggle" on:click={toggle}>
-        {() => `showing: ${archived() ? 'archived' : 'active'}`}
+        {`showing: ${archived() ? 'archived' : 'active'}`}
       </button>
       <Loading initial={<div class="list-card">loading…</div>}>
         {() => (
           <ul
             class="list-card"
             attr:data-testid="list"
-            attr:data-gen={() => (use(list).archived ? 'archived' : 'active')}
+            attr:data-gen={use(list).archived ? 'archived' : 'active'}
           >
-            <For each={() => use(list).items}>{(item) => <li>{item}</li>}</For>
+            <For each={use(list).items}>{(item) => <li>{item}</li>}</For>
           </ul>
         )}
       </Loading>

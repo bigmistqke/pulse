@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, test } from 'vitest'
 import {
   catchError,
   flush,
+  isLoading,
   Loading,
   microtaskScheduler,
   onCleanup,
@@ -217,7 +218,7 @@ test('useLoading() inside subtree reflects pending state', async () => {
 
   function Header() {
     const pending = useLoading()
-    return <Show when={pending} fallback={<i>idle</i>}>{() => <i>busy</i>}</Show>
+    return <Show when={pending()} fallback={<i>idle</i>}>{() => <i>busy</i>}</Show>
   }
 
   const dispose = render(
@@ -349,6 +350,53 @@ test('useLoading() outside any Loading returns constant-false accessor', () => {
   dispose()
 })
 
+test('isLoading() inside subtree reflects pending state, read fresh each call', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+  let resolveP!: (v: string) => void
+  const p = new Promise<string>((r) => { resolveP = r })
+
+  function Header() {
+    return <Show when={isLoading()} fallback={<i>idle</i>}>{() => <i>busy</i>}</Show>
+  }
+
+  const dispose = render(
+    () => (
+      <Loading initial={<p>init</p>}>
+        {() => (
+          <>
+            <Header/>
+            <span>{() => use(p)}</span>
+          </>
+        )}
+      </Loading>
+    ),
+    target,
+  )
+  resolveP('done')
+  await p
+  flush()
+  expect(target.textContent).toContain('idle')
+  expect(target.textContent).toContain('done')
+  dispose()
+})
+
+test('isLoading() outside any Loading returns false', () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+
+  let captured: boolean | undefined
+  const dispose = render(
+    () => {
+      captured = isLoading()
+      return <span>x</span>
+    },
+    target,
+  )
+  expect(captured).toBe(false)
+  dispose()
+})
+
 test('rapid src-swap keeps pending count at 1, not climbing', async () => {
   const target = document.createElement('section')
   document.body.append(target)
@@ -360,7 +408,7 @@ test('rapid src-swap keeps pending count at 1, not climbing', async () => {
   function Probe() {
     const pending = useLoading()
     // Observe pending at each tick by reading inside an effect via Show
-    return <Show when={pending}>{() => { observedPending.push(true); return <i>p</i> }}</Show>
+    return <Show when={pending()}>{() => { observedPending.push(true); return <i>p</i> }}</Show>
   }
 
   const dispose = render(

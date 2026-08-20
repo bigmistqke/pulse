@@ -1,6 +1,6 @@
 import { transformAsync } from '@babel/core'
 import type { Plugin } from 'vite'
-import pulsePropsToGetters from '../../src/babel-plugin'
+import pulsePropsToGetters from './babel-plugin'
 
 export function pulseJsx(): Plugin {
   return {

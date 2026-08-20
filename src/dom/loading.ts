@@ -10,6 +10,8 @@ import {
   type Owner,
 } from '../owner'
 import { signal, type Accessor } from '../signal'
+import type { Child } from './h'
+import { readDynamic } from './resolve'
 
 const CONST_FALSE_ACCESSOR: Accessor<boolean> = () => false
 
@@ -22,10 +24,35 @@ export function useLoading(): Accessor<boolean> {
   return scope === null ? CONST_FALSE_ACCESSOR : scope.active
 }
 
+/**
+ * Reads the nearest enclosing `<Loading>` boundary's pending state directly,
+ * as a plain `boolean` rather than an accessor. Call it fresh at each read
+ * site — inside a getter-converted prop, or inside an effect — the same way
+ * `signal()` reads are meant to be called fresh rather than stored. Returns
+ * `false` when called outside any Loading subtree.
+ *
+ * `useLoading()` still exists for the narrower case where the boundary is
+ * read from one place and the resulting accessor handed to another —
+ * `isLoading()` covers the common case of reading and using the state at the
+ * same call site.
+ */
+export function isLoading(): boolean {
+  const scope = findBoundaryScope(getOwner(), 'pending')
+  return scope === null ? false : scope.active()
+}
+
 export interface LoadingProps {
-  /** Function child REQUIRED — defers JSX construction until inside the
-   *  boundary owner so descendants register with the right `boundaries.pending`. */
-  children: () => unknown
+  /** JSX construction must be deferred until inside the boundary owner, so
+   *  descendants register with the right `boundaries.pending`. A function
+   *  child defers by construction — `Loading` calls it itself, inside the
+   *  boundary. A plain `Child` only defers correctly when the pulse JSX
+   *  compiler (props-to-getters) is compiling this file: it rewrites a bare
+   *  JSX-element child into exactly that same thunk at compile time. Passed
+   *  through any other JSX pipeline (plain tsc/esbuild react-jsx), a plain
+   *  `Child` is constructed immediately at the call site, before this
+   *  boundary owner exists — pass an explicit `() => <Foo/>` in any file not
+   *  compiled by the pulse plugin. */
+  children: Child | (() => unknown)
   fallback?: unknown
   initial?: unknown
 }
@@ -142,7 +169,7 @@ export function Loading(props: LoadingProps): Accessor<unknown> {
   boundaryOwner.boundaries.pending = scope
 
   // Construct loaded subtree once, inside boundaryOwner.
-  const loadedSubtree: unknown = runWithOwner(boundaryOwner, props.children)
+  const loadedSubtree: unknown = runWithOwner(boundaryOwner, () => readDynamic(props, 'children'))
 
   // Detect "ever loaded": flip true the first time pending drops to false.
   // Owned by boundaryOwner (symmetric with loadedSubtree) so the lifetime
@@ -163,6 +190,10 @@ export function Loading(props: LoadingProps): Accessor<unknown> {
     // this swap decision, so a still-pending binding inside loadedSubtree
     // continues to withhold its own commit exactly as it already does.
     if (props.initial === undefined && props.fallback === undefined) return loadedSubtree
+    // initial/fallback are plain Child, not a duck-typed accessor union -
+    // read directly and pass through untouched, function value or not;
+    // insertChild is what decides whether the result needs its own
+    // reactive effect, not this component.
     if (!hasEverLoaded) return props.initial ?? props.fallback
     return props.fallback ?? loadedSubtree
   }

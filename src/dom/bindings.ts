@@ -10,7 +10,23 @@ import {
   type BindingController,
   type Owner,
 } from '../owner'
+import { readDynamic } from './resolve'
 import { runBindingCompute } from '../transition-tracker'
+
+/**
+ * Fragment (see `h.ts`) hands a function child back to its own caller
+ * unresolved, to be wrapped by whichever LATER, unrelated `insertChild` call
+ * ends up consuming the array - typically under a different, wrong owner
+ * than the one that was ambient when the Fragment itself was built (e.g. a
+ * boundary's `boundaryOwner`). `tagChildOwner` records the correct owner
+ * against the function itself, keyed by reference, so `insertChild` can
+ * recover it later regardless of where the wrapping actually happens.
+ */
+const taggedChildOwner = new WeakMap<() => unknown, Owner | null>()
+
+export function tagChildOwner(child: () => unknown, owner: Owner | null): void {
+  taggedChildOwner.set(child, owner)
+}
 
 /**
  * Wrap a reactive `apply(value)` binding in the compute/commit split. The
@@ -91,8 +107,8 @@ function reactiveCommit<T>(
  * binding still works — but it will never be cleaned up, so we surface the
  * leak loudly. Wrap in `render()` or `createRoot()` to silence.
  */
-function warnIfOrphaned(kind: string): void {
-  if (getOwner() === null) {
+function warnIfOrphaned(kind: string, owner: Owner | null = getOwner()): void {
+  if (owner === null) {
     console.warn(
       `pulse: ${kind} created outside any owner — it will live forever. ` +
       `Wrap in render() or createRoot().`,
@@ -114,12 +130,18 @@ function warnIfOrphaned(kind: string): void {
  */
 export function insertChild(parent: Node, value: unknown): void {
   if (typeof value === 'function') {
-    // Capture the owner at h()-call time. The binding-effect lives until this
-    // owner is disposed. Each run of the effect gets its own sub-owner so any
-    // nested effects/computeds created by the user function are cleaned up
-    // before the next run — no leak across re-runs.
-    warnIfOrphaned('reactive child')
-    const parentOwner = getOwner()
+    // Capture the owner at h()-call time — unless Fragment already tagged
+    // this exact function with the owner ambient when IT was built (see
+    // tagChildOwner above): a Fragment child is resolved later, by whichever
+    // unrelated call ends up consuming Fragment's returned array, so the
+    // owner ambient right here can be the wrong one. The binding-effect
+    // lives until this owner is disposed. Each run of the effect gets its
+    // own sub-owner so any nested effects/computeds created by the user
+    // function are cleaned up before the next run — no leak across re-runs.
+    const parentOwner = taggedChildOwner.has(value as () => unknown)
+      ? taggedChildOwner.get(value as () => unknown)!
+      : getOwner()
+    warnIfOrphaned('reactive child', parentOwner)
     const start = document.createComment('')
     const end = document.createComment('')
     parent.appendChild(start)
@@ -248,13 +270,20 @@ function applyAttr(el: Element, name: string, value: unknown): void {
 }
 
 /**
- * Apply one prop entry to `el`. Handles `on:`, `prop:`, and `attr:` prefixes;
- * function values with `prop:` and `attr:` are reactive (wrapped in effect).
- * Default path also uses `setAttribute` with reactivity for function values.
+ * Apply one prop entry to `el`, reading it from `props[name]` rather than
+ * receiving an already-read value. Every kind except `ref` and `on:`
+ * always wraps the read in a reactive effect - it does not check whether
+ * the value is a function first. A getter-backed prop (from the
+ * props-to-getters compiler) reads its live value on every run, so its own
+ * reactive dependencies (if it has any) are picked up by r3's tracking,
+ * active during that read; a plain value just makes the effect a one-shot
+ * (e.g. a genuinely static `attr:type`) - functionally harmless, the same
+ * accepted overhead as everywhere else in this design.
  */
-export function bindProp(el: Element, name: string, value: unknown): void {
+export function bindProp(el: Element, name: string, props: Record<string, unknown>): void {
   // ref — callback invoked once with the element; not reactive
   if (name === 'ref') {
+    const value = props[name]
     if (typeof value === 'function') (value as (el: Element) => void)(el)
     return
   }
@@ -264,6 +293,7 @@ export function bindProp(el: Element, name: string, value: unknown): void {
   // reach, because a DOM event fires outside any owner context entirely.
   if (name.startsWith('on:')) {
     const event = name.slice(3)
+    const value = props[name]
     if (typeof value !== 'function') return
     warnIfOrphaned('event listener')
     const capturedOwner = getOwner()
@@ -273,67 +303,46 @@ export function bindProp(el: Element, name: string, value: unknown): void {
     onCleanup(() => el.removeEventListener(event, wrapped))
     return
   }
-  // prop:name — DOM property assignment; function value is reactive
-  if (name.startsWith('prop:')) {
-    const prop = name.slice(5)
-    if (typeof value === 'function') {
-      warnIfOrphaned('prop binding')
-      const parentOwner = getOwner()
-      reactiveCommit(parentOwner, value as () => unknown, (v) => { (el as any)[prop] = v })
-    } else {
-      ;(el as any)[prop] = value
-    }
-    return
-  }
-  // attr:name — explicit setAttribute; function value is reactive
+  // attr:name — explicit setAttribute, always reactive
   if (name.startsWith('attr:')) {
     const attr = name.slice(5)
-    if (typeof value === 'function') {
-      warnIfOrphaned('attr binding')
-      const parentOwner = getOwner()
-      reactiveCommit(parentOwner, value as () => unknown, (v) => applyAttr(el, attr, v))
-    } else {
-      applyAttr(el, attr, value)
-    }
+    warnIfOrphaned('attr binding')
+    const parentOwner = getOwner()
+    reactiveCommit(parentOwner, () => readDynamic(props, name), (v) => applyAttr(el, attr, v))
     return
   }
-  // class:name — toggle a single class; function value is reactive
+  // prop:name — DOM property assignment, always reactive
+  if (name.startsWith('prop:')) {
+    const prop = name.slice(5)
+    warnIfOrphaned('prop binding')
+    const parentOwner = getOwner()
+    reactiveCommit(parentOwner, () => readDynamic(props, name), (v) => { (el as any)[prop] = v })
+    return
+  }
+  // class:name — toggle a single class, always reactive
   if (name.startsWith('class:')) {
     const cls = name.slice(6)
-    if (typeof value === 'function') {
-      warnIfOrphaned('class binding')
-      const parentOwner = getOwner()
-      reactiveCommit(parentOwner, value as () => unknown, (v) => el.classList.toggle(cls, !!v))
-    } else {
-      el.classList.toggle(cls, !!value)
-    }
+    warnIfOrphaned('class binding')
+    const parentOwner = getOwner()
+    reactiveCommit(parentOwner, () => readDynamic(props, name), (v) => el.classList.toggle(cls, !!v))
     return
   }
-  // style:name — set/remove a single style property; function value is reactive
+  // style:name — set/remove a single style property, always reactive
   if (name.startsWith('style:')) {
     const prop = name.slice(6)
-    const applyStyle = (v: unknown) => {
+    warnIfOrphaned('style binding')
+    const parentOwner = getOwner()
+    reactiveCommit(parentOwner, () => readDynamic(props, name), (v) => {
       if (v === null || v === undefined || v === false) {
         ;(el as HTMLElement).style.removeProperty(prop)
       } else {
         ;(el as HTMLElement).style.setProperty(prop, String(v))
       }
-    }
-    if (typeof value === 'function') {
-      warnIfOrphaned('style binding')
-      const parentOwner = getOwner()
-      reactiveCommit(parentOwner, value as () => unknown, applyStyle)
-    } else {
-      applyStyle(value)
-    }
+    })
     return
   }
-  // default — same as attr:, with bare name
-  if (typeof value === 'function') {
-    warnIfOrphaned('attr binding')
-    const parentOwner = getOwner()
-    reactiveCommit(parentOwner, value as () => unknown, (v) => applyAttr(el, name, v))
-  } else {
-    applyAttr(el, name, value)
-  }
+  // default — same as attr:, with bare name, always reactive
+  warnIfOrphaned('attr binding')
+  const parentOwner = getOwner()
+  reactiveCommit(parentOwner, () => readDynamic(props, name), (v) => applyAttr(el, name, v))
 }

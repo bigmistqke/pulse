@@ -50,7 +50,7 @@ export function SpinnerFlash() {
         <button attr:data-testid="refetch" on:click={refetch}>refetch</button>
         <button attr:data-testid="remount" on:click={remount}>remount boundary</button>
       </div>
-      <Show when={mounted}>{boundary}</Show>
+      <Show when={mounted()}>{boundary}</Show>
     </div>
   )
 

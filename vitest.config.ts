@@ -1,6 +1,7 @@
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vitest/config'
+import { pulseJsx } from './src/vite-jsx-plugin'
 
 const here = dirname(fileURLToPath(import.meta.url))
 const aliases = {
@@ -25,6 +26,7 @@ export default defineConfig({
       },
       {
         extends: true,
+        plugins: [pulseJsx()],
         resolve: { alias: aliases },
         test: {
           name: 'dom',

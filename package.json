@@ -16,19 +16,24 @@
     "./babel-plugin": {
       "types": "./dist/babel-plugin.d.ts",
       "import": "./dist/babel-plugin.js"
+    },
+    "./vite-jsx-plugin": {
+      "types": "./dist/vite-jsx-plugin.d.ts",
+      "import": "./dist/vite-jsx-plugin.js"
     }
   },
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
-    "build": "tsdown --dts src/index.ts src/babel-plugin.ts"
+    "build": "tsdown --dts src/index.ts src/babel-plugin.ts src/vite-jsx-plugin.ts"
   },
   "dependencies": {
     "r3": "github:bigmistqke/r3#b1d23b8947f161975d0a54460f8acf5760ad9278"
   },
   "devDependencies": {
     "@babel/core": "^8.0.1",
+    "@babel/helper-module-imports": "^8.0.0",
     "@babel/plugin-syntax-jsx": "^8.0.1",
     "@babel/plugin-transform-react-jsx": "^8.0.1",
     "@babel/preset-typescript": "^8.0.1",
@@ -37,6 +42,7 @@
     "playwright": "^1.60.0",
     "tsdown": "^0.11.1",
     "typescript": "^5.8.3",
+    "vite": "^6.4.2",
     "vitest": "^3.1.3"
   }
 }

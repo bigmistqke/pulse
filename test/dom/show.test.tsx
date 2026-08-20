@@ -21,7 +21,7 @@ test('truthy when mounts function child with narrowed value', () => {
   document.body.append(target)
   const [user] = signal<{ name: string } | null>({ name: 'Ada' })
   const dispose = render(
-    () => <Show when={user}>{(u) => <span>{u.name}</span>}</Show>,
+    () => <Show when={user()}>{(u) => <span>{u.name}</span>}</Show>,
     target,
   )
   expect(target.textContent).toBe('Ada')
@@ -34,7 +34,7 @@ test('falsy when mounts fallback', () => {
   const [user] = signal<{ name: string } | null>(null)
   const dispose = render(
     () => (
-      <Show when={user} fallback={<p>none</p>}>
+      <Show when={user()} fallback={<p>none</p>}>
         {(u) => <span>{u.name}</span>}
       </Show>
     ),
@@ -51,7 +51,7 @@ test('pending Promise<T> when → fallback', () => {
   const [user] = signal<{ name: string } | Promise<{ name: string }>>(p)
   const dispose = render(
     () => (
-      <Show when={user} fallback={<p>loading</p>}>
+      <Show when={user()} fallback={<p>loading</p>}>
         {(u) => <span>{u.name}</span>}
       </Show>
     ),
@@ -68,7 +68,7 @@ test('truthy → truthy with different value preserves subtree (children not re-
   const [user, setUser] = signal<{ name: string } | null>({ name: 'Ada' })
   const dispose = render(
     () => (
-      <Show when={user}>
+      <Show when={user()}>
         {(u) => { calls++; return <span>{u.name}</span> }}
       </Show>
     ),
@@ -87,7 +87,7 @@ test('truthy → falsy disposes branch sub-owner', () => {
   const [user, setUser] = signal<{ name: string } | null>({ name: 'Ada' })
   const dispose = render(
     () => (
-      <Show when={user} fallback={<p>none</p>}>
+      <Show when={user()} fallback={<p>none</p>}>
         {(u) => {
           onCleanup(() => { cleaned = true })
           return <span>{u.name}</span>
@@ -109,7 +109,7 @@ test('falsy → truthy mounts fresh children invocation', () => {
   const [user, setUser] = signal<{ name: string } | null>(null)
   const dispose = render(
     () => (
-      <Show when={user} fallback={<p>none</p>}>
+      <Show when={user()} fallback={<p>none</p>}>
         {(u) => { calls++; return <span>{u.name}</span> }}
       </Show>
     ),
@@ -130,7 +130,7 @@ test('disposing surrounding owner disposes active branch', () => {
   const [cond] = signal(true)
   const dispose = render(
     () => (
-      <Show when={cond}>
+      <Show when={cond()}>
         {() => {
           onCleanup(() => { cleaned = true })
           return <span>hi</span>
@@ -149,7 +149,7 @@ test('static (non-function) child renders when truthy', () => {
   document.body.append(target)
   const [cond] = signal(true)
   const dispose = render(
-    () => <Show when={cond}><p>shown</p></Show>,
+    () => <Show when={cond()}><p>shown</p></Show>,
     target,
   )
   expect(target.textContent).toBe('shown')

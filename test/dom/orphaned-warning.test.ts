@@ -22,9 +22,17 @@ afterEach(() => {
   document.body.innerHTML = ''
 })
 
-test('static h() outside any owner does NOT warn', () => {
-  h('div', { id: 'static' }, 'hello')
-  expect(warnSpy).not.toHaveBeenCalled()
+test('a static attr:/bare/prop:/class:/style: value still warns - every kind but ref/on: is always effect-wrapped', () => {
+  // Every kind except ref and on: always wraps its read in an effect,
+  // regardless of whether the value turns out to be static - so creating
+  // one outside any owner warns the same as a genuinely dynamic one would.
+  h('div', { 'attr:id': 'static' })
+  expect(warnSpy).toHaveBeenCalledTimes(1)
+  expect(warnSpy.mock.calls[0][0]).toMatch(/attr binding.*outside any owner/)
+  warnSpy.mockClear()
+  h('div', { id: 'static' })
+  expect(warnSpy).toHaveBeenCalledTimes(1)
+  expect(warnSpy.mock.calls[0][0]).toMatch(/attr binding.*outside any owner/)
 })
 
 test('reactive function child outside any owner warns', () => {

@@ -1,4 +1,6 @@
-import { bindProp, insertChild } from './bindings'
+import { bindProp, insertChild, tagChildOwner } from './bindings'
+import { mergeProps } from './merge-props'
+import { getOwner, type Owner } from '../owner'
 
 /**
  * Anything `insertChild` will render: a Node, a primitive, null/undefined/
@@ -23,21 +25,51 @@ export type Tag = string | ((props: any) => Node | Node[] | (() => unknown)) | s
 
 export const Fragment: unique symbol = Symbol('Fragment')
 
+/** Recurses into nested arrays (a single Fragment child can itself be an
+ *  array, e.g. from `.map()`) tagging every function it finds. */
+function tagOwners(children: unknown[], owner: Owner | null): void {
+  for (const child of children) {
+    if (typeof child === 'function') tagChildOwner(child as () => unknown, owner)
+    else if (Array.isArray(child)) tagOwners(child, owner)
+  }
+}
+
 /**
- * Create a DOM node tree. `tag` is a string (HTML element name) for now; the
- * function-tag (component) and Fragment-tag paths are added in Task 11.
+ * Create a DOM node tree. `tag` is a string (HTML element name), a
+ * component function, or `Fragment`.
  *
- * `props` keys are dispatched by prefix (Tasks 6–10); in this task only bare
- * names work and they all go through `setAttribute`.
+ * `props` keys are dispatched by prefix; a getter-backed prop (from the
+ * props-to-getters compiler, or from a caller like `mergeProps`) is read
+ * live wherever it's consumed - `bindProp` for DOM tags, or directly by a
+ * component's own code - never flattened into a one-time snapshot here.
  */
 export function h(tag: Tag, props: Record<string, unknown> | null, ...children: unknown[]): Node | Node[] | (() => unknown) {
   if (tag === Fragment) {
+    // The raw values pass straight through - a function child is only
+    // wrapped by insertChild's own binding-effect later, at whichever
+    // unrelated call site ends up consuming this array (unlike the DOM-tag
+    // branch below, which wraps its children immediately, itself). Tag each
+    // function child with the owner ambient RIGHT NOW, at Fragment-
+    // construction time, so that later wrapping - wherever it happens -
+    // uses this owner instead of whatever's ambient at that unrelated call
+    // site. Without this, a component sitting directly under a Fragment
+    // with no static element between it and an enclosing boundary can't
+    // reach the boundary's scope (`useLoading()`, `isErrored()`, ...) - see
+    // tagChildOwner's own doc comment in bindings.ts.
+    const owner = getOwner()
+    tagOwners(children, owner)
     return children as Node[]
   }
   if (typeof tag === 'function') {
-    const merged: Record<string, unknown> = props ? { ...props } : {}
-    if (children.length === 1) merged.children = children[0]
-    else if (children.length > 1) merged.children = children
+    if (children.length === 0) {
+      return tag(props ?? {})
+    }
+    // A manual (non-JSX-compiled) h() call passing children as trailing
+    // args - merge them onto props as a plain value. mergeProps (not
+    // spread) is still used here so any getter already on `props` survives
+    // the merge instead of being flattened.
+    const childrenValue = children.length === 1 ? children[0] : children
+    const merged = props ? mergeProps(props, { children: childrenValue }) : { children: childrenValue }
     return tag(merged)
   }
   if (typeof tag !== 'string') {
@@ -46,7 +78,7 @@ export function h(tag: Tag, props: Record<string, unknown> | null, ...children: 
   const el = document.createElement(tag)
   if (props) {
     for (const key of Object.keys(props)) {
-      bindProp(el, key, props[key])
+      bindProp(el, key, props)
     }
   }
   for (const child of children) {

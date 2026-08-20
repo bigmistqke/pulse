@@ -37,7 +37,7 @@ export function createEventLog(): EventLog {
 export function EventTimeline(props: { log: EventLog }) {
   return (
     <ol class="timeline" attr:data-testid="timeline">
-      <For each={() => props.log.events()}>
+      <For each={props.log.events()}>
         {(e) => (
           <li class={`evt evt-${e.kind}`} attr:data-generation={e.generation}>
             <span class="evt-t">{`${e.t}ms`}</span>

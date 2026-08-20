@@ -53,7 +53,7 @@ export function OptimisticClobbered() {
         <button attr:data-testid="refresh" on:click={refresh}>refresh</button>
       </div>
       <ul class="list-card" attr:data-testid="comments">
-        <For each={() => comments()}>
+        <For each={comments()}>
           {(c) => (
             <li attr:data-gen={c.optimistic ? 'stale' : 'current'} attr:data-comment-id={c.id}>
               {c.text}

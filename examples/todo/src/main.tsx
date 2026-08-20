@@ -71,7 +71,7 @@ function App() {
       <input
         class="new-todo"
         attr:placeholder="What needs doing?"
-        prop:value={newText}
+        prop:value={newText()}
         on:input={(e: Event) =>
           setNewText((e.target as HTMLInputElement).value)
         }
@@ -79,14 +79,14 @@ function App() {
           if ((e as KeyboardEvent).key === 'Enter') addTodo()
         }}
       />
-      <Show when={() => todos().length > 0} fallback={<p class="empty">No todos yet.</p>}>
+      <Show when={todos().length > 0} fallback={<p class="empty">No todos yet.</p>}>
         <ul class="todo-list">
-          <For each={visibleTodos}>
+          <For each={visibleTodos()}>
             {(todo) => (
-              <li class:done={todo.done}>
+              <li class:done={todo.done()}>
                 <input
                   attr:type="checkbox"
-                  prop:checked={todo.done}
+                  prop:checked={todo.done()}
                   on:change={() => todo.setDone((d) => !d)}
                 />
                 <span class="text">{todo.text}</span>
@@ -98,19 +98,19 @@ function App() {
         <footer class="footer">
           <span class="count">
             <Switch>
-              <Match when={() => remaining() === 0 && todos().length > 0}>All done!</Match>
-              <Match when={() => remaining() === 1}>1 item left</Match>
+              <Match when={remaining() === 0 && todos().length > 0}>All done!</Match>
+              <Match when={remaining() === 1}>1 item left</Match>
               {/* `remaining` is passed as a function child → reactive binding;
                   " items left" is a static text sibling. Wrapping in a fn child
                   (`{() => `${remaining()} items left`}`) would NOT be reactive —
                   Match calls function children once at branch transition. */}
-              <Match when={() => remaining() > 1}>{remaining} items left</Match>
+              <Match when={remaining() > 1}>{remaining} items left</Match>
             </Switch>
           </span>
           <div class="filters">
-            <button class:active={() => filter() === 'all'} on:click={() => setFilter('all')}>All</button>
-            <button class:active={() => filter() === 'active'} on:click={() => setFilter('active')}>Active</button>
-            <button class:active={() => filter() === 'completed'} on:click={() => setFilter('completed')}>Completed</button>
+            <button class:active={filter() === 'all'} on:click={() => setFilter('all')}>All</button>
+            <button class:active={filter() === 'active'} on:click={() => setFilter('active')}>Active</button>
+            <button class:active={filter() === 'completed'} on:click={() => setFilter('completed')}>Completed</button>
           </div>
           <button class="clear" on:click={clearCompleted}>Clear completed</button>
         </footer>
@@ -121,7 +121,7 @@ function App() {
               class="estimate-input"
               attr:type="number"
               attr:min="0"
-              prop:value={estimate}
+              prop:value={estimate()}
               on:input={(e: Event) =>
                 setEstimate(Number((e.target as HTMLInputElement).value))
               }

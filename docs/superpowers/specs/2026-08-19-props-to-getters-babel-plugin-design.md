@@ -98,6 +98,45 @@ identifier holds a plain value or an accessor function; that ambiguity is
 resolved by convention, not analysis (§5 explains the one place this
 matters in practice).
 
+### 2.1 Bare (unbraced) JSX-element and fragment children of a component
+
+In standard JSX, `<Foo><Bar/></Foo>` and `<Foo>{<Bar/>}</Foo>` are
+equivalent — both produce the identical `children` value. The wrap rule
+above only ever sees the second form: a bare `<Bar/>` with no braces is a
+`JSXElement` sitting directly in the parent's children array, not a
+`JSXExpressionContainer`, so the `JSXExpressionContainer` visitor never
+runs on it. Left alone, this makes the compiler's output depend on
+whether an author (or their editor's format-on-save) happened to type
+braces around a single JSX-element child — for a component whose contract
+requires a deferred/function child (e.g. `<Loading>`'s `children`), the
+unbraced form would construct that child eagerly, outside the boundary
+it's meant to defer into, while the braced form would correctly defer it.
+That inconsistency was found live, from exactly this formatter-driven
+flip.
+
+The plugin closes it with a second rule, applied to `JSXElement` and
+`JSXFragment` nodes directly (not via the `JSXExpressionContainer`
+visitor): a bare element/fragment child is wrapped into
+`{() => <OriginalElement/>}` — reproducing exactly what the braced form
+already compiles to — when, and only when, its immediate parent tag is a
+**component** (a JSX name starting with an uppercase letter, or a member
+expression like `Foo.Bar`). A DOM tag's direct element children
+(`<div><span>hi</span></div>`'s `<span>`) are never touched by this rule:
+wrapping those would reactive-bind every ordinarily-static nested element
+in the entire codebase, a massive and wrong behavior change for the
+overwhelmingly common case. This is the one place in the plugin that is
+tag-aware — every other rule in this document is not.
+
+This second rule can produce a bare component-tag child (e.g. a
+`<Match>` used as a direct child of `<Switch>`) that itself now arrives
+at its consumer wrapped in a thunk, where it previously arrived as the
+raw value. A consumer that inspects its children synchronously — `Switch`
+reading each `<Match>` child's tagged shape, rather than rendering it —
+needs to unwrap that thunk before inspecting it (`src/dom/switch.ts`).
+`src/dom/resolve.ts`'s `resolve()` (§3) is the single-call, non-recursive
+unwrap used for this and for every other "the compiler may have wrapped
+this" consumption point in the framework.
+
 ## 3. Architecture
 
 ```
@@ -130,9 +169,13 @@ export is added anyway, for parity with `"./jsx-runtime"` and as the public
 surface a future external consumer would use — but nothing in this task's
 own wiring depends on it resolving.
 
-The plugin itself is tag-agnostic: it never needs to know whether a JSX
-element is a DOM tag or a component, since the exclusion rules (§2) are
-attribute-name-based and the wrap/no-wrap decision is the same either way.
+For attribute and expression-container-child wrapping (§2), the plugin is
+tag-agnostic: it never needs to know whether a JSX element is a DOM tag or
+a component, since the exclusion rules are attribute-name-based and the
+wrap/no-wrap decision is the same either way. The one exception is the
+bare-element/fragment-child rule (§2.1), which is deliberately
+tag-aware — it must be, to avoid wrapping every ordinary nested DOM
+element in the codebase.
 
 ## 4. Babel pipeline integration
 

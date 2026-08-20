@@ -21,7 +21,7 @@ test('renders rows in order', () => {
   document.body.append(target)
   const [items] = signal([1, 2, 3])
   const dispose = render(
-    () => <For each={items}>{(n) => <li>{n}</li>}</For>,
+    () => <For each={items()}>{(n) => <li>{n}</li>}</For>,
     target,
   )
   expect(target.querySelectorAll('li')).toHaveLength(3)
@@ -34,7 +34,7 @@ test('empty array → fallback rendered', () => {
   document.body.append(target)
   const [items] = signal<number[]>([])
   const dispose = render(
-    () => <For each={items} fallback={<p>empty</p>}>{(n) => <li>{n}</li>}</For>,
+    () => <For each={items()} fallback={<p>empty</p>}>{(n) => <li>{n}</li>}</For>,
     target,
   )
   expect(target.textContent).toBe('empty')
@@ -49,7 +49,7 @@ test('adding items mounts new DOM at the right position', () => {
   const c = { id: 'c' }
   const [items, setItems] = signal([a, b])
   const dispose = render(
-    () => <For each={items}>{(item) => <li>{item.id}</li>}</For>,
+    () => <For each={items()}>{(item) => <li>{item.id}</li>}</For>,
     target,
   )
   expect(target.textContent).toBe('ab')
@@ -66,7 +66,7 @@ test('removing items fires per-row onCleanup', () => {
   const cleanups: string[] = []
   const [items, setItems] = signal([a, b])
   const dispose = render(
-    () => <For each={items}>{(item) => {
+    () => <For each={items()}>{(item) => {
       onCleanup(() => cleanups.push(item.id))
       return <li>{item.id}</li>
     }}</For>,
@@ -87,7 +87,7 @@ test('reorder: same DOM node identities, repositioned', () => {
   const c = { id: 'c' }
   const [items, setItems] = signal([a, b, c])
   const dispose = render(
-    () => <For each={items}>{(item) => <li>{item.id}</li>}</For>,
+    () => <For each={items()}>{(item) => <li>{item.id}</li>}</For>,
     target,
   )
   const lisBefore = Array.from(target.querySelectorAll('li'))
@@ -104,7 +104,7 @@ test('pending Promise<T[]> → fallback rendered', () => {
   const p = new Promise<number[]>(() => {})
   const [items] = signal<number[] | Promise<number[]>>(p)
   const dispose = render(
-    () => <For each={items} fallback={<p>loading</p>}>{(n) => <li>{n}</li>}</For>,
+    () => <For each={items()} fallback={<p>loading</p>}>{(n) => <li>{n}</li>}</For>,
     target,
   )
   expect(target.textContent).toBe('loading')
@@ -120,10 +120,10 @@ test('index accessor is reactive: rendered DOM updates on reorder', () => {
   const [items, setItems] = signal([a, b, c])
   const dispose = render(
     () => (
-      <For each={items}>
+      <For each={items()}>
         {(item, index) => (
           <li>
-            {index}:{item.id}
+            {index()}:{item.id}
           </li>
         )}
       </For>

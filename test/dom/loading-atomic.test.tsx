@@ -271,7 +271,7 @@ test('reactive child unmounted while throwing releases its controller (does not 
       <Loading>
         {() => (
           <div>
-            <Show when={showA}>
+            <Show when={showA()}>
               {() => <span class="a">{() => use(pA)}</span>}
             </Show>
             <span class="b">{() => use(pB)}</span>
@@ -420,7 +420,7 @@ test('newly-mounted binding inside <Loading> joins the gather (option A: hold pr
         {() => (
           <div>
             <span class="a">{() => use(srcA())}</span>
-            <Show when={visible}>
+            <Show when={visible()}>
               {() => <span class="b">{() => use(srcB())}</span>}
             </Show>
           </div>
@@ -478,7 +478,7 @@ test('mid-flight mount without fallback: prior tree retained until gate opens', 
         {() => (
           <div>
             <span class="a">{() => use(srcA())}</span>
-            <Show when={visible}>
+            <Show when={visible()}>
               {() => <span class="b">{() => use(srcB())}</span>}
             </Show>
           </div>
@@ -523,7 +523,7 @@ test('deferred non-throwing use() binding: unmount before gate opens does not NP
       <Loading>
         {() => (
           <div>
-            <Show when={showRaw}>
+            <Show when={showRaw()}>
               {() => <span class="raw">{() => use(n)}</span>}
             </Show>
             <span class="hold">{() => use(pHold)}</span>
@@ -559,7 +559,7 @@ test('deferred non-throwing use() binding: unmount before gate opens does not NP
       <Loading>
         {() => (
           <div>
-            <Show when={showRaw2}>
+            <Show when={showRaw2()}>
               {() => <span class="raw2">{() => use(m)}</span>}
             </Show>
             <span class="hold2">{() => use(pHold2)}</span>
@@ -761,15 +761,14 @@ test('use(computed) inside binding: two-stage pipeline (async + sync map) propag
   expect(target.querySelector('.list')!.textContent).toBe('c,d')
 })
 
-// KNOWN BUG: top-level COMPONENT children in a Loading's Fragment can't reach
-// the Loading scope via useLoading(). Their bindings get wrapped by the OUTER
-// hole's insertChild under the outer's runOwner (not boundaryOwner), so
-// findBoundaryScope walks past Loading. Workaround: nest the component in any
-// static element (`<div><Show ...>` works fine). Real fix requires either
-// pre-resolving loadedSubtree to DOM under boundaryOwner (snapshot-stale
-// issue) or a marker-based "wrap-under-this-owner" hint on values returned
-// to insertChild. Tracked in docs/follow-ups.md.
-test.skip('KNOWN BUG: top-level component inside Loading misses scope via useLoading()', async () => {
+// Was a KNOWN BUG: a top-level COMPONENT child of a Loading's Fragment
+// couldn't reach the Loading scope via useLoading() - Fragment used to hand
+// its raw children array back unprocessed, so a function child only got
+// wrapped by insertChild later, under whatever owner was ambient at that
+// later, unrelated call site (not boundaryOwner). Fixed by having h()'s
+// Fragment branch resolve its children into real nodes immediately, the same
+// way the DOM-tag branch already did - see src/dom/h.ts.
+test('top-level component inside Loading reaches scope via useLoading()', async () => {
   const target = document.createElement('section')
   document.body.append(target)
 
@@ -794,11 +793,9 @@ test.skip('KNOWN BUG: top-level component inside Loading misses scope via useLoa
       <Loading initial={<p>loading</p>}>
         {() => (
           <>
-            {/* Component at TOP level of the Fragment — its binding gets
-                wrapped by the OUTER Loading hole's insertChild, which uses
-                the outer hole's runOwner (NOT boundaryOwner) as ambient.
-                If useLoading() walks owners from that point, it must still
-                find the Loading scope. This is the demo pattern. */}
+            {/* Component at TOP level of the Fragment, no static element
+                between it and the boundary - useLoading() must still find
+                the Loading scope from here. This is the demo pattern. */}
             <Indicator />
             <span class="sib">{() => use(srcP())}</span>
           </>

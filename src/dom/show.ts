@@ -8,6 +8,7 @@ import {
   type Owner,
 } from '../owner'
 import type { Child } from './h'
+import { readDynamic } from './resolve'
 
 /** Type-level narrowing for `Show`'s function-child: the value passed in
  *  is the input minus its falsy components (including pending Promises,
@@ -43,9 +44,7 @@ export function Show<T>(props: ShowProps<T>): () => unknown {
   let branchOwner: Owner | null = null
 
   return () => {
-    const raw = typeof props.when === 'function'
-      ? (props.when as () => T)()
-      : props.when
+    const raw = readDynamic(props, 'when') as T
     const isTruthy = !!raw && !isPromise(raw)
     const branch = isTruthy ? 'truthy' : 'falsy'
 
@@ -59,10 +58,16 @@ export function Show<T>(props: ShowProps<T>): () => unknown {
     // disposing them on the very next re-run. Same pattern as mapArray.
     cachedNode = untrack(() => runWithOwner(branchOwner!, () => {
       if (isTruthy) {
-        return typeof props.children === 'function'
-          ? (props.children as (v: Truthy<T>) => Child)(raw as Truthy<T>)
-          : props.children
+        // readDynamic distinguishes a getter (already resolved - even to
+        // another component's live accessor, e.g. a nested <Show>, which
+        // must be left as a function for insertChild to wrap in its own
+        // effect) from a genuine hand-written render-prop function (which
+        // needs calling, with the narrowed value).
+        return readDynamic(props, 'children', raw as Truthy<T>) as Child
       }
+      // Read directly: this closure re-runs on every reactive pass (via
+      // insertChild's effect), so a getter-backed fallback is already
+      // live here.
       return props.fallback
     }))
     lastBranch = branch

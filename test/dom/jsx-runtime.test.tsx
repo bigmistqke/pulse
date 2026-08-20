@@ -17,7 +17,7 @@ afterEach(() => {
 test('JSX renders an element with reactive child', () => {
   createRoot(() => {
     const [count, setCount] = signal(0)
-    const el = (<div>{count}</div>) as HTMLElement
+    const el = (<div>{count()}</div>) as HTMLElement
     document.body.append(el)
     expect(el.textContent).toBe('0')
     setCount(5)
@@ -30,7 +30,7 @@ test('JSX renders nested element with on: and class:', () => {
   createRoot(() => {
     const [on, setOn] = signal(false)
     const el = (
-      <button on:click={() => { clicked++ }} class:active={on}>
+      <button on:click={() => { clicked++ }} class:active={on()}>
         ok
       </button>
     ) as HTMLButtonElement

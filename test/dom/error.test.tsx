@@ -8,6 +8,7 @@ import {
   Errored,
   flush,
   For,
+  isErrored,
   Loading,
   microtaskScheduler,
   onCleanup,
@@ -578,7 +579,7 @@ test('a mutation triggered from a reference-keyed row still reaches <Errored>, e
       >
         {() => (
           <ul>
-            <For each={overlay}>
+            <For each={overlay()}>
               {(item: Item) => {
                 onCleanup(() => {
                   rowDisposals++
@@ -647,7 +648,7 @@ test('an action that fails after its owning row unmounted (but the boundary is s
       <Errored
         fallback={(error) => <p data-testid="error-panel">{(error as Error).message}</p>}
       >
-        {() => <Show when={visible}>{() => <Widget />}</Show>}
+        {() => <Show when={visible()}>{() => <Widget />}</Show>}
       </Errored>
     ),
     target,
@@ -707,7 +708,7 @@ test('an action that fails after its <Errored> boundary itself unmounted escalat
 
   render(
     () => (
-      <Show when={boundaryVisible}>
+      <Show when={boundaryVisible()}>
         {() => (
           <Errored
             fallback={(error) => <p data-testid="error-panel">{(error as Error).message}</p>}
@@ -855,6 +856,91 @@ test('useErrored() called with no owner at all returns a safe, always-inactive s
   expect(state.active()).toBe(false)
   expect(state.error()).toBeNull()
   expect(() => state.retry()).not.toThrow()
+})
+
+test('isErrored() reflects the nearest boundary, read fresh each call', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+  const c = computed(() => Promise.reject(new Error('boom')))
+
+  render(
+    () => (
+      <Errored>
+        {() => (
+          // No static wrapper element needed: a component sitting directly
+          // under a bare Fragment still reaches the boundary's owner.
+          <>
+            <Show when={isErrored() !== undefined} fallback={<i>healthy</i>}>
+              {() => <i>errored</i>}
+            </Show>
+            <p>{use(c)}</p>
+          </>
+        )}
+      </Errored>
+    ),
+    target,
+  )
+  // Show's own binding-effect, for a component sitting directly under a
+  // Fragment, is created one effect-nesting level deep (inside Errored's
+  // own wrapping effect) — an explicit flush() settles it, the same as a
+  // microtask tick would in production under the default scheduler.
+  flush()
+
+  expect(target.textContent).toContain('healthy')
+
+  await tick()
+  flush()
+
+  expect(target.textContent).toContain('errored')
+  expect(target.textContent).not.toContain('healthy')
+})
+
+test('isErrored().retry retries every failed report, the same operation reset() performs', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+  let attempt = 0
+  const c = computed(() => {
+    attempt++
+    return attempt === 1 ? Promise.reject(new Error('boom')) : Promise.resolve('ok')
+  })
+  let retry: (() => void) | undefined
+
+  render(
+    () => (
+      <Errored>
+        {() => (
+          <>
+            {/* isErrored(predicate) written as a type guard narrows the
+                Truthy branch Show hands to `children` — `state.error` comes
+                back typed as `Error`, not `unknown`. */}
+            <Show when={isErrored((error): error is Error => error instanceof Error)}>
+              {(state) => {
+                retry = state.retry
+                return <p>{state.error.message}</p>
+              }}
+            </Show>
+            <p>{use(c)}</p>
+          </>
+        )}
+      </Errored>
+    ),
+    target,
+  )
+
+  await tick()
+  flush()
+  expect(retry).toBeDefined()
+  expect(target.textContent).toContain('boom')
+
+  retry!()
+  await tick()
+  flush()
+
+  expect(attempt).toBe(2)
+})
+
+test('isErrored() called with no owner at all returns undefined', () => {
+  expect(isErrored()).toBeUndefined()
 })
 
 test('Errored.Error renders nothing while the boundary is healthy, and the error UI once it fails', async () => {
@@ -1224,7 +1310,7 @@ test('a mutation triggered from a reference-keyed row still reaches a filtered <
       >
         {() => (
           <ul>
-            <For each={overlay}>
+            <For each={overlay()}>
               {(item: Item) => {
                 onCleanup(() => {
                   rowDisposals++

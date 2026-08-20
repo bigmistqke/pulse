@@ -33,10 +33,8 @@ Latency and failure rate are adjustable in the page, and can be seeded from the 
 
 **A mutation writes `todos` directly once the server confirms — no mirror signal.** `todos` is both the fetch and the write target: `setTodos((prev) => [...(prev ?? []), saved])` is the whole "fold the server's answer into canonical truth" step. An earlier version of this demo kept a second, plain signal in sync with the fetch via an effect purely so `optimistic` had something ordinary to wrap — a signal existing only to mirror another one into a form something else needs is a sign the mirrored thing should have been writable in the first place.
 
-## Two things the code works around deliberately
+## One thing the code works around deliberately
 
-Both are recorded in `docs/follow-ups.md`, and the demo does what those entries recommend rather than hiding the seam.
-
-A component sitting directly inside the function child of `<Loading>` or `<Errored>` is wrapped under the *outer* hole's owner and never finds the boundary's scope, so there is a static `<div>` between the boundary and its children.
+Recorded in `docs/follow-ups.md`, and the demo does what that entry recommends rather than hiding the seam.
 
 The fake server reads its latency and failure rate from plain module variables rather than signals. They are read inside the request helper, which runs while a reactive computation is on the stack, and reading a signal there would make every request a dependency of the stage that issued it — so moving the latency slider would trigger a refetch.

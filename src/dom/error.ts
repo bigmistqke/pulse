@@ -10,12 +10,20 @@ import {
   type Owner,
 } from '../owner'
 import type { Accessor } from '../signal'
+import type { Child } from './h'
+import { readDynamic } from './resolve'
 
 export interface ErroredProps<E = unknown> {
-  /** Function child REQUIRED — defers JSX construction until inside the boundary
-   *  owner, so descendants register with the right scope. Same contract as
-   *  `<Loading>`. */
-  children: () => unknown
+  /** JSX construction must be deferred until inside the boundary owner, so
+   *  descendants register with the right scope. A function child defers by
+   *  construction — `Errored` calls it itself, inside the boundary. A plain
+   *  `Child` only defers correctly when the pulse JSX compiler
+   *  (props-to-getters) is compiling this file: it rewrites a bare
+   *  JSX-element child into exactly that same getter at compile time, read
+   *  the same way `<Loading>`'s `children` is — see its doc comment for the
+   *  full contract. Pass an explicit `() => <Foo/>` in any file not compiled
+   *  by the pulse plugin. */
+  children: Child | (() => unknown)
   /** Optional. When provided, behaves as a full-subtree swap: replace the
    *  whole subtree with `fallback(error, reset)` while the boundary is
    *  active. When omitted, `<Errored>` is pure scoping — children stay
@@ -104,6 +112,36 @@ export function useErrored<E = unknown>(
 }
 
 /**
+ * Reads the nearest enclosing `<Errored>` boundary's state directly, as a
+ * plain `{ error, retry } | undefined` rather than a bag of accessors. Call
+ * it fresh at each read site — inside a getter-converted prop, or inside an
+ * effect — the same way `signal()` reads are meant to be called fresh rather
+ * than stored. Returns `undefined` when the boundary is inactive or when no
+ * boundary is found, folding "healthy" and "no boundary" into one case since
+ * both mean "nothing to show".
+ *
+ * `predicate` narrows which reports count, same as `useErrored()`.
+ *
+ * `useErrored()` still exists for the narrower case where the boundary is
+ * read from one place and the resulting accessors handed to another —
+ * `isErrored()` covers the common case of reading and using the state at the
+ * same call site.
+ */
+export function isErrored<E = unknown>(
+  predicate?: ((value: unknown) => value is E) | ((value: unknown) => boolean),
+): { error: E; retry: () => void } | undefined {
+  const scope = findBoundaryScope(getOwner(), 'error')
+  if (scope === null) return undefined
+  const matching =
+    predicate === undefined ? scope.reports() : scope.reports().filter((r) => predicate(r.error))
+  if (matching.length === 0) return undefined
+  return {
+    error: matching[0].error as E,
+    retry: () => (predicate === undefined ? scope.reset() : scope.resetMatching(predicate)),
+  }
+}
+
+/**
  * Error boundary. Bindings beneath it that throw a real error report themselves
  * here; the boundary collects them.
  *
@@ -130,7 +168,7 @@ export function Errored<E = unknown>(props: ErroredProps<E>): Accessor<unknown> 
 
   // Construct the guarded subtree once, inside boundaryOwner — same
   // components-run-once contract as `<Loading>`.
-  const subtree: unknown = runWithOwner(boundaryOwner, props.children)
+  const subtree: unknown = runWithOwner(boundaryOwner, () => readDynamic(props, 'children'))
 
   return () => {
     if (props.fallback === undefined) return subtree
@@ -167,7 +205,7 @@ export interface ErroredErrorProps<E = unknown> {
 /**
  * Compound sugar for showing the nearest `<Errored>` boundary's error inline,
  * anywhere, with no unmounting of anything around it — built entirely on
- * `useErrored()`, nothing more.
+ * `isErrored()`, nothing more.
  *
  * Gets its own sub-owner, disposed on each active/inactive transition — the
  * same pattern `Show` uses internally — so that whatever the render prop
@@ -184,13 +222,13 @@ export interface ErroredErrorProps<E = unknown> {
 export namespace Errored {
   export function Error<E = unknown>(props: ErroredErrorProps<E>): Accessor<unknown> {
     const parentOwner = getOwner()
-    const { active, error, retry } = useErrored(props.for)
     let branchOwner: Owner | null = null
     let lastActive: boolean | null = null
     let cached: unknown
 
     return () => {
-      const isActive = active()
+      const state = isErrored(props.for)
+      const isActive = state !== undefined
       if (isActive === lastActive) return cached
 
       if (branchOwner !== null) disposeOwner(branchOwner)
@@ -199,12 +237,8 @@ export namespace Errored {
       // Without untrack, those would route to the calling binding-effect's
       // r3 per-run cleanup instead of branchOwner, disposing them on the
       // very next re-run — same pattern as Show/mapArray.
-      //
-      // error() as E is safe here: isActive is only true while matching()
-      // is non-empty, and error() only returns null when matching() is
-      // empty.
-      cached = isActive
-        ? untrack(() => runWithOwner(branchOwner!, () => props.children(error() as E, retry)))
+      cached = state
+        ? untrack(() => runWithOwner(branchOwner!, () => props.children(state.error as E, state.retry)))
         : null
       lastActive = isActive
       return cached
