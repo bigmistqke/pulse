@@ -34,15 +34,13 @@ export function UncommittableSpeculation() {
         {`showing: ${archived() ? 'archived' : 'active'}`}
       </button>
       <Loading initial={<div class="list-card">loading…</div>}>
-        {() => (
-          <ul
-            class="list-card"
-            attr:data-testid="list"
-            attr:data-gen={use(list).archived ? 'archived' : 'active'}
-          >
-            <For each={use(list).items}>{(item) => <li>{item}</li>}</For>
-          </ul>
-        )}
+        <ul
+          class="list-card"
+          attr:data-testid="list"
+          attr:data-gen={use(list).archived ? 'archived' : 'active'}
+        >
+          <For each={use(list).items}>{(item) => <li>{item}</li>}</For>
+        </ul>
       </Loading>
     </div>
   )

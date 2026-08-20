@@ -80,17 +80,11 @@ const remaining = () => overlay().filter(todo => !todo.done).length
 /* --------------------------------------------------------------- mutations */
 
 /**
- * Every mutation has the same shape: write the speculative list, then wait for
- * the server and fold its answer into canonical truth. If the server refuses,
- * the generator throws, the action is discarded, and the overlay disappears
- * with it — a refused write's error is picked up automatically by the
- * nearest `<Errored>` boundary below, with no wiring needed here.
- *
- * The overlay is built from `committed(...)` rather than from `overlay()` so it
- * layers on server truth rather than on another in-flight action's guess. Read
- * through `latest`, not called directly: `todos` is a fetch, so it may itself
- * be a promise mid-reload, and the tolerant read degrades to the last known
- * list instead — the same list a plain `Todo[]` mirror signal used to hold.
+ * A refused write's error routes automatically to the nearest `<Errored>`
+ * boundary — the generator's throw discards the action and the overlay with
+ * it, with no wiring needed here. Built from `committed(...)`, not
+ * `overlay()`, so it layers on server truth rather than another in-flight
+ * action's guess.
  */
 function submitTodo(text: string) {
 	// A placeholder id, negative so it cannot collide with a real one. It only
@@ -201,13 +195,9 @@ function Controls() {
 	)
 }
 
-/**
- * A mutation error's inline banner. Reads the nearest `<Errored>` boundary
- * via `Errored.Error` — the mutation boundary in `App`, since that is what
- * wraps this component — and shows it without unmounting anything else in
- * `TodoList`: unlike the load boundary's `fallback`, this never swaps the
- * list out, only overlays a message above it.
- */
+/** Shows the nearest `<Errored>` boundary's error without unmounting
+ *  anything — unlike the load boundary's `fallback`, this only overlays a
+ *  message; it never swaps the list out. */
 function MutationError() {
 	return (
 		<Errored.Error>

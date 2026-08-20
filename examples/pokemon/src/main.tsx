@@ -23,7 +23,6 @@ function PokemonDetails(props: { name: string }) {
 	return (
 		<Loading initial={<div class="detail-spinner">loading details…</div>}>
 			<div class="details">
-				{/* sprite: hidden until p resolves; each prop binding is reactive */}
 				<Show when={use(pokemon).sprites.front_default}>
 					<img attr:src={use(pokemon).sprites.front_default!} attr:alt={use(pokemon).name} />
 				</Show>
@@ -66,15 +65,8 @@ function App() {
 	return (
 		<div class="app">
 			<TopBar />
-			{/* One Loading boundary covers page label + list. Initial first load
-          shows the spinner via `initial`. Subsequent transitions hold the
-          prior committed tree (no fallback set), with a small `.indicator`
-          chip surfacing via isLoading() for the in-flight cue. */}
 			<Loading initial={<div class="spinner">loading…</div>}>
 				<div class="loaded">
-					{/* No "refreshing" chip. Instead, the list and page label fade
-                via class:loading while the boundary is pending (transition
-                window). Visual cue without layout shift. */}
 					<ul class="list" class:loading={isLoading()}>
 						<For each={use(list)}>{ref => <PokemonRow ref={ref} />}</For>
 					</ul>

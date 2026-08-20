@@ -37,15 +37,13 @@ export function LostInteractivity() {
         on:input={onInput}
       />
       <Loading initial={<div class="list-card">type to search…</div>}>
-        {() => (
-          <ul
-            class="list-card"
-            attr:data-testid="results"
-            attr:data-result-query={use(results).query}
-          >
-            <For each={use(results).items}>{(item) => <li>{item}</li>}</For>
-          </ul>
-        )}
+        <ul
+          class="list-card"
+          attr:data-testid="results"
+          attr:data-result-query={use(results).query}
+        >
+          <For each={use(results).items}>{(item) => <li>{item}</li>}</For>
+        </ul>
       </Loading>
     </div>
   )

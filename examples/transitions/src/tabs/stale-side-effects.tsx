@@ -38,14 +38,12 @@ export function StaleSideEffects() {
     <div class="scenario">
       <button attr:data-testid="save" on:click={doSave}>save</button>
       <Loading initial={<div class="payload">no save yet</div>}>
-        {() => (
-          <div class="payload" attr:data-testid="committed" attr:data-gen="current">
-            {() => use(save).text}
-          </div>
-        )}
+        <div class="payload" attr:data-testid="committed" attr:data-gen="current">
+          {use(save).text}
+        </div>
       </Loading>
       <div class="counter">
-        side effects executed: <span attr:data-testid="side-effect-count">{() => sideEffectsRan()}</span>
+        side effects executed: <span attr:data-testid="side-effect-count">{sideEffectsRan()}</span>
       </div>
     </div>
   )

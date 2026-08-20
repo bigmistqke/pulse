@@ -42,21 +42,17 @@ export function TornAcrossBoundaries() {
     <div class="scenario">
       <button attr:data-testid="navigate" on:click={navigate}>navigate alice ⇄ bob</button>
       <Loading initial={<div class="pane">loading header…</div>}>
-        {() => (
-          <div class="pane pane-header" attr:data-testid="header" attr:data-gen={use(headerData).user}>
-            {() => use(headerData).name}
-          </div>
-        )}
+        <div class="pane pane-header" attr:data-testid="header" attr:data-gen={use(headerData).user}>
+          {use(headerData).name}
+        </div>
       </Loading>
       <Loading initial={<div class="pane">loading body…</div>}>
-        {() => (
-          <div class="pane pane-body" attr:data-testid="body" attr:data-gen={use(countData).user}>
-            <div>{() => `${use(countData).count} followers`}</div>
-            <ul>
-              <For each={use(postsData).posts}>{(p) => <li>{p}</li>}</For>
-            </ul>
-          </div>
-        )}
+        <div class="pane pane-body" attr:data-testid="body" attr:data-gen={use(countData).user}>
+          <div>{`${use(countData).count} followers`}</div>
+          <ul>
+            <For each={use(postsData).posts}>{(p) => <li>{p}</li>}</For>
+          </ul>
+        </div>
       </Loading>
     </div>
   )

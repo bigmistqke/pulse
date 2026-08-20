@@ -44,19 +44,17 @@ export function TornState() {
     <div class="scenario">
       <button attr:data-testid="navigate" on:click={navigate}>navigate alice ⇄ bob</button>
       <Loading initial={<div class="profile-card">loading…</div>}>
-        {() => (
-          <div class="profile-card" attr:data-testid="profile-card">
-            <div class="pane pane-header" attr:data-gen={use(profile).user}>
-              {() => use(profile).name}
-            </div>
-            <div class="pane pane-followers" attr:data-gen={use(followers).user}>
-              {() => `${use(followers).count} followers`}
-            </div>
-            <ul class="pane pane-posts" attr:data-gen={use(posts).user}>
-              <For each={use(posts).titles}>{(title) => <li>{title}</li>}</For>
-            </ul>
+        <div class="profile-card" attr:data-testid="profile-card">
+          <div class="pane pane-header" attr:data-gen={use(profile).user}>
+            {use(profile).name}
           </div>
-        )}
+          <div class="pane pane-followers" attr:data-gen={use(followers).user}>
+            {`${use(followers).count} followers`}
+          </div>
+          <ul class="pane pane-posts" attr:data-gen={use(posts).user}>
+            <For each={use(posts).titles}>{(title) => <li>{title}</li>}</For>
+          </ul>
+        </div>
       </Loading>
     </div>
   )

@@ -54,14 +54,6 @@ const visibleTodos = () => {
 
 const remaining = () => todos().filter((t) => !t.done()).length
 
-/**
- * The one piece of writable derived state in this example: normally
- * `remaining() * 5`, but directly editable. One value, two sources — the
- * formula computes it, or you type your own. The next add, remove, or toggle
- * changes `remaining`, and the derivation takes back over, dropping whatever
- * was typed. No server, no promise, no action involved: the same setter that
- * writes a fetched list elsewhere writes a plain number here.
- */
 const [estimate, setEstimate] = signal(() => remaining() * 5)
 
 function App() {
@@ -100,10 +92,6 @@ function App() {
             <Switch>
               <Match when={remaining() === 0 && todos().length > 0}>All done!</Match>
               <Match when={remaining() === 1}>1 item left</Match>
-              {/* `remaining` is passed as a function child → reactive binding;
-                  " items left" is a static text sibling. Wrapping in a fn child
-                  (`{() => `${remaining()} items left`}`) would NOT be reactive —
-                  Match calls function children once at branch transition. */}
               <Match when={remaining() > 1}>{remaining} items left</Match>
             </Switch>
           </span>
