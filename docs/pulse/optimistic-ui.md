@@ -406,6 +406,9 @@ The wrapper shape is the load-bearing decision. Other sub-questions can be settl
 
 ## Tentative recommendations
 
+> **Status.** Recommendations 2 and 4 shipped as written: a per-action layer stack with most-recent-wins display and per-action cleanup, and the explicit dual-setter pattern. Recommendations 1, 3 and 5 were overtaken. `optimistic(...)` is a *signal variant* rather than a wrapper: it takes stages, builds the same pipeline `signal(...)` builds, and differs only in its setter's write discipline, so its accessor is an ordinary node and the read verb is chosen at the read site instead of being fixed by the wrapper. That means it is not library code over scope and cleanup (recommendation 5), the two-reader split is a call-site choice rather than a structural one (recommendation 1), and the closure-bound query survives only as the third tuple slot on a primitive that is no longer a wrapper (recommendation 3). See [ADR 0016](../adr/0016-optimistic-as-a-signal-variant.md). The section below is left as written, as the reasoning that was current when the shape was first chosen.
+
+
 **1. Adopt the wrapper shape (A) — 3-tuple destructure.** `optimistic(committedSignal)` returns `[optimisticValue, setOptimisticValue, isOptimistic]`. The optimistic dimension lives at the wrapper-creation site; consumers bind to either `value` (canonical) or `optimisticValue` (overlay-aware) depending on their use case, and use the closure-bound `isOptimistic` when they need the pending status.
 
 **2. Stack-based overlay for concurrent actions.** A per-node overlay map keyed by action handle; reader returns the most-recent live layer; each action's cleanup removes only its layer.

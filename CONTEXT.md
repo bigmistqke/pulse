@@ -38,6 +38,45 @@ Promise-valued signals keeps `latest`/`isPending` working without an explicit
 `use` call.)
 _Avoid_: store (different concept), atom.
 
+**Optimistic**:
+A Signal with a different write discipline, created as
+`const [value, setValue, isOptimistic] = optimistic(...stages)`. The pipeline
+is built exactly the way `computed(...)` and `signal(...)` build one, so the
+accessor is an ordinary node and the read verb is chosen at the read site:
+`use(value)`, `latest(value)`, `peek(value)`, `isPending(value)`,
+`error(value)`. Only the setter differs. An ordinary setter's write is isolated
+to the enclosing action, promoted when it commits, gone if it is discarded, and
+it stands once promoted. An optimistic setter writes a Layer in front of the
+derivation instead: it leaks out (a reader outside every action sees the top of
+the layer stack, so the prediction is on screen at once), it stays scoped
+inside (a reader inside an action sees the nearest layer up its own scope
+chain, and otherwise the derivation itself — one action never reads another's
+guess), and it expires with the action on both the commit and the discard face.
+A prediction that turned out right survives only because the action also wrote
+the canonical source the pipeline reads. Because layers sit in front of the
+derivation rather than being written into it, a source that resolves or changes
+while a prediction is live updates underneath it and shows through when the
+last layer drops — nothing is overwritten, so nothing has to be reverted. While
+any layer is live the node reports neither pending nor failed: a prediction is
+on screen, so nothing should suspend behind it or swap it for an error.
+Wrapping an existing node (`optimistic(todos)`) registers this node as
+downstream of it, so a refresh of that node is reported through this one and a
+boundary's retry resets it. See
+[ADR 0016](docs/adr/0016-optimistic-as-a-signal-variant.md).
+_Avoid_: overlay (say Layer), override.
+
+**Layer**:
+One entry in an Optimistic's stack — a predicted value, keyed by the Scope of
+the action that wrote it. Display is last-write-wins: the top of the stack is
+what an outside reader sees, so a second action's prediction hides a first
+action's until one of them closes. Each action's layer is dropped by its own
+settle, so an early-committing action cannot wipe a later one's live
+prediction. An update function's `prev` is this action's own layer if it has
+one, and otherwise the derivation's last resolved value read at committed
+level — never another action's prediction, so a prediction can always be
+withdrawn by the action that made it.
+_Avoid_: overlay, override, optimistic value (ambiguous with the accessor).
+
 **Accessor**:
 A callable that reads a reactive value — `count()`. Type: `Accessor<T> = () => T`.
 The first element of the `signal()` tuple. Computeds also return Accessors.
@@ -545,6 +584,29 @@ together when `list` settles.
   call at all and keeps every behaviour, which is the demonstration that
   loading and error propagation never needed a throw — only the non-optional
   return type and the atomic-commit gate do.
+- **v1.6** (shipped, [ADR 0016](docs/adr/0016-optimistic-as-a-signal-variant.md)):
+  `optimistic()` is a signal variant rather than a wrapper around one. It takes
+  stages and builds the same pipeline `computed()` builds, so its accessor is an
+  ordinary node — `use(value)`, `latest(value)`, `peek(value)`,
+  `isPending(value)` and `error(value)` all apply, chosen at the read site
+  instead of fixed at construction. Only the setter differs: it writes a Layer
+  in front of the derivation, which leaks out to readers outside every action,
+  stays scoped to the writing action's own chain inside, and expires when that
+  action closes. Two defects in the intermediate version that wrote the layer
+  INTO the node, both measured rather than reasoned about, are what put the
+  layers in front: a source that changed while a prediction was live overwrote
+  it, and an action could not read back its own prediction while an update
+  function's `prev` resolved to a rival action's — which baked a refused
+  prediction into a second action's layer, where its own rollback could no
+  longer withdraw it. Wrapping an existing node registers this node as
+  downstream of it, so a refresh of that node is reported through this one and a
+  boundary's retry resets it — verified end-to-end: without that link the
+  example's failed-load-then-retry test does not recover. Two further
+  consequences of layering in front, both measured: dropping a layer stabilizes
+  first, or it reveals a derivation that has not yet followed the write the
+  same action just made; and both the reader and its tracker entry read the
+  derivation on every call, or nothing pulls the pipeline while a prediction is
+  showing and dropping the layer reveals a stale value.
 - **later**: make `retry`/`reset` genuinely absent when nothing is retryable,
   instead of present and inert for a non-re-runnable source (see
   `docs/follow-ups.md`); structural-mount gating in `<Loading>` (current bug:

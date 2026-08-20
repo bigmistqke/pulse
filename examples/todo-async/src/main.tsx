@@ -1,6 +1,5 @@
 import {
 	action,
-	committed,
 	Errored,
 	For,
 	from,
@@ -9,7 +8,6 @@ import {
 	latest,
 	Loading,
 	optimistic,
-	peek,
 	render,
 	Show,
 	signal,
@@ -56,45 +54,55 @@ const [todos, setTodos] = signal(() => {
 }, [] as Todo[])
 
 /**
- * What the UI reads. While an action has a live overlay this returns the
- * speculative list; otherwise it falls through to canonical truth. The overlay
- * is dropped when the action closes on either face, so a refused write rolls
- * back without any explicit undo.
+ * What the UI reads. `optimistic` is `signal` with a different write
+ * discipline: the same pipeline, the same stale-while-revalidate publishing,
+ * the same registration with the pending and error trackers — but its setter
+ * writes a layer in FRONT of the derivation rather than a value into it. The
+ * layer leaks out, so every consumer sees the prediction at once; it stays
+ * scoped to the action that wrote it, so a second in-flight write builds on
+ * server truth rather than on a rival guess; and it is dropped when that
+ * action closes, on either face. So a refused write rolls back with no
+ * explicit undo, and a confirmed one survives only because the action also
+ * wrote `todos`, which this recipe reads.
  *
- * The signal is passed directly — `optimistic` overlays a source, so it takes
- * the source. It reads that source through `latest` itself: an overlay layers
- * plain values over plain values, and `todos` is a fetch, so its raw read is
- * `Todo[] | Promise<Todo[]>` with nothing sensible to overlay onto a Promise.
- * `todos`'s construction-time `[]` default carries through, so `overlay()` is
- * a plain `Todo[]` with no `?? []` needed at any read site below.
+ * Its accessor is an ordinary node, so the read verb is chosen at each read
+ * site below rather than baked in here. Wrapping `todos` registers this node as
+ * downstream of it: a refetch is reported through this node too, and the
+ * boundary's retry resets `todos` rather than only re-running this recipe over
+ * a source that is still parked.
+ *
+ * The `[]` default plays the same role it does on `todos` — it is what the
+ * tolerant read reports until the first load resolves, so no read below needs
+ * its own `?? []`.
  */
-const [overlay, setOverlay, speculating] = optimistic(todos)
+const [overlay, setOverlay, speculating] = optimistic(todos, [] as Todo[])
 
 const visible = () => {
-	const all = overlay()
+	const all = latest(overlay)
 	const f = filter()
 	if (f === 'active') return all.filter(todo => !todo.done)
 	if (f === 'completed') return all.filter(todo => todo.done)
 	return all
 }
 
-const remaining = () => overlay().filter(todo => !todo.done).length
+const remaining = () => latest(overlay).filter(todo => !todo.done).length
 
 /* --------------------------------------------------------------- mutations */
 
 /**
  * A refused write's error routes automatically to the nearest `<Errored>`
- * boundary — the generator's throw discards the action and the overlay with
- * it, with no wiring needed here. Built from `committed(...)`, not
- * `overlay()`, so it layers on server truth rather than another in-flight
- * action's guess.
+ * boundary — the generator's throw discards the action and its layer with it,
+ * with no wiring needed here. The update form's `prev` is server truth, not
+ * another in-flight action's guess: a layer is scoped to the action that wrote
+ * it, so one action's prediction is never read into another's and can always
+ * be withdrawn by the action that made it.
  */
 function submitTodo(text: string) {
 	// A placeholder id, negative so it cannot collide with a real one. It only
 	// ever exists inside the overlay.
 	const pending: Todo = { id: -Date.now(), text, done: false }
 	action(function* () {
-		setOverlay([...committed(() => peek(todos)), pending])
+		setOverlay(prev => [...prev, pending])
 		const saved = yield* from(api.add(text))
 		setTodos(prev => [...prev, saved])
 	})
@@ -109,10 +117,8 @@ function addTodo() {
 
 function toggleTodo(todo: Todo) {
 	action(function* () {
-		setOverlay(
-			committed(() => peek(todos)).map(each =>
-				each.id === todo.id ? { ...each, done: !each.done } : each,
-			),
+		setOverlay(prev =>
+			prev.map(each => (each.id === todo.id ? { ...each, done: !each.done } : each)),
 		)
 		const saved = yield* from(api.toggle(todo.id))
 		setTodos(prev => prev.map(each => (each.id === saved.id ? saved : each)))
@@ -121,7 +127,7 @@ function toggleTodo(todo: Todo) {
 
 function removeTodo(todo: Todo) {
 	action(function* () {
-		setOverlay(committed(() => peek(todos)).filter(each => each.id !== todo.id))
+		setOverlay(prev => prev.filter(each => each.id !== todo.id))
 		yield* from(api.remove(todo.id))
 		setTodos(prev => prev.filter(each => each.id !== todo.id))
 	})

@@ -74,6 +74,16 @@ touches only the background-tracking set, which was already proven safe to feed 
 
 ## Considered and rejected: registering `optimistic()`'s/`visible()`'s own accessors with the pending tracker
 
+> **Superseded by [ADR 0016](./0016-optimistic-as-a-signal-variant.md).** The
+> argument below is about sufficiency for loading propagation, and it holds:
+> the ambient hand-off does reach a boundary from inside any binding's call
+> stack, with no registration needed. What it does not weigh is what
+> registration buys beyond that — `use()` on the optimistic accessor, a read
+> style chosen per read site rather than fixed at construction, and a retry
+> that resets the wrapped node instead of only re-running the recipe over a
+> source that is still parked. `optimistic()` now builds a pipeline and
+> registers it, for those reasons rather than this one.
+
 An earlier direction had `optimistic()` call `registerPending()` on its own returned accessor,
 proxying `source`'s pending state, with `visible()`/`remaining()` rebuilt as `computed()` pipelines
 so pending-ness would propagate through `PendingEntry.upstream`, the same mechanism a multi-stage
@@ -153,8 +163,11 @@ first load, hold-prior across a refetch, a failed load reaching `<Errored>` with
 and the optimistic overlay. That is the concrete demonstration that loading and error propagation
 never needed the throw — only the value guarantee and the commit gate do.
 
-`optimistic()` changed shape in the same pass: it takes the source signal directly rather than a
-thunk (`optimistic(todos)`, not `optimistic(() => latest(todos))`) and makes the tolerant read
+`optimistic()` changed shape in the same pass (since superseded — see
+[ADR 0016](./0016-optimistic-as-a-signal-variant.md), which makes it a signal variant whose accessor
+is an ordinary node, read with whichever verb the read site names): it takes the source signal
+directly rather than a thunk (`optimistic(todos)`, not `optimistic(() => latest(todos))`) and makes
+the tolerant read
 itself, mirroring `latest`'s overloads. An overlay layers plain values over plain values, so a
 fetch-backed source has to be read tolerantly somewhere; doing it inside means every consumer of the
 overlay gets the ambient participation for free.

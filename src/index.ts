@@ -22,6 +22,6 @@ export {
 } from './scheduler'
 export { type Accessor, type Setter, type Signal } from './signal'
 export { signal, type DerivedSetter } from './derived-signal'
-export { optimistic } from './optimistic'
+export { optimistic, type OptimisticSetter } from './optimistic'
 export { action, committed, onSettled, type ActionHandle, type SettleOutcome } from './scope'
 export { Errored, For, Fragment, h, isErrored, isLoading, Loading, Match, render, Show, Switch, useErrored, useLoading, type ErroredState, type Truthy } from './dom'
