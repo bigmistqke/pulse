@@ -1,24 +1,26 @@
 import { expect, test } from '@playwright/test'
 
 test.describe('E3 — optimistic value clobbered by refetch', () => {
-  test('documents the E3 failure: a refetch that lands first overwrites the optimistic comment', async ({ page }) => {
+  // Known gap, not a flake: the optimistic overlay and committed truth share
+  // one signal cell, so a refetch that lands first overwrites the optimistic
+  // entry once it lands. Red until the overlay is held in its own signal and
+  // merged with committed truth via a computed (see this demo's `actual` doc
+  // field). If this ever starts passing, Playwright will flag it as an
+  // unexpected pass — that's the signal to remove test.fail() here.
+  test.fail('an optimistic comment survives a refetch that lands before its save', async ({ page }) => {
     await page.goto('/')
     await page.locator('[data-testid="tab-optimistic-clobbered"]').click()
 
     await expect(page.locator('[data-testid="comments"] li')).toHaveCount(2)
 
     // Add a comment (add latency 1200ms), then refresh (300ms) so the refresh
-    // lands first.
+    // lands first. The optimistic comment must stay visible the whole time.
     await page.locator('[data-testid="add"]').click()
     await expect(page.locator('[data-testid="comments"] li')).toHaveCount(3)
     await page.locator('[data-testid="refresh"]').click()
 
-    // Poll: the optimistic overlay and committed truth share one signal
-    // cell, so the refresh's setComments(list) overwrites the optimistic
-    // entry once it lands. This assertion documents that vanish as it
-    // stands today, and should flip to `toBe(false)` once the overlay is
-    // held in its own signal and merged with committed truth via a
-    // computed (see this demo's `actual` doc field).
+    // Poll: the list must never drop below 3 items (the optimistic comment
+    // must never vanish). Red until pulse has a scoped/overlay write.
     const vanished = await page.evaluate(async () => {
       let gone = false
       const deadline = performance.now() + 1800
@@ -28,6 +30,6 @@ test.describe('E3 — optimistic value clobbered by refetch', () => {
       }
       return gone
     })
-    expect(vanished).toBe(true)
+    expect(vanished).toBe(false)
   })
 })

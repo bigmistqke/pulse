@@ -211,7 +211,7 @@ function Controls() {
 function MutationError() {
 	return (
 		<Errored.Error>
-			{(error: unknown, retry: () => void) => (
+			{(error, retry) => (
 				<div class="mutation-error" data-testid="mutation-error-panel">
 					<p>{String((error as Error)?.message ?? error)}</p>
 					<button data-testid="mutation-retry" on:click={retry}>
@@ -325,7 +325,7 @@ function App() {
             inside `TodoList` can show the error without unmounting
             anything, and a mutation error never reaches the outer swap. */}
 				<Errored
-					for={(e: unknown): e is LoadFailedError => e instanceof LoadFailedError}
+					for={(e): e is LoadFailedError => e instanceof LoadFailedError}
 					fallback={(error, reset: () => void) => (
 						<div class="error" data-testid="error-panel">
 							<p>{error.message}</p>
@@ -336,7 +336,7 @@ function App() {
 					)}
 				>
 					<div class="main-column">
-						<Errored for={(e: unknown) => !(e instanceof LoadFailedError)}>
+						<Errored for={e => !(e instanceof LoadFailedError)}>
 							<div class="mutation-scope">
 								<input
 									class="new-todo"
