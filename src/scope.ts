@@ -465,7 +465,7 @@ export interface ActionHandle {
  *   and the action's later commit can overwrite it. Use a generator body if you
  *   need to write after awaiting.
  *
- * - **Generator** (`function* () { … yield* read(p) … }`) — fully scoped. Pulse
+ * - **Generator** (`function* () { … yield* from(p) … }`) — fully scoped. Pulse
  *   drives the resumption itself, so it re-enters the scope on every resume and a
  *   write after a `yield*` is still speculative. Commits when the body completes,
  *   discards when it throws.

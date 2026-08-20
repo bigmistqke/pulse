@@ -35,7 +35,11 @@ body {
 [data-gen='bob'], [data-gen='archived'], [data-gen='superseded'] { background: #1d5238; }
 [data-gen='stale'] { background: #52331d; }
 .profile-card, .list-card { border: 1px solid #34343d; border-radius: 8px; padding: 8px; }
-.payload.is-fallback { background: #52331d; color: #e0b86b; }
+.payload.is-fallback, .pane.is-fallback { background: #52331d; color: #e0b86b; }
+
+.pane-row { display: flex; gap: 12px; }
+.pane-row .pane { flex: 1 1 0; background: #1d3a52; }
+.pane-label { margin: 0 0 4px; font-size: 11px; text-transform: uppercase; color: #9a9aa6; }
 
 .latency-controls { border: 1px solid #34343d; border-radius: 8px; padding: 10px; }
 .latency-controls h3 { margin: 0 0 8px; font-size: 12px; text-transform: uppercase; color: #9a9aa6; }

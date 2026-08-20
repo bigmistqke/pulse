@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { action, effect, optimistic, read, signal } from '../src/index'
+import { action, effect, optimistic, from, signal } from '../src/index'
 import { flush, microtaskScheduler, setScheduler, syncScheduler } from '../src/scheduler'
 
 // A promise plus its resolver, so a generator action can be held in flight and
@@ -20,7 +20,7 @@ test('a consumer sees the overlay value while the action is in flight', async ()
   const g = gate()
   const handle = action(function* () {
     setOptimisticValue('draft')
-    yield* read(g.promise)
+    yield* from(g.promise)
   })
   // In flight: the overlay is visible from outside the action.
   expect(optimisticValue()).toBe('draft')
@@ -34,7 +34,7 @@ test('the wrapped signal reads canonical truth, not the overlay', async () => {
   const g = gate()
   const handle = action(function* () {
     setOptimisticValue('draft')
-    yield* read(g.promise)
+    yield* from(g.promise)
   })
   expect(value()).toBe('saved') // canonical reader untouched
   expect(optimisticValue()).toBe('draft') // overlay-aware reader
@@ -48,7 +48,7 @@ test('a discarded action reverts the overlay to the prior value', async () => {
   const g = gate()
   const handle = action(function* () {
     setOptimisticValue('draft')
-    yield* read(g.promise)
+    yield* from(g.promise)
   })
   expect(optimisticValue()).toBe('draft')
   g.reject(new Error('server rejected'))
@@ -64,7 +64,7 @@ test('a committed action settles through to the canonical value', async () => {
   const g = gate()
   const handle = action(function* () {
     setOptimisticValue('draft')
-    yield* read(g.promise)
+    yield* from(g.promise)
     setValue('draft')
   })
   expect(optimisticValue()).toBe('draft')
@@ -82,7 +82,7 @@ test('committing does not flash the prior value through the overlay reader', asy
     const g = gate()
     const handle = action(function* () {
       setOptimisticValue('draft')
-      yield* read(g.promise)
+      yield* from(g.promise)
       setValue('draft')
     })
     const seen: string[] = []
@@ -106,7 +106,7 @@ test('isOptimistic reflects whether an overlay is live', async () => {
   const g = gate()
   const handle = action(function* () {
     setOptimisticValue('y')
-    yield* read(g.promise)
+    yield* from(g.promise)
   })
   expect(isOptimistic()).toBe(true)
   g.resolve()
@@ -121,11 +121,11 @@ test('two concurrent actions show the most recent write and clean up independent
   const b = gate()
   const runA = action(function* () {
     setOptimisticValue('a')
-    yield* read(a.promise)
+    yield* from(a.promise)
   })
   const runB = action(function* () {
     setOptimisticValue('b')
-    yield* read(b.promise)
+    yield* from(b.promise)
   })
   expect(optimisticValue()).toBe('b') // most recent write shows
   a.resolve()

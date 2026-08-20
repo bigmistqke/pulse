@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { latest, use, NotReadyYet, read, track, resolvedPromise } from '../src/async'
+import { latest, use, NotReadyYet, from, track, resolvedPromise } from '../src/async'
 import { isPending } from '../src/pending'
 import { effect } from '../src/effect'
 import { flush, microtaskScheduler, setScheduler, syncScheduler } from '../src/scheduler'
@@ -145,9 +145,9 @@ test('use re-throws the rejection reason of a settled rejected promise', async (
   expect(() => use(p)).toThrow('boom') // settled rejected: re-throws the reason
 })
 
-test('read of a plain value yields it; yield* expression resolves to it', () => {
-  // Drive `read(42)` manually (no driver yet here — we drive by hand for the unit test).
-  const gen = read(42)
+test('from of a plain value yields it; yield* expression resolves to it', () => {
+  // Drive `from(42)` manually (no driver yet here — we drive by hand for the unit test).
+  const gen = from(42)
   const step = gen.next()
   expect(step.done).toBe(false)
   expect(step.value).toBe(42)
@@ -156,18 +156,18 @@ test('read of a plain value yields it; yield* expression resolves to it', () => 
   expect(final.value).toBe(42)
 })
 
-test('read of a signal calls its accessor (tracking happens via the call)', () => {
+test('from of a signal calls its accessor (tracking happens via the call)', () => {
   const [s] = signal(7)
-  const gen = read(s)
+  const gen = from(s)
   const step = gen.next()
   expect(step.value).toBe(7) // s() was called; yields its value
   const final = gen.next(7)
   expect(final.value).toBe(7)
 })
 
-test('read of a promise yields the promise itself', () => {
+test('from of a promise yields the promise itself', () => {
   const p = Promise.resolve(1)
-  const gen = read(p)
+  const gen = from(p)
   const step = gen.next()
   expect(step.value).toBe(p)
 })
@@ -244,8 +244,80 @@ describe('use(accessor) — Plan B: throws on isPending', () => {
   })
 })
 
-describe('read — post-Plan-A (no brand suspension)', () => {
-  test('yield* read on an SWR-refetching computed yields the stale value, NOT brand.promise', async () => {
+// use.latest()'s mirror-image contract (ADR 0014): throws only while latest(x)
+// has genuinely never resolved anything; once it has, an SWR refetch that
+// would make use(x) throw returns the stale value instead. use(x) itself is
+// unchanged — the tests above stay correct and untouched.
+describe('use.latest(accessor) — throws only before the first value, tolerant after', () => {
+  test('throws NotReadyYet while nothing has ever resolved, exactly like use()', () => {
+    const [s] = signal<Promise<number>>(new Promise(() => {})) // never resolves
+    expect(() => use.latest(s)).toThrow(NotReadyYet)
+  })
+
+  test('the thrown NotReadyYet carries the in-flight promise, exactly like use()', async () => {
+    const [s] = signal<Promise<number>>(new Promise(() => {}))
+    let threw: unknown = null
+    try {
+      use.latest(s)
+    } catch (e) {
+      threw = e
+    }
+    expect(threw).toBeInstanceOf(NotReadyYet)
+    const { promiseOf } = await import('../src/pending')
+    expect((threw as NotReadyYet).promise).toBe(promiseOf(s)())
+  })
+
+  test('returns the resolved value once settled, same as use()', async () => {
+    const [s] = signal(Promise.resolve(10))
+    await tick()
+    expect(use.latest(s)).toBe(10)
+  })
+
+  test('does NOT throw during an SWR refetch — returns the stale value instead of use()\'s throw', async () => {
+    const [id, setId] = signal(1)
+    let release!: (v: number) => void
+    const c = computed(() => {
+      const i = id()
+      if (i === 1) return Promise.resolve(10)
+      return new Promise<number>((r) => { release = r })
+    })
+    await tick()
+    expect(use.latest(c)).toBe(10)
+
+    setId(2)
+    expect(isPending(c)()).toBe(true)
+    // use(c) would throw here (see the Plan B test above) — use.latest(c) does not.
+    expect(use.latest(c)).toBe(10)
+    expect(() => use(c)).toThrow(NotReadyYet)
+
+    release(20)
+    await tick()
+    expect(use.latest(c)).toBe(20)
+  })
+
+  test('use(swrComputed) throwing during refetch and use.latest(swrComputed) returning stale are both true at once', async () => {
+    const [page, setPage] = signal(1)
+    let activeResolve: (v: string) => void = () => {}
+    const c = computed(() => {
+      page()
+      return new Promise<string>((r) => (activeResolve = r))
+    })
+    c()
+    await new Promise<void>((r) => queueMicrotask(r))
+    activeResolve('v1')
+    await new Promise<void>((r) => queueMicrotask(r))
+    expect(use.latest(c)).toBe('v1')
+
+    setPage(2)
+    await new Promise<void>((r) => queueMicrotask(r))
+    expect(isPending(c)()).toBe(true)
+    expect(() => use(c)).toThrow(NotReadyYet)
+    expect(use.latest(c)).toBe('v1')
+  })
+})
+
+describe('from — post-Plan-A (no brand suspension)', () => {
+  test('yield* from on an SWR-refetching computed yields the stale value, NOT brand.promise', async () => {
     const [page, setPage] = signal(1)
     let activeResolve: (v: string) => void = () => {}
     const c = computed(() => {
@@ -269,7 +341,7 @@ describe('read — post-Plan-A (no brand suspension)', () => {
     // promise whose WeakMap state is fulfilled/stale, carrying the stale value —
     // the driver's settle() unwraps it to 'v1' on resume. The key point (still
     // asserted): it is fulfilled/stale, NOT a pending in-flight promise.
-    const gen = read(c)
+    const gen = from(c)
     const first = gen.next()
     const yielded = first.value as Promise<string>
     expect(track(yielded).status).toBe('fulfilled')

@@ -2,7 +2,7 @@ import { expect, test } from 'vitest'
 import { computed } from '../src/computed'
 import { effect } from '../src/effect'
 import { signal } from '../src/signal'
-import { latest, NotReadyYet, read, use } from '../src/async'
+import { latest, NotReadyYet, from, use } from '../src/async'
 import { isPending, promiseOf } from '../src/pending'
 import { flush, microtaskScheduler, setScheduler, syncScheduler } from '../src/scheduler'
 import { createRoot, catchError } from '../src/owner'
@@ -112,7 +112,7 @@ test('a conditionally-async stage flips its read shape honestly across evaluatio
 test('a generator stage with yield* read of a settled value runs synchronously', () => {
   const [s] = signal(3)
   const c = computed(function* () {
-    const x: number = yield* read(s)
+    const x: number = yield* from(s)
     return x * 2
   })
   expect(use(c)).toBe(6)
@@ -122,7 +122,7 @@ test('a generator stage suspends on a pending promise, resumes on settle', async
   let release!: (v: number) => void
   const p = new Promise<number>((resolve) => { release = resolve })
   const c = computed(function* () {
-    const x: number = yield* read(p)
+    const x: number = yield* from(p)
     return x + 100
   })
   expect(c()).toBeInstanceOf(Promise)
@@ -155,7 +155,7 @@ test('a generator stage that try/catches a rejected yield resumes normally', asy
   const p = Promise.reject(reason)
   const c = computed(function* () {
     try {
-      yield* read(p)
+      yield* from(p)
       return 'unreachable'
     } catch (e) {
       return `caught: ${(e as Error).message}`

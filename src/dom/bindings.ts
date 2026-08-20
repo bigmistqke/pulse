@@ -53,7 +53,7 @@ function reactiveCommit<T>(
     controller = null
   })
   effect(() => {
-    let result: { value: T; engagedTransition: boolean }
+    let result: { value: T; engagedTransition: boolean; backgroundPromise: Promise<unknown> | null }
     try {
       // runWithOwner(parentOwner, ...) so that owner-aware reads inside
       // `read` (e.g. `useLoading()`) walk from parentOwner up — finding
@@ -75,7 +75,14 @@ function reactiveCommit<T>(
       controller?.report({ status: 'idle' })
       throw e
     }
-    const { value, engagedTransition } = result
+    const { value, engagedTransition, backgroundPromise } = result
+    // A use.latest() SWR read: has a value, but its accessor is pending
+    // again underneath. Not part of the gate at all (it's committing right
+    // now, regardless of which path below) — only the boundary's isLoading()
+    // aggregate needs to hear about it.
+    if (backgroundPromise !== null) {
+      findBoundaryScope(parentOwner, 'pending')?.trackBackground(backgroundPromise)
+    }
     const commit = () => apply(value)
     // If there's a prior controller (binding previously threw), always go
     // through the controller to consume its pendingSet entry.
@@ -165,6 +172,7 @@ export function insertChild(parent: Node, value: unknown): void {
       const nextRunOwner = createSubOwner(parentOwner)
       let frag: DocumentFragment | null = null
       let engagedTransition = false
+      let backgroundPromise: Promise<unknown> | null = null
       try {
         runWithOwner(nextRunOwner, () => {
           const result = runBindingCompute(() => {
@@ -173,7 +181,15 @@ export function insertChild(parent: Node, value: unknown): void {
             insertChild(frag, next)
           })
           engagedTransition = result.engagedTransition
+          backgroundPromise = result.backgroundPromise
         })
+        // A use.latest() SWR read inside this child: has a value (already
+        // built into `frag` above), but its accessor is pending again
+        // underneath. Not part of the gate — only the boundary's
+        // isLoading() aggregate needs to hear about it.
+        if (backgroundPromise !== null) {
+          findBoundaryScope(parentOwner, 'pending')?.trackBackground(backgroundPromise)
+        }
       } catch (e) {
         // Sub-owner from the failed run is orphaned — dispose to clean up
         // any partial nested registrations.

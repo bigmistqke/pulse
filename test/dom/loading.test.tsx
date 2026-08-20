@@ -1,8 +1,11 @@
 import { afterEach, beforeEach, expect, test } from 'vitest'
 import {
   catchError,
+  computed,
   flush,
   isLoading,
+  isPending,
+  latest,
   Loading,
   microtaskScheduler,
   onCleanup,
@@ -20,6 +23,11 @@ afterEach(() => {
   setScheduler(microtaskScheduler(flush))
   document.body.innerHTML = ''
 })
+
+/** Resolve after all microtasks have drained (a macrotask boundary) — lets
+ *  `deferOrCommit`'s own `queueMicrotask` tail-check fire, independent of
+ *  whichever effect scheduler is active. */
+const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
 
 test('synchronous loaded thunk renders immediately; pending stays false', () => {
   const target = document.createElement('section')
@@ -433,5 +441,108 @@ test('rapid src-swap keeps pending count at 1, not climbing', async () => {
   setSrc(p2)
   // Still pending. text stays at init.
   expect(target.textContent).toBe('init')
+  dispose()
+})
+
+// Regression for ADR 0014's "Implementation correction": a use.latest() SWR
+// read must never reopen a boundary's fallback on remount, even while its
+// background refresh is still in flight — see docs/adr/0014-use-latest-composed-on-latest.md.
+test('use.latest() holds prior across a Loading boundary remount, even while a background refresh is in flight', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+
+  const [version, setVersion] = signal(0)
+  let release!: (v: string) => void
+  const data = computed<Promise<string>>(() => {
+    const v = version()
+    if (v === 0) return Promise.resolve('v0')
+    return new Promise<string>((r) => { release = r })
+  })
+
+  const [mounted, setMounted] = signal(true)
+  const boundary = () => (
+    <Loading initial={<p>fallback</p>}>
+      {() => <span>{() => use.latest(data)}</span>}
+    </Loading>
+  )
+
+  const dispose = render(() => <Show when={mounted()}>{boundary}</Show>, target)
+
+  // First load resolves.
+  await tick()
+  flush()
+  expect(target.textContent).toBe('v0')
+
+  // Trigger a refetch: data is pending again, but use.latest(data) already has 'v0'.
+  setVersion(1)
+  expect(isPending(data)()).toBe(true)
+  expect(latest(data)).toBe('v0')
+
+  // Remount the boundary WHILE that refetch is still in flight.
+  setMounted(false)
+  setMounted(true)
+
+  // The fresh boundary's own hasEverLoaded starts false, but use.latest(data)
+  // never throws (it has a value), so it must hold 'v0' — not show 'fallback' —
+  // for the ENTIRE remaining duration of the background refresh, not just
+  // until the next microtask.
+  await tick()
+  flush()
+  expect(target.textContent).toBe('v0')
+  await tick()
+  flush()
+  expect(target.textContent).toBe('v0') // still refreshing in the background; still holding prior
+
+  release('v1')
+  await tick()
+  flush()
+  expect(target.textContent).toBe('v1')
+  dispose()
+})
+
+test('a bare latest() read never registers with the enclosing Loading boundary', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+
+  const [version, setVersion] = signal(0)
+  let release!: (v: string) => void
+  const data = computed<Promise<string>>(() => {
+    const v = version()
+    if (v === 0) return Promise.resolve('v0')
+    return new Promise<string>((r) => { release = r })
+  })
+
+  // Captured once, inside the boundary's own subtree (a valid owner context)
+  // — calling the returned accessor afterward needs no ambient owner, unlike
+  // isLoading()/useLoading()'s own lookup of the nearest boundary.
+  let loading!: () => boolean
+  const dispose = render(
+    () => (
+      <Loading initial={<p>fallback</p>}>
+        {() => {
+          loading = useLoading()
+          return <span>{() => latest(data) ?? 'empty'}</span>
+        }}
+      </Loading>
+    ),
+    target,
+  )
+
+  // Never registers as pending — commits immediately, before data has ever resolved.
+  expect(target.textContent).toBe('empty')
+  await tick()
+  flush()
+  expect(target.textContent).toBe('v0')
+
+  // A background refresh behind a bare latest() read never surfaces through
+  // the boundary's active()/isLoading() either — only use()/use.latest() feed it.
+  setVersion(1)
+  expect(loading()).toBe(false)
+  expect(target.textContent).toBe('v0')
+
+  release('v1')
+  await tick()
+  flush()
+  expect(target.textContent).toBe('v1')
   dispose()
 })

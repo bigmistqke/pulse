@@ -90,9 +90,30 @@ export function Loading(props: LoadingProps): Accessor<unknown> {
   const deferredCommits: Array<() => void> = []
   let tailCheckScheduled = false
 
-  const [pendingSig, setPendingSig] = signal(false)
-  const recomputePending = () =>
-    setPendingSig(pendingSet.size > 0 || readySet.size > 0 || deferredCommits.length > 0)
+  // In-flight promises handed off by a use.latest() binding that took the
+  // stale-while-revalidate path (has a value, no commit to gate — see
+  // trackBackground below). Tracked only so isLoading()/useLoading() still
+  // reflect a background refresh; doesn't participate in the atomic-commit
+  // gate at all.
+  const backgroundPromises = new Set<Promise<unknown>>()
+
+  // gatePending: drives the atomic-commit gate AND the initial/fallback swap
+  // decision (including hasEverLoaded, below) — a binding that hasn't
+  // committed yet, or is waiting for its siblings before an atomic flush.
+  // Deliberately excludes backgroundPromises: a use.latest() binding that
+  // took the SWR path already committed (it has a value to show), so its
+  // in-flight refresh must never reopen the fallback.
+  const [gatePending, setGatePending] = signal(false)
+  // active: what isLoading()/useLoading() report to callers outside this
+  // boundary's own swap decision — gate-pending OR a background refresh in
+  // progress, so a caller rendering its own "loading…" indicator still sees
+  // the refresh even though the boundary itself never swaps for it.
+  const [activeSig, setActiveSig] = signal(false)
+  const recomputePending = () => {
+    const gate = pendingSet.size > 0 || readySet.size > 0 || deferredCommits.length > 0
+    setGatePending(gate)
+    setActiveSig(gate || backgroundPromises.size > 0)
+  }
 
   /** Flush all ready and deferred commits atomically. Call only when gate is open. */
   const flushAll = () => {
@@ -106,7 +127,7 @@ export function Loading(props: LoadingProps): Accessor<unknown> {
 
   const scope: LoadingScope = {
     kind: 'pending',
-    active: pendingSig,
+    active: activeSig,
     register(): BindingController {
       const controller: BindingController = {
         report(state: BindingState): void {
@@ -165,6 +186,18 @@ export function Loading(props: LoadingProps): Accessor<unknown> {
         })
       }
     },
+    trackBackground(promise: Promise<unknown>): void {
+      if (backgroundPromises.has(promise)) return
+      backgroundPromises.add(promise)
+      recomputePending()
+      promise.finally(() => {
+        // The boundary may have been torn down before this settles — no-op
+        // rather than mutate a set nothing is reading anymore.
+        if (boundaryOwner.disposed) return
+        backgroundPromises.delete(promise)
+        recomputePending()
+      })
+    },
   }
   boundaryOwner.boundaries.pending = scope
 
@@ -177,12 +210,12 @@ export function Loading(props: LoadingProps): Accessor<unknown> {
   let hasEverLoaded = false
   runWithOwner(boundaryOwner, () => {
     effect(() => {
-      if (!pendingSig()) hasEverLoaded = true
+      if (!gatePending()) hasEverLoaded = true
     })
   })
 
   return () => {
-    if (!pendingSig()) return loadedSubtree
+    if (!gatePending()) return loadedSubtree
     // Neither prop given at all (not merely falsy — an explicit fallback of
     // null/''/false still means "swap to this") → context-only: stay
     // mounted. The atomic-commit gate above is unaffected either way — it

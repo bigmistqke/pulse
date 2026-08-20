@@ -13,7 +13,7 @@ import {
   microtaskScheduler,
   onCleanup,
   optimistic,
-  read,
+  from,
   render,
   setScheduler,
   Show,
@@ -490,7 +490,7 @@ test('a failed action registers with the nearest <Errored> boundary, and its ret
   function saveToBob() {
     action(function* () {
       setName('bob')
-      yield* read(save())
+      yield* from(save())
     })
   }
 
@@ -568,7 +568,7 @@ test('a mutation triggered from a reference-keyed row still reaches <Errored>, e
           each.id === item.id ? { ...each, done: !each.done } : each,
         ),
       )
-      yield* read(Promise.reject(new Error('server refused')))
+      yield* from(Promise.reject(new Error('server refused')))
     })
   }
 
@@ -634,7 +634,7 @@ test('an action that fails after its owning row unmounted (but the boundary is s
         data-testid="save"
         on:click={() => {
           action(function* () {
-            yield* read(pending)
+            yield* from(pending)
           })
         }}
       >
@@ -697,7 +697,7 @@ test('an action that fails after its <Errored> boundary itself unmounted escalat
         data-testid="save"
         on:click={() => {
           action(function* () {
-            yield* read(pending)
+            yield* from(pending)
           })
         }}
       >
@@ -1255,7 +1255,7 @@ test('action() skips a nearer <Errored> whose for declines the error, and regist
                 data-testid="trigger"
                 on:click={() =>
                   action(function* () {
-                    yield* read(Promise.reject(new TypeError('boom')))
+                    yield* from(Promise.reject(new TypeError('boom')))
                   })
                 }
               >
@@ -1298,7 +1298,7 @@ test('a mutation triggered from a reference-keyed row still reaches a filtered <
           each.id === item.id ? { ...each, done: !each.done } : each,
         ),
       )
-      yield* read(Promise.reject(new Error('server refused')))
+      yield* from(Promise.reject(new Error('server refused')))
     })
   }
 

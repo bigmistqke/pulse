@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
 import { signal } from '../src/derived-signal'
-import { latest, read, use } from '../src/async'
+import { latest, from, use } from '../src/async'
 import { isPending } from '../src/pending'
 import { onCleanup } from '../src/owner'
 import { error } from '../src/error'
@@ -42,7 +42,7 @@ test('W3: an update function receives the value an eagerly-run derivation produc
 test('W3: an update function receives undefined while nothing has resolved yet', () => {
   let seen: unknown = 'not called'
   const [list, setList] = signal(function* () {
-    return yield* read(new Promise<string[]>(() => {}))
+    return yield* from(new Promise<string[]>(() => {}))
   })
   setList((prev) => {
     seen = prev
@@ -80,7 +80,7 @@ test('a write into a multi-stage pipeline lands on the output', () => {
 test('a bare write into an asynchronously coloured stage keeps the read a promise', async () => {
   let resolveList: (v: string[]) => void = () => {}
   const [list, setList] = signal(function* () {
-    return yield* read(new Promise<string[]>((r) => (resolveList = r)))
+    return yield* from(new Promise<string[]>((r) => (resolveList = r)))
   })
 
   // the generator suspended on a promise that was still pending, so the raw
@@ -128,7 +128,7 @@ test('a generator stage that never suspends publishes its value bare', () => {
 test('a generator stage colours its read by what it actually reads, not by being a generator', async () => {
   const [syncSource] = signal(() => 5)
   const [syncDerived] = signal(function* () {
-    return yield* read(syncSource)
+    return yield* from(syncSource)
   })
   // this generator never reads anything that could be pending
   expect(syncDerived()).toBe(5)
@@ -137,7 +137,7 @@ test('a generator stage colours its read by what it actually reads, not by being
   let resolveAsync: (v: number) => void = () => {}
   const asyncSource = new Promise<number>((r) => (resolveAsync = r))
   const [asyncDerived] = signal(function* () {
-    return yield* read(asyncSource)
+    return yield* from(asyncSource)
   })
   // this generator suspends on first load, so the raw read is a promise
   expect(asyncDerived()).toBeInstanceOf(Promise)
@@ -151,7 +151,7 @@ const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
 
 test('signal(fn, default): latest() reports the default before the first resolution', () => {
   const [todos] = signal(function* () {
-    return yield* read(new Promise<string[]>(() => {})) // never resolves
+    return yield* from(new Promise<string[]>(() => {})) // never resolves
   }, [] as string[])
   expect(latest(todos)).toEqual([])
 })
@@ -159,7 +159,7 @@ test('signal(fn, default): latest() reports the default before the first resolut
 test('signal(fn, default): latest() reports the real value once resolved, not the default', async () => {
   let resolveList: (v: string[]) => void = () => {}
   const [todos] = signal(function* () {
-    return yield* read(new Promise<string[]>((r) => (resolveList = r)))
+    return yield* from(new Promise<string[]>((r) => (resolveList = r)))
   }, [] as string[])
   expect(latest(todos)).toEqual([])
   resolveList(['a'])
@@ -169,7 +169,7 @@ test('signal(fn, default): latest() reports the real value once resolved, not th
 
 test('signal(fn, default) does not change the raw read — still a promise while pending', () => {
   const [todos] = signal(function* () {
-    return yield* read(new Promise<string[]>(() => {})) // never resolves
+    return yield* from(new Promise<string[]>(() => {})) // never resolves
   }, [] as string[])
   // the default only seeds the tolerant read; the strict read stays honest
   // about the pipeline still being in flight
@@ -181,10 +181,10 @@ test('signal(fn, default): latest(todos) needs no second argument to type as non
   // This is mostly a typecheck-only assertion — the `const … : T = …` lines
   // are the compile-time checks; a wrong type would fail to compile.
   const [withDefault] = signal(function* () {
-    return yield* read(new Promise<string[]>(() => {}))
+    return yield* from(new Promise<string[]>(() => {}))
   }, [] as string[])
   const [withoutDefault] = signal(function* () {
-    return yield* read(new Promise<string[]>(() => {}))
+    return yield* from(new Promise<string[]>(() => {}))
   })
 
   // string[], not string[] | undefined — no ?? [] or second argument needed
@@ -202,7 +202,7 @@ test('signal(fn, default): latest(todos) needs no second argument to type as non
 test('signal(fn, default): an update function sees the default in place of undefined before the first resolution', () => {
   let seen: unknown = 'not called'
   const [, setTodos] = signal(function* () {
-    return yield* read(new Promise<string[]>(() => {})) // never resolves
+    return yield* from(new Promise<string[]>(() => {})) // never resolves
   }, [] as string[])
   setTodos((prev) => {
     seen = prev
@@ -213,7 +213,7 @@ test('signal(fn, default): an update function sees the default in place of undef
 
 test('signal(fn, default): an update function still sees the real resolved value once one exists, not the default', async () => {
   const [todos, setTodos] = signal(function* () {
-    return yield* read(Promise.resolve(['a']))
+    return yield* from(Promise.resolve(['a']))
   }, [] as string[])
   await tick()
   let seen: unknown = 'not called'
@@ -229,10 +229,10 @@ test('signal(fn, default): an update function needs no ?? default to type as non
   // This is mostly a typecheck-only assertion — the `const … : T = …` lines
   // are the compile-time checks; a wrong type would fail to compile.
   const [, setWithDefault] = signal(function* () {
-    return yield* read(new Promise<string[]>(() => {}))
+    return yield* from(new Promise<string[]>(() => {}))
   }, [] as string[])
   const [, setWithoutDefault] = signal(function* () {
-    return yield* read(new Promise<string[]>(() => {}))
+    return yield* from(new Promise<string[]>(() => {}))
   })
 
   setWithDefault((prev) => {
@@ -255,7 +255,7 @@ test('W1: a write abandons the fetch in flight and it never publishes', async ()
   const [version, setVersion] = signal(1)
   const [todos, setTodos] = signal(function* () {
     version()
-    return yield* read(new Promise<string[]>((r) => (resolveList = r)))
+    return yield* from(new Promise<string[]>((r) => (resolveList = r)))
   })
 
   // start the first load and let it settle
@@ -285,7 +285,7 @@ test('W13: abandoning a paused stage runs its cleanups', async () => {
   const [todos, setTodos] = signal(function* () {
     const v = version()
     onCleanup(() => aborted.push(`run ${v}`))
-    return yield* read(new Promise<string[]>(() => {}))
+    return yield* from(new Promise<string[]>(() => {}))
   })
 
   expect(isPending(todos)()).toBe(true)
@@ -297,7 +297,7 @@ test('a cleanup fired by a write sees the value that was written', () => {
   const seen: unknown[] = []
   const [todos, setTodos] = signal(function* () {
     onCleanup(() => seen.push(latest(todos)))
-    return yield* read(new Promise<string[]>(() => {}))
+    return yield* from(new Promise<string[]>(() => {}))
   })
 
   setTodos(['written'])
@@ -310,7 +310,7 @@ test('W19: invalidating then writing in one tick makes no request at all', async
   const [todos, setTodos] = signal(function* () {
     version()
     requests++
-    return yield* read(Promise.resolve(['from server']))
+    return yield* from(Promise.resolve(['from server']))
   })
 
   await tick()
@@ -331,7 +331,7 @@ test('W19: invalidating then writing with an update function also makes no reque
   const [todos, setTodos] = signal(function* () {
     version()
     requests++
-    return yield* read(Promise.resolve(['from server']))
+    return yield* from(Promise.resolve(['from server']))
   })
 
   await tick()
@@ -351,7 +351,7 @@ test('W20: writing then invalidating in one tick lets the request win', async ()
   const [todos, setTodos] = signal(function* () {
     version()
     requests++
-    return yield* read(Promise.resolve([`server ${requests}`]))
+    return yield* from(Promise.resolve([`server ${requests}`]))
   })
 
   await tick()
@@ -371,7 +371,7 @@ test('W9: a write abandons a fetch that is in a middle stage', async () => {
   const [todos, setTodos] = signal(
     () => version(),
     function* () {
-      return yield* read(new Promise<string[]>((r) => (resolveList = r)))
+      return yield* from(new Promise<string[]>((r) => (resolveList = r)))
     },
     (server: string[]) => server.filter((t) => t !== 'done'),
   )
@@ -395,7 +395,7 @@ test('W10: a stage whose request was abandoned refetches when the tail next need
     () => version(),
     function* (v: number) {
       requests++
-      return yield* read(new Promise<string[]>((r) => (resolveList = r)))
+      return yield* from(new Promise<string[]>((r) => (resolveList = r)))
     },
     (server: string[]) => (showAll() ? server : server.filter((t) => t !== 'done')),
   )
@@ -441,7 +441,7 @@ test('W11: a later change to the abandoned stage own dependency restarts it', as
     () => version(),
     function* () {
       requests++
-      return yield* read(new Promise<string[]>((r) => (resolveList = r)))
+      return yield* from(new Promise<string[]>((r) => (resolveList = r)))
     },
     (server: string[]) => server,
   )
@@ -472,7 +472,7 @@ test('W8: a write behaves the same when the fetch is in the tail', async () => {
   const [todos, setTodos] = signal(
     () => version(),
     function* () {
-      return yield* read(new Promise<string[]>((r) => (resolveList = r)))
+      return yield* from(new Promise<string[]>((r) => (resolveList = r)))
     },
   )
 
@@ -496,11 +496,11 @@ test('W12: a write abandons every stage that has work, and resuming reissues bot
     () => version(),
     function* () {
       sessionRequests++
-      return yield* read(new Promise<{ id: number }>((r) => (resolveSession = r)))
+      return yield* from(new Promise<{ id: number }>((r) => (resolveSession = r)))
     },
     function* () {
       listRequests++
-      return yield* read(new Promise<string[]>((r) => (resolveList = r)))
+      return yield* from(new Promise<string[]>((r) => (resolveList = r)))
     },
   )
 
@@ -529,7 +529,7 @@ test('W5: a write clears a parked error on a single stage', async () => {
   const [version, setVersion] = signal(1)
   const [todos, setTodos] = signal(function* () {
     version()
-    return yield* read(Promise.reject(new Error('offline')) as Promise<string[]>)
+    return yield* from(Promise.reject(new Error('offline')) as Promise<string[]>)
   })
 
   await tick()
@@ -545,7 +545,7 @@ test('W5: a write clears an error parked on an earlier stage', async () => {
   const [todos, setTodos] = signal(
     () => version(),
     function* () {
-      return yield* read(Promise.reject(new Error('offline')) as Promise<string[]>)
+      return yield* from(Promise.reject(new Error('offline')) as Promise<string[]>)
     },
     (server: string[]) => server,
   )
@@ -571,7 +571,7 @@ test('W5: a write clears the error through more than one never-resolved stage', 
   const [todos, setTodos] = signal(
     () => version(),
     function* () {
-      return yield* read(Promise.reject(new Error('offline')) as Promise<string[]>)
+      return yield* from(Promise.reject(new Error('offline')) as Promise<string[]>)
     },
     (server: string[]) => server, // never independently resolves
     (server: string[]) => server, // the tail
@@ -587,7 +587,7 @@ test('W5: a write clears the error through more than one never-resolved stage', 
 
 test('W6: a written promise reports as pending and then resolves', async () => {
   const [todos, setTodos] = signal(function* () {
-    return yield* read(Promise.resolve(['a']))
+    return yield* from(Promise.resolve(['a']))
   })
   await tick()
   expect(use(todos)).toEqual(['a'])
@@ -606,7 +606,7 @@ test('W6: a written promise reports as pending and then resolves', async () => {
 
 test('W6: an update function sees the value from before a written promise settles', async () => {
   const [todos, setTodos] = signal(function* () {
-    return yield* read(Promise.resolve(['a']))
+    return yield* from(Promise.resolve(['a']))
   })
   await tick()
 
@@ -623,7 +623,7 @@ test('W7: a dependency change supersedes a written promise that has not settled'
   const [version, setVersion] = signal(1)
   const [todos, setTodos] = signal(function* () {
     const v = version()
-    return yield* read(Promise.resolve([`server ${v}`]))
+    return yield* from(Promise.resolve([`server ${v}`]))
   })
   await tick()
   expect(use(todos)).toEqual(['server 1'])
@@ -643,7 +643,7 @@ test('W7: a dependency change supersedes a written promise that has not settled'
 
 test('W6: a rejected written promise parks as an error', async () => {
   const [todos, setTodos] = signal(function* () {
-    return yield* read(Promise.resolve(['a']))
+    return yield* from(Promise.resolve(['a']))
   })
   await tick()
 
@@ -655,7 +655,7 @@ test('W6: a rejected written promise parks as an error', async () => {
 
 test('W14: a write inside an action is invisible until it commits', async () => {
   const [todos, setTodos] = signal(function* () {
-    return yield* read(Promise.resolve(['a']))
+    return yield* from(Promise.resolve(['a']))
   })
   await tick()
 
@@ -663,7 +663,7 @@ test('W14: a write inside an action is invisible until it commits', async () => 
   await action(function* () {
     setTodos(['a', 'walk'])
     seenInside.push(use(todos))
-    yield* read(Promise.resolve(null))
+    yield* from(Promise.resolve(null))
   }).settled
 
   expect(seenInside).toEqual([['a', 'walk']])
@@ -675,7 +675,7 @@ test('W15: a discarded action leaves the reload alive', async () => {
   const [version, setVersion] = signal(1)
   const [todos, setTodos] = signal(function* () {
     version()
-    return yield* read(new Promise<string[]>((r) => (resolveList = r)))
+    return yield* from(new Promise<string[]>((r) => (resolveList = r)))
   })
 
   resolveList(['a'])
@@ -687,7 +687,7 @@ test('W15: a discarded action leaves the reload alive', async () => {
 
   const handle = action(function* () {
     setTodos(['a', 'walk'])
-    yield* read(Promise.reject(new Error('save failed')))
+    yield* from(Promise.reject(new Error('save failed')))
   })
   await handle.settled
   expect(handle.error()).toBeInstanceOf(Error)
@@ -705,7 +705,7 @@ test('W16: cancelling waits until the value reaches the committed world', async 
   const [version, setVersion] = signal(1)
   const [todos, setTodos] = signal(function* () {
     version()
-    return yield* read(new Promise<string[]>((r) => (resolveList = r)))
+    return yield* from(new Promise<string[]>((r) => (resolveList = r)))
   })
   resolveList(['a'])
   await tick()
@@ -715,7 +715,7 @@ test('W16: cancelling waits until the value reaches the committed world', async 
 
   const handle = action(function* () {
     action(() => setTodos(['inner']))
-    yield* read(Promise.reject(new Error('outer failed')))
+    yield* from(Promise.reject(new Error('outer failed')))
   })
   await handle.settled
   expect(handle.error()).toBeInstanceOf(Error)
@@ -730,7 +730,7 @@ test('W17: a reload that lands while an action is open is replaced at commit', a
   const [version, setVersion] = signal(1)
   const [todos, setTodos] = signal(function* () {
     version()
-    return yield* read(new Promise<string[]>((r) => (resolveList = r)))
+    return yield* from(new Promise<string[]>((r) => (resolveList = r)))
   })
   resolveList(['a'])
   await tick()
@@ -742,7 +742,7 @@ test('W17: a reload that lands while an action is open is replaced at commit', a
 
   const running = action(function* () {
     setTodos(['a', 'walk'])
-    yield* read(new Promise<null>((r) => (resolveSave = r)))
+    yield* from(new Promise<null>((r) => (resolveSave = r)))
   })
 
   resolveList(['a', 'b']) // the reload lands while the action is open
@@ -765,7 +765,7 @@ test('a queued recompute survives a write inside a discarded action', async () =
   const [todos, setTodos] = signal(function* () {
     const v = version()
     requests++
-    return yield* read(Promise.resolve([`v${v}`]))
+    return yield* from(Promise.resolve([`v${v}`]))
   })
   await tick()
   expect(requests).toBe(1)
@@ -774,7 +774,7 @@ test('a queued recompute survives a write inside a discarded action', async () =
 
   const handle = action(function* () {
     setTodos(['written'])
-    yield* read(Promise.reject(new Error('fail')))
+    yield* from(Promise.reject(new Error('fail')))
   })
   await handle.settled
   expect(handle.error()).toBeInstanceOf(Error)
@@ -803,14 +803,14 @@ test('writing a promise inside an action does not trigger a fresh recompute', as
   let requests = 0
   const [todos, setTodos] = signal(function* () {
     requests++
-    return yield* read(Promise.resolve(['a']))
+    return yield* from(Promise.resolve(['a']))
   })
   await tick()
   expect(requests).toBe(1)
 
   await action(function* () {
     setTodos(Promise.resolve(['a', 'walk']))
-    yield* read(Promise.resolve(null))
+    yield* from(Promise.resolve(null))
   }).settled
   await tick()
 
@@ -834,7 +834,7 @@ test('W22: a write from inside the derivation own body does not raise', async ()
   const cleanups: string[] = []
   const [todos, setTodos] = signal(function* () {
     onCleanup(() => cleanups.push('ran'))
-    const list = yield* read(Promise.resolve<string[]>([]))
+    const list = yield* from(Promise.resolve<string[]>([]))
     if (list.length === 0) {
       setTodos(['seeded'])
       return ['seeded']
@@ -851,7 +851,7 @@ test('W4: a dependency change after a write takes the derivation back over', asy
   const [version, setVersion] = signal(1)
   const [todos, setTodos] = signal(function* () {
     const v = version()
-    return yield* read(Promise.resolve([`server ${v}`]))
+    return yield* from(Promise.resolve([`server ${v}`]))
   })
   await tick()
 
@@ -883,7 +883,7 @@ test('a read from inside an effect while an earlier stage is waiting to reload',
     () => version(),
     function* () {
       requests++
-      return yield* read(new Promise<string[]>((r) => (resolveList = r)))
+      return yield* from(new Promise<string[]>((r) => (resolveList = r)))
     },
     (server: string[]) => (showAll() ? server : server.slice(0, 1)),
   )
@@ -928,14 +928,14 @@ test('a discarded action does not leave the change gate describing a rolled-back
   const [version, setVersion] = signal(1)
   const [count, setCount] = signal(function* () {
     const v = version()
-    return yield* read(Promise.resolve(v === 1 ? 5 : 7))
+    return yield* from(Promise.resolve(v === 1 ? 5 : 7))
   })
   await tick()
   expect(use(count)).toBe(5)
 
   const handle = action(function* () {
     setCount(7)
-    yield* read(Promise.reject(new Error('nope')))
+    yield* from(Promise.reject(new Error('nope')))
   })
   await handle.settled
   expect(handle.error()).toBeInstanceOf(Error)
@@ -966,7 +966,7 @@ test('an update function that throws leaves a queued run intact', async () => {
   const [todos, setTodos] = signal(function* () {
     const v = version()
     requests++
-    return yield* read(Promise.resolve([`v${v}`]))
+    return yield* from(Promise.resolve([`v${v}`]))
   })
   await tick()
   expect(requests).toBe(1)

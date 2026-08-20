@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { computed, latest, read, signal, use, type PipelineRead, type Resolved } from '../src/index'
+import { computed, latest, from, signal, use, type PipelineRead, type Resolved } from '../src/index'
 
 /** Resolve after all microtasks have drained (a macrotask boundary). */
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
@@ -11,7 +11,7 @@ test('end-to-end: signal -> sync stage -> async stage -> generator stage', async
     (n: number) => n * 10,                    // stage 1: sync transform
     async (n: number) => `fetched:${n}`,      // stage 2: async, returns a promise
     function* (s: string) {                   // stage 3: generator
-      const upper: string = yield* read(s.toUpperCase())
+      const upper: string = yield* from(s.toUpperCase())
       return `result=${upper}`
     },
   )
@@ -81,17 +81,17 @@ test('PipelineRead keeps async colour honestly (compile-time)', () => {
 
 test('PipelineRead colours a generator stage by what it actually yields, not by being a generator (compile-time)', () => {
   // Three shapes of `function*` stage, colour derived from their `yield*
-  // read(x)` calls rather than asserted for every generator: one that only
+  // from(x)` calls rather than asserted for every generator: one that only
   // ever reads settled values, one that only ever reads a promise, and one
   // that conditionally reads either.
   function* fullySync() {
-    return yield* read(5)
+    return yield* from(5)
   }
   function* definitelyAsync() {
-    return yield* read(Promise.resolve(5))
+    return yield* from(Promise.resolve(5))
   }
   function* maybeAsync(flag: boolean) {
-    return flag ? yield* read(5) : yield* read(Promise.resolve(5))
+    return flag ? yield* from(5) : yield* from(Promise.resolve(5))
   }
 
   type S1genSync = PipelineRead<[], ReturnType<typeof fullySync>>        // number

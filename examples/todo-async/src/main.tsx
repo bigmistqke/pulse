@@ -8,7 +8,7 @@ import {
 	latest,
 	Loading,
 	optimistic,
-	read,
+	from,
 	render,
 	Show,
 	signal,
@@ -92,7 +92,7 @@ function submitTodo(text: string) {
 	const pending: Todo = { id: -Date.now(), text, done: false }
 	action(function* () {
 		setOverlay([...committed(() => latest(todos)), pending])
-		const saved = yield* read(api.add(text))
+		const saved = yield* from(api.add(text))
 		setTodos(prev => [...prev, saved])
 	})
 }
@@ -111,7 +111,7 @@ function toggleTodo(todo: Todo) {
 				each.id === todo.id ? { ...each, done: !each.done } : each,
 			),
 		)
-		const saved = yield* read(api.toggle(todo.id))
+		const saved = yield* from(api.toggle(todo.id))
 		setTodos(prev => prev.map(each => (each.id === saved.id ? saved : each)))
 	})
 }
@@ -119,7 +119,7 @@ function toggleTodo(todo: Todo) {
 function removeTodo(todo: Todo) {
 	action(function* () {
 		setOverlay(committed(() => latest(todos)).filter(each => each.id !== todo.id))
-		yield* read(api.remove(todo.id))
+		yield* from(api.remove(todo.id))
 		setTodos(prev => prev.filter(each => each.id !== todo.id))
 	})
 }

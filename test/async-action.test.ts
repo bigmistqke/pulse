@@ -1,5 +1,5 @@
 import { expect, test, vi } from 'vitest'
-import { action, committed, computed, read, signal } from '../src/index'
+import { action, committed, computed, from, signal } from '../src/index'
 import {
   catchError,
   createRoot,
@@ -29,7 +29,7 @@ test('an async action holds the speculation open across the await and commits on
 
   const handle = action(function* () {
     setName('bob') // optimistic write
-    const saved: string = yield* read(save('bob')) // the mutation; scope stays open
+    const saved: string = yield* from(save('bob')) // the mutation; scope stays open
     setName(`${saved}!`) // a write AFTER the await must still be speculative
   })
 
@@ -49,7 +49,7 @@ test('an async action rolls back every speculative write when the mutation fails
 
   const handle = action(function* () {
     setName('bob')
-    yield* read(save())
+    yield* from(save())
     setName('never') // unreachable
   })
 
@@ -68,7 +68,7 @@ test('derived state follows the speculation across the await', async () => {
 
   const handle = action(function* () {
     setN(5)
-    yield* read(save())
+    yield* from(save())
     // Resumed inside the scope: the derivation still sees the speculative value.
     expect(doubled()).toBe(10)
     expect(committed(doubled)).toBe(2)
@@ -134,11 +134,11 @@ test('two concurrent async actions are isolated from each other', async () => {
 
   const first = action(function* () {
     setA('a1')
-    yield* read(slow(20))
+    yield* from(slow(20))
   })
   const second = action(function* () {
     setB('b1')
-    yield* read(slow(5))
+    yield* from(slow(5))
   })
 
   await Promise.all([first.settled, second.settled])
@@ -172,7 +172,7 @@ test('retry() re-runs the action from scratch after an error', async () => {
 
   const handle = action(function* () {
     setName('bob')
-    yield* read(save())
+    yield* from(save())
   })
 
   await handle.settled
@@ -195,7 +195,7 @@ test('settled reflects whichever attempt is current, so reading it again after r
     })
 
   const handle = action(function* () {
-    yield* read(save())
+    yield* from(save())
   })
 
   const first = handle.settled
@@ -220,7 +220,7 @@ test('retry() clears error() synchronously, before the new attempt has settled',
     })
 
   const handle = action(function* () {
-    yield* read(save())
+    yield* from(save())
   })
 
   await handle.settled
@@ -249,7 +249,7 @@ test('a superseded attempt settling later does not overwrite the outcome of a ne
     })
 
   const handle = action(function* () {
-    yield* read(save())
+    yield* from(save())
   })
 
   await handle.settled
@@ -306,7 +306,7 @@ test('action() skips a nearer ErrorScope whose for declines the error, registeri
 
       return runWithOwner(inner, () =>
         action(function* () {
-          yield* read(Promise.reject(new TypeError('boom')))
+          yield* from(Promise.reject(new TypeError('boom')))
         }),
       )
     })
@@ -323,7 +323,7 @@ test('action() with no explicit <Errored> anywhere still reaches the implicit ro
   const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
   const handle = createRoot(() =>
     action(function* () {
-      yield* read(Promise.reject(new Error('boom')))
+      yield* from(Promise.reject(new Error('boom')))
     }),
   )
   await handle.settled
@@ -342,7 +342,7 @@ test('action() stops candidate-collection at the nearest catchError, never reach
     catchError(
       () => {
         handle = action(function* () {
-          yield* read(Promise.reject(new Error('boom')))
+          yield* from(Promise.reject(new Error('boom')))
         })
       },
       () => {},
@@ -398,7 +398,7 @@ test('action() moves a claim to a boundary that now accepts a retry, releasing t
       return runWithOwner(inner, () =>
         action(function* () {
           attempt++
-          yield* read(
+          yield* from(
             Promise.reject(attempt === 1 ? new RangeError('r') : new TypeError('t')),
           )
         }),
@@ -449,7 +449,7 @@ test('action() moves a claim back to a nearer boundary once a retry fails with a
     return runWithOwner(inner, () =>
       action(function* () {
         attempt++
-        yield* read(Promise.reject(attempt === 1 ? new TypeError('t') : new RangeError('r')))
+        yield* from(Promise.reject(attempt === 1 ? new TypeError('t') : new RangeError('r')))
       }),
     )
   })

@@ -37,10 +37,21 @@ import type { Accessor } from './signal'
 
 let usedInCurrentBinding = false
 let errorSourceInCurrentBinding: Accessor<unknown> | null = null
+let backgroundPromiseInCurrentBinding: Promise<unknown> | null = null
 
 /** Called by `use()` to mark the current binding as engaged in transition coordination. */
 export function markUsedInBinding(): void {
   usedInCurrentBinding = true
+}
+
+/** Called by `use.latest()` when it takes the stale-while-revalidate path — the
+ *  accessor has resolved before, but is pending again right now. Carries the
+ *  in-flight promise out to `runBindingCompute`'s caller, which hands it to
+ *  the nearest `<Loading>` scope's background-tracking set instead of the
+ *  usual throw/`deferOrCommit` routing, since this binding already has a
+ *  value to commit. */
+export function markBackgroundPromise(promise: Promise<unknown>): void {
+  backgroundPromiseInCurrentBinding = promise
 }
 
 /** Called by a computed's accessor before it throws its parked error, so the
@@ -79,17 +90,22 @@ export function clearErrorSource(): void {
  * Run `fn` as a binding compute, capturing whether `use()` was called inside it.
  * Restores the prior flag state on return (handles nesting).
  */
-export function runBindingCompute<T>(fn: () => T): { value: T; engagedTransition: boolean } {
+export function runBindingCompute<T>(
+  fn: () => T,
+): { value: T; engagedTransition: boolean; backgroundPromise: Promise<unknown> | null } {
   const prevUsed = usedInCurrentBinding
   const prevSource = errorSourceInCurrentBinding
+  const prevBackground = backgroundPromiseInCurrentBinding
   usedInCurrentBinding = false
   errorSourceInCurrentBinding = null
+  backgroundPromiseInCurrentBinding = null
   try {
     const value = fn()
     // Success: nothing threw, so no catcher is waiting to take the source.
     errorSourceInCurrentBinding = prevSource
-    return { value, engagedTransition: usedInCurrentBinding }
+    return { value, engagedTransition: usedInCurrentBinding, backgroundPromise: backgroundPromiseInCurrentBinding }
   } finally {
     usedInCurrentBinding = prevUsed
+    backgroundPromiseInCurrentBinding = prevBackground
   }
 }

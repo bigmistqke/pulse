@@ -46,7 +46,7 @@ export function computed<A, B, C, D, E>(
  * Create a derived signal from a pipeline of one or more stages. Each stage may
  * be sync `(v) => T`, async `async (v) => Promise<T>`, or generator
  * `function* (v): Generator<…, T, …>`. Inside a generator stage, use
- * `yield* read(x)` to read signals and await promises with correct per-yield
+ * `yield* from(x)` to read signals and await promises with correct per-yield
  * inference. The pipeline suspends when a stage's promise is pending (the stage's
  * r3 value becomes that in-flight `Promise<T>` — async color flows downstream).
  *

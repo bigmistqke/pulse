@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest'
 import { computed } from '../src/computed'
 import { signal } from '../src/signal'
-import { latest, read, use } from '../src/async'
+import { latest, from, use } from '../src/async'
 import { createRoot } from '../src/owner'
 import { error, resetError } from '../src/error'
 
@@ -19,7 +19,7 @@ test('a generator stage that builds its promise inside the body converges', asyn
   }
 
   const c = computed(function* () {
-    const x: number = yield* read(makePromise())
+    const x: number = yield* from(makePromise())
     return x + 100
   })
 
@@ -34,7 +34,7 @@ test('the code before a pause runs once, not once per settle', async () => {
   let before = 0
   const c = computed(function* () {
     before++
-    const x: number = yield* read(
+    const x: number = yield* from(
       new Promise<number>((resolve) => setTimeout(() => resolve(1), 1)),
     )
     return x
@@ -52,13 +52,13 @@ test('a generator with two inline pauses converges and builds each promise once'
   let secondCreated = 0
 
   const c = computed(function* () {
-    const a: number = yield* read(
+    const a: number = yield* from(
       new Promise<number>((resolve) => {
         firstCreated++
         setTimeout(() => resolve(1), 1)
       }),
     )
-    const b: number = yield* read(
+    const b: number = yield* from(
       new Promise<number>((resolve) => {
         secondCreated++
         setTimeout(() => resolve(2), 1)
@@ -83,8 +83,8 @@ test('a signal read before a pause stays a dependency across a resume', async ()
 
   const c = computed(function* () {
     runs++
-    const av: number = yield* read(a)
-    const p: number = yield* read(
+    const av: number = yield* from(a)
+    const p: number = yield* from(
       new Promise<number>((resolve) => setTimeout(() => resolve(10), 1)),
     )
     return av + p
@@ -111,8 +111,8 @@ test('a dependency changing mid-pause discards the generator and restarts', asyn
 
   const c = computed(function* () {
     bodyRuns++
-    const av: number = yield* read(a)
-    const p: number = yield* read(
+    const av: number = yield* from(a)
+    const p: number = yield* from(
       new Promise<number>((resolve) => {
         promisesCreated++
         setTimeout(() => resolve(10), 50)
@@ -141,7 +141,7 @@ test('a dependency changing mid-pause discards the generator and restarts', asyn
 test('a rejected inline promise reaches the generator try/catch', async () => {
   const c = computed(function* () {
     try {
-      yield* read(
+      yield* from(
         new Promise<number>((_, reject) =>
           setTimeout(() => reject(new Error('boom')), 1),
         ),
@@ -164,10 +164,10 @@ test('a discarded generator runs its finally block', async () => {
   let closed = 0
 
   const c = computed(function* () {
-    const av: number = yield* read(a)
+    const av: number = yield* from(a)
     opened++
     try {
-      const p: number = yield* read(
+      const p: number = yield* from(
         new Promise<number>((resolve) => setTimeout(() => resolve(10), 5)),
       )
       return av + p
@@ -199,9 +199,9 @@ test('a finally block reading a signal during a discard adds no dependency', asy
 
   const c = computed(function* () {
     runs++
-    const av: number = yield* read(a)
+    const av: number = yield* from(a)
     try {
-      const p: number = yield* read(
+      const p: number = yield* from(
         new Promise<number>((resolve) => setTimeout(() => resolve(10), 50)),
       )
       return av + p
@@ -238,12 +238,12 @@ test('resetting a parked error discards a generator that has since re-paused', a
   const c = computed(function* () {
     attempt++
     const mine = attempt
-    const av: number = yield* read(a)
+    const av: number = yield* from(a)
     try {
       if (mine === 1) {
-        yield* read(Promise.reject(new Error('boom')))
+        yield* from(Promise.reject(new Error('boom')))
       }
-      const p: number = yield* read(
+      const p: number = yield* from(
         new Promise<number>((resolve) => setTimeout(() => resolve(10), 100)),
       )
       return av + p
@@ -273,7 +273,7 @@ test('disposing the owner runs a paused generator finally block', async () => {
     dispose = d
     const c = computed(function* () {
       try {
-        return yield* read(
+        return yield* from(
           new Promise<number>((resolve) => setTimeout(() => resolve(1), 50)),
         )
       } finally {
@@ -363,11 +363,11 @@ test('use(promise) inside a generator stage resolves and the stage publishes the
   expect(latest(c)).toBe(10)
 })
 
-test('use(...) then yield* read(...) inside a generator stage converges', async () => {
+test('use(...) then yield* from(...) inside a generator stage converges', async () => {
   const [a, setA] = signal(1)
   const c = computed(function* () {
     const viaUse = use(a) as number
-    const viaRead: number = yield* read(
+    const viaRead: number = yield* from(
       new Promise<number>((resolve) => setTimeout(() => resolve(10), 1)),
     )
     return viaUse + viaRead
@@ -392,11 +392,11 @@ test('a discarded generator does not leave its abandoned promise able to re-run 
 
   const c = computed(function* () {
     bodyRuns++
-    const av: number = yield* read(a)
+    const av: number = yield* from(a)
     if (av === 2) {
       throw new Error('boom')
     }
-    const p: number = yield* read(
+    const p: number = yield* from(
       new Promise<number>((resolve) => setTimeout(() => resolve(10), 50)),
     )
     return av + p
@@ -434,7 +434,7 @@ test('a generator stage that pauses and then returns a pending promise resolves 
   // generator is finished at that point, so the promise is its result and not
   // a pause to re-enter.
   const c = computed(function* () {
-    const first: number = yield* read(
+    const first: number = yield* from(
       new Promise<number>((resolve) => setTimeout(() => resolve(3), 5)),
     )
     return new Promise<number>((resolve) => setTimeout(() => resolve(first * 10), 5))
@@ -456,8 +456,8 @@ test('a generator stage that pauses, resumes, then returns a promise stays react
 
   const c = computed(function* () {
     bodyRuns++
-    const av: number = yield* read(a)
-    const paused: number = yield* read(
+    const av: number = yield* from(a)
+    const paused: number = yield* from(
       new Promise<number>((resolve) => setTimeout(() => resolve(1), 5)),
     )
     return new Promise<number>((resolve) => setTimeout(() => resolve(av * 10 + paused), 5))
@@ -499,7 +499,7 @@ test('a generator stage returning a pending promise stays reactive to its depend
   const [a, setA] = signal(2)
 
   const c = computed(function* () {
-    const av: number = yield* read(a)
+    const av: number = yield* from(a)
     return new Promise<number>((resolve) => setTimeout(() => resolve(av * 10), 5))
   })
 

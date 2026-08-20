@@ -2,7 +2,7 @@ import { isPromise } from './is-promise'
 import { isPending, promiseOf } from './pending'
 import { rawValueOf } from './error'
 import { NODE, type Accessor, type Signal } from './signal'
-import { markUsedInBinding } from './transition-tracker'
+import { markBackgroundPromise, markUsedInBinding } from './transition-tracker'
 
 /**
  * Records the most recent resolved value observed for each signal. Keyed on the
@@ -186,7 +186,48 @@ export function use(x: unknown): unknown {
 }
 
 /**
- * The resolved-and-unwrapped type of a stage value or `read(x)` argument:
+ * Throws `NotReadyYet` only while `latest(x)` itself would still report
+ * `undefined` — genuinely nothing has ever resolved. Once `latest(x)` has
+ * anything at all, never throws again for that accessor: a same-instance
+ * refetch and a boundary remount are treated identically, because the value
+ * comes from `latest(x)`'s own stale-while-revalidate machinery (mostly
+ * seeded on the pending promise itself, not on this accessor's identity),
+ * not from anything scoped to a calling `<Loading>` instance. See ADR 0014.
+ *
+ * An anonymous function expression assigned as a property of the `use`
+ * function declaration — not a named one, and not a `namespace use { export
+ * function latest() {...} }` merge. TypeScript augments a function
+ * declaration's type from a same-file property assignment like this one
+ * automatically, generics included, so there's nothing further to declare.
+ * (A named function expression, or a namespace member, would each shadow
+ * the module-level `latest` with their own binding of the same name for
+ * anything inside their own body — this has no name of its own to shadow
+ * with.)
+ */
+use.latest = function <T>(x: Accessor<T>): Awaited<T> {
+  // Same unconditional engagement marker use() sets — a use.latest() binding
+  // still participates in the nearest <Loading> boundary's atomic-commit
+  // gate via deferOrCommit, even on a run where it doesn't throw.
+  markUsedInBinding()
+  const value = latest(x)
+  if (value !== undefined) {
+    // Has a value to show — but if the underlying accessor is ALSO currently
+    // pending (a refetch in flight behind the stale value), hand the
+    // in-flight promise out so the nearest <Loading> scope's isLoading()
+    // still reflects the background refresh, without withholding this
+    // binding's own commit the way a throw would.
+    if (isPending(x)()) {
+      const inFlight = promiseOf(x)()
+      if (inFlight !== null) markBackgroundPromise(inFlight)
+    }
+    return value as Awaited<T>
+  }
+  // Genuinely nothing has ever resolved for this accessor.
+  throw new NotReadyYet(promiseOf(x)()!)
+}
+
+/**
+ * The resolved-and-unwrapped type of a stage value or `from(x)` argument:
  * - If T is a Signal<U> or Accessor<U> (a callable returning U), the result is Awaited<U>.
  * - If T is a Generator returning R, the result is Awaited<R>.
  * - Otherwise the result is Awaited<T>.
@@ -215,7 +256,7 @@ type MaybeAsync<X> =
 
 /** Unwrap a generator's return type, coloured by what it actually yields — not
  *  asserted unconditionally. `Y`, the generator's yield type, is whatever
- *  `read`/`settled` calls inside the body were declared to yield; TypeScript
+ *  `from`/`settled` calls inside the body were declared to yield; TypeScript
  *  infers it as the union of every yield site (including ones reached through
  *  `yield*` delegation), so it reflects the real shape of the body, not just
  *  its last stage. A body that never yields (`Y` is `never`) is fully
@@ -264,7 +305,7 @@ function isSignalAccessor(x: unknown): x is Signal<unknown> {
   return typeof x === 'function' && NODE in (x as object)
 }
 
-/** What `read(x)` actually yields, mirroring `Resolved`'s unwrapping of a
+/** What `from(x)` actually yields, mirroring `Resolved`'s unwrapping of a
  *  signal or accessor argument — but keeping the colour visible (not run
  *  through `Awaited`), since this is what `Surface` inspects through a
  *  generator stage's inferred yield type to tell a settled read apart from
@@ -272,24 +313,27 @@ function isSignalAccessor(x: unknown): x is Signal<unknown> {
 type Yielded<T> = T extends Signal<infer U> ? U : T extends () => infer U ? U : T
 
 /**
- * Generator-side resolver. Use as `yield* read(x)` inside a `function*` stage.
+ * Generator-side resolver. Use as `yield* from(x)` inside a `function*` stage.
+ * Named after Python's `yield from` — same idea, carried through JS's
+ * `yield*` syntax instead. (Previously named `read`; renamed because that
+ * name didn't signal the `yield*`-only constraint — see ADR 0014.)
  * - x is a signal: the accessor is called (tracking the signal as a dep), and
  *   its value (which may be a `T` or a `Promise<T>`) is yielded.
  * - x is a promise: yielded directly (untracked).
  * - x is a plain value: yielded directly; the driver resumes immediately with it.
  *
- * `yield* read(x)` has type `Resolved<typeof x>` — per-yield inference, courtesy
+ * `yield* from(x)` has type `Resolved<typeof x>` — per-yield inference, courtesy
  * of generator delegation. The declared yield type, `Yielded<T>`, carries the
  * same per-yield colour outward: a `function*` stage that only ever reads
  * settled values infers a fully synchronous yield type, and `Surface` reads
  * that to publish the stage's result bare instead of wrapped in a `Promise`.
  *
- * Plan A note: `read` does NOT consult any `[PENDING]` brand. Suspension is
+ * Plan A note: `from` does NOT consult any `[PENDING]` brand. Suspension is
  * driven solely by the driver's `settle()` over the yielded value. Coherent
  * snapshots and transitions are handled by the JSX boundary layer (Plan B),
- * not by `read`.
+ * not by `from`.
  */
-export function* read<T>(x: T): Generator<Yielded<T>, Resolved<T>, unknown> {
+export function* from<T>(x: T): Generator<Yielded<T>, Resolved<T>, unknown> {
   if (isSignalAccessor(x)) {
     // The runtime shape matches Yielded<T>'s Signal/accessor branch by
     // construction; TypeScript cannot verify that through a generic T, so the
@@ -300,19 +344,19 @@ export function* read<T>(x: T): Generator<Yielded<T>, Resolved<T>, unknown> {
 }
 
 /**
- * Wait-for-all coordination barrier — the plural form of `yield* read(x)`. Use as
+ * Wait-for-all coordination barrier — the plural form of `yield* from(x)`. Use as
  * `const [a, b] = yield* settled([A, B])` inside a generator stage. Suspends until
  * EVERY input has settled and resolves to the tuple of fresh values, so a shared
  * consumer swaps to the new frame atomically (never a half-updated frame).
  *
- * Unlike `read`, which is stale-while-revalidate tolerant (it yields the stale
+ * Unlike `from`, which is stale-while-revalidate tolerant (it yields the stale
  * value during a refetch), `settled` awaits each refetching input's IN-FLIGHT
  * promise — reached through the pending registry (`promiseOf`), not the stale
  * value the raw read returns — so the frame is genuinely fresh once it resolves.
  * A settled rejection propagates (via `Promise.all`), routing to the boundary.
  *
  * The declared yield type, `Promise<unknown[]>`, is unconditional (unlike
- * `read`'s per-argument `Yielded<T>`) because the one `yield` below always
+ * `from`'s per-argument `Yielded<T>`) because the one `yield` below always
  * awaits a `Promise.all` when it runs — so `Surface` always colours a
  * generator stage that uses `yield* settled(...)` as async, matching that it
  * really can suspend, even though the `if` guarding it means a given run
@@ -342,7 +386,7 @@ export function* settled<T extends readonly unknown[]>(
   }
   // Suspend until every in-flight input has settled — then the frame is coherent.
   if (inflight.length > 0) yield Promise.all(inflight)
-  // Read the fresh resolved values. A rejected input THROWS (as `read`/`use` do)
+  // Read the fresh resolved values. A rejected input THROWS (as `from`/`use` do)
   // rather than reading `.value` off a rejected state — which may hold a seeded
   // stale-while-revalidate prior (see `track`), not the rejection's own result.
   return inputs.map((x) => {

@@ -34,14 +34,21 @@ export function SpinnerFlash() {
     }, 30)
   }
 
-  const boundary = () => (
-    <Loading initial={<div class="payload is-fallback" attr:data-testid="fallback">loading…</div>}>
-      {() => (
-        <div class="payload" attr:data-testid="payload" attr:data-gen="current">
+  const panes = () => (
+    <div class="pane-row">
+      <Loading initial={<div class="pane is-fallback" attr:data-testid="fallback-use">loading…</div>}>
+        <div class="pane" attr:data-testid="payload-use">
+          <p class="pane-label">use(data)</p>
           {() => use(data).text}
         </div>
-      )}
-    </Loading>
+      </Loading>
+      <Loading initial={<div class="pane is-fallback" attr:data-testid="fallback-use-latest">loading…</div>}>
+        <div class="pane" attr:data-testid="payload-use-latest">
+          <p class="pane-label">use.latest(data)</p>
+          {() => use.latest(data).text}
+        </div>
+      </Loading>
+    </div>
   )
 
   const scenario = (
@@ -50,7 +57,7 @@ export function SpinnerFlash() {
         <button attr:data-testid="refetch" on:click={refetch}>refetch</button>
         <button attr:data-testid="remount" on:click={remount}>remount boundary</button>
       </div>
-      <Show when={mounted()}>{boundary}</Show>
+      <Show when={mounted()}>{panes}</Show>
     </div>
   )
 
@@ -58,7 +65,7 @@ export function SpinnerFlash() {
     <TabFrame
       title="FM2 · Spinner flash"
       quality="A boundary should hold prior content across a refetch — no fallback flash for content already shown — regardless of when the boundary was mounted."
-      actual="Fails on remount. <Loading> tracks 'has ever loaded' per-boundary, so a boundary mounted after its data resolved treats the next refetch as a first load and flashes the fallback."
+      actual="use(data) always throws while data is pending, by design — on a fresh boundary that means a fallback flash, even for a refetch of data shown before the remount. use.latest(data) only throws while latest(data) has genuinely never resolved anything, so it survives the remount and never flashes."
       scenario={scenario}
       controls={<LatencyControls knobs={[knob]} />}
       timeline={<EventTimeline log={log} />}

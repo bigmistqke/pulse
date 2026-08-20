@@ -77,6 +77,15 @@ export interface LoadingScope extends BoundaryScope {
    * bindings have settled.
    */
   deferOrCommit(commit: () => void): void
+  /**
+   * Register an in-flight promise from a `use.latest()` binding that took the
+   * stale-while-revalidate path — it already has a value to show, so it
+   * doesn't go through `register()`/`deferOrCommit`, but the boundary's
+   * `active` should still reflect that a refresh is happening in the
+   * background. Removed automatically, via the promise's own settlement, not
+   * by an explicit unregister call.
+   */
+  trackBackground(promise: Promise<unknown>): void
 }
 
 /** The failed collection. */

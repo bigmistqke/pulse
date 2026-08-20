@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest'
 import { computed } from '../src/computed'
 import { signal } from '../src/signal'
-import { latest, read } from '../src/async'
+import { latest, from } from '../src/async'
 import { createRoot, onCleanup } from '../src/owner'
 
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
@@ -14,7 +14,7 @@ test('onCleanup before a pause does not fire when the generator resumes', async 
 
   const c = computed(function* () {
     onCleanup(() => events.push('cleanup'))
-    const x: number = yield* read(
+    const x: number = yield* from(
       new Promise<number>((resolve) => setTimeout(() => resolve(1), 1)),
     )
     events.push('after-pause')
@@ -34,7 +34,7 @@ test('onCleanup fires when the generator completes', async () => {
 
   const c = computed(function* () {
     onCleanup(() => cleaned++)
-    return yield* read(
+    return yield* from(
       new Promise<number>((resolve) => setTimeout(() => resolve(1), 1)),
     )
   })
@@ -51,9 +51,9 @@ test('onCleanup fires when the generator is discarded on a dependency change', a
   let cleaned = 0
 
   const c = computed(function* () {
-    const av: number = yield* read(a)
+    const av: number = yield* from(a)
     onCleanup(() => cleaned++)
-    const p: number = yield* read(
+    const p: number = yield* from(
       new Promise<number>((resolve) => setTimeout(() => resolve(10), 5)),
     )
     return av + p
@@ -78,7 +78,7 @@ test('onCleanup fires when the owner is disposed while paused', async () => {
     dispose = d
     const c = computed(function* () {
       onCleanup(() => cleaned++)
-      return yield* read(
+      return yield* from(
         new Promise<number>((resolve) => setTimeout(() => resolve(1), 50)),
       )
     })
@@ -97,11 +97,11 @@ test('cleanups run most recently registered first, after finally blocks', async 
   const events: string[] = []
 
   const c = computed(function* () {
-    const av: number = yield* read(a)
+    const av: number = yield* from(a)
     onCleanup(() => events.push('first'))
     onCleanup(() => events.push('second'))
     try {
-      const p: number = yield* read(
+      const p: number = yield* from(
         new Promise<number>((resolve) => setTimeout(() => resolve(10), 5)),
       )
       return av + p

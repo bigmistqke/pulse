@@ -105,16 +105,19 @@ One function in a Pipeline. Independently sync `(value) => ...`,
 reactive signals and tracks its own dependency set. Stage N's parameter type is
 inferred from stage N-1's return type.
 
-**read**:
-The generator-side resolver helper, used as `yield* read(x)` inside a
+**from**:
+The generator-side resolver helper, used as `yield* from(x)` inside a
 `function*` stage. `x` may be a signal (tracked + resolved), a bare promise
 (suspended on, untracked), or a plain value (returned immediately). It exists
 because `yield*` delegation is the only way TypeScript can infer a per-yield
-value type inside a generator body. After Plan A, `read` is a plain yield
+value type inside a generator body. After Plan A, `from` is a plain yield
 helper — it does NOT consult any pending brand. Suspension comes from the
 driver's `settle()` over the yielded value. Coherent multi-read snapshots
-across siblings are a `<Loading>` boundary concern, not `read`'s job.
-_Avoid_: get, unwrap.
+across siblings are a `<Loading>` boundary concern, not `from`'s job. Named
+`from` — not its earlier name `read` — because `read` didn't signal the
+`yield*`-only constraint; `from` echoes Python's own `yield from` phrasing
+through JS's `yield*` syntax instead. See [ADR 0014](docs/adr/0014-use-latest-composed-on-latest.md).
+_Avoid_: get, unwrap, read (superseded — see above).
 
 **use / NotReadyYet**:
 `use<T>(x: T | Promise<T> | Accessor<T>): Awaited<T>` is the opt-in synchronous
@@ -150,6 +153,29 @@ is a code smell.
 _Contrast_: Solid's throwing is implicit and pervasive (every accessor); `use`
 is explicit, local, and grep-able.
 
+**use.latest**:
+`use.latest<T>(x: Accessor<T>): Awaited<T>` — declaration-merged onto `use`
+(the same pattern as `Errored.Error` merged onto `Errored`), not a separate
+top-level export. Composes directly on `latest(x)`: call it; if the result is
+not `undefined`, return it (marking engagement the same as `use`, and handing
+the in-flight promise to the nearest `<Loading>` scope's background-tracking
+set if `isPending(x)()` is also true); if it IS `undefined` — genuinely
+nothing has ever resolved for this accessor — throw `NotReadyYet`, exactly
+like `use`.
+
+The difference from `use`: `use` throws on every pending episode, forever.
+`use.latest` throws only until the first value exists, then never again for
+that accessor — a same-instance refetch and an instance remount are treated
+identically, because the memory lives on whatever `latest(x)` already tracks
+(mostly the pending promise's own seeded SWR state, not the accessor's
+identity), not on the calling boundary. No new tracking state was added
+anywhere to make this work — see [ADR 0014](docs/adr/0014-use-latest-composed-on-latest.md)
+for the full reasoning, including two rejected designs that DID need new
+tracking state and why they were dropped.
+_Avoid_: a separate top-level primitive for this (`warm`, `hold`, `keep`,
+`useStale`, `useLatest`, standalone `latest`/`get` reshuffle — all considered
+and rejected; see the ADR).
+
 **isPending / promiseOf**:
 External reactive accessors over the pending tracker, exposed scheduler-style
 (`src/pending.ts`). `isPending<T>(x: Accessor<T>): Accessor<boolean>` returns
@@ -170,7 +196,8 @@ anymore (Plan A removed it).
 *resolved* value: `undefined` until the signal first resolves, then always the
 last resolved value; does not revert to `undefined` while a newer promise is
 pending. Use when you want stale-but-stable explicit data (vs. `use` which
-throws on pending).
+throws on pending). `use.latest` (see above) composes directly on this —
+throwing only while `latest` itself would still report `undefined`.
 
 **Component**:
 A function that runs once and returns a DOM node tree (or an accessor that
@@ -214,6 +241,26 @@ State machine inside `LoadingScope`:
 - `deferredCommits: Array<() => void>` — anonymous commits from
   `use()`-engaged bindings that didn't throw but need to wait for the gate
   (so atomic with sibling throwers).
+- `backgroundPromises: Set<Promise<unknown>>` — in-flight promises handed off
+  by a `use.latest()` SWR read (a binding that returned a stale value instead
+  of throwing). Added on hand-off, removed by a single `promise.finally(...)`
+  callback per promise, guarded to no-op if the scope is already disposed by
+  the time it fires. Doesn't participate in the gate (a `use.latest()` binding
+  already committed; nothing is waiting on it) — only in `isLoading()`'s
+  aggregate, so a background refresh still surfaces as "loading" even though
+  nothing is withheld.
+
+Two separate signals, not one: `gatePending` (`pendingSet.size > 0 ||
+readySet.size > 0 || deferredCommits.length > 0`) drives the commit gate below,
+`Loading()`'s own initial-vs-loaded swap check, and `hasEverLoaded`.
+`activeSig` (`gatePending || backgroundPromises.size > 0`) is what `scope.active`
+— and therefore `isLoading()`/`useLoading()` — read. Collapsing these into one
+signal is a real bug, not a simplification: a `use.latest()` binding's
+background refresh would then hold `gatePending`/`hasEverLoaded` true for the
+whole refresh, reopening the exact fallback-flash-on-remount bug `use.latest`
+exists to close, just stretched across the refetch instead of a single
+microtask. See [ADR 0014](docs/adr/0014-use-latest-composed-on-latest.md)'s
+"Implementation correction" section.
 
 When `pendingSet.size === 0 && (readySet.size > 0 || deferredCommits.length > 0)`,
 the gate opens: all commits flush in one pass. A microtask "tail check" handles
@@ -224,11 +271,16 @@ reported in the same flush.
 tree yet); `fallback` shows on subsequent transitions if set, otherwise the
 prior committed tree is held.
 
-**useLoading**:
+**useLoading / isLoading**:
 `useLoading(): Accessor<boolean>` — reads the nearest enclosing `<Loading>`
 boundary's pending state. Returns a constant-false accessor when called
-outside any Loading subtree. Use for in-flight visual cues
-(`class:loading={() => useLoading()()}`).
+outside any Loading subtree. For the narrower case of reading the boundary
+from one place and handing the resulting accessor to another.
+
+`isLoading(): boolean` — the same read, called fresh at the call site instead
+of returning an accessor to store — the common case, e.g. a getter-converted
+prop (`class:loading={isLoading()}`) that's already re-read on every reactive
+pass, with nothing to gain from an intermediate accessor.
 
 **effect (single-arg form)**:
 `effect(fn: () => void)` runs a side-effecting function reactively. Re-runs on
@@ -361,7 +413,7 @@ the same shape as an incremental graph of binds.
 
 ## Relationships
 
-- A **Signal** is read via an **Accessor** (sync contexts) or `yield* read()`
+- A **Signal** is read via an **Accessor** (sync contexts) or `yield* from()`
   (inside a `function*` stage).
 - A **Computed** is a **Pipeline** of **Stages**; each stage registers with
   the pending tracker, and `isPending`/`promiseOf` walk the chain.
@@ -403,26 +455,32 @@ together when `list` settles.
 
 ## Roadmap
 
-- **v1** (shipped): core (multi-stage computeds, generator computeds, `read`,
+- **v1** (shipped): core (multi-stage computeds, generator computeds, `from`,
   SWR), DOM layer, error boundaries, `<Loading>` atomic-commit boundary,
-  `use(...)` as suspension + transition-engagement marker, staged effects.
+  `use(...)` as suspension + transition-engagement marker, staged effects,
+  `useLoading`/`isLoading`, `useErrored`/`isErrored`.
+- **v1.1** (shipped, [ADR 0014](docs/adr/0014-use-latest-composed-on-latest.md)):
+  `use.latest(x)`, declaration-merged onto `use`, fixing the fallback-flash-on-
+  remount bug (FM2); `read` renamed to `from` throughout `src/async.ts` and its
+  call sites; `LoadingScope` gains `backgroundPromises`/`trackBackground()` and
+  splits its pending signal into `gatePending`/`activeSig` (see the Loading
+  boundary entry above).
 - **later**: structural-mount gating in `<Loading>` (current bug: `<Show>`/
   `<For>` mount/unmount commits don't defer with the boundary — only content
-  hole commits do); top-level component children in a Fragment under
-  `<Loading>` losing the scope (workaround: wrap in static element); optimistic
-  store; explicit `transition()` value for cross-tree coordination beyond
-  what `<Loading>` placement covers.
+  hole commits do); optimistic store; explicit `transition()` value for
+  cross-tree coordination beyond what `<Loading>` placement covers.
 
 See [`docs/follow-ups.md`](./docs/follow-ups.md) for the live tracker of
 known issues and follow-up work.
 
 ## Flagged ambiguities
 
-- `read` (the generator-side helper) was at one point made *brand-aware* —
-  inspecting the accessor's pending state and yielding the in-flight Promise
-  to suspend the generator. Plan A reverted this: `read` is plain. Coherent
-  multi-read snapshots now live entirely in the `<Loading>` gather mechanism,
-  not in `read`.
+- `from` (the generator-side helper, named `read` at the time this was
+  decided — see [ADR 0014](docs/adr/0014-use-latest-composed-on-latest.md))
+  was at one point made *brand-aware* — inspecting the accessor's pending
+  state and yielding the in-flight Promise to suspend the generator. Plan A
+  reverted this: `from` is plain. Coherent multi-read snapshots now live
+  entirely in the `<Loading>` gather mechanism, not in `from`.
 
 ## Example dialogue
 
