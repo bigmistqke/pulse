@@ -209,28 +209,41 @@ want stale-but-stable explicit data with no coordination of any kind (vs.
 `use` which throws on pending).
 
 `latest<T>(s: Accessor<T>): Awaited<T> | undefined` reads `peek(s)`'s exact
-value, and additionally — while `s` is pending — hands its in-flight promise
-to the nearest `<Loading>` boundary's background-tracking set, ambiently
-participating in `isLoading()`/`useLoading()`. Never calls
-`markUsedInBinding()`, so it can never withhold a commit or reopen a
-boundary's fallback — only the loading *indicator* hears about it, never the
-swap decision. `use.latest` (see above) composes directly on this — throwing
-only while `latest` itself would still report `undefined`, and getting the
-same background hand-off for free by calling `latest` internally.
+value and additionally reports `s`'s state to the surrounding boundaries,
+ambiently — never by throwing, and never by calling `markUsedInBinding()`, so
+it can neither withhold a commit nor participate in the atomic-commit gate.
+Three facts flow out, all read off the accessor's own state (so all survive a
+boundary remount):
 
-Displaying a value and propagating loading state are two separate
-capabilities — `peek`/`latest` is the "which value" axis, `use`/`use.latest`
-is the "does this gate a commit" axis, and they compose independently rather
-than one primitive doing double duty. See [ADR 0015](docs/adr/0015-peek-latest-split-ambient-loading-participation.md)
-for the design history, including two rejected shapes that tried to fold both
-axes into one call, and the error-boundary flush bug uncovered (not caused) by
-applying this split to `examples/todo-async` — see
-[`docs/follow-ups.md`](docs/follow-ups.md).
-_Avoid_: reaching for `use`/`use.latest` purely to make a binding "participate"
-without needing its value (call `latest` instead, if a throw isn't wanted) or
-purely to gate a commit without displaying anything at that call site (a
-value-less leaf calling `use` and returning nothing is the honest shape for
-that, not a discarded value next to a real read).
+- pending, and `s` has genuinely resolved before → a background refresh.
+  Feeds `isLoading()`/`useLoading()` only; the boundary holds prior content.
+- pending, and `s` has never resolved → a first load. Feeds `isLoading()` AND
+  the boundary's `initial` swap, so a subtree that reads only through `latest`
+  still gets its placeholder with nothing throwing.
+- parked in an error state → reported to the nearest accepting `<Errored>`,
+  since the tolerant read degrades rather than throwing and the boundary's
+  only other intake is a binding that threw. Cleared automatically on any
+  later run that sees no error, which is what unlatches the boundary.
+
+"Has genuinely resolved" is tracked separately from "has a value to report",
+so a `signal(fn, default)` source still gets its first-load placeholder: the
+seed says what to DISPLAY meanwhile, not that the fetch has finished.
+
+`use.latest` composes directly on this — throwing only while `latest` itself
+would still report `undefined`, and getting every ambient report for free.
+
+**The axes.** Displaying a value and coordinating with boundaries are separate
+capabilities. `peek` is the escape hatch — the only reader with no
+participation at all. Everything else participates: `latest` ambiently,
+`use`/`use.latest` ambiently plus the two things a throw uniquely buys —
+a non-optional return type (`Awaited<T>`, never `undefined`) and enrolment in
+the atomic-commit gate so sibling bindings land in one frame. Reach for `use`
+when you want those two; reach for `latest` otherwise. See
+[ADR 0015](docs/adr/0015-peek-latest-split-ambient-loading-participation.md).
+_Avoid_: a value-less binding that calls `use(x)` and discards the result
+purely to make a boundary react — that conscripts the guaranteed-value
+primitive for the one thing that isn't its benefit. Boundaries hear about
+state through `latest`; `use` is for when the call site wants the value.
 
 **Component**:
 A function that runs once and returns a DOM node tree (or an accessor that
@@ -523,10 +536,21 @@ together when `list` settles.
   and never recomputed unless some unrelated write happened to flush, which
   made the boundary's liveness depend on incidental traffic elsewhere in the
   tree. Uncovered by the v1.3 migration above; see `docs/follow-ups.md`.
-- **later**: structural-mount gating in `<Loading>` (current bug: `<Show>`/
-  `<For>` mount/unmount commits don't defer with the boundary — only content
-  hole commits do); optimistic store; explicit `transition()` value for
-  cross-tree coordination beyond what `<Loading>` placement covers.
+- **v1.5** (shipped, [ADR 0015](docs/adr/0015-peek-latest-split-ambient-loading-participation.md)'s
+  follow-on): `latest(x)` reports three facts ambiently instead of one —
+  background refresh, first load (driving `<Loading initial>`), and the
+  source's error state (driving `<Errored>`). `peek` is now the only reader
+  that reports nothing. `optimistic()` takes the source signal directly and
+  makes the tolerant read itself. `examples/todo-async` contains no `use()`
+  call at all and keeps every behaviour, which is the demonstration that
+  loading and error propagation never needed a throw — only the non-optional
+  return type and the atomic-commit gate do.
+- **later**: make `retry`/`reset` genuinely absent when nothing is retryable,
+  instead of present and inert for a non-re-runnable source (see
+  `docs/follow-ups.md`); structural-mount gating in `<Loading>` (current bug:
+  `<Show>`/`<For>` mount/unmount commits don't defer with the boundary — only
+  content hole commits do); optimistic store; explicit `transition()` value
+  for cross-tree coordination beyond what `<Loading>` placement covers.
 
 See [`docs/follow-ups.md`](./docs/follow-ups.md) for the live tracker of
 known issues and follow-up work.

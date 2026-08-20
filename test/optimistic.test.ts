@@ -78,7 +78,7 @@ test('committing does not flash the prior value through the overlay reader', asy
   setScheduler(syncScheduler(flush))
   try {
     const [value, setValue] = signal('saved')
-    const [optimisticValue, setOptimisticValue] = optimistic(value)
+    const [optimisticValue, setOptimisticValue] = optimistic(value, '')
     const g = gate()
     const handle = action(function* () {
       setOptimisticValue('draft')

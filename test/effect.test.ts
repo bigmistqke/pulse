@@ -159,6 +159,7 @@ test('effect that suspends increments nearest pending boundary scope', async () 
     }),
     deferOrCommit(commit) { commit() },
     trackBackground() {},
+    trackFirstLoad() {},
   }
   let resolveP!: (v: number) => void
   const p = new Promise<number>((r) => { resolveP = r })
@@ -189,6 +190,7 @@ test('effect disposal while pending unregisters from the pending boundary scope'
     }),
     deferOrCommit(commit) { commit() },
     trackBackground() {},
+    trackFirstLoad() {},
   }
   const p = new Promise<number>(() => {}) // never settles
 
@@ -216,6 +218,7 @@ test('effect that never suspends does not touch the pending boundary scope', () 
     }),
     deferOrCommit(commit) { commit() },
     trackBackground() {},
+    trackFirstLoad() {},
   }
   createRoot(() => {
     getOwner()!.boundaries.pending = scope

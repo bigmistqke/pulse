@@ -124,3 +124,51 @@ name previously meant — the escape hatch is what's new, not the participant.
   through `<Loading>`'s `deferOrCommit`. Not caused by this ADR's change (it reproduced with the
   pre-split `latest()` too), only uncovered by it. Fixed in the same pass, in `src/owner.ts` and
   `src/scope.ts`, with regression tests in `test/dom/error.test.tsx`.
+
+## Follow-on: the full ambient contract, and what a throw is actually for
+
+The split above shipped with `latest()` reporting only one fact — a background refresh — which left
+`<Loading initial>` and `<Errored>` still reachable only through a throw. Working through why the
+`examples/todo-async` migration still needed a value-less `{() => { use(todos); return null }}`
+binding produced the sharper framing: **`use`'s only benefits at a call site are that it returns
+`Awaited<T>` instead of `Awaited<T> | undefined` (which is what the throw buys) and that it enrols
+the binding in the atomic-commit gate.** Everything else it appeared to provide was coordination
+that had simply never been given another route.
+
+So `latest()` now reports three facts rather than one, and `peek()` is the only reader that reports
+nothing:
+
+- **background refresh** — pending, and the accessor has resolved before. `isLoading()` only.
+- **first load** — pending, and the accessor has never resolved. `isLoading()` and the `initial`
+  swap. Keyed on genuine resolution (a private `everResolved` set written only where a real value
+  arrives) rather than on whether a value came back, so a `signal(fn, default)` source still gets
+  its placeholder — a seed says what to display meanwhile, not that the fetch has finished.
+- **error** — the source is parked in an error state. Reported to the nearest accepting `<Errored>`
+  through a per-binding controller in `src/dom/bindings.ts`, and cleared to `idle` on any later run
+  that sees no error, which is what unlatches the boundary. Reading `error(s)` also subscribes to
+  the node's error state, so the binding re-runs on reset and reports its own recovery.
+
+`examples/todo-async` now contains **no `use()` call at all** and keeps every behaviour: Skeleton on
+first load, hold-prior across a refetch, a failed load reaching `<Errored>` with a working retry,
+and the optimistic overlay. That is the concrete demonstration that loading and error propagation
+never needed the throw — only the value guarantee and the commit gate do.
+
+`optimistic()` changed shape in the same pass: it takes the source signal directly rather than a
+thunk (`optimistic(todos)`, not `optimistic(() => latest(todos))`) and makes the tolerant read
+itself, mirroring `latest`'s overloads. An overlay layers plain values over plain values, so a
+fetch-backed source has to be read tolerantly somewhere; doing it inside means every consumer of the
+overlay gets the ambient participation for free.
+
+### Known gap: `retry` is offered even when nothing can be retried
+
+`useErrored()`/`isErrored()`/`<Errored>`'s `fallback` all hand out a `retry`/`reset` unconditionally,
+because it is built as a closure over `scope.reset()` — a scope-level operation that never consults
+the individual failure. It is only meaningful when the failed source is re-runnable: a `computed`
+with a recipe (verified: the body runs again and the boundary clears), or an `action` with a body.
+For a raw rejected promise there is nothing to re-run and no registered node for `resetError` to
+reset, so retrying re-runs the binding, re-throws the identical rejection, and correctly re-latches
+the boundary — but the rendered fallback comes back EMPTY, because the reset transiently publishes
+an empty report collection and the fallback's own content re-renders against `error() === null` in
+that window. Measured, not inferred. Tracked in `docs/follow-ups.md`; the intended fix is to make
+`retry` genuinely absent (`null`) when no matching report is retryable, rather than present and
+inert.

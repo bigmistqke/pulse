@@ -433,6 +433,7 @@ test('findBoundaryScope walks parent chain to find first non-null entry', () => 
     register: () => ({ report() {}, unregister() {} }),
     deferOrCommit(commit) { commit() },
     trackBackground() {},
+    trackFirstLoad() {},
   }
   createRoot(() => {
     const outer = getOwner()!
@@ -446,7 +447,7 @@ test('findBoundaryScope walks parent chain to find first non-null entry', () => 
 })
 
 test('findBoundaryScope returns null when no scope on chain', () => {
-  let captured: LoadingScope | null = { kind: 'pending', active: () => false, register: () => ({ report() {}, unregister() {} }), deferOrCommit(commit) { commit() }, trackBackground() {} }
+  let captured: LoadingScope | null = { kind: 'pending', active: () => false, register: () => ({ report() {}, unregister() {} }), deferOrCommit(commit) { commit() }, trackBackground() {}, trackFirstLoad() {} }
   createRoot(() => {
     captured = findBoundaryScope(getOwner(), 'pending')
   })

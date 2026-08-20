@@ -87,6 +87,16 @@ export interface LoadingScope extends BoundaryScope {
    * by an explicit unregister call.
    */
   trackBackground(promise: Promise<unknown>): void
+  /**
+   * Register an in-flight promise from a `latest()` read that had NO value to
+   * report — the accessor has genuinely never resolved. Unlike
+   * `trackBackground`, this DOES drive the boundary's `initial` swap: "nothing
+   * under me has ever loaded" is exactly what `initial` is for. It still never
+   * touches the atomic-commit gate — the binding that reported it has already
+   * committed whatever it had (typically nothing), so there is nothing to
+   * withhold. Removed automatically via the promise's own settlement.
+   */
+  trackFirstLoad(promise: Promise<unknown>): void
 }
 
 /** The failed collection. */

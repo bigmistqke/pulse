@@ -549,7 +549,7 @@ test('a bare peek() read never registers with the enclosing Loading boundary', a
   dispose()
 })
 
-test('a bare latest() read ambiently feeds isLoading() during a refresh, without ever gating the fallback', async () => {
+test('a bare latest() read drives initial on first load, then holds prior across a refresh', async () => {
   const target = document.createElement('section')
   document.body.append(target)
 
@@ -574,7 +574,14 @@ test('a bare latest() read ambiently feeds isLoading() during a refresh, without
     target,
   )
 
-  expect(target.textContent).toBe('empty')
+  // First load, read only through latest() — nothing here throws and nothing
+  // engages the commit gate, but latest() had no value to report, so it hands
+  // the in-flight promise to the boundary's first-load set and the boundary
+  // shows `initial`. This is what makes the placeholder a property of the
+  // data rather than of a throw. See ADR 0015.
+  expect(target.textContent).toBe('fallback')
+  expect(loading()).toBe(true)
+
   await tick()
   flush()
   expect(target.textContent).toBe('v0')
@@ -594,5 +601,40 @@ test('a bare latest() read ambiently feeds isLoading() during a refresh, without
   flush()
   expect(loading()).toBe(false)
   expect(target.textContent).toBe('v1')
+  dispose()
+})
+
+// ADR 0015 follow-on: a seeded source still reports its FIRST load, because
+// "has genuinely resolved" is tracked separately from "has a value to report".
+// The seed says what to display meanwhile; it is not a claim that the fetch
+// finished. Without that distinction a signal(fn, default) would silently lose
+// its placeholder, since latest() would always have a value to hand back.
+test('a seeded source still gets its initial placeholder on first load', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+
+  let release!: (v: string[]) => void
+  const [items] = signal(
+    () => new Promise<string[]>((r) => { release = r }),
+    [] as string[],
+  )
+
+  const dispose = render(
+    () => (
+      <Loading initial={<p>skeleton</p>}>
+        {() => <span>{`${latest(items).length} items`}</span>}
+      </Loading>
+    ),
+    target,
+  )
+
+  // latest(items) hands back the seed [] — but items has never actually
+  // resolved, so this is a first load and the boundary shows `initial`.
+  expect(target.textContent).toBe('skeleton')
+
+  release(['a', 'b'])
+  await tick()
+  flush()
+  expect(target.textContent).toBe('2 items')
   dispose()
 })

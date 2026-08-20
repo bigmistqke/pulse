@@ -3,17 +3,16 @@ import {
 	committed,
 	Errored,
 	For,
+	from,
 	isErrored,
 	isPending,
 	latest,
-	peek,
 	Loading,
 	optimistic,
-	from,
+	peek,
 	render,
 	Show,
 	signal,
-	use,
 } from 'pulse'
 import { api, config, LoadFailedError, type Todo } from './api'
 
@@ -40,13 +39,16 @@ const [version, setVersion] = signal(0)
  * server actually confirmed; the speculative guess a mutation shows before
  * that lives entirely in the overlay below, never here.
  *
- * The `[]` default seeds `latest(todos)`'s fallback, so every tolerant read
- * below can drop its own `?? []` — `latest(todos)` reports `[]` on its own
- * until the first load resolves, exactly as if that had already happened.
- * `setTodos`'s update form gets the same substitution, so a mutation below
- * can write `(prev) => [...prev, x]` directly with no `?? []` of its own
- * either. The strict read (`todos()`, `use(todos)`) is unaffected: it still
- * stays a Promise while the load is genuinely in flight.
+ * The `[]` default seeds the tolerant read's fallback, so every read below can
+ * drop its own `?? []` — `latest(todos)`/`peek(todos)` report `[]` on their
+ * own until the first load resolves. `setTodos`'s update form gets the same
+ * substitution, so a mutation below can write `(prev) => [...prev, x]`
+ * directly with no `?? []` of its own either.
+ *
+ * The seed says what to DISPLAY meanwhile; it does not claim the fetch has
+ * finished. `latest` tracks genuine resolution separately, so this signal
+ * still reports its first load to the surrounding `<Loading>` and still gets
+ * the Skeleton — see ADR 0015.
  */
 const [todos, setTodos] = signal(() => {
 	version()
@@ -59,11 +61,14 @@ const [todos, setTodos] = signal(() => {
  * is dropped when the action closes on either face, so a refused write rolls
  * back without any explicit undo.
  *
- * `optimistic` wraps a tolerant, always-bare read rather than `todos` itself:
- * `todos` is a fetch, so its raw read is `Todo[] | Promise<Todo[]>`, and the
- * overlay only ever needs to compare and replace plain arrays.
+ * The signal is passed directly — `optimistic` overlays a source, so it takes
+ * the source. It reads that source through `latest` itself: an overlay layers
+ * plain values over plain values, and `todos` is a fetch, so its raw read is
+ * `Todo[] | Promise<Todo[]>` with nothing sensible to overlay onto a Promise.
+ * `todos`'s construction-time `[]` default carries through, so `overlay()` is
+ * a plain `Todo[]` with no `?? []` needed at any read site below.
  */
-const [overlay, setOverlay, speculating] = optimistic(() => latest(todos))
+const [overlay, setOverlay, speculating] = optimistic(todos)
 
 const visible = () => {
 	const all = overlay()
@@ -214,18 +219,6 @@ function MutationError() {
 function TodoList() {
 	return (
 		<div class="list-area">
-			{/* The only thing in this boundary that throws, and it renders nothing.
-			    Gating and displaying are separate capabilities, so they get separate
-			    holes rather than one bolted onto the other: this one exists purely to
-			    tell the boundary whether `todos` has ever genuinely loaded, so the
-			    Skeleton shows on a first load and a rejected load reaches `<Errored>`.
-			    The rows and the count below read through `latest(todos)` (via
-			    `overlay()`), which never throws but does ambiently report a background
-			    refresh to this boundary's `isLoading()` — see ADR 0015. */}
-			{() => {
-				use(todos)
-				return null
-			}}
 			<MutationError />
 			<ul class="todo-list" class:speculative={speculating()} data-testid="todo-list">
 				<For each={visible()}>
@@ -299,10 +292,14 @@ function App() {
 			<div class="columns">
 				{/* Two boundaries at the same wrapping point, split by error type
             rather than by position — the load and every mutation both
-            originate from inside the same subtree below (`use(todos)` and
-            the row buttons both live in `<TodoList>`), so which one claims
-            a given error depends entirely on `for`, not on where either
-            boundary sits. The outer boundary only accepts a LoadFailedError
+            originate from inside the same subtree below (the list's own
+            `latest(todos)` reads and the row buttons all live in
+            `<TodoList>`), so which one claims a given error depends entirely
+            on `for`, not on where either boundary sits. Note that nothing in
+            that subtree throws: a failed load reaches the outer boundary
+            because `latest` reports its source's error state ambiently, the
+            same way it reports pending — see ADR 0015. The outer boundary
+            only accepts a LoadFailedError
             (`list()`'s own error class) and swaps the whole column for it —
             there is nothing useful to show once the load itself failed. The
             inner boundary accepts everything else (every mutation error)

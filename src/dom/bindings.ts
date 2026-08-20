@@ -4,12 +4,15 @@ import {
   createSubOwner,
   disposeOwner,
   findBoundaryScope,
+  findNearestErrorScope,
   getOwner,
   onCleanup,
   runWithOwner,
   type BindingController,
+  type ErrorScope,
   type Owner,
 } from '../owner'
+import type { Accessor } from '../signal'
 import { readDynamic } from './resolve'
 import { runBindingCompute } from '../transition-tracker'
 
@@ -35,11 +38,71 @@ export function tagChildOwner(child: () => unknown, owner: Owner | null): void {
  * `scope.report({status: 'ready', commit})`. On throw, reports 'throwing'
  * and re-throws so the effect's outer machinery re-runs on settle.
  */
+/**
+ * Per-binding intake for AMBIENT error reports — an error a `latest()` read
+ * observed on a source that degraded to its last good value rather than
+ * throwing. The throw path has its own reporting (in `effect.ts`); this is the
+ * other half, so a subtree that reads exclusively through `latest()` still
+ * participates in `<Errored>` (ADR 0015).
+ *
+ * The controller is persistent across re-runs, so one failed source that makes
+ * this binding re-run several times stays ONE entry in the boundary's
+ * collection — the same property `effect.ts`'s error controller relies on. It
+ * is re-targeted if a different boundary accepts the error (a retry can fail
+ * with a different type than the attempt that made the first claim), and
+ * cleared to `idle` on any run that observes no error, which is what lets the
+ * boundary unlatch when the source recovers.
+ */
+function makeAmbientErrorReporter(parentOwner: Owner | null): {
+  report: (ambient: { error: unknown; source: Accessor<unknown> } | null) => void
+  dispose: () => void
+} {
+  let controller: BindingController | null = null
+  let controllerScope: ErrorScope | null = null
+  return {
+    report(ambient) {
+      if (ambient === null) {
+        controller?.report({ status: 'idle' })
+        return
+      }
+      const found = findNearestErrorScope(parentOwner, ambient.error)
+      if (found === null) {
+        controller?.report({ status: 'idle' })
+        return
+      }
+      if (controller !== null && controllerScope !== found.scope) {
+        controller.unregister()
+        controller = null
+      }
+      if (controller === null) {
+        controller = found.scope.register()
+        controllerScope = found.scope
+      }
+      controller.report({
+        status: 'error',
+        error: ambient.error,
+        source: ambient.source,
+        // The boundary's own reset already calls `resetError(source)`, which
+        // recomputes the root failed stage. This binding subscribed to that
+        // node's error state by reading `error(s)` inside `latest()`, so the
+        // recompute re-runs it and it reports itself recovered on its own —
+        // there is no separate kick to issue here.
+        retry: () => {},
+      })
+    },
+    dispose() {
+      controller?.unregister()
+      controller = null
+    },
+  }
+}
+
 function reactiveCommit<T>(
   parentOwner: Owner | null,
   read: () => T,
   apply: (value: T) => void,
 ): void {
+  const ambientErrors = makeAmbientErrorReporter(parentOwner)
   let controller: BindingController | null = null
   const ensureController = (): BindingController | null => {
     if (controller !== null) return controller
@@ -51,9 +114,16 @@ function reactiveCommit<T>(
   onCleanup(() => {
     controller?.unregister()
     controller = null
+    ambientErrors.dispose()
   })
   effect(() => {
-    let result: { value: T; engagedTransition: boolean; backgroundPromise: Promise<unknown> | null }
+    let result: {
+      value: T
+      engagedTransition: boolean
+      backgroundPromise: Promise<unknown> | null
+      firstLoadPromise: Promise<unknown> | null
+      ambientError: { error: unknown; source: Accessor<unknown> } | null
+    }
     try {
       // runWithOwner(parentOwner, ...) so that owner-aware reads inside
       // `read` (e.g. `useLoading()`) walk from parentOwner up — finding
@@ -75,14 +145,22 @@ function reactiveCommit<T>(
       controller?.report({ status: 'idle' })
       throw e
     }
-    const { value, engagedTransition, backgroundPromise } = result
-    // A use.latest() SWR read: has a value, but its accessor is pending
-    // again underneath. Not part of the gate at all (it's committing right
-    // now, regardless of which path below) — only the boundary's isLoading()
-    // aggregate needs to hear about it.
+    const { value, engagedTransition, backgroundPromise, firstLoadPromise, ambientError } = result
+    // A use.latest()/latest() SWR read: has a value, but its accessor is
+    // pending again underneath. Not part of the gate at all (it's committing
+    // right now, regardless of which path below) — only the boundary's
+    // isLoading() aggregate needs to hear about it. A latest() read with NO
+    // value goes to trackFirstLoad instead, which additionally drives the
+    // boundary's `initial` swap.
     if (backgroundPromise !== null) {
       findBoundaryScope(parentOwner, 'pending')?.trackBackground(backgroundPromise)
     }
+    if (firstLoadPromise !== null) {
+      findBoundaryScope(parentOwner, 'pending')?.trackFirstLoad(firstLoadPromise)
+    }
+    // Unconditional, both ways: reporting clears to `idle` when this run saw
+    // no error, which is what unlatches the boundary once the source recovers.
+    ambientErrors.report(ambientError)
     const commit = () => apply(value)
     // If there's a prior controller (binding previously threw), always go
     // through the controller to consume its pendingSet entry.
@@ -162,9 +240,11 @@ export function insertChild(parent: Node, value: unknown): void {
       controller = scope.register()
       return controller
     }
+    const ambientErrors = makeAmbientErrorReporter(parentOwner)
     onCleanup(() => {
       controller?.unregister()
       controller = null
+      ambientErrors.dispose()
     })
     effect(() => {
       // Build the fragment FIRST inside a fresh sub-owner so any nested
@@ -172,7 +252,9 @@ export function insertChild(parent: Node, value: unknown): void {
       const nextRunOwner = createSubOwner(parentOwner)
       let frag: DocumentFragment | null = null
       let engagedTransition = false
+      let ambientError: { error: unknown; source: Accessor<unknown> } | null = null
       let backgroundPromise: Promise<unknown> | null = null
+      let firstLoadPromise: Promise<unknown> | null = null
       try {
         runWithOwner(nextRunOwner, () => {
           const result = runBindingCompute(() => {
@@ -182,13 +264,23 @@ export function insertChild(parent: Node, value: unknown): void {
           })
           engagedTransition = result.engagedTransition
           backgroundPromise = result.backgroundPromise
+          firstLoadPromise = result.firstLoadPromise
+          ambientError = result.ambientError
         })
-        // A use.latest() SWR read inside this child: has a value (already
-        // built into `frag` above), but its accessor is pending again
-        // underneath. Not part of the gate — only the boundary's
-        // isLoading() aggregate needs to hear about it.
+        // Unconditional, both ways: reporting clears to `idle` when this run
+        // saw no error, which unlatches the boundary once the source recovers.
+        ambientErrors.report(ambientError)
+        // A use.latest()/latest() SWR read inside this child: has a value
+        // (already built into `frag` above), but its accessor is pending
+        // again underneath. Not part of the gate — only the boundary's
+        // isLoading() aggregate needs to hear about it. A latest() read with
+        // NO value goes to trackFirstLoad instead, which additionally drives
+        // the boundary's `initial` swap.
         if (backgroundPromise !== null) {
           findBoundaryScope(parentOwner, 'pending')?.trackBackground(backgroundPromise)
+        }
+        if (firstLoadPromise !== null) {
+          findBoundaryScope(parentOwner, 'pending')?.trackFirstLoad(firstLoadPromise)
         }
       } catch (e) {
         // Sub-owner from the failed run is orphaned — dispose to clean up

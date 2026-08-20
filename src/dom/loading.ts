@@ -97,22 +97,38 @@ export function Loading(props: LoadingProps): Accessor<unknown> {
   // gate at all.
   const backgroundPromises = new Set<Promise<unknown>>()
 
-  // gatePending: drives the atomic-commit gate AND the initial/fallback swap
-  // decision (including hasEverLoaded, below) — a binding that hasn't
+  // In-flight promises handed off by a latest() read that had NO value — the
+  // accessor has genuinely never resolved. Same hand-off mechanism as
+  // backgroundPromises, opposite meaning, and the two are kept apart because
+  // the boundary treats them oppositely: this one DOES drive the `initial`
+  // swap ("nothing has ever loaded" is what `initial` is for), that one must
+  // never touch it (a refresh behind visible content must hold prior).
+  // Neither participates in the atomic-commit gate — a binding that reported
+  // either has already committed whatever it had.
+  const firstLoadPromises = new Set<Promise<unknown>>()
+
+  // gatePending: drives the atomic-commit gate — a binding that hasn't
   // committed yet, or is waiting for its siblings before an atomic flush.
   // Deliberately excludes backgroundPromises: a use.latest() binding that
   // took the SWR path already committed (it has a value to show), so its
   // in-flight refresh must never reopen the fallback.
   const [gatePending, setGatePending] = signal(false)
-  // active: what isLoading()/useLoading() report to callers outside this
-  // boundary's own swap decision — gate-pending OR a background refresh in
-  // progress, so a caller rendering its own "loading…" indicator still sees
-  // the refresh even though the boundary itself never swaps for it.
+  // firstLoadPending: some reader under this boundary is waiting on something
+  // that has never resolved. Drives the `initial` swap alongside gatePending,
+  // so a subtree that reads only through latest() — never throwing, never
+  // engaging the gate — still gets its first-load placeholder. Because the
+  // fact comes from the accessor's own state rather than per-boundary
+  // bookkeeping, it survives a boundary remount (same property that makes
+  // use.latest() fix FM2).
+  const [firstLoadPending, setFirstLoadPending] = signal(false)
+  // active: what isLoading()/useLoading() report — anything in flight at all,
+  // whether it gates a commit, is a background refresh, or is a first load.
   const [activeSig, setActiveSig] = signal(false)
   const recomputePending = () => {
     const gate = pendingSet.size > 0 || readySet.size > 0 || deferredCommits.length > 0
     setGatePending(gate)
-    setActiveSig(gate || backgroundPromises.size > 0)
+    setFirstLoadPending(firstLoadPromises.size > 0)
+    setActiveSig(gate || backgroundPromises.size > 0 || firstLoadPromises.size > 0)
   }
 
   /** Flush all ready and deferred commits atomically. Call only when gate is open. */
@@ -186,6 +202,16 @@ export function Loading(props: LoadingProps): Accessor<unknown> {
         })
       }
     },
+    trackFirstLoad(promise: Promise<unknown>): void {
+      if (firstLoadPromises.has(promise)) return
+      firstLoadPromises.add(promise)
+      recomputePending()
+      promise.finally(() => {
+        if (boundaryOwner.disposed) return
+        firstLoadPromises.delete(promise)
+        recomputePending()
+      })
+    },
     trackBackground(promise: Promise<unknown>): void {
       if (backgroundPromises.has(promise)) return
       backgroundPromises.add(promise)
@@ -210,12 +236,12 @@ export function Loading(props: LoadingProps): Accessor<unknown> {
   let hasEverLoaded = false
   runWithOwner(boundaryOwner, () => {
     effect(() => {
-      if (!gatePending()) hasEverLoaded = true
+      if (!gatePending() && !firstLoadPending()) hasEverLoaded = true
     })
   })
 
   return () => {
-    if (!gatePending()) return loadedSubtree
+    if (!gatePending() && !firstLoadPending()) return loadedSubtree
     // Neither prop given at all (not merely falsy — an explicit fallback of
     // null/''/false still means "swap to this") → context-only: stay
     // mounted. The atomic-commit gate above is unaffected either way — it

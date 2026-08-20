@@ -1,14 +1,27 @@
 import { isPromise } from './is-promise'
 import { isPending, promiseOf } from './pending'
-import { rawValueOf } from './error'
+import { error, rawValueOf } from './error'
 import { NODE, type Accessor, type Signal } from './signal'
-import { markBackgroundPromise, markUsedInBinding } from './transition-tracker'
+import { markAmbientError, markBackgroundPromise, markFirstLoadPromise, markUsedInBinding } from './transition-tracker'
 
 /**
  * Records the most recent resolved value observed for each signal. Keyed on the
  * signal (accessor) object — entries are garbage-collected with the signal.
  */
 const lastResolved = new WeakMap<object, unknown>()
+
+/**
+ * Which accessors have GENUINELY resolved at least once, as opposed to merely
+ * having a value to report. Deliberately not the same question as
+ * `lastResolved.has(s)`: `signal(fn, default)` pre-populates that map through
+ * `seedLatest` so a tolerant read can hand back the default immediately, and a
+ * seed is a display fallback — "show this until something better arrives" —
+ * not a claim that the fetch has finished. `latest()` needs the stricter
+ * question to tell a genuine first load apart from a refresh, so that a seeded
+ * source still gets its `<Loading initial>` placeholder. Written only where a
+ * real value arrives, never by `seedLatest`.
+ */
+const everResolved = new WeakSet<object>()
 
 /** A compile-time-only marker key. Never read at runtime — `WithFallback`
  *  uses it purely so `peek`/`latest`'s overloads can tell a `signal(fn,
@@ -57,6 +70,7 @@ export function peek<T, D>(s: Accessor<T>, fallback?: D): Awaited<T> | D | undef
     const state = track(value as Promise<unknown>) // current state for this promise (re-read each call; track replaces the entry on settle)
     if (state.status === 'fulfilled') {
       lastResolved.set(s, state.value)
+      everResolved.add(s)
       return state.value as Awaited<T>
     }
     if (state.status === 'rejected') {
@@ -78,6 +92,7 @@ export function peek<T, D>(s: Accessor<T>, fallback?: D): Awaited<T> | D | undef
     return lastResolved.has(s) ? (lastResolved.get(s) as Awaited<T>) : fallback
   }
   lastResolved.set(s, value as T)
+  everResolved.add(s)
   return value as Awaited<T>
 }
 
@@ -98,9 +113,31 @@ export function latest<T>(s: Accessor<T>): Awaited<T> | undefined
 export function latest<T, D>(s: Accessor<T>, fallback: D): Awaited<T> | D
 export function latest<T, D>(s: Accessor<T>, fallback?: D): Awaited<T> | D | undefined {
   const value = peek(s, fallback as D)
+  // Participate in the nearest <Errored> as well as the nearest <Loading>.
+  // The tolerant read degrades to the last good value instead of throwing, so
+  // an error boundary would otherwise never hear about a failed source in a
+  // subtree that reads exclusively through `latest()`. Reading `error(s)` also
+  // subscribes to the node's error state, so the binding re-runs — and reports
+  // itself recovered — the moment that error is reset.
+  const parked = error(s)
+  if (parked !== null && parked !== undefined) {
+    markAmbientError(parked, s as Accessor<unknown>)
+  }
   if (isPending(s)) {
     const inFlight = promiseOf(s)
-    if (inFlight !== null) markBackgroundPromise(inFlight)
+    if (inFlight !== null) {
+      // Two different facts, and the boundary needs them apart. Once this
+      // accessor has genuinely resolved, a later pending episode is a refresh
+      // behind content that has been on screen — hold prior, only the loading
+      // indicator changes. Before that it is a first load, which is exactly
+      // what `initial` is for. Keyed on genuine resolution rather than on
+      // whether a value came back, so a `signal(fn, default)` source still
+      // gets its placeholder: the seed says what to display meanwhile, not
+      // that the fetch has finished. Both facts come from the accessor's own
+      // state, so both survive a boundary remount. See ADR 0015.
+      if (everResolved.has(s)) markBackgroundPromise(inFlight)
+      else markFirstLoadPromise(inFlight)
+    }
   }
   return value
 }

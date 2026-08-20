@@ -9,6 +9,7 @@ import {
   flush,
   For,
   isErrored,
+  latest,
   Loading,
   microtaskScheduler,
   onCleanup,
@@ -558,7 +559,7 @@ test('a mutation triggered from a reference-keyed row still reaches <Errored>, e
   // isolated in the speculative scope until commit, and this action never
   // commits, so <For> would never see the write and the row would never be
   // rebuilt at all, which would not reproduce the bug this test is about.
-  const [overlay, setOverlay] = optimistic(items)
+  const [overlay, setOverlay] = optimistic(items, [] as Item[])
   let rowDisposals = 0
 
   function toggle(item: Item) {
@@ -1288,7 +1289,7 @@ test('a mutation triggered from a reference-keyed row still reaches a filtered <
 
   type Item = { id: number; done: boolean }
   const [items] = signal<Item[]>([{ id: 1, done: false }])
-  const [overlay, setOverlay] = optimistic(items)
+  const [overlay, setOverlay] = optimistic(items, [] as Item[])
   let rowDisposals = 0
 
   function toggle(item: Item) {
@@ -1627,4 +1628,77 @@ test('action().retry() clears a displayed error with no manual flush', async () 
   await tick()
 
   expect(target.querySelector('[data-testid="err"]')?.textContent).toBe('none')
+})
+
+// ADR 0015 follow-on: `latest()` degrades on a rejection rather than throwing,
+// so without ambient reporting a subtree that reads exclusively through it
+// would never reach an <Errored> at all. Nothing here throws.
+test('a failed source reaches <Errored> through latest(), with nothing throwing', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+  const [id, setId] = signal(1)
+  let bodyRuns = 0
+  const c = computed(() => {
+    bodyRuns++
+    return id() === 1 ? Promise.reject(new Error('boom')) : Promise.resolve('ok')
+  })
+
+  render(
+    () => (
+      <Errored fallback={(error) => <p data-testid="panel">{(error as Error).message}</p>}>
+        {() => <span data-testid="content">{() => latest(c) ?? 'nothing'}</span>}
+      </Errored>
+    ),
+    target,
+  )
+
+  await tick()
+  flush()
+  expect(target.querySelector('[data-testid="panel"]')?.textContent).toBe('boom')
+
+  // And it unlatches on its own when the source recovers — the ambient report
+  // clears to idle on the next run that sees no error.
+  setId(2)
+  await tick()
+  flush()
+  expect(target.querySelector('[data-testid="panel"]')).toBeNull()
+  expect(target.querySelector('[data-testid="content"]')?.textContent).toBe('ok')
+  expect(bodyRuns).toBeGreaterThanOrEqual(2)
+})
+
+// The retry path for an ambiently-reported error: the boundary's own reset
+// calls resetError(source), which recomputes the root failed stage. The
+// binding subscribed to that node's error state by reading error(s) inside
+// latest(), so it re-runs and reports its own recovery with no kick of its own.
+test('resetting an ambiently-reported error retries the failed source', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+  let attempt = 0
+  const c = computed(() => {
+    attempt++
+    return attempt === 1 ? Promise.reject(new Error('boom')) : Promise.resolve('recovered')
+  })
+
+  render(
+    () => (
+      <Errored fallback={(error, reset) => (
+        <button data-testid="retry" on:click={reset}>{(error as Error).message}</button>
+      )}>
+        {() => <span data-testid="content">{() => latest(c) ?? 'nothing'}</span>}
+      </Errored>
+    ),
+    target,
+  )
+
+  await tick()
+  flush()
+  expect(target.querySelector('[data-testid="retry"]')?.textContent).toBe('boom')
+
+  target.querySelector<HTMLButtonElement>('[data-testid="retry"]')!.click()
+  await tick()
+  flush()
+
+  expect(target.querySelector('[data-testid="retry"]')).toBeNull()
+  expect(target.querySelector('[data-testid="content"]')?.textContent).toBe('recovered')
+  expect(attempt).toBe(2)
 })
