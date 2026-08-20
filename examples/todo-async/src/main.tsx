@@ -6,6 +6,7 @@ import {
 	isErrored,
 	isPending,
 	latest,
+	peek,
 	Loading,
 	optimistic,
 	from,
@@ -88,7 +89,7 @@ function submitTodo(text: string) {
 	// ever exists inside the overlay.
 	const pending: Todo = { id: -Date.now(), text, done: false }
 	action(function* () {
-		setOverlay([...committed(() => latest(todos)), pending])
+		setOverlay([...committed(() => peek(todos)), pending])
 		const saved = yield* from(api.add(text))
 		setTodos(prev => [...prev, saved])
 	})
@@ -104,7 +105,7 @@ function addTodo() {
 function toggleTodo(todo: Todo) {
 	action(function* () {
 		setOverlay(
-			committed(() => latest(todos)).map(each =>
+			committed(() => peek(todos)).map(each =>
 				each.id === todo.id ? { ...each, done: !each.done } : each,
 			),
 		)
@@ -115,7 +116,7 @@ function toggleTodo(todo: Todo) {
 
 function removeTodo(todo: Todo) {
 	action(function* () {
-		setOverlay(committed(() => latest(todos)).filter(each => each.id !== todo.id))
+		setOverlay(committed(() => peek(todos)).filter(each => each.id !== todo.id))
 		yield* from(api.remove(todo.id))
 		setTodos(prev => prev.filter(each => each.id !== todo.id))
 	})
@@ -213,18 +214,21 @@ function MutationError() {
 function TodoList() {
 	return (
 		<div class="list-area">
+			{/* The only thing in this boundary that throws, and it renders nothing.
+			    Gating and displaying are separate capabilities, so they get separate
+			    holes rather than one bolted onto the other: this one exists purely to
+			    tell the boundary whether `todos` has ever genuinely loaded, so the
+			    Skeleton shows on a first load and a rejected load reaches `<Errored>`.
+			    The rows and the count below read through `latest(todos)` (via
+			    `overlay()`), which never throws but does ambiently report a background
+			    refresh to this boundary's `isLoading()` — see ADR 0015. */}
+			{() => {
+				use(todos)
+				return null
+			}}
 			<MutationError />
 			<ul class="todo-list" class:speculative={speculating()} data-testid="todo-list">
-				<For
-					each={() => {
-						// The opt-in. Calling `use` here is what enrols this binding in the
-						// surrounding `<Loading>`: it throws while the load is in flight, so
-						// the boundary shows `initial` on a first load and holds the prior
-						// list on a refetch. The rows themselves come from `visible()`.
-						use(todos)
-						return visible()
-					}}
-				>
+				<For each={visible()}>
 					{(todo: Todo) => (
 						<li class:done={todo.done} data-testid="todo-row">
 							<input
@@ -241,14 +245,7 @@ function TodoList() {
 				</For>
 			</ul>
 			<footer class="footer">
-				<span class="count" data-testid="remaining">
-					{() => {
-						// Enrolled the same way, so the count and the list commit together
-						// rather than the count updating a frame ahead of the rows.
-						use(todos)
-						return `${remaining()} left`
-					}}
-				</span>
+				<span class="count" data-testid="remaining">{`${remaining()} left`}</span>
 				<div class="filters">
 					<button
 						data-testid="filter-all"

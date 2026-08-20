@@ -223,7 +223,7 @@ capabilities — `peek`/`latest` is the "which value" axis, `use`/`use.latest`
 is the "does this gate a commit" axis, and they compose independently rather
 than one primitive doing double duty. See [ADR 0015](docs/adr/0015-peek-latest-split-ambient-loading-participation.md)
 for the design history, including two rejected shapes that tried to fold both
-axes into one call, and a known scheduler bug uncovered (not caused) while
+axes into one call, and the error-boundary flush bug uncovered (not caused) by
 applying this split to `examples/todo-async` — see
 [`docs/follow-ups.md`](docs/follow-ups.md).
 _Avoid_: reaching for `use`/`use.latest` purely to make a binding "participate"
@@ -510,9 +510,19 @@ together when `list` settles.
   unchanged); `latest(x)` takes the name for a new behavior — `peek(x)`'s
   value, plus ambient hand-off to the nearest `<Loading>` boundary's
   background-tracking set while `x` is pending, never gating a commit.
-  `use.latest()` simplifies to compose on the new `latest(x)` directly. The
-  `examples/todo-async` migration this enables is blocked on a scheduler bug
-  uncovered while applying it — see `docs/follow-ups.md`.
+  `use.latest()` simplifies to compose on the new `latest(x)` directly.
+  `examples/todo-async` is migrated: its list and count bindings drop their own
+  `use(todos)` calls and read through `latest()`, with one value-less leaf
+  binding carrying the gating that genuinely needs a throw.
+- **v1.4** (shipped): an error boundary's own write now requests a flush.
+  `createErrorScope`'s `recompute` (`src/owner.ts`) and `makeErrorCell`'s
+  `setError` (`src/scope.ts`) reach r3's `setSignal` directly, which only marks
+  subscribers dirty — neither paired the write with `requestFlush()`, the way
+  every other writer in pulse does. Consumers of an error boundary
+  (`<Errored.Error>`, `isErrored()`, `useErrored()`) were therefore left dirty
+  and never recomputed unless some unrelated write happened to flush, which
+  made the boundary's liveness depend on incidental traffic elsewhere in the
+  tree. Uncovered by the v1.3 migration above; see `docs/follow-ups.md`.
 - **later**: structural-mount gating in `<Loading>` (current bug: `<Show>`/
   `<For>` mount/unmount commits don't defer with the boundary — only content
   hole commits do); optimistic store; explicit `transition()` value for

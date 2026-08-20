@@ -19,6 +19,7 @@ import {
   type ErrorScope,
   type Owner,
 } from './owner'
+import { requestFlush } from './scheduler'
 import type { Accessor } from './signal'
 
 /** Graph identity wrapping a recipe. Value is not in the Node — it is produced
@@ -415,7 +416,15 @@ function makeErrorCell(): [Accessor<unknown>, (value: unknown) => void] {
     stabilize()
     return node.value
   }) as Accessor<unknown>
-  const setError = (value: unknown) => r3SetSignal(node, value)
+  // The write is paired with a flush request for the same reason
+  // `createErrorScope`'s own `recompute` does it (`src/owner.ts`): r3's
+  // `setSignal` only marks subscribers dirty in its heap, so a write with no
+  // accompanying `stabilize()` leaves every reader of this cell — here,
+  // `action().error` — stale until something unrelated happens to flush.
+  const setError = (value: unknown) => {
+    r3SetSignal(node, value)
+    requestFlush()
+  }
   return [accessor, setError]
 }
 

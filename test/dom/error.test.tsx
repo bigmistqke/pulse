@@ -1499,3 +1499,132 @@ test("Errored.Error's for prop narrows what it displays to reports matching it",
 
   expect(target.querySelector('[data-testid="type-error-only"]')?.textContent).toBe('b-failed')
 })
+
+// Regression: an error boundary must be driven by its OWN write, not by
+// incidental traffic elsewhere in the tree. `createErrorScope`'s `recompute`
+// (src/owner.ts) writes r3's `reportsNode` directly, and r3's `setSignal` only
+// marks subscribers dirty in its heap — something must call `stabilize()` to
+// drain it. That write used to skip `requestFlush()`, so every consumer of the
+// scope (`<Errored.Error>`, `isErrored()`, `useErrored()`) sat dirty and never
+// recomputed until some unrelated write happened to request a flush. In a tree
+// where something else called `use()` on every pass, that incidental flush
+// always arrived and the bug was invisible; remove the last such call and the
+// error boundary silently went dead.
+//
+// The manual `flush()` calls the other tests in this file make would mask it —
+// this one deliberately makes none after the click, so the framework's own
+// writer-side scheduling is what has to drive the update.
+test('an action rejection reaches Errored.Error with no manual flush (boundary drives its own write)', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+
+  render(
+    () => (
+      <Errored for={(e): e is Error => e instanceof Error}>
+        {() => (
+          <div>
+            <Errored.Error>
+              {(error) => <p data-testid="error-ui">{(error as Error).message}</p>}
+            </Errored.Error>
+            <button
+              data-testid="trigger"
+              on:click={() =>
+                action(function* () {
+                  yield* from(Promise.reject(new Error('boom')))
+                })
+              }
+            >
+              trigger
+            </button>
+          </div>
+        )}
+      </Errored>
+    ),
+    target,
+  )
+
+  flush()
+  expect(target.querySelector('[data-testid="error-ui"]')).toBeNull()
+
+  const button = target.querySelector('[data-testid="trigger"]') as HTMLButtonElement
+  button.click()
+  await tick()
+
+  expect(target.querySelector('[data-testid="error-ui"]')?.textContent).toBe('boom')
+})
+
+// The same pairing, for the other direct r3 writer: `makeErrorCell`'s
+// `setError` (src/scope.ts), which backs `action().error`. It has to be read
+// through a BINDING here, not called at top level: the accessor takes the
+// `getContext() === null` branch for an untracked read and calls `stabilize()`
+// itself, which papers over the missing flush. Only a tracked read — the r3
+// `read` branch, which is what a real UI does — actually depends on the write
+// having requested one.
+test('action().error reaches a binding that displays it, with no manual flush', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+
+  // The action is created up front, so the binding below can actually track
+  // its error cell; it fails later, when the promise it is waiting on rejects.
+  let rejectIt!: (e: unknown) => void
+  const pending = new Promise<never>((_, reject) => {
+    rejectIt = reject
+  })
+
+  render(
+    () => {
+      const handle = action(function* () {
+        yield* from(pending)
+      })
+      return <p data-testid="err">{() => (handle.error() as Error | null)?.message ?? 'none'}</p>
+    },
+    target,
+  )
+
+  flush()
+  expect(target.querySelector('[data-testid="err"]')?.textContent).toBe('none')
+
+  rejectIt(new Error('boom'))
+  await tick()
+
+  expect(target.querySelector('[data-testid="err"]')?.textContent).toBe('boom')
+})
+
+// `handle.retry()` clears the error cell via `setError(null)` with NO
+// accompanying boundary report, so `createErrorScope`'s own `requestFlush` (in
+// src/owner.ts) does not cover this path — `makeErrorCell`'s write has to
+// request the flush itself.
+test('action().retry() clears a displayed error with no manual flush', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+
+  let rejectFirst!: (e: unknown) => void
+  const first = new Promise<never>((_, reject) => {
+    rejectFirst = reject
+  })
+  let attempt = 0
+  let handle!: ReturnType<typeof action>
+
+  render(
+    () => {
+      handle = action(function* () {
+        attempt++
+        yield* from(attempt === 1 ? first : new Promise<never>(() => {}))
+      })
+      return <p data-testid="err">{() => (handle.error() as Error | null)?.message ?? 'none'}</p>
+    },
+    target,
+  )
+
+  flush()
+  rejectFirst(new Error('boom'))
+  await tick()
+  expect(target.querySelector('[data-testid="err"]')?.textContent).toBe('boom')
+
+  // Retry directly on the handle. The second attempt never settles, so the
+  // only thing that should reach the DOM is the error clearing to null.
+  handle.retry()
+  await tick()
+
+  expect(target.querySelector('[data-testid="err"]')?.textContent).toBe('none')
+})

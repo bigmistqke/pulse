@@ -11,6 +11,7 @@ import {
 import type { Accessor } from './signal'
 import { currentGeneratorCleanups } from './generator-cleanup'
 import { resetError } from './error'
+import { requestFlush } from './scheduler'
 
 /**
  * Per-binding state reports flow into a Loading boundary via this shape.
@@ -372,6 +373,17 @@ export function createErrorScope(
 
   const recompute = (): void => {
     r3SetSignal(reportsNode, Array.from(errorSet.values()))
+    // Pair the write with a flush request, the same way every other writer in
+    // pulse does (`signal()`'s setter, `computed`'s publish). r3's `setSignal`
+    // only inserts subscribers into its dirty heap — something has to call
+    // `stabilize()` to actually drain it. Without this, a consumer of this
+    // scope (`<Errored.Error>`, `isErrored()`, `useErrored()`) is left marked
+    // dirty and never recomputed, so an error reported here is invisible until
+    // some UNRELATED write happens to request a flush. That made the whole
+    // error boundary's liveness depend on incidental traffic elsewhere in the
+    // tree — see docs/follow-ups.md and the regression test in
+    // test/dom/error.test.tsx.
+    requestFlush()
   }
 
   const resetEntries = (entries: Array<[BindingController, ErrorReport]>): void => {

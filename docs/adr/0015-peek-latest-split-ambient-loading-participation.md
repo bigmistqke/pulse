@@ -108,15 +108,19 @@ name previously meant — the escape hatch is what's new, not the participant.
   now `peek`'s job, and `latest`'s distinguishing behavior is unobservable outside a binding anyway.
   `test/dom/loading.test.tsx` gained two tests: `peek()` confirmed to never register with a boundary,
   `latest()` confirmed to feed `isLoading()` ambiently while never reopening a boundary's fallback.
-- `examples/todo-async/src/main.tsx` is **not yet migrated** to this ADR's design. Applying it
-  (`optimistic(() => latest(todos))` staying as-is, a single value-less leaf binding calling `use
-  (todos)` purely for first-load/error gating, `visible()`/`remaining()` losing their own `use(todos)`
-  calls entirely) is a genuinely correct application of everything above and was verified to work for
-  loading/skeleton/background-refresh behavior — but doing so surfaced a separate, real bug: with
-  *no* binding anywhere in `TodoList` calling `use()` at all, `MutationError`'s `<Errored.Error>`
-  binding stops re-evaluating after its first run, even though the error-report signal it reads
-  (`reportsNode` in `src/owner.ts`) is genuinely written to on rejection. Reproduces with the
-  pre-existing `latest()` behavior too (confirmed by reverting only the ambient-participation half) —
-  it is not caused by this ADR's change, only uncovered by removing the last `use()` call from that
-  subtree, which had been incidentally keeping some other scheduling path alive. Tracked in
-  `docs/follow-ups.md`; the `main.tsx` migration is blocked on finding and fixing that bug.
+- `examples/todo-async/src/main.tsx` is migrated to this design. `optimistic(() => latest(todos))`
+  stays as it was; the list and count bindings lose their own `use(todos)` calls entirely and read
+  through `latest()` (via `overlay()`), which never throws but does ambiently report a background
+  refresh; and a single value-less leaf binding — `{() => { use(todos); return null }}` — carries
+  the gating that genuinely needs a throw (first-load Skeleton, and routing a rejected load to
+  `<Errored>`). The three action generators use `peek(todos)`: they build a write's base value, not
+  a displayed one, and run from an event handler outside any binding, where `latest()`'s hand-off
+  would be a no-op anyway.
+
+  Applying this migration is what surfaced the error-boundary flush bug described in
+  `docs/follow-ups.md` — an `<Errored.Error>` binding stopped re-evaluating once nothing in the
+  subtree called `use()` anymore, because `createErrorScope`'s write to its report collection never
+  requested a flush and had been relying on the incidental one a non-throwing `use()` triggers
+  through `<Loading>`'s `deferOrCommit`. Not caused by this ADR's change (it reproduced with the
+  pre-split `latest()` too), only uncovered by it. Fixed in the same pass, in `src/owner.ts` and
+  `src/scope.ts`, with regression tests in `test/dom/error.test.tsx`.
