@@ -1,15 +1,19 @@
 /**
  * Module-level tracker for what happened during the current binding compute —
- * not only whether `use()` was engaged, but also which node's parked error
- * (if any) the compute threw.
+ * which pending sources it read the value of, whether `use()` was engaged, and
+ * which node's parked error (if any) the compute threw.
  *
  * When a binding's compute function calls `use(...)` — even if it doesn't
  * throw — we want that binding to participate in transition coordination with
  * the nearest `<Loading>` boundary. This module provides:
  *
  * - `markUsedInBinding()`: called by `use()` unconditionally to flag engagement.
- * - `runBindingCompute(fn)`: wraps a binding's compute, captures the flag, and
- *   returns both the computed value and whether `use()` was called.
+ * - `markPendingValueRead()`: called by `latest()` whenever the source it read
+ *   is pending, recording WHICH source and whether that source has resolved
+ *   before. The boundary needs the second fact to tell a background refresh
+ *   apart from a genuine first load.
+ * - `runBindingCompute(fn)`: wraps a binding's compute, captures both, and
+ *   returns them alongside the computed value.
  *
  * It also tracks which node's parked error (if any) the compute threw, so the
  * binding's catch handler can hand that provenance to an `<Errored>` boundary:
@@ -35,10 +39,35 @@
 
 import type { Accessor } from './signal'
 
+/**
+ * One pending source whose VALUE a binding compute read.
+ *
+ * Reading a source's value is what makes a binding depend on that source
+ * settling. Reading only its pending state — `isPending(x)` on its own — is
+ * not recorded here, because a binding that merely reports staleness must keep
+ * updating during exactly the window it exists to describe.
+ */
+export interface PendingValueRead {
+  /** The source that was read. Reads are deduplicated on this within a single
+   *  compute, so a binding that reads the same source six times records it
+   *  once. */
+  source: Accessor<unknown>
+  /** The promise that source is waiting on right now. */
+  promise: Promise<unknown>
+  /** Whether this source has ever resolved a real value before. A boundary
+   *  treats the two cases oppositely: a source that has resolved before is
+   *  refreshing behind content that is already on screen, and one that has not
+   *  is loading for the first time, which is what a placeholder is for. */
+  everResolved: boolean
+}
+
+/** Shared empty result, so a compute that read nothing pending — the common
+ *  case — allocates nothing. */
+const NO_PENDING_READS: readonly PendingValueRead[] = []
+
 let usedInCurrentBinding = false
 let errorSourceInCurrentBinding: Accessor<unknown> | null = null
-let backgroundPromiseInCurrentBinding: Promise<unknown> | null = null
-let firstLoadPromiseInCurrentBinding: Promise<unknown> | null = null
+let pendingValueReadsInCurrentBinding: Map<Accessor<unknown>, PendingValueRead> | null = null
 let ambientErrorInCurrentBinding: { error: unknown; source: Accessor<unknown> } | null = null
 
 /** Called by `use()` to mark the current binding as engaged in transition coordination. */
@@ -46,31 +75,27 @@ export function markUsedInBinding(): void {
   usedInCurrentBinding = true
 }
 
-/** Called by `use.latest()` when it takes the stale-while-revalidate path — the
- *  accessor has resolved before, but is pending again right now. Carries the
- *  in-flight promise out to `runBindingCompute`'s caller, which hands it to
- *  the nearest `<Loading>` scope's background-tracking set instead of the
- *  usual throw/`deferOrCommit` routing, since this binding already has a
- *  value to commit. */
-export function markBackgroundPromise(promise: Promise<unknown>): void {
-  backgroundPromiseInCurrentBinding = promise
-}
-
-/** Called by `latest()` when it is pending AND has no value to report — the
- *  accessor has genuinely never resolved. The distinction from
- *  `markBackgroundPromise` is exactly the one `<Loading>` needs to choose
- *  `initial` (nothing has ever been shown) over hold-prior (something has),
- *  and it comes from the accessor's own state rather than from per-boundary
- *  bookkeeping — so it survives a boundary remount, the same way
- *  `use.latest()`'s does. See ADR 0015.
+/**
+ * Called by `latest()` when the source it read is pending. Records the source
+ * itself rather than only its promise, so a compute that read two pending
+ * sources reports both — the single-promise slot this replaced kept only
+ * whichever read happened last.
  *
- *  A source with a construction-time fallback (`signal(fn, default)`) never
- *  reports through here: `peek` hands back the default, so there IS a value to
- *  show from the caller's point of view. Seeding is a deliberate opt-out of
- *  the ambient first-load distinction — "treat this as the value until
- *  something better arrives" is what a seed means. */
-export function markFirstLoadPromise(promise: Promise<unknown>): void {
-  firstLoadPromiseInCurrentBinding = promise
+ * A source with a construction-time fallback (`signal(fn, default)`) still
+ * reports with `everResolved` false until it genuinely resolves: `peek` hands
+ * back the default, so there IS a value to show from the caller's point of
+ * view, but a seed says what to display meanwhile rather than that the fetch
+ * has finished. See ADR 0015.
+ */
+export function markPendingValueRead(
+  source: Accessor<unknown>,
+  promise: Promise<unknown>,
+  everResolved: boolean,
+): void {
+  if (pendingValueReadsInCurrentBinding === null) {
+    pendingValueReadsInCurrentBinding = new Map()
+  }
+  pendingValueReadsInCurrentBinding.set(source, { source, promise, everResolved })
 }
 
 /**
@@ -81,7 +106,7 @@ export function markFirstLoadPromise(promise: Promise<unknown>): void {
  * the accessor's own state, so a subtree that reads exclusively through
  * `latest()` still participates in error boundaries.
  *
- * Distinct from `markErrorSource` above, which serves the THROW path: that one
+ * Distinct from `markErrorSource` below, which serves the THROW path: that one
  * records provenance for an error already unwinding the stack, this one is the
  * whole report for an error that never throws at all.
  */
@@ -122,41 +147,44 @@ export function clearErrorSource(): void {
 }
 
 /**
- * Run `fn` as a binding compute, capturing whether `use()` was called inside it.
- * Restores the prior flag state on return (handles nesting).
+ * Run `fn` as a binding compute, capturing what it read and whether `use()`
+ * was called inside it. Restores the prior state on return (handles nesting).
  */
 export function runBindingCompute<T>(fn: () => T): {
   value: T
   engagedTransition: boolean
-  backgroundPromise: Promise<unknown> | null
-  firstLoadPromise: Promise<unknown> | null
+  pendingReads: readonly PendingValueRead[]
   ambientError: { error: unknown; source: Accessor<unknown> } | null
 } {
   const prevUsed = usedInCurrentBinding
   const prevSource = errorSourceInCurrentBinding
-  const prevBackground = backgroundPromiseInCurrentBinding
-  const prevFirstLoad = firstLoadPromiseInCurrentBinding
+  const prevPendingReads = pendingValueReadsInCurrentBinding
   const prevAmbientError = ambientErrorInCurrentBinding
   usedInCurrentBinding = false
   errorSourceInCurrentBinding = null
-  backgroundPromiseInCurrentBinding = null
-  firstLoadPromiseInCurrentBinding = null
+  pendingValueReadsInCurrentBinding = null
   ambientErrorInCurrentBinding = null
   try {
     const value = fn()
     // Success: nothing threw, so no catcher is waiting to take the source.
     errorSourceInCurrentBinding = prevSource
+    // The cast defeats control-flow narrowing: this slot was set to null a few
+    // lines above, and TypeScript does not model `fn()` writing to a
+    // module-level variable, so without it the non-null branch narrows to
+    // `never`. Filling the slot during `fn()` is the entire point of it.
+    const collected = pendingValueReadsInCurrentBinding as Map<
+      Accessor<unknown>,
+      PendingValueRead
+    > | null
     return {
       value,
       engagedTransition: usedInCurrentBinding,
-      backgroundPromise: backgroundPromiseInCurrentBinding,
-      firstLoadPromise: firstLoadPromiseInCurrentBinding,
+      pendingReads: collected === null ? NO_PENDING_READS : Array.from(collected.values()),
       ambientError: ambientErrorInCurrentBinding,
     }
   } finally {
     usedInCurrentBinding = prevUsed
-    backgroundPromiseInCurrentBinding = prevBackground
-    firstLoadPromiseInCurrentBinding = prevFirstLoad
+    pendingValueReadsInCurrentBinding = prevPendingReads
     ambientErrorInCurrentBinding = prevAmbientError
   }
 }

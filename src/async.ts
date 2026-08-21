@@ -2,7 +2,7 @@ import { isPromise } from './is-promise'
 import { isPending, promiseOf } from './pending'
 import { error, rawValueOf } from './error'
 import { NODE, type Accessor, type Signal } from './signal'
-import { markAmbientError, markBackgroundPromise, markFirstLoadPromise, markUsedInBinding } from './transition-tracker'
+import { markAmbientError, markPendingValueRead, markUsedInBinding } from './transition-tracker'
 
 /**
  * Records the most recent resolved value observed for each signal. Keyed on the
@@ -135,8 +135,7 @@ export function latest<T, D>(s: Accessor<T>, fallback?: D): Awaited<T> | D | und
       // gets its placeholder: the seed says what to display meanwhile, not
       // that the fetch has finished. Both facts come from the accessor's own
       // state, so both survive a boundary remount. See ADR 0015.
-      if (everResolved.has(s)) markBackgroundPromise(inFlight)
-      else markFirstLoadPromise(inFlight)
+      markPendingValueRead(s as Accessor<unknown>, inFlight, everResolved.has(s))
     }
   }
   return value

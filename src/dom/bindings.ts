@@ -14,7 +14,7 @@ import {
 } from '../owner'
 import type { Accessor } from '../signal'
 import { readDynamic } from './resolve'
-import { runBindingCompute } from '../transition-tracker'
+import { runBindingCompute, type PendingValueRead } from '../transition-tracker'
 
 /**
  * Fragment (see `h.ts`) hands a function child back to its own caller
@@ -97,6 +97,29 @@ function makeAmbientErrorReporter(parentOwner: Owner | null): {
   }
 }
 
+/**
+ * Hand every pending source this binding read the value of to the nearest
+ * `<Loading>` boundary.
+ *
+ * The binding is committing right now either way — none of these reads threw,
+ * so none of them is part of the atomic-commit gate. What the boundary needs
+ * them for is its `isLoading()` aggregate, and, for a source that has never
+ * resolved, its `initial` swap: a first load is exactly what `initial` is for,
+ * while a refresh behind content already on screen must hold prior instead.
+ */
+function reportPendingReads(
+  parentOwner: Owner | null,
+  pendingReads: readonly PendingValueRead[],
+): void {
+  if (pendingReads.length === 0) return
+  const scope = findBoundaryScope(parentOwner, 'pending')
+  if (scope === null) return
+  for (const read of pendingReads) {
+    if (read.everResolved) scope.trackBackground(read.promise)
+    else scope.trackFirstLoad(read.promise)
+  }
+}
+
 function reactiveCommit<T>(
   parentOwner: Owner | null,
   read: () => T,
@@ -120,8 +143,7 @@ function reactiveCommit<T>(
     let result: {
       value: T
       engagedTransition: boolean
-      backgroundPromise: Promise<unknown> | null
-      firstLoadPromise: Promise<unknown> | null
+      pendingReads: readonly PendingValueRead[]
       ambientError: { error: unknown; source: Accessor<unknown> } | null
     }
     try {
@@ -145,19 +167,8 @@ function reactiveCommit<T>(
       controller?.report({ status: 'idle' })
       throw e
     }
-    const { value, engagedTransition, backgroundPromise, firstLoadPromise, ambientError } = result
-    // A use.latest()/latest() SWR read: has a value, but its accessor is
-    // pending again underneath. Not part of the gate at all (it's committing
-    // right now, regardless of which path below) — only the boundary's
-    // isLoading() aggregate needs to hear about it. A latest() read with NO
-    // value goes to trackFirstLoad instead, which additionally drives the
-    // boundary's `initial` swap.
-    if (backgroundPromise !== null) {
-      findBoundaryScope(parentOwner, 'pending')?.trackBackground(backgroundPromise)
-    }
-    if (firstLoadPromise !== null) {
-      findBoundaryScope(parentOwner, 'pending')?.trackFirstLoad(firstLoadPromise)
-    }
+    const { value, engagedTransition, pendingReads, ambientError } = result
+    reportPendingReads(parentOwner, pendingReads)
     // Unconditional, both ways: reporting clears to `idle` when this run saw
     // no error, which is what unlatches the boundary once the source recovers.
     ambientErrors.report(ambientError)
@@ -253,8 +264,7 @@ export function insertChild(parent: Node, value: unknown): void {
       let frag: DocumentFragment | null = null
       let engagedTransition = false
       let ambientError: { error: unknown; source: Accessor<unknown> } | null = null
-      let backgroundPromise: Promise<unknown> | null = null
-      let firstLoadPromise: Promise<unknown> | null = null
+      let pendingReads: readonly PendingValueRead[] = []
       try {
         runWithOwner(nextRunOwner, () => {
           const result = runBindingCompute(() => {
@@ -263,25 +273,13 @@ export function insertChild(parent: Node, value: unknown): void {
             insertChild(frag, next)
           })
           engagedTransition = result.engagedTransition
-          backgroundPromise = result.backgroundPromise
-          firstLoadPromise = result.firstLoadPromise
+          pendingReads = result.pendingReads
           ambientError = result.ambientError
         })
         // Unconditional, both ways: reporting clears to `idle` when this run
         // saw no error, which unlatches the boundary once the source recovers.
         ambientErrors.report(ambientError)
-        // A use.latest()/latest() SWR read inside this child: has a value
-        // (already built into `frag` above), but its accessor is pending
-        // again underneath. Not part of the gate — only the boundary's
-        // isLoading() aggregate needs to hear about it. A latest() read with
-        // NO value goes to trackFirstLoad instead, which additionally drives
-        // the boundary's `initial` swap.
-        if (backgroundPromise !== null) {
-          findBoundaryScope(parentOwner, 'pending')?.trackBackground(backgroundPromise)
-        }
-        if (firstLoadPromise !== null) {
-          findBoundaryScope(parentOwner, 'pending')?.trackFirstLoad(firstLoadPromise)
-        }
+        reportPendingReads(parentOwner, pendingReads)
       } catch (e) {
         // Sub-owner from the failed run is orphaned — dispose to clean up
         // any partial nested registrations.
