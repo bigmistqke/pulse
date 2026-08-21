@@ -9,7 +9,7 @@ import { makeAccessor, NODE, signal, signalWithNode, type Accessor, type Signal 
 import { registerPending, lookupPending } from './pending'
 import { registerError, lookupError } from './error'
 import { requestFlush } from './scheduler'
-import { markErrorSource } from './transition-tracker'
+import { markErrorSource, runNodeCompute } from './transition-tracker'
 
 /** A pipeline stage of any shape: sync, async, or generator. The return type
  *  is whatever the function returns — sync `R`, async `Promise<R>`, or
@@ -18,6 +18,10 @@ type Stage<In, Out> = (value: In) => Out
 
 // Overloads: stage N's input is `Resolved<stage N-1's return type>`; the pipeline
 // result is `Resolved<last stage's return type>`.
+/** Shared empty dynamic-upstream collection, so a node whose recipe reads
+ *  nothing through a verb allocates nothing and never invalidates on it. */
+const NO_SOURCE_READS: readonly Accessor<unknown>[] = []
+
 export function computed<A>(s0: () => A): Signal<PipelineRead<[], A>>
 export function computed<A, B>(
   s0: () => A,
@@ -357,7 +361,30 @@ function makeStageNode(
   // dep-tracker: runs the body for r3 dep tracking. Side-effects into
   // publishedValue / pendingSig. Its OWN return value is irrelevant — we
   // never read it for the value.
-  const depTracker = r3Computed(() => {
+  // The sources this node's recipe read through a verb on its last run — its
+  // dynamic upstream. `latest(x)` and `use(x)` record here; `peek(x)` does
+  // not, which is what makes `peek` the read that stops loading state from
+  // travelling any further. Consulted live by `isPending`/`promiseOf`: this
+  // node holds a value derived from these sources, so while any of them is in
+  // flight the value it holds is being replaced, and it says so.
+  let lastSourceReads: readonly Accessor<unknown>[] = NO_SOURCE_READS
+  const [sourceReads, setSourceReads] =
+    signal<readonly Accessor<unknown>[]>(NO_SOURCE_READS)
+  /** Publish a run's reads, skipping the write when the set is unchanged —
+   *  a fresh array every run would invalidate every consumer on every run. */
+  const recordSourceReads = (next: readonly Accessor<unknown>[]): void => {
+    if (
+      next.length === lastSourceReads.length &&
+      next.every((source, i) => lastSourceReads[i] === source)
+    ) {
+      return
+    }
+    lastSourceReads = next
+    setSourceReads(next)
+  }
+
+  const depTracker = r3Computed(() =>
+    runNodeCompute(() => {
     try {
       kick() // dep so generator stash-rerun can force body re-run
 
@@ -689,7 +716,7 @@ function makeStageNode(
       }
       return null
     }
-  })
+  }, recordSourceReads))
 
   // ---- write path -------------------------------------------------------
 
@@ -931,6 +958,7 @@ function makeStageNode(
     pending: pendingSig,
     promise: () => suspendedOn,
     upstream: upstreamEntry,
+    reads: sourceReads,
   })
 
   // Register with the error tracker — the same shape, walked the same way.

@@ -99,6 +99,59 @@ export function markPendingValueRead(
 }
 
 /**
+ * Sources whose values the node currently recomputing has read through a verb.
+ * Separate from the binding-level collection above, and populated on a
+ * different rule: this one records every source a verb read, pending or not,
+ * because the fact it feeds is evaluated live rather than at record time.
+ *
+ * Recording unconditionally is what keeps the record independent of when the
+ * reader happens to re-run. A refetch usually does invalidate readers, because
+ * the new promise becomes the source's published value — but the record should
+ * not depend on that being true, only on which sources this node's value came
+ * from.
+ */
+let sourceReadsInCurrentNode: Set<Accessor<unknown>> | null = null
+
+/** Shared empty result, so a node that read no sources allocates nothing. */
+const NO_SOURCE_READS: readonly Accessor<unknown>[] = []
+
+/**
+ * Record that the node currently recomputing read this source through a verb.
+ * Called by `use()` and `latest()`, and deliberately NOT by `peek()` — which
+ * is what makes `peek` the read that stops loading state from propagating any
+ * further, rather than a synonym for `latest` outside a binding.
+ *
+ * A no-op when no node is recomputing, which is the case for every read made
+ * from a binding, an action body, or a plain helper.
+ */
+export function markSourceRead(source: Accessor<unknown>): void {
+  if (sourceReadsInCurrentNode === null) return
+  sourceReadsInCurrentNode.add(source)
+}
+
+/**
+ * Run `fn` as a node's recompute, collecting the sources its verbs read.
+ * `onReads` is called on both the success and the throw path, because a stage
+ * that suspends has still read whatever it read before throwing. Restores the
+ * prior collection on the way out, so a nested node's reads are recorded
+ * against that node rather than against this one.
+ */
+export function runNodeCompute<T>(
+  fn: () => T,
+  onReads: (reads: readonly Accessor<unknown>[]) => void,
+): T {
+  const prev = sourceReadsInCurrentNode
+  const collected = new Set<Accessor<unknown>>()
+  sourceReadsInCurrentNode = collected
+  try {
+    return fn()
+  } finally {
+    sourceReadsInCurrentNode = prev
+    onReads(collected.size === 0 ? NO_SOURCE_READS : Array.from(collected))
+  }
+}
+
+/**
  * Called by `latest()` when the accessor it read is parked in an error state.
  * The tolerant read degrades to the last good value rather than throwing, so
  * without this the error would reach no `<Errored>` at all — the boundary's

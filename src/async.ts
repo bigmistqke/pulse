@@ -2,7 +2,7 @@ import { isPromise } from './is-promise'
 import { isPending, promiseOf } from './pending'
 import { error, rawValueOf } from './error'
 import { NODE, type Accessor, type Signal } from './signal'
-import { markAmbientError, markPendingValueRead, markUsedInBinding } from './transition-tracker'
+import { markAmbientError, markPendingValueRead, markSourceRead, markUsedInBinding } from './transition-tracker'
 
 /**
  * Records the most recent resolved value observed for each signal. Keyed on the
@@ -113,6 +113,11 @@ export function latest<T>(s: Accessor<T>): Awaited<T> | undefined
 export function latest<T, D>(s: Accessor<T>, fallback: D): Awaited<T> | D
 export function latest<T, D>(s: Accessor<T>, fallback?: D): Awaited<T> | D | undefined {
   const value = peek(s, fallback as D)
+  // Record the read against the node currently recomputing, if there is one,
+  // whether or not `s` is pending right now: the record says which sources
+  // this node's value came from, and whether any of them is in flight is
+  // asked later, live. A no-op outside a node's recompute.
+  markSourceRead(s as Accessor<unknown>)
   // Participate in the nearest <Errored> as well as the nearest <Loading>.
   // The tolerant read degrades to the last good value instead of throwing, so
   // an error boundary would otherwise never hear about a failed source in a
@@ -241,6 +246,10 @@ export function use(x: unknown): unknown {
     // computeds when their sub count drops to 0, mid-flow"), and new values
     // would never propagate after a refetch.
     x = accessor()
+    // Same record `latest()` makes, for the same reason: this node's value
+    // came from `accessor`, so a later refresh of it is a refresh of this
+    // node's value too, whatever verb was used to read it.
+    markSourceRead(accessor as Accessor<unknown>)
     if (isPending(accessor)) {
       throw new NotReadyYet(promiseOf(accessor)!)
     }

@@ -5,8 +5,11 @@ principle that falls out of the split: **throwing decides what a binding
 renders, and nothing else. Every part of the loading lifecycle is reported
 ambiently, from the reads a binding makes.**
 
-None of this is implemented. This is a design record produced by working
-through the current code and the examples; the sections below distinguish
+Most of this is not implemented. Two pieces are: a binding compute now records
+which pending sources it read rather than reporting a boolean and two loose
+promises, and a node records the sources its recipe read so that loading state
+crosses a tolerant read. The rest — the split itself, gate membership, the
+named pending set — is still a design record. The sections below distinguish
 between what was verified against the source and what is still an argument.
 
 ## The three jobs, as they exist today
@@ -174,6 +177,93 @@ driver resumes the generator from a settle handler, outside any binding compute.
 So inside a stage body, suspending is the propagation mechanism and always was.
 Reading tolerantly there is the deliberate opposite: take whatever value is
 present and do not make this node wait.
+
+## The verbs are the only places the async colour stops
+
+An asynchronous node's raw accessor always hands back a promise — a pending one
+while the work is in flight, and a resolved one wrapping the value afterwards
+(`setPublishedValue(resolvedPromise(...))` in `src/computed.ts`). The colour is
+carried in the value at runtime, not only in the type
+([ADR 0004](0004-propagate-async-color.md)).
+
+A derivation that reads a source and passes the promise along is therefore
+asynchronous itself, with no verb and no reporting machinery involved.
+Measured: with `memo` pending, `computed(() => memo())` reports pending and
+resolves to the same value, because it holds the same promise. Doing anything
+else with a raw read produces a permanently wrong value — `memo() + 1` is
+`"[object Promise]1"` before and after the source settles — which is what the
+propagated colour exists to make visible, and which TypeScript rejects without
+a double cast.
+
+So propagation is the default, and the three read verbs are the three ways to
+stop it:
+
+- `use(x)` refuses to stop it until the value is there. The reader stays
+  pending, because it suspended.
+- `latest(x)` stops it and takes the value the source last resolved to.
+- `peek(x)` stops it, takes the same value, and deliberately reports nothing.
+
+### A tolerant read should leave a trace
+
+Stopping the colour is right: a derivation that read tolerantly has a value and
+is not waiting for anything. But its value was computed from a source that is
+still in flight, and nothing downstream can currently discover that. Measured,
+with `memo` pending: `computed(() => use(memo) + 1)` reports pending, and
+`computed(() => (latest(memo) ?? 0) + 1)` does not, even though the second
+one's value will change when `memo` resolves.
+
+This is not a missing concept. `isPending(x)` already means "something is in
+flight" rather than "there is no value here" — a refreshing node reports
+pending while the value it last resolved to is still on screen, which is
+exactly what `examples/typeahead` reads to show that a search is running. The
+gap is that the fact stops at a tolerant read instead of propagating through
+it.
+
+The mechanism is the collection this record already calls for at the binding
+layer, applied one layer down. A node's recompute records the pending sources
+whose values it read, and those become a dynamic upstream on its
+`PendingEntry`, alongside the static pipeline chain that `upstream` already
+holds. `isPending`'s existing walk then crosses tolerant reads with no change
+to the walk itself.
+
+Every read is recorded, pending or not, and whether any recorded source is in
+flight is asked later and live. The record therefore says which sources this
+node's value came from, and nothing about when it was taken. That matters
+because the alternative — recording only sources that were pending at read time
+— would make the answer depend on when the reader last ran. In practice a
+refetch does invalidate readers, since the new promise becomes the source's
+published value, but the record should not rest on that.
+
+`peek` records nothing, which is what finally distinguishes it from `latest`
+outside a binding. Today the two are indistinguishable there, which is why
+`peek` reads as an escape hatch with nothing to escape.
+
+This is also where the binding layer and the node layer converge. If every
+compute records what it read — a binding through `runBindingCompute`, a node
+through its own recompute — then a boundary consulting its children and a
+consumer calling `isPending` are the same walk over the same kind of record.
+That is the open question about bindings as nodes, reached from the other side.
+
+### What this does to `use`
+
+`isPending` is one predicate, and it already means "something is in flight"
+rather than "there is no value here": `use(c)` on a refreshing node throws
+today even though that node is holding its previous value, which
+`test/async.test.ts:298` locks in. Crossing tolerant reads therefore widens
+where `use` suspends — a node that read anything now refreshing reports
+pending, so `use` on that node throws.
+
+That was decided deliberately rather than tolerated. The alternative, a second
+query so that `isPending` stops at a tolerant read, leaves `isPending` with an
+arbitrary stopping rule: it would still mean "in flight" for a refreshing leaf
+and something narrower for a node derived from one. One predicate that means
+the same thing everywhere is worth `use` suspending more often, and
+`use.latest` is the read for a call site that wants the stale value instead.
+
+The cost to watch is a node that reads many sources: it reports pending
+whenever any of them refreshes, so `use` on an aggregate can suspend often. If
+that turns out to bite, the answer is a narrower query rather than a stopping
+rule inside this one.
 
 ## Gate membership comes from reads, not from which verb was called
 
@@ -490,6 +580,8 @@ Nothing here is implemented. The changes it implies, in rough order of size:
   primitive, and an ordering primitive is only ever about order.
 - Whether bindings should be nodes with their own pending entries, so that
   boundaries read their children rather than children reporting to boundaries.
+  The node-level collection described above is half of this, approached from
+  the node side; what it does not settle is the binding side.
   This would merge boundaries and groups into one kind of thing and remove the
   module-level slots entirely. The hard parts are that a binding's dependencies
   change on every run, and that releasing a withheld commit still needs a handle
