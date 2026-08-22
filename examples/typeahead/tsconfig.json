@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ESNext", "DOM"],
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "jsxImportSource": "pulse",
+    "paths": {
+      "pulse/jsx-runtime": ["../../src/jsx-runtime.ts"],
+      "pulse": ["../../src/index.ts"]
+    }
+  },
+  "include": ["src", "vite.config.ts"]
+}
