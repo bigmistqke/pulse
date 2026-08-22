@@ -1,16 +1,19 @@
 # Decompose `<Loading>` into a placeholder, a commit gate, and a named pending set
 
 `<Loading>` does three separate jobs. This record splits them, and states the
-principle that falls out of the split: **throwing decides what a binding
-renders, and nothing else. Every part of the loading lifecycle is reported
-ambiently, from the reads a binding makes.**
+principle that falls out of the split: **the read verb decides what a binding
+renders and whether that binding waits for its neighbours. Everything else in
+the loading lifecycle is reported ambiently, from the reads a binding makes.**
 
 Most of this is not implemented. Two pieces are: a binding compute now records
 which pending sources it read rather than reporting a boolean and two loose
 promises, and a node records the sources its recipe read so that loading state
-crosses a tolerant read. The rest — the split itself, gate membership, the
-named pending set — is still a design record. The sections below distinguish
-between what was verified against the source and what is still an argument.
+crosses a tolerant read. Both of those feed reporting only. The rest — the
+split itself, the named pending set — is still a design record. Gate membership
+was the one part of it that would have changed behaviour, and it is settled the
+other way: it stays where it is today, on the verb. The sections below
+distinguish between what was verified against the source and what is still an
+argument.
 
 ## The three jobs, as they exist today
 
@@ -46,7 +49,7 @@ asynchronous nodes, and `findBoundaryScope` answers it by walking up the owner
 tree from whoever is asking. That produces two problems.
 
 First, adding a boundary for one reason silently changes another. Introducing a
-`<Loading>` so that six fields commit together also re-parents every
+`<Loading>` so that several fields commit together also re-parents every
 `isLoading()` call below it, because the lookup finds the nearest boundary
 regardless of why that boundary exists.
 
@@ -113,17 +116,18 @@ on `Show`, because eager construction is the negation of what `Show` is for.
 `Show` is sufficient for exactly one case: a first-load swap in one direction,
 over a subtree that starts no work of its own.
 
-## Throwing decides what renders, and nothing else
+## Throwing decides what renders, and what waits
 
 [ADR 0015](0015-peek-latest-split-ambient-loading-participation.md) established
 that `use()`'s only benefits at a call site are that it returns `Awaited<T>`
 instead of `Awaited<T> | undefined`, and that it enrols the binding in the
 atomic-commit gate. Everything else it appeared to provide was coordination that
-had simply never been given another route. Removing the second of those two —
-see the next section — leaves only the first.
+had simply never been given another route. Both of those two survive: the
+section on gate membership below keeps the second.
 
-The general statement is that throwing is a decision about values, and every
-part of the loading lifecycle is ambient.
+The general statement is that the throw is a decision about values, taken at the
+read site, and that reporting — loading state, first load, errors — is ambient
+and taken from whatever the binding read.
 
 There is a corollary that keeps this honest. The throw is also "I have nothing
 to render yet": a binding that throws never runs `apply(value)`, so nothing is
@@ -142,14 +146,18 @@ same guarantee seen from the type side and from the screen side. It does mean
 that applying the principle mechanically — "the lifecycle is ambient, so always
 read tolerantly" — changes what appears on screen, so it has to be stated.
 
-The read site is then left with one question, and four answers:
+The read site is then left with one question, and five answers. The third
+column is decided by the second: a binding waits for the rest of its gate
+exactly when the verb it used could have suspended, whether or not it suspended
+on this run.
 
-| written | rendered while the value is absent |
-| --- | --- |
-| `latest(x, default)` | the default |
-| `latest(x)` | whatever the surrounding expression makes of `undefined` |
-| `use(x)` | nothing, and the nearest placeholder covers the region |
-| `peek(x)` | as `latest(x)`, reporting nothing — for reads outside a binding |
+| written | rendered while the value is absent | waits for the rest of the gate |
+| --- | --- | --- |
+| `latest(x, default)` | the default | no |
+| `latest(x)` | whatever the surrounding expression makes of `undefined` | no |
+| `use.latest(x)` | the previous value, or nothing until one has ever arrived | yes |
+| `use(x)` | nothing, and the nearest placeholder covers the region | yes |
+| `peek(x)` | as `latest(x)`, reporting nothing — for reads outside a binding | no |
 
 ### The principle is scoped to binding call sites
 
@@ -265,24 +273,29 @@ whenever any of them refreshes, so `use` on an aggregate can suspend often. If
 that turns out to bite, the answer is a narrower query rather than a stopping
 rule inside this one.
 
-## Gate membership comes from reads, not from which verb was called
+## Gate membership stays with the read verb
 
 Three models were weighed.
 
-**Membership by marker, which is what exists today.** A binding joins the gate
-only if it called `use()` or `use.latest()`, both of which call
-`markUsedInBinding()` (`src/async.ts:279` for the second of the two). The flag is
-captured per compute by `runBindingCompute` and returned as
-`engagedTransition`. `CONTEXT.md` describes this per-read-site opt-in as the
+**Membership by marker, which is what exists today, and what this record
+keeps.** A binding joins the gate only if it called `use()` or `use.latest()`,
+both of which call `markUsedInBinding()` (`src/async.ts:279` for the second of
+the two). The flag is captured per compute by `runBindingCompute` and returned
+as `engagedTransition`. `CONTEXT.md` describes this per-read-site opt-in as the
 framework's central bet.
 
-[ADR 0015](0015-peek-latest-split-ambient-loading-participation.md) undercut it.
-`examples/todo-async` now contains no `use()` call at all and keeps every
-behaviour, so nothing in it joins a gate. The marker survives as the gate's only
-membership mechanism in a codebase that has been migrating away from the
-primitive that sets it. And once the gate is its own component, requiring a
-second marker inside it is redundant: wrapping the region already said which
-bindings should land together.
+Two things are said against it.
+[ADR 0015](0015-peek-latest-split-ambient-loading-participation.md) left
+`examples/todo-async` with no `use()` call at all and every behaviour intact, so
+nothing in it joins a gate: the marker is the gate's only membership mechanism
+in a codebase that has been migrating away from the primitive that sets it. And
+once the gate is its own component, requiring a second marker inside it looks
+redundant, because wrapping the region already said which bindings should land
+together. Neither is a defect. The first says gates are rare, which is a reason
+to ask whether the component is needed at all — recorded below as open — and not
+a reason to widen who joins one. The second is answered by the region model,
+immediately below, which is what "wrapping already said it" means when written
+out.
 
 **Membership by region — every binding under the gate defers.** Refuted by
 `examples/typeahead`: the wrapped element carries
@@ -291,30 +304,62 @@ staleness during the load. Holding its commit until the load ends means the
 indication can never appear while it is wanted. Any indicator placed inside the
 region it describes fails the same way.
 
-**Membership by source, which is what this record adopts.** A binding defers if
-it read the **value** of a source that is currently pending. A binding that read
-only a source's pending state does not defer. The distinction is already
-available in the existing structures: `PendingEntry.pending` is its own reactive
-accessor, separate from the value accessor, so reading the value and reading the
-pending flag are already different reads.
-
-Applied to `examples/typeahead`, this reproduces the separation the example
-draws by hand:
-
-| binding | reads | defers |
-| --- | --- | --- |
-| `{use(record).name}` | the value of `record` | yes |
-| `{latest(shown).cities}` | the value | yes |
-| `class:stale={isPending(record)}` | the pending state only | no |
-| a class driven by pointer state, a clock | nothing pending | no |
-
-`docs/async/deep-dives/solid-2x.md:148` records Solid 2.x deciding commit
+**Membership by source — a binding defers if it read the value of a source that
+is currently pending, and does not defer if it read only that source's pending
+state.** The distinction is available in the existing structures:
+`PendingEntry.pending` is its own reactive accessor, separate from the value
+accessor, so reading a value and reading a pending flag are already different
+reads. `docs/async/deep-dives/solid-2x.md:148` records Solid 2.x deciding commit
 readiness per source rather than per transition, through
 `_asyncReporters: Map<Computed, Set<Computed>>`, and calls it materially more
-precise than blocking a commit on any pending boundary in scope. Membership by
-marker is the second of those two shapes; membership by source is the first.
+precise than blocking a commit on any pending boundary in scope.
 
-### Engagement alone would not be enough
+This model is not adopted, for three reasons.
+
+**It deletes a combination and puts nothing in its place.** Today `latest(x)`
+means: take the value the source last resolved to, report loading and errors
+ambiently, and commit when this binding is ready. Under membership by source
+that combination has no spelling inside a gate, because reading the value is
+what enrols you. The only verb left that never defers is `peek`, which reports
+nothing at all — so a binding that wants to move on its own has to give up error
+propagation to `<Errored>` and loading reporting to get there. This is not
+hypothetical: `examples/typeahead/src/main.tsx:32` reads the result list with
+`latest` and says why in the comment above it — the list wants a total value and
+wants the boundary to hear about the refresh, but has no reason to join its
+gate. Membership by source overrules that sentence from outside the call site.
+The region model was refuted by a binding that had to keep committing while its
+region waited; membership by source re-admits a narrower form of the same
+failure, for value reads rather than for pending-state reads.
+
+**It compounds with node-level collection.** Now that a node reports pending
+when any source it read is refreshing, a binding over an aggregate node reads,
+transitively, everything that node read. Under membership by source such a
+binding defers on almost any refresh anywhere upstream. The answer offered above
+for the same effect on `use` — write a narrower query — applies to a call site
+that asked to suspend. It does not apply to a binding that never asked to
+coordinate with anything.
+
+**Its motivating case is not demonstrated.** The tear it prevents is a gate
+whose bindings read different sources tolerantly and therefore land in different
+frames. No example contains one. Measured, the example that motivates the gate
+does not exercise the gate at all: see the finding below on
+`examples/typeahead`.
+
+What remains is the positive statement, which is the reason to keep the verb
+rather than merely the absence of a reason to change. **A binding waits for its
+neighbours exactly when the verb it used could have suspended.** `use` and
+`use.latest` can throw; `latest` and `peek` cannot. A call site that wrote `use`
+said it has nothing to render until the value arrives, and holding it until its
+neighbours are ready too is a continuation of that sentence. A call site that
+wrote `latest` already decided what to do about the absent value, at the read
+site, in the expression itself; withholding its commit overrides a decision it
+has already taken. Membership by source makes that decision from the outside,
+out of what the binding happened to read.
+
+So gating stays explicit. A binding lands with others because a verb named it,
+not because of what it touched.
+
+### If this reopens, a marker alone would not be enough
 
 Making a tolerant read call `markUsedInBinding()` was considered and does not
 work, for a reason that is worth recording because it is not obvious.
@@ -327,19 +372,21 @@ source's binding never threw, and it flushes. The frame is torn anyway.
 
 Participation requires both halves — queue the commit, and register the pending
 source that was read as something the gate must wait for. The second half is
-membership by source. There is no cheaper version.
+membership by source. There is no cheaper version, so a future scenario that
+demands tolerant participation is asking for the whole model, not for a flag.
 
-### What this record supersedes in ADR 0015
+### What this leaves standing in ADR 0015
 
 [ADR 0015](0015-peek-latest-split-ambient-loading-participation.md) considered
 and rejected letting a tolerant read participate in the gate, on the grounds
 that nothing in that shape ever throws, so `gatePending` resolves to false
 almost immediately and `hasEverLoaded` becomes true before any data has
-arrived. That is a statement about `hasEverLoaded` and the `initial` swap. Under
-this decomposition the gate does not own `hasEverLoaded`; the placeholder does,
-driven by first-load reporting that is keyed on the accessor's own state. The
-failure mode requires the gate signal and the swap signal to be one signal.
+arrived. That rejection stands, and it was measured against a real defect.
 
+The decomposition would remove that particular obstacle without displacing the
+decision. Split, the gate does not own `hasEverLoaded`; the placeholder does,
+driven by first-load reporting that is keyed on the accessor's own state, and
+the failure mode requires the gate signal and the swap signal to be one signal.
 The same applies to the two exclusions written into `src/dom/loading.ts`:
 `backgroundPromises` is kept out of the gate because an in-flight refresh must
 never reopen a fallback, and `firstLoadPromises` is kept out for a related
@@ -348,9 +395,9 @@ share a signal. Once withholding a commit and reopening a fallback are separate
 actions with separate owners, all three exclusions become independently
 decidable.
 
-That argument is reasoning about code that does not exist yet. ADR 0015's
-rejection was measured against a real defect, so this needs verifying rather than
-believing.
+That is reasoning about code that does not exist yet, and it argues only that
+one obstacle would be gone. It is not an argument for tolerant participation,
+which is decided against above on other grounds.
 
 ## The placeholder is not summoned by a tolerant read
 
@@ -550,28 +597,41 @@ genuinely needs something new.
 
 ## Consequences
 
-Nothing here is implemented. The changes it implies, in rough order of size:
+The split is not implemented. The changes it implies, in rough order of size:
 
 - `src/dom/loading.ts` splits into a placeholder and a gate, and the aggregate
   becomes a value that both can be handed.
-- `src/transition-tracker.ts` loses `markUsedInBinding`, `usedInCurrentBinding`
-  and the `engagedTransition` result field. `runBindingCompute` returns the set
-  of pending sources whose values were read, rather than a boolean and three
-  optional promises.
-- `BindingController`'s `throwing` status disappears, because a binding is known
-  to be blocking before it throws. The two catch sites in `src/dom/bindings.ts`
-  stop reporting and only skip the commit and rethrow for re-run-on-settle.
-- `use` and `use.latest` stop calling `markUsedInBinding()`. Their contracts
-  become their value contracts alone.
 - `<Loading>` disappears rather than being renamed, so that every call site is
   edited and the changed meaning of `fallback` cannot be inherited silently.
+
+Keeping membership on the verb means the machinery that implements it stays as
+it is. Three things that a move to membership by source would have removed are
+therefore kept:
+
+- `src/transition-tracker.ts` keeps `markUsedInBinding`, `usedInCurrentBinding`
+  and the `engagedTransition` result field. `runBindingCompute` already returns
+  the set of pending sources whose values were read alongside them, and that set
+  feeds reporting only — `reportPendingReads` in `src/dom/bindings.ts:110` hands
+  each one to `trackBackground` or `trackFirstLoad`, and nothing in the gate
+  reads it.
+- `BindingController`'s `throwing` status stays. `pendingSet` is populated from
+  that report and from nothing else, and it is what holds the gate open.
+- `use` and `use.latest` keep calling `markUsedInBinding()`. Enrolling the
+  binding is part of their contract, not an implementation detail of it.
 
 ## Not decided
 
 - Whether the gate is needed as a user-facing component at all, once actions
   cover caused asynchronous work and a placeholder's lift condition covers first
   load. The test is to name a refresh that no cause owns and that would tear
-  without a gate.
+  without a gate. The measurement below is evidence for the sceptical answer:
+  the one example that wraps a gate around several fields does not need it.
+- What would reopen membership by source, which is decided against above rather
+  than left open: a scenario where two sources resolve at different times, both
+  are read tolerantly — so neither binding can be made to suspend without
+  changing what is on screen meanwhile — and their values must reach the screen
+  in the same frame. Nothing in the examples is that scenario. Building one is
+  the work that would settle whether the model is ever wanted.
 - Whether `use` earns its place beside `latest(x, default)`. It does where there
   is no sensible default and a partially drawn frame would be wrong, but that
   should be checked against real call sites.
@@ -592,6 +652,23 @@ Nothing here is implemented. The changes it implies, in rough order of size:
 
 ## Findings recorded while producing this
 
+- The atomic-commit test in `examples/typeahead` does not discriminate.
+  `tests/typeahead.spec.ts` records the `detail-name` and `detail-country` pair
+  across a selection change and asserts the pair was only ever
+  `Amsterdam | Netherlands` and then `Berlin | Germany`. Measured: it passes
+  unchanged with the detail `<Loading>` replaced by a fragment. All seven fields
+  read the same `record` node, so they are invalidated together, recompute in
+  one propagation and land in one pass whether or not a gate is there. The
+  example demonstrates supersession and stale-while-revalidate; it does not
+  demonstrate atomic commit. Showing that a gate is load-bearing needs bindings
+  reading two sources that resolve at different times.
+- `first load › the detail header names the selected city before its record
+  arrives` was timing-flaky, and the flakiness had nothing to do with the gate:
+  measured, it fails intermittently on a full run with the boundary in place,
+  and passes when run alone. The in-flight indicator it asserts on is visible
+  only for the 280 milliseconds the first `detail` request takes in the default
+  latency mode, which a slower machine can spend on the assertion before it.
+  Fixed by pinning that test to a long fixed latency.
 - `use()` inside an `async` stage parks `NotReadyYet` as the node's error, in
   both positions — before and after the `await`. The node never re-runs, reports
   itself not pending, and an error boundary would receive a suspension signal as
