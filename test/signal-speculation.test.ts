@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
 import { signal } from '../src/signal'
-import { action } from '../src/scope'
+import { action, committed } from '../src/scope'
 
 /**
  * @canon rule-a-commit-promotes-every-write-at-once
@@ -24,16 +24,20 @@ test('an action discards a public signal write on throw (rollback)', () => {
 })
 
 /**
+ * @canon rule-a-speculative-write-stays-out-of-committed-state
  * @canon rule-a-speculation-reads-its-own-writes
  */
 test('a public signal write inside an action is isolated from committed state until commit', () => {
   const [count, setCount] = signal(0)
   const seen: number[] = []
+  const committedInside: number[] = []
   action(() => {
     setCount(5)
     seen.push(count()) // inside the action: sees its own speculative write
+    committedInside.push(committed(count)) // committed state has not moved
   })
   expect(seen).toEqual([5])
+  expect(committedInside).toEqual([0])
   expect(count()).toBe(5) // committed after the action returns
 })
 

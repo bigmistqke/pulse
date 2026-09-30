@@ -33,6 +33,9 @@ test('getOwner returns the current owner inside createRoot', () => {
   })
 })
 
+/**
+ * @canon rule-owner-cleanups-unwind
+ */
 test('createRoot disposes its onCleanup callbacks', () => {
   const log: string[] = []
   createRoot((dispose) => {
@@ -42,6 +45,22 @@ test('createRoot disposes its onCleanup callbacks', () => {
   })
   // Bottom-up: cleanups run in LIFO order ('b' before 'a').
   expect(log).toEqual(['b', 'a'])
+})
+
+/**
+ * @canon rule-owner-cleanups-unwind
+ */
+test('a throwing onCleanup callback stops neither the others nor the dispose', () => {
+  const log: string[] = []
+  createRoot((dispose) => {
+    onCleanup(() => log.push('a'))
+    onCleanup(() => {
+      throw new Error('boom')
+    })
+    onCleanup(() => log.push('c'))
+    expect(() => dispose()).not.toThrow()
+  })
+  expect(log).toEqual(['c', 'a'])
 })
 
 test('createRoot is always a root — nested createRoot is independent', () => {

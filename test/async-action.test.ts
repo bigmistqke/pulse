@@ -152,19 +152,51 @@ test('two concurrent async actions are isolated from each other', async () => {
   const [a, setA] = signal('a0')
   const [b, setB] = signal('b0')
   const slow = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+  const seenByFirst: string[] = []
+  const seenBySecond: string[] = []
 
   const first = action(function* () {
     setA('a1')
     yield* from(slow(20))
+    seenByFirst.push(b()) // the second action has written b, and is still open or committed
   })
   const second = action(function* () {
     setB('b1')
+    seenBySecond.push(a()) // the first action has written a and is still open
     yield* from(slow(5))
   })
 
   await Promise.all([first.settled, second.settled])
+  expect(seenBySecond).toEqual(['a0']) // never the first action's open write
+  expect(seenByFirst).toEqual(['b1']) // the second action had committed by then
   expect(committed(a)).toBe('a1')
   expect(committed(b)).toBe('b1')
+})
+
+/**
+ * @canon rule-overlapping-writes-resolve-by-commit-order
+ */
+test('two actions writing the same signal: the one that commits last wins', async () => {
+  const [x, setX] = signal('x0')
+  const firstGate = Promise.withResolvers<void>()
+  const secondGate = Promise.withResolvers<void>()
+
+  const first = action(function* () {
+    setX('first') // written first
+    yield* from(firstGate.promise)
+  })
+  const second = action(function* () {
+    setX('second') // written second
+    yield* from(secondGate.promise)
+  })
+
+  secondGate.resolve()
+  await second.settled
+  expect(committed(x)).toBe('second')
+
+  firstGate.resolve() // commits last, though it wrote first
+  await first.settled
+  expect(committed(x)).toBe('first')
 })
 
 // ---- ActionHandle-specific behaviour ----

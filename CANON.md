@@ -26,12 +26,17 @@ The canon is being written backwards from the existing tests and documents, one 
 - [`@axiom flows-share-fate-only-where-the-code-says-so`](#axiom-flows-share-fate-only-where-the-code-says-so) — Two flows are coupled only where the code couples them explicitly. Everything else is isolated.
   - [`@rule sibling-speculations-do-not-see-each-other`](#rule-sibling-speculations-do-not-see-each-other) — Two actions that are not nested never read each other's writes or predictions.
   - [`@rule nesting-makes-actions-share-fate`](#rule-nesting-makes-actions-share-fate) — A nested action commits into its parent, not into committed state. Its writes reach committed state only if the parent commits, and its discard does not discard the parent.
+  - [`@rule overlapping-writes-resolve-by-commit-order`](#rule-overlapping-writes-resolve-by-commit-order) — When two sibling actions write the same node, the one that commits last decides its committed value.
 - [`@axiom build-on-r3-rather-than-change-it`](#axiom-build-on-r3-rather-than-change-it) — Pulse uses r3 as it is. What r3 does not do is built in a layer above it, not patched into it.
   - [`@rule r3-holds-only-committed-values`](#rule-r3-holds-only-committed-values) — r3 holds one committed value per node. A read or write with no speculation open goes straight through r3.
   - [`@rule a-scope-reads-through-its-chain`](#rule-a-scope-reads-through-its-chain) — A read in a scope takes the nearest slot up its chain of scopes, and falls through to committed state when no scope in the chain has one.
   - [`@rule a-speculative-write-reaches-only-consumers-in-its-chain`](#rule-a-speculative-write-reaches-only-consumers-in-its-chain) — A write in a scope invalidates only the consumers whose scope has the writing scope in its chain, and only where no nearer scope has its own slot for the written node.
   - [`@rule speculative-derivation-is-pulled-on-read`](#rule-speculative-derivation-is-pulled-on-read) — Under a speculation, a computed is recomputed when it is read, into a slot of that scope, and a write only marks the affected slots dirty.
   - [`@rule only-written-nodes-are-promoted-at-commit`](#rule-only-written-nodes-are-promoted-at-commit) — A commit promotes the nodes the speculation wrote, and drops everything else it holds.
+  - [`@rule an-effect-created-in-an-action-misses-what-the-action-wrote`](#rule-an-effect-created-in-an-action-misses-what-the-action-wrote) — An effect created inside an action reads the action's writes on its first run, but does not re-run when a source the action wrote changes afterwards. Once it re-runs for any other reason, it follows that source again.
+- [`@axiom teardown-unwinds`](#axiom-teardown-unwinds) — What runs when something closes runs in reverse order of registration, and a callback that throws stops neither the others nor the close.
+  - [`@rule close-callbacks-unwind`](#rule-close-callbacks-unwind) — The `onSettled` callbacks of a speculation fire in reverse order of registration. One that throws is isolated: the others still fire, and the speculation still closes.
+  - [`@rule owner-cleanups-unwind`](#rule-owner-cleanups-unwind) — When an owner is disposed, its `onCleanup` callbacks run in reverse order of registration. One that throws is swallowed: the others still run, and the dispose does not throw.
 <!-- toc:end -->
 
 ## Driving principles — the canon's axioms
@@ -154,6 +159,12 @@ Inside an action, a reader sees the nearest prediction up its own chain of actio
 
 Nesting is how code couples two actions on purpose.
 
+### @rule overlapping-writes-resolve-by-commit-order
+
+> When two sibling actions write the same node, the one that commits last decides its committed value.
+
+Neither action sees the other's write, and nothing merges them. Each commit promotes its own value, so the order of commits decides, not the order of writes.
+
 ## @axiom build-on-r3-rather-than-change-it
 
 > Pulse uses r3 as it is. What r3 does not do is built in a layer above it, not patched into it.
@@ -189,3 +200,25 @@ A slot caches whatever its recipe returned, `undefined` included, until a write 
 > A commit promotes the nodes the speculation wrote, and drops everything else it holds.
 
 A computed the speculation only read is not promoted, so its committed value stays derived from committed state. Closing a scope, either way, removes its slots and its links from the sources they listened to.
+
+### @rule an-effect-created-in-an-action-misses-what-the-action-wrote
+
+> An effect created inside an action reads the action's writes on its first run, but does not re-run when a source the action wrote changes afterwards. Once it re-runs for any other reason, it follows that source again.
+
+Its first run reads a node the action wrote from the action's slot, which links the effect through the overlay's own dependency links instead of through r3. Those links are removed when the action closes, so nothing is left to tell the effect about later changes to that node. A source the action did not write is read through r3, and is followed normally. An effect created inside an action that wrote nothing behaves like any other effect.
+
+## @axiom teardown-unwinds
+
+> What runs when something closes runs in reverse order of registration, and a callback that throws stops neither the others nor the close.
+
+No design document states this. It is stated from the code: owner disposal in `src/owner.ts`, and the settle callbacks in `src/scope.ts`, which say they mirror it.
+
+### @rule close-callbacks-unwind
+
+> The `onSettled` callbacks of a speculation fire in reverse order of registration. One that throws is isolated: the others still fire, and the speculation still closes.
+
+### @rule owner-cleanups-unwind
+
+> When an owner is disposed, its `onCleanup` callbacks run in reverse order of registration. One that throws is swallowed: the others still run, and the dispose does not throw.
+
+Owned children are disposed before the owner's own cleanups, also last-created first.

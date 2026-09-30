@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from 'vitest'
 import { effect } from '../src/effect'
 import { onCleanup, createRoot, catchError } from '../src/owner'
-import { getOwner } from '../src/index'
+import { action, getOwner } from '../src/index'
 import { type LoadingScope } from '../src/owner'
 import {
   flush,
@@ -227,4 +227,70 @@ test('effect that never suspends does not touch the pending boundary scope', () 
   })
 
   setScheduler(microtaskScheduler(flush))
+})
+
+// ---- an effect created inside an action ----
+
+const settle = () => new Promise<void>((resolve) => setTimeout(resolve))
+
+/**
+ * @canon rule-an-effect-created-in-an-action-misses-what-the-action-wrote
+ */
+test('an effect created inside an action does not re-run when a source the action wrote changes', async () => {
+  const [n, setN] = signal(1)
+  const seen: number[] = []
+  createRoot(() => {
+    action(() => {
+      setN(2)
+      effect(() => {
+        seen.push(n())
+      })
+    })
+  })
+  await settle()
+  setN(3)
+  await settle()
+  expect(seen).toEqual([2]) // the first run read the action's write, and nothing since
+})
+
+/**
+ * @canon rule-an-effect-created-in-an-action-misses-what-the-action-wrote
+ */
+test('once such an effect re-runs for another source, it follows the written source again', async () => {
+  const [n, setN] = signal(1)
+  const [m, setM] = signal('m1')
+  const seen: string[] = []
+  createRoot(() => {
+    action(() => {
+      setN(2)
+      effect(() => {
+        seen.push(`${n()}/${m()}`)
+      })
+    })
+  })
+  await settle()
+  setM('m2') // a source the action did not write: the effect follows it
+  await settle()
+  setN(3) // followed again, because the re-run read it outside the action
+  await settle()
+  expect(seen).toEqual(['2/m1', '2/m2', '3/m2'])
+})
+
+/**
+ * @canon rule-an-effect-created-in-an-action-misses-what-the-action-wrote
+ */
+test('an effect created inside an action that wrote nothing follows its sources normally', async () => {
+  const [n, setN] = signal(1)
+  const seen: number[] = []
+  createRoot(() => {
+    action(() => {
+      effect(() => {
+        seen.push(n())
+      })
+    })
+  })
+  await settle()
+  setN(3)
+  await settle()
+  expect(seen).toEqual([1, 3])
 })
