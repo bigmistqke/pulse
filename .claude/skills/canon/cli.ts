@@ -1116,13 +1116,16 @@ function analyse(write: boolean): Analysis {
     }
   }
 
+  /** A test file: `.test` or `.spec`, in TypeScript with or without JSX. */
+  const isSuite = (name: string): boolean => /\.(test|spec)\.tsx?$/.test(name);
+
   /** Every suite under a tree, so a voluntary citation is still read. */
   function allSuites(dir: string, out: string[] = []): string[] {
     for (const name of readdirSync(dir)) {
       const entry = join(dir, name);
       if (statSync(entry).isDirectory()) {
         allSuites(entry, out);
-      } else if (name.endsWith('.test.ts') || name.endsWith('.spec.ts')) {
+      } else if (isSuite(name)) {
         out.push(entry);
       }
     }
@@ -1135,11 +1138,7 @@ function analyse(write: boolean): Analysis {
       const entry = join(dir, name);
       if (statSync(entry).isDirectory()) {
         allModules(entry, out);
-      } else if (
-        name.endsWith('.ts') &&
-        !name.endsWith('.test.ts') &&
-        !name.endsWith('.spec.ts')
-      ) {
+      } else if (/\.tsx?$/.test(name) && !isSuite(name)) {
         out.push(entry);
       }
     }
