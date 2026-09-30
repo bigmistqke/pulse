@@ -91,6 +91,7 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule a-signal-reads-back-its-last-write`](#rule-a-signal-reads-back-its-last-write) — A signal returns its initial value until it is written, and afterwards the last value written. An update function receives the current value.
   - [`@rule one-scheduler-flushes-every-consumer`](#rule-one-scheduler-flushes-every-consumer) — Every write asks one injectable scheduler for a flush. The default scheduler batches every request made in one tick into a single flush on a microtask; the synchronous scheduler flushes on each request.
   - [`@rule an-equal-value-does-not-notify-consumers`](#rule-an-equal-value-does-not-notify-consumers) — A computed that settles to a value `Object.is`-equal to the one it already published does not re-run its consumers.
+  - [`@rule a-committed-write-of-an-equal-value-is-a-no-op`](#rule-a-committed-write-of-an-equal-value-is-a-no-op) — A committed write to a signal that equals its current value re-runs nothing. Equality is SameValueZero: `NaN` equals `NaN`, and `0` equals `-0`.
   - [`@rule an-error-write-schedules-its-own-flush`](#rule-an-error-write-schedules-its-own-flush) — A write to error state — a boundary's report collection, or an action's error — requests a flush itself, so its readers update without any other write happening.
   - [`@rule an-effect-runs-at-creation-and-after-each-change`](#rule-an-effect-runs-at-creation-and-after-each-change) — An effect runs once when it is created, and again after each change to a source it read.
   - [`@rule an-effects-cleanups-run-before-its-next-run`](#rule-an-effects-cleanups-run-before-its-next-run) — A cleanup registered with `onCleanup` inside an effect's body belongs to that run. It runs before the effect's next run, not when the owner is disposed.
@@ -365,6 +366,8 @@ A signal node is backed by an r3 signal, and a computed node by an r3 computed t
 
 A scope's chain runs from itself to the root. A slot in a more specific scope shadows the same node's slot further up. The ambient scope is the root until a scope is entered, and entering one restores the previous scope on the way out, even on a throw.
 
+Entering a scope and restoring the previous one on the way out is the same pattern [ambient context](#axiom-ambient-context-is-set-for-a-call-and-restored-after) describes for owners.
+
 ### @rule a-speculative-write-reaches-only-consumers-in-its-chain
 
 > A write in a scope invalidates only the consumers whose scope has the writing scope in its chain, and only where no nearer scope has its own slot for the written node.
@@ -517,11 +520,15 @@ A boundary with no `for` accepts everything. The walk is repeated for every erro
 
 > A synchronous throw from a `catchError` body is routed only to `catchError` handlers, never to an `<Errored>` or a root's boundary. When none accepts it, it is thrown to the caller.
 
+`catchError` is pulse's `try` and `catch`. A synchronous throw from its body belongs to the caller's stack, the way a throw inside `try` belongs to its `catch`, so only `catchError` handlers on that stack take it. An error in a node is graph state, not part of anyone's stack, which is why it reaches every kind of boundary.
+
 ### @rule a-catch-error-handler-is-called-for-each-throw-under-it
 
 > A `catchError` handler is called for each throw that reaches it, from its body and from any node created under it, on the first run and on later re-runs.
 
 A handler is a callback, not a collection. One rejection can re-run the reading binding several times, and the handler may be called once per re-run.
+
+`catchError` is the event-shaped part of the error system, kept for code that wants to hear each throw, such as logging. It is deliberately outside [the axiom that an error is graph state](#axiom-an-error-is-graph-state-not-an-event): that axiom describes `<Errored>` and `error(x)`, which show state and do not count throws.
 
 ### @rule an-error-nothing-claims-is-thrown-on-a-first-run
 
@@ -1015,6 +1022,8 @@ A staged effect reads its whole pipeline with `use`, so its commit always joins 
 
 Only content commits go through the gate. The gap is recorded in [`docs/follow-ups.md`](docs/follow-ups.md).
 
+This is a known defect, not a design: the gate was meant to hold the whole prior tree. It is tracked in `docs/follow-ups.md`, and the canon states it until it is fixed.
+
 ### @rule a-read-without-use-commits-at-once
 
 > A binding that did not call `use` commits as soon as it runs, whatever state its boundary is in.
@@ -1235,6 +1244,8 @@ The mapper runs once per new item, under a sub-owner for that item. An item stil
 
 Each row receives an index accessor that follows the row's current position, so a reorder updates the index without rebuilding the row.
 
+A row is its item: the same object in a new position is the same row, moved, with its state kept. No key function is needed because the item already has an identity.
+
 ### @rule show-renders-its-children-when-truthy-and-its-fallback-otherwise
 
 > `Show` renders its children while `when` is truthy and its `fallback` while it is falsy. A function child is called with the truthy value.
@@ -1304,30 +1315,6 @@ The *Control flow* entry of [`CONTEXT.md`](CONTEXT.md) states this: async behavi
 ## Open questions
 
 The canon states what the code does. Where a document said nothing, or said something the code does not do, it follows the code. The items below record those places, so that a review can decide whether each behaviour is the one pulse should have. An item is removed once it is decided: by changing the code and the canon, by changing the document, or by accepting the behaviour as stated.
-
-### Probably unintended behaviour the canon records as it is
-
-- [`rule-a-throw-from-a-catch-error-body-reaches-only-catch-error-handlers`](#rule-a-throw-from-a-catch-error-body-reaches-only-catch-error-handlers). A throw from a `catchError` body walks only `catchError` handlers, never an `<Errored>` or the root's boundary, and is re-thrown even inside a root. A throw from a node considers both kinds. There are two routes for one kind of event.
-- [`rule-a-catch-error-handler-is-called-for-each-throw-under-it`](#rule-a-catch-error-handler-is-called-for-each-throw-under-it). A `catchError` handler is a callback called once per throw, possibly several times for one rejection. [`axiom-an-error-is-graph-state-not-an-event`](#axiom-an-error-is-graph-state-not-an-event) says a boundary shows state and does not count throws; `catchError` is the part of the error system that does not follow it.
-- [`exception-structure-mounts-at-once-inside-a-pending-boundary`](#exception-structure-mounts-at-once-inside-a-pending-boundary). `<Show>` and `<For>` mount and unmount structure at once inside a pending `<Loading>`; only content holes wait. `CONTEXT.md` describes a gate that holds the entire prior tree. `docs/follow-ups.md` already tracks this.
-
-### Stated from the code, with no document behind it
-
-- [`axiom-teardown-unwinds`](#axiom-teardown-unwinds). Closing runs callbacks in reverse order of registration, and one that throws stops nothing else: `onSettled` callbacks, owner cleanups, and a generator's cleanups after its `finally` blocks.
-- [`axiom-the-latest-production-wins`](#axiom-the-latest-production-wins), and [`axiom-an-error-is-graph-state-not-an-event`](#axiom-an-error-is-graph-state-not-an-event). Each comes from a design spec under `docs/superpowers/specs/`, not from an ADR or a principle in `framings.md`. The error spec is marked "designed, not implemented" and names things that shipped under other names (`<Failed>` became `<Errored>`, `failure(x)` became `error(x)`). Both may want an ADR.
-- [`rule-overlapping-writes-resolve-by-commit-order`](#rule-overlapping-writes-resolve-by-commit-order). ADR 0009 states last-commit-wins; a test now confirms it. Whether commit order is the right tie-breaker is open.
-- [`rule-list-rows-are-keyed-by-reference`](#rule-list-rows-are-keyed-by-reference). Rows are keyed by reference equality. No document says why reference and not a key function or index. Duplicate references in one list are not covered by a test.
-- [`rule-an-event-handler-runs-under-the-owner-it-was-bound-in`](#rule-an-event-handler-runs-under-the-owner-it-was-bound-in) and [`rule-a-component-that-throws-during-render-leaves-nothing-behind`](#rule-a-component-that-throws-during-render-leaves-nothing-behind). Each is stated only in a code comment.
-- [`rule-pulse-reaches-r3-only-through-its-exports`](#rule-pulse-reaches-r3-only-through-its-exports). A practice visible in ADR 0005, not a stated rule.
-- The error boundary rules for the root's default boundary logging every report, and for an error write scheduling its own flush.
-
-### Parents chosen at merge, to confirm
-
-- [`rule-the-handle-reports-its-newest-attempt`](#rule-the-handle-reports-its-newest-attempt) under [`axiom-a-speculation-commits-or-is-discarded-whole`](#axiom-a-speculation-commits-or-is-discarded-whole). That `retry()` opens a fresh speculation follows from the axiom; that only the newest attempt is reported does not.
-- [`rule-a-live-prediction-reports-neither-pending-nor-failed`](#rule-a-live-prediction-reports-neither-pending-nor-failed) under the same axiom. Its reasoning comes from ADR 0016 (a prediction is on screen, so nothing should suspend behind it), not from the axiom.
-- [`rule-an-optimistic-value-is-read-like-any-node`](#rule-an-optimistic-value-is-read-like-any-node) under [`axiom-compose-rather-than-proliferate`](#axiom-compose-rather-than-proliferate).
-- The staged effect joins its boundary's gate because `stagedEffect` reads its pipeline with `use`. The canon states this as a case of [`rule-use-enrols-the-binding-in-its-boundarys-gate`](#rule-use-enrols-the-binding-in-its-boundarys-gate); `CONTEXT.md` describes it as a property of staged effects.
-- [`rule-runwithowner-restores-the-previous-owner`](#rule-runwithowner-restores-the-previous-owner) and [`rule-a-scope-reads-through-its-chain`](#rule-a-scope-reads-through-its-chain) state the same save-and-restore pattern for owners and for speculative scopes. The second could also cite [`axiom-ambient-context-is-set-for-a-call-and-restored-after`](#axiom-ambient-context-is-set-for-a-call-and-restored-after).
 
 ### Where the code contradicts a document
 
