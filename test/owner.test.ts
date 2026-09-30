@@ -104,8 +104,8 @@ test('runWithOwner sets the ambient owner for fn execution and restores after', 
     runWithOwner(owner, () => {
       captured = getOwner()
     })
+    expect(captured).toBe(owner)
   })
-  expect(captured).not.toBeNull()
 })
 
 /**
@@ -124,8 +124,11 @@ test('runWithOwner on a disposed owner throws', () => {
  * @canon rule-oncleanup-without-an-owner-does-nothing
  */
 test('onCleanup outside any context is a no-op (permissive)', () => {
-  // Should not throw, should not crash.
-  expect(() => onCleanup(() => {})).not.toThrow()
+  let ran = false
+  expect(() => onCleanup(() => { ran = true })).not.toThrow()
+  // Registered nowhere: disposing an unrelated root does not run it.
+  createRoot((dispose) => dispose())
+  expect(ran).toBe(false)
 })
 
 /**

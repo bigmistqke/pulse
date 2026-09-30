@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'vitest'
+import { afterEach, expect, test, vi } from 'vitest'
 import {
   catchError,
   computed,
@@ -67,4 +67,20 @@ test('uncaught throw still propagates outside any catchError', () => {
   expect(() => {
     effect(() => { throw new Error('uncaught') })
   }).toThrow('uncaught')
+})
+
+/**
+ * @canon rule-an-error-nothing-claims-is-thrown-on-a-first-run
+ */
+test('outside any root, an unclaimed error during a re-run is logged, not thrown at the writer', () => {
+  setScheduler(syncScheduler(flush))
+  const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+  const [trigger, setTrigger] = signal(0)
+  effect(() => {
+    if (trigger() === 1) throw new Error('on re-run')
+  })
+  expect(() => setTrigger(1)).not.toThrow()
+  expect(spy.mock.calls.some((call) => call.some((arg) => (arg as Error)?.message === 'on re-run'))).toBe(true)
+  spy.mockRestore()
+  setScheduler(microtaskScheduler(flush))
 })

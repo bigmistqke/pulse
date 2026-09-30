@@ -89,7 +89,7 @@ test('peek(s, fallback) falls back again after a rejection with nothing seeded',
 /**
  * @canon rule-a-signal-stores-a-promise-as-it-is
  */
-test('peek is reactive — updates when the signal is written to a new value', () => {
+test('peek is reactive — updates when the signal is written to a new value', async () => {
   // peek re-runs the effect when the signal *value* changes (a write). It does
   // NOT push on the same-Promise-settling, since signal stores values as-is and
   // r3 dirties only on writes. For "push on settle," reach for `computed(() => p)`.
@@ -101,6 +101,9 @@ test('peek is reactive — updates when the signal is written to a new value', (
   setS(Promise.resolve(1))           // write: effect re-runs
   // peek will see 'pending' synchronously (state not yet drained), so still undefined
   expect(seen).toEqual([undefined, undefined])
+  await new Promise<void>((resolve) => setTimeout(resolve))
+  flush()
+  expect(seen).toEqual([undefined, undefined]) // the promise settling is not a write
   setScheduler(microtaskScheduler(flush))
 })
 

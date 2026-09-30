@@ -36,6 +36,16 @@ test('a static attr:/bare/prop:/class:/style: value still warns - every kind but
   h('div', { id: 'static' })
   expect(warnSpy).toHaveBeenCalledTimes(1)
   expect(warnSpy.mock.calls[0][0]).toMatch(/attr binding.*outside any owner/)
+  for (const [prop, kind] of [
+    ['prop:value', 'prop'],
+    ['class:active', 'class'],
+    ['style:color', 'style'],
+  ] as const) {
+    warnSpy.mockClear()
+    h('div', { [prop]: prop === 'class:active' ? true : 'red' })
+    expect(warnSpy).toHaveBeenCalledTimes(1)
+    expect(warnSpy.mock.calls[0][0]).toMatch(new RegExp(`${kind} binding.*outside any owner`))
+  }
 })
 
 /**

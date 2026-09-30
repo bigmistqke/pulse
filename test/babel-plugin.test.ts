@@ -93,7 +93,7 @@ test('converts a dynamic attr: value to a getter, same as every other binding ki
 /**
  * @canon exception-ref-and-on-props-stay-as-written
  */
-test('a namespaced attribute is a plain string-keyed prop, matching bindProp\'s prefix dispatch', () => {
+test('a namespaced attribute compiles to a plain string key', () => {
   const code = transform('<div on:click={handler} />;')
   expect(code).toContain('"on:click": handler')
 })
@@ -101,7 +101,7 @@ test('a namespaced attribute is a plain string-keyed prop, matching bindProp\'s 
 /**
  * @canon rule-a-spread-merges-descriptors-not-values
  */
-test('spread: rewrites to mergeProps(...) instead of native object spread, preserving getter-ness of the spread source', () => {
+test('spread: compiles to a mergeProps(...) call instead of a native object spread', () => {
   const code = transform('<Foo a={x} {...rest} b={y} {...more} c={z} />;')
   expect(code).toContain('import { jsx as _jsx, mergeProps as _mergeProps } from "pulse/jsx-runtime"')
   expect(code).toContain('_mergeProps({')

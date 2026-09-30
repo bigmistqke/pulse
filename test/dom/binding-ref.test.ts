@@ -19,7 +19,7 @@ test('ref receives the mounted element', () => {
 /**
  * @canon rule-a-ref-is-called-once-with-its-element
  */
-test('ref is invoked once even if its underlying value is a signal accessor (treated as the function itself)', () => {
+test('a ref function is invoked once with its element, not re-run as a reactive binding', () => {
   // The spec says ref is not reactive. The handler is the function itself,
   // even if it happens to be a signal accessor.
   let calls = 0

@@ -74,7 +74,7 @@ test('a stage in the middle of the pipeline may also read signals', () => {
 /**
  * @canon rule-a-pipeline-reads-as-a-promise-while-its-value-came-through-async
  */
-test('an async stage suspends the pipeline; the value flips to the resolved value on settle', async () => {
+test('a pipeline with an async stage reads as a promise before and after it settles', async () => {
   let release!: (v: number) => void
   const c = computed(
     () => 1,
@@ -89,6 +89,7 @@ test('an async stage suspends the pipeline; the value flips to the resolved valu
   await tick()
   // After settle: the view is a fresh fulfilled promise carrying the resolved
   // value; read it through the verbs.
+  expect(c()).toBeInstanceOf(Promise) // still a promise: the value came through async
   expect(isPending(c)).toBe(false)
   expect(peek(c)).toBe(11)
 })
@@ -433,7 +434,7 @@ test('async stage rejection: rejected promise re-thrown on next r3 invocation (r
 /**
  * @canon rule-an-async-computed-refetches-when-a-source-changes
  */
-test('stage-0 returning Promise: dep stays tracked across settles (THE main bug)', async () => {
+test('an async first stage keeps its dependency tracked across settles', async () => {
   setScheduler(syncScheduler(flush))
   const fetches: number[] = []
   const [page, setPage] = signal(0)
@@ -633,7 +634,7 @@ test('isPending(computed) true during refetch (after first settle)', async () =>
 /**
  * @canon rule-an-async-computed-refetches-when-a-source-changes
  */
-test('.then-chained Promise identity (unstable per call): no infinite loop, settles correctly', async () => {
+test('a stage returning a new .then-chained promise on every call settles without looping', async () => {
   setScheduler(syncScheduler(flush))
   const [page, setPage] = signal(0)
   const underlyingResolvers: Array<(v: { results: number[] }) => void> = []
@@ -674,7 +675,7 @@ test('.then-chained Promise identity (unstable per call): no infinite loop, sett
 /**
  * @canon rule-an-async-computed-refetches-when-a-source-changes
  */
-test('multi-stage: stage 1 returning Promise still works (regression check)', async () => {
+test('a promise returned by a later stage is settled before it is published', async () => {
   setScheduler(syncScheduler(flush))
   const [page, setPage] = signal(0)
   const resolvers: Array<(v: { results: number[] }) => void> = []
@@ -746,7 +747,7 @@ test('supersession: stale settle of an old promise is ignored', async () => {
 /**
  * @canon rule-a-computed-is-a-pipeline-of-stages
  */
-test('generator stage: unchanged behaviour (regression check)', async () => {
+test('a generator stage re-runs when a signal it read changes', async () => {
   setScheduler(syncScheduler(flush))
   const [trigger, setTrigger] = signal(0)
   let yieldedFromGen = 0

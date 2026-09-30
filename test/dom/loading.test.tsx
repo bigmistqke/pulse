@@ -255,14 +255,19 @@ test('useLoading() inside subtree reflects pending state', async () => {
   let resolveP!: (v: string) => void
   const p = new Promise<string>((r) => { resolveP = r })
 
+  const seen: boolean[] = []
+  const record = (value: boolean): boolean => {
+    seen.push(value)
+    return value
+  }
   function Header() {
     const pending = useLoading()
-    return <Show when={pending()} fallback={<i>idle</i>}>{() => <i>busy</i>}</Show>
+    return <Show when={record(pending())} fallback={<i>idle</i>}>{() => <i>busy</i>}</Show>
   }
 
   const dispose = render(
     () => (
-      <Loading initial={<p>init</p>}>
+      <Loading>
         {() => (
           <>
             <Header/>
@@ -273,11 +278,14 @@ test('useLoading() inside subtree reflects pending state', async () => {
     ),
     target,
   )
+  flush()
+  // No initial, so the subtree stays mounted and the indicator can show the wait.
+  expect(seen).toContain(true)
+  expect(target.textContent).toContain('busy')
   resolveP('done')
   await p
   flush()
-  // eslint-disable-next-line no-console
-  console.log('[DOM after]', target.innerHTML)
+  expect(seen.at(-1)).toBe(false)
   expect(target.textContent).toContain('idle')
   expect(target.textContent).toContain('done')
   dispose()
@@ -410,13 +418,18 @@ test('isLoading() inside subtree reflects pending state, read fresh each call', 
   let resolveP!: (v: string) => void
   const p = new Promise<string>((r) => { resolveP = r })
 
+  const seen: boolean[] = []
+  const record = (value: boolean): boolean => {
+    seen.push(value)
+    return value
+  }
   function Header() {
-    return <Show when={isLoading()} fallback={<i>idle</i>}>{() => <i>busy</i>}</Show>
+    return <Show when={record(isLoading())} fallback={<i>idle</i>}>{() => <i>busy</i>}</Show>
   }
 
   const dispose = render(
     () => (
-      <Loading initial={<p>init</p>}>
+      <Loading>
         {() => (
           <>
             <Header/>
@@ -427,9 +440,14 @@ test('isLoading() inside subtree reflects pending state, read fresh each call', 
     ),
     target,
   )
+  flush()
+  // No initial, so the subtree stays mounted and the indicator can show the wait.
+  expect(seen).toContain(true)
+  expect(target.textContent).toContain('busy')
   resolveP('done')
   await p
   flush()
+  expect(seen.at(-1)).toBe(false)
   expect(target.textContent).toContain('idle')
   expect(target.textContent).toContain('done')
   dispose()
@@ -457,7 +475,7 @@ test('isLoading() outside any Loading returns false', () => {
 /**
  * @canon rule-a-boundary-shows-initial-until-its-first-load
  */
-test('rapid src-swap keeps pending count at 1, not climbing', async () => {
+test('rapidly swapping a pending source keeps the boundary on initial', async () => {
   const target = document.createElement('section')
   document.body.append(target)
   const p1 = new Promise<string>(() => {})

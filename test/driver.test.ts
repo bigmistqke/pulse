@@ -36,7 +36,7 @@ test('sync stage returning a settled promise -> resolved synchronously on second
 /**
  * @canon rule-a-stage-result-is-settled-before-it-is-passed-on
  */
-test('async stage with pending promise -> suspended (carries the same promise instance)', () => {
+test('async stage with pending promise -> suspended', () => {
   let release!: (v: number) => void
   const stage = async (_: unknown) => {
     return new Promise<number>((resolve) => { release = resolve })

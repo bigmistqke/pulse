@@ -430,7 +430,7 @@ test('binding without use() inside <Loading> commits immediately regardless of b
 /**
  * @canon exception-structure-mounts-at-once-inside-a-pending-boundary
  */
-test('newly-mounted binding inside <Loading> joins the gather (option A: hold prior tree)', async () => {
+test('a binding mounted inside a pending <Loading> shows its value once the boundary settles', async () => {
   const target = document.createElement('section')
   document.body.append(target)
   const [visible, setVisible] = signal(false)
@@ -492,7 +492,7 @@ test('newly-mounted binding inside <Loading> joins the gather (option A: hold pr
 /**
  * @canon exception-structure-mounts-at-once-inside-a-pending-boundary
  */
-test('mid-flight mount without fallback: prior tree retained until gate opens', async () => {
+test('mid-flight mount without fallback: the new structure appears at once, its content empty until the gate opens', async () => {
   const target = document.createElement('section')
   document.body.append(target)
   const [visible, setVisible] = signal(false)
@@ -681,7 +681,7 @@ test('coherent transitions: use(plainSignal) + sibling computed-going-pending in
 
   // Atomic-commit promise: page label should NOT update yet — list is
   // pending, both bindings should hold their prior values until gate opens.
-  expect(target.querySelector('.page')!.textContent).toBe('page 1') // ← FAILS: shows 'page 2'
+  expect(target.querySelector('.page')!.textContent).toBe('page 1')
   expect(target.querySelector('.items')!.textContent).toBe('a,b')
 
   // Settle list.

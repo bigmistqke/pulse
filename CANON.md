@@ -1316,25 +1316,6 @@ The *Control flow* entry of [`CONTEXT.md`](CONTEXT.md) states this: async behavi
 
 The canon states what the code does. Where a document said nothing, or said something the code does not do, it follows the code. The items below record those places, so that a review can decide whether each behaviour is the one pulse should have. An item is removed once it is decided: by changing the code and the canon, by changing the document, or by accepting the behaviour as stated.
 
-### Tests whose title claims more than they assert
-
-- `test/owner.test.ts`: "onCleanup outside any context is a no-op" asserts only that it does not throw. "runWithOwner sets the ambient owner … and restores after" asserts only that the owner is non-null.
-- `test/dom/orphaned-warning.test.ts`: "a static attr:/bare/prop:/class:/style: value still warns" exercises two of the five kinds.
-- `test/async-action.test.ts`: "action() stops candidate-collection at the nearest catchError" asserts only that nothing was logged, not that the handler is never called.
-- [`rule-an-error-nothing-claims-is-thrown-on-a-first-run`](#rule-an-error-nothing-claims-is-thrown-on-a-first-run): the re-run half (logged instead of thrown) is confirmed by a probe but pinned by no test.
-- `test/async.test.ts`: "peek is reactive" does not assert that a promise settling leaves the effect alone.
-- `test/pending.test.ts`: two tests build pending entries by hand instead of through `computed`.
-- `test/computed.test.ts`: "an async stage suspends the pipeline; the value flips …" never checks the raw read after settle. Three tests are named after historical bugs rather than the behaviour they pin.
-- `test/signal.test.ts` "computed accessor is not writable (type-level)" and two `(compile-time)` tests in `test/writable-derived.test.ts` are checked by the type checker, not by vitest.
-- `test/smoke.test.ts` calls r3 directly and pins nothing about how pulse uses it.
-- `test/driver.test.ts`: "async stage with pending promise -> suspended (carries the same promise instance)" never checks the instance.
-- `test/dom/loading.test.tsx`: "useLoading() inside subtree reflects pending state" and "isLoading() inside subtree reflects pending state" assert only the settled state. "rapid src-swap keeps pending count at 1" never asserts the count.
-- `test/dom/loading-atomic.test.tsx`: "mid-flight mount without fallback: prior tree retained until gate opens" asserts the opposite of its title. "newly-mounted binding inside <Loading> joins the gather" shows no gather. "coherent transitions" carries a "← FAILS" comment on an assertion that passes.
-- `test/dom/binding-events.test.ts`: "on:event passes the lowercased event name". The name is not lowercased.
-- `test/dom/binding-ref.test.ts`: "ref is invoked once even if its underlying value is a signal accessor" passes a plain function.
-- `test/babel-plugin.test.ts`: two tests check only the compiled shape of what their titles describe at runtime.
-- No test pins that a `Switch` re-run with the same winner keeps its branch, or that a staged effect skips a commit equal to the last one.
-
 ### Not covered by the canon
 
 - `test/dom/smoke.test.ts` checks that the browser test environment works. It pins nothing about pulse and is left untagged.

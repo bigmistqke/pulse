@@ -20,7 +20,7 @@ test('on:click attaches a listener', () => {
 /**
  * @canon rule-an-event-prop-adds-a-listener-until-its-owner-is-disposed
  */
-test('on:event passes the lowercased event name', () => {
+test('on:event listens to the event named after the prefix, as written', () => {
   const handler = vi.fn()
   createRoot(() => {
     const el = h('input', { 'on:input': handler }) as HTMLInputElement
