@@ -199,6 +199,7 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule a-spread-merges-descriptors-not-values`](#rule-a-spread-merges-descriptors-not-values) — A props object that contains a spread is compiled to a `mergeProps` call over its segments, so a getter in a spread source stays a getter.
   - [`@rule a-dom-child-is-one-thunk-per-dynamic-child`](#rule-a-dom-child-is-one-thunk-per-dynamic-child) — On a DOM element or a Fragment, each dynamic child becomes its own thunk, never a getter. A literal, a function expression, or a nested JSX element stays as written.
   - [`@rule component-children-become-one-getter`](#rule-component-children-become-one-getter) — On a component, the children become one getter over the whole value, and are not wrapped child by child.
+  - [`@rule the-vite-plugin-compiles-only-jsx-files`](#rule-the-vite-plugin-compiles-only-jsx-files) — The Vite plugin compiles a `.tsx` or `.jsx` file, ignoring any query string on its id, and leaves every other file alone. It applies the props-to-getters transform, then the automatic JSX runtime imported from `pulse`.
 - [`@axiom control-flow-bakes-in-no-async-policy`](#axiom-control-flow-bakes-in-no-async-policy) — `Show`, `Switch` and `For` are ordinary components. They coerce a pending input to its empty form, and decide nothing else about async.
   - [`@rule a-pending-condition-reads-as-falsy`](#rule-a-pending-condition-reads-as-falsy) — A `when` that is a pending promise counts as falsy: `Show` renders its fallback, and `Switch` skips that `Match`.
   - [`@rule a-pending-list-reads-as-empty`](#rule-a-pending-list-reads-as-empty) — A list that is a pending promise counts as an empty list: `mapArray` returns no entries, and `For` renders its fallback.
@@ -1298,6 +1299,10 @@ The runtime receives a DOM element's children as values and treats a function va
 
 A component reads `props.children` like any other prop, so the children are deferred until the component reads them. A bare JSX-element child compiles exactly like the braced form. A tag written as a member expression, such as `Foo.Bar`, counts as a component.
 
+### @rule the-vite-plugin-compiles-only-jsx-files
+
+> The Vite plugin compiles a `.tsx` or `.jsx` file, ignoring any query string on its id, and leaves every other file alone. It applies the props-to-getters transform, then the automatic JSX runtime imported from `pulse`.
+
 ## @axiom control-flow-bakes-in-no-async-policy
 
 > `Show`, `Switch` and `For` are ordinary components. They coerce a pending input to its empty form, and decide nothing else about async.
@@ -1319,4 +1324,3 @@ The canon states what the code does. Where a document said nothing, or said some
 ### Not covered by the canon
 
 - `test/dom/smoke.test.ts` checks that the browser test environment works. It pins nothing about pulse and is left untagged.
-- `src/vite-jsx-plugin.ts` has no test, so no rule states it.
