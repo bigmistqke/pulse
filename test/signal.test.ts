@@ -92,3 +92,53 @@ test('SWR: while a refetch is pending the prior resolved value stays available v
   expect(isPending(s)).toBe(true)
   expect(peek(s)).toBe(1) // prior held (seeded from the current node value)
 })
+
+// ---- an equal committed write re-runs nothing ----
+
+async function runsAfterWrite<T>(initial: T, next: T): Promise<number> {
+  const { createRoot } = await import('../src/owner')
+  const { effect } = await import('../src/effect')
+  const [value, setValue] = signal(initial)
+  let runs = 0
+  createRoot(() => {
+    effect(() => {
+      value()
+      runs++
+    })
+  })
+  await tick()
+  runs = 0
+  setValue(next)
+  await tick()
+  return runs
+}
+
+/**
+ * @canon rule-a-committed-write-of-an-equal-value-is-a-no-op
+ */
+test('writing the same number again re-runs nothing', async () => {
+  expect(await runsAfterWrite(1, 1)).toBe(0)
+})
+
+/**
+ * @canon rule-a-committed-write-of-an-equal-value-is-a-no-op
+ */
+test('writing NaN over NaN re-runs nothing', async () => {
+  expect(await runsAfterWrite(Number.NaN, Number.NaN)).toBe(0)
+})
+
+/**
+ * @canon rule-a-committed-write-of-an-equal-value-is-a-no-op
+ */
+test('writing 0 over -0 re-runs nothing', async () => {
+  expect(await runsAfterWrite(-0, 0)).toBe(0)
+})
+
+/**
+ * @canon rule-a-committed-write-of-an-equal-value-is-a-no-op
+ */
+test('writing the same object again re-runs nothing, and a different object re-runs once', async () => {
+  const same = { a: 1 }
+  expect(await runsAfterWrite(same, same)).toBe(0)
+  expect(await runsAfterWrite({ a: 1 }, { a: 1 })).toBe(1)
+})

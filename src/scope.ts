@@ -279,7 +279,12 @@ function trackRead(node: Node, scope: Scope): void {
 export function writeValue<T>(node: Node<T>, value: T): void {
   const scope = getCurrentScope()
   if (scope === ROOT_SCOPE) {
-    r3SetSignal(node.backing as R3Signal<T>, value)
+    const backing = node.backing as R3Signal<T>
+    // r3 drops a write that is `===` to the current value, which leaves NaN
+    // re-notifying. Dropping NaN over NaN here makes the whole comparison
+    // SameValueZero without changing r3.
+    if (Number.isNaN(backing.value) && Number.isNaN(value)) return
+    r3SetSignal(backing, value)
     return
   }
   // speculative — Task 4

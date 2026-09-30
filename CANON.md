@@ -681,6 +681,12 @@ An effect therefore does not re-run between a write and the end of the tick, and
 
 > A computed that settles to a value `Object.is`-equal to the one it already published does not re-run its consumers.
 
+### @rule a-committed-write-of-an-equal-value-is-a-no-op
+
+> A committed write to a signal that equals its current value re-runs nothing. Equality is SameValueZero: `NaN` equals `NaN`, and `0` equals `-0`.
+
+ADR 0008 chose `Object.is`. r3 compares with `===`, which already makes `0` and `-0` equal, and pulse builds on r3 rather than changing it. Pulse adds the `NaN` case in its own write path. The result is SameValueZero, the equality `Map`, `Set` and `Array.prototype.includes` use.
+
 ### @rule an-error-write-schedules-its-own-flush
 
 > A write to error state — a boundary's report collection, or an action's error — requests a flush itself, so its readers update without any other write happening.
@@ -1304,7 +1310,6 @@ The canon states what the code does. Where a document said nothing, or said some
 - [`rule-a-throw-from-a-catch-error-body-reaches-only-catch-error-handlers`](#rule-a-throw-from-a-catch-error-body-reaches-only-catch-error-handlers). A throw from a `catchError` body walks only `catchError` handlers, never an `<Errored>` or the root's boundary, and is re-thrown even inside a root. A throw from a node considers both kinds. There are two routes for one kind of event.
 - [`rule-a-catch-error-handler-is-called-for-each-throw-under-it`](#rule-a-catch-error-handler-is-called-for-each-throw-under-it). A `catchError` handler is a callback called once per throw, possibly several times for one rejection. [`axiom-an-error-is-graph-state-not-an-event`](#axiom-an-error-is-graph-state-not-an-event) says a boundary shows state and does not count throws; `catchError` is the part of the error system that does not follow it.
 - [`exception-structure-mounts-at-once-inside-a-pending-boundary`](#exception-structure-mounts-at-once-inside-a-pending-boundary). `<Show>` and `<For>` mount and unmount structure at once inside a pending `<Loading>`; only content holes wait. `CONTEXT.md` describes a gate that holds the entire prior tree. `docs/follow-ups.md` already tracks this.
-- [`rule-an-equal-value-does-not-notify-consumers`](#rule-an-equal-value-does-not-notify-consumers) states deduplication only for computeds. For plain signals, a probe showed that writing `NaN` over `NaN` re-notifies consumers, although ADR 0008 names that case as its example of an `Object.is` no-op. No test pins plain-signal deduplication either way.
 
 ### Stated from the code, with no document behind it
 
@@ -1327,7 +1332,6 @@ The canon states what the code does. Where a document said nothing, or said some
 ### Where the code contradicts a document
 
 - `docs/pulse/framings.md`, P3: a plain read "never throws". Reading the accessor of a failed async computed, or of a failed `signal(fn)`, throws the rejection reason. Only `peek` and `latest` never throw. [`axiom-plain-reads-are-honest`](#axiom-plain-reads-are-honest) is worded to what holds.
-- ADR 0008 describes `signal(value, { equals })`. The option does not exist; a second argument is silently ignored.
 - `CONTEXT.md`, the Owner entry: orphaned reactive nodes warn. Only DOM bindings and event listeners do; a bare `effect()` or `computed()` outside every owner is silent, and `onCleanup` there is a silent no-op.
 - `CONTEXT.md` and `docs/pulse/CONTEXT.md` describe the error boundary as `catchError` only. `<Errored>`, report collections, `for` predicates and the root's default boundary are not described. ADR 0006 predates `<Errored>` joining the walk as a peer and the `for` predicate.
 - `docs/pulse/CONTEXT.md` uses the old names: `latest` for what is now `peek`, and `yield* read` for what is now `from`. ADR 0013 also says `read`.
