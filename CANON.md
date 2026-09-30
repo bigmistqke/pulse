@@ -149,6 +149,11 @@ The canon was written backwards from the existing tests and documents, and descr
     - [`@case a-reactive-prop-that-called-use-waits-for-the-gate`](#case-a-reactive-prop-that-called-use-waits-for-the-gate) — `bindings.ts` `bindProp`.
     - [`@case a-staged-effect-reads-its-pipeline-with-use`](#case-a-staged-effect-reads-its-pipeline-with-use) — `effect.ts` `stagedEffect`.
   - [`@rule a-structural-commit-waits-for-the-content-it-brings`](#rule-a-structural-commit-waits-for-the-content-it-brings) — A reactive child whose new content contains a suspended reactive child of the same boundary commits through that boundary's gate. The new structure lands in the same pass as that content, and the structure it replaces stays on screen until then.
+    - [`@case a-hole-holds-new-content-that-is-not-ready`](#case-a-hole-holds-new-content-that-is-not-ready) — `bindings.ts` `insertChild`.
+    - [`@case a-held-commit-places-its-nodes-only-when-it-lands`](#case-a-held-commit-places-its-nodes-only-when-it-lands) — `bindings.ts` `insertChild`.
+    - [`@case a-replaced-held-commit-releases-the-gate`](#case-a-replaced-held-commit-releases-the-gate) — `bindings.ts` `insertChild`.
+    - [`@case a-hole-under-a-nested-boundary-does-not-hold`](#case-a-hole-under-a-nested-boundary-does-not-hold) — `bindings.ts` `holdsSuspendedHole`.
+    - [`@case a-suspended-prop-does-not-hold-the-structure`](#case-a-suspended-prop-does-not-hold-the-structure) — `bindings.ts` `holdsSuspendedHole`.
   - [`@rule a-read-without-use-commits-at-once`](#rule-a-read-without-use-commits-at-once) — A binding that did not call `use` commits as soon as it runs, whatever state its boundary is in.
   - [`@rule latest-reports-loading-without-waiting`](#rule-latest-reports-loading-without-waiting) — `latest(x)` returns the last resolved value, never throws, and never makes the binding wait. While `x` is pending it reports the load to the nearest boundary: a first load drives the boundary's first-load placeholder, and a refresh drives `isLoading()` only.
   - [`@rule peek-reports-nothing`](#rule-peek-reports-nothing) — `peek(x)` returns the last resolved value and reports nothing to any boundary, neither a first load nor a refresh.
@@ -1023,7 +1028,35 @@ A staged effect reads its whole pipeline with `use`, so its commit always joins 
 
 This is how `Show`, `Switch` and `For` hold a branch or a row that is not ready: each renders through a reactive child, and a hole inside the new content that called `use` on a pending value is suspended. The waiting still comes from `use`, inside the new content, so a structural read that did not call `use` makes nothing wait by itself.
 
-The content is checked as DOM. A suspended reactive child leaves its marker in the nodes about to be inserted, however and whenever those nodes were built, a `For` row built by its own computation included. A suspended hole under a nested boundary belongs to that boundary, and does not hold the outer structure. Only a suspended reactive child counts: a reactive prop that suspends does not hold the structure around it. When a later run replaces a held commit, the held commit is withdrawn and the subtree built for it is disposed.
+#### @case a-hole-holds-new-content-that-is-not-ready
+
+> `bindings.ts` `insertChild`.
+
+Before committing, a reactive child looks in the nodes it is about to insert for the marker of a suspended reactive child of its own boundary. The DOM is what is checked, so it does not matter how or when those nodes were built: a `For` row built by its own computation during the flush counts the same as a `Show` branch built during the run. When such a marker is there, the commit is handed to the gate as this binding's ready commit, and the nodes on screen stay.
+
+#### @case a-held-commit-places-its-nodes-only-when-it-lands
+
+> `bindings.ts` `insertChild`.
+
+While a commit is held, its nodes are not moved into a fragment. They are placed when the commit lands. A row that `For` reuses is a live node already on screen, so it stays on screen, with its content, for as long as the new list is held.
+
+#### @case a-replaced-held-commit-releases-the-gate
+
+> `bindings.ts` `insertChild`.
+
+When a later run of the same reactive child replaces a held commit, it first withdraws that commit from the gate, and then disposes the subtree built for it. The subtree's suspended bindings unregister with it, so they no longer hold the gate for a commit that will never land, and withdrawing first means the gate opening cannot apply the stale commit.
+
+#### @case a-hole-under-a-nested-boundary-does-not-hold
+
+> `bindings.ts` `holdsSuspendedHole`.
+
+A suspended hole's marker records the boundary the hole is suspended in, and only a marker of the checking hole's own boundary counts. Content under a nested `<Loading>` is suspended in that boundary, so the outer structure mounts at once and the inner boundary shows its own placeholder.
+
+#### @case a-suspended-prop-does-not-hold-the-structure
+
+> `bindings.ts` `holdsSuspendedHole`.
+
+Only the markers of reactive children are looked for. A reactive prop that suspends, such as `class={use(x)}`, leaves no marker, so the element that carries it mounts at once, and the prop's own value waits at the gate.
 
 ### @rule a-read-without-use-commits-at-once
 

@@ -428,7 +428,7 @@ test('binding without use() inside <Loading> commits immediately regardless of b
 })
 
 /**
- * @canon rule-a-structural-commit-waits-for-the-content-it-brings
+ * @canon case-a-hole-holds-new-content-that-is-not-ready
  */
 test('a binding mounted inside a pending <Loading> shows its value once the boundary settles', async () => {
   const target = document.createElement('section')
@@ -489,7 +489,7 @@ test('a binding mounted inside a pending <Loading> shows its value once the boun
 })
 
 /**
- * @canon rule-a-structural-commit-waits-for-the-content-it-brings
+ * @canon case-a-hole-holds-new-content-that-is-not-ready
  */
 test('mid-flight mount without fallback: the new structure lands together with its content', async () => {
   const target = document.createElement('section')
@@ -535,7 +535,7 @@ test('mid-flight mount without fallback: the new structure lands together with i
 })
 
 /**
- * @canon rule-a-structural-commit-waits-for-the-content-it-brings
+ * @canon case-a-replaced-held-commit-releases-the-gate
  */
 test('a held branch replaced before its content loads is discarded, and does not hold the gate', async () => {
   const target = document.createElement('section')
@@ -576,7 +576,7 @@ test('a held branch replaced before its content loads is discarded, and does not
 })
 
 /**
- * @canon rule-a-structural-commit-waits-for-the-content-it-brings
+ * @canon case-a-hole-under-a-nested-boundary-does-not-hold
  */
 test('content under a nested boundary does not hold the outer structure', async () => {
   const target = document.createElement('section')
@@ -614,7 +614,7 @@ test('content under a nested boundary does not hold the outer structure', async 
 })
 
 /**
- * @canon rule-a-structural-commit-waits-for-the-content-it-brings
+ * @canon case-a-held-commit-places-its-nodes-only-when-it-lands
  */
 test('a For row whose content is pending lands together with it', async () => {
   const target = document.createElement('section')
@@ -985,5 +985,43 @@ test('top-level component inside Loading reaches scope via useLoading()', async 
   resolveP2('second')
   await new Promise((r) => queueMicrotask(() => r(undefined)))
   flush()
+  dispose()
+})
+
+/**
+ * @canon case-a-suspended-prop-does-not-hold-the-structure
+ */
+test('an element whose reactive prop suspends mounts at once, and only the prop waits', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+  const [visible, setVisible] = signal(false)
+  let resolveClass: (v: string) => void = () => {}
+  const pendingClass = new Promise<string>((r) => (resolveClass = r))
+  const dispose = render(
+    () => (
+      <Loading>
+        {() => (
+          <div>
+            <Show when={visible()}>
+              {() => <span class={use(pendingClass)}>b</span>}
+            </Show>
+          </div>
+        )}
+      </Loading>
+    ),
+    target,
+  )
+  flush()
+  setVisible(true)
+  flush()
+  await new Promise((r) => queueMicrotask(() => r(undefined)))
+  flush()
+  const span = target.querySelector('span')
+  expect(span).not.toBeNull() // the structure did not wait
+  expect(span!.getAttribute('class')).toBeNull() // the prop did
+  resolveClass('ready')
+  await new Promise((r) => queueMicrotask(() => r(undefined)))
+  flush()
+  expect(target.querySelector('span')!.getAttribute('class')).toBe('ready')
   dispose()
 })
