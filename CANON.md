@@ -1230,7 +1230,7 @@ A re-run that stays on the same side, truthy or falsy, returns the branch alread
 
 > `switch.ts` `Switch`.
 
-The winning `Match` object is the key. While it stays the winner, the built branch is reused. When another `Match` wins, or none does, the old branch's sub-owner is disposed before the new branch is built.
+The winning `Match`'s position among the `Switch`'s children is the key, not the `Match` object. The compiler turns component children into a getter, so each re-evaluation reads fresh `Match` objects; their positions stay put. While the same position wins, the built branch is reused. When another position wins, or none does, the old branch's sub-owner is disposed before the new branch is built.
 
 #### @case map-array-builds-each-item-once-under-its-own-owner
 

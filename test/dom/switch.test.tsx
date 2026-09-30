@@ -170,3 +170,31 @@ test('a Match whose when is a pending promise is skipped', () => {
   expect(target.textContent).toBe('b')
   dispose()
 })
+
+/**
+ * @canon case-switch-rebuilds-only-when-the-winning-match-changes
+ */
+test('a re-evaluation that picks the same Match keeps its branch without rebuilding it', () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+  const [count, setCount] = signal(1)
+  let builds = 0
+  const dispose = render(
+    () => (
+      <Switch fallback={<p>none</p>}>
+        <Match when={count() > 0}>
+          {() => {
+            builds++
+            return <p>positive</p>
+          }}
+        </Match>
+      </Switch>
+    ),
+    target,
+  )
+  expect(builds).toBe(1)
+  setCount(2) // the condition re-runs and the same Match wins again
+  expect(target.textContent).toBe('positive')
+  expect(builds).toBe(1)
+  dispose()
+})
