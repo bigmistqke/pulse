@@ -101,7 +101,7 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule a-computed-has-no-setter`](#rule-a-computed-has-no-setter) — `computed` returns an accessor and nothing to write with. A derivation that can also be written is made with `signal`.
   - [`@rule a-signal-given-stages-is-a-writable-derivation`](#rule-a-signal-given-stages-is-a-writable-derivation) — `signal(s0, s1, …)` builds the same pipeline `computed` builds and adds a setter. `signal(value)` given a value that is not a function stays a plain signal.
   - [`@rule an-optimistic-value-is-read-like-any-node`](#rule-an-optimistic-value-is-read-like-any-node) — The accessor of an optimistic value is an ordinary node. Every read verb applies to it, and the pending and failed state of what its recipe reads reaches the read site through it.
-  - [`@rule a-staged-effect-is-a-pipeline-ending-in-a-commit`](#rule-a-staged-effect-is-a-pipeline-ending-in-a-commit) — `effect([stage0, …, stageN], commit)` runs the same pipeline a computed runs, and passes the final stage's resolved value to `commit`. It commits again whenever the pipeline produces a new value.
+  - [`@rule a-staged-effect-is-a-pipeline-ending-in-a-commit`](#rule-a-staged-effect-is-a-pipeline-ending-in-a-commit) — `effect([stage0, …, stageN], commit)` runs the same pipeline a computed runs, and passes the final stage's resolved value to `commit`. It commits again whenever the pipeline produces a new value, and skips a value `Object.is`-equal to the one it last committed.
 - [`@axiom the-latest-production-wins`](#axiom-the-latest-production-wins) — A derived value shows whatever produced it last — a dependency change or a direct write — and a production that was started earlier never publishes over a later one.
   - [`@rule a-write-replaces-a-derived-value-without-rerunning-it`](#rule-a-write-replaces-a-derived-value-without-rerunning-it) — A write to a writable derivation replaces its value at once, and the body does not run again because of it.
   - [`@rule a-write-abandons-the-run-in-progress`](#rule-a-write-abandons-the-run-in-progress) — A write abandons every stage's run in progress — a fetch in flight, a paused generator, or a recompute queued in the same tick — and the abandoned run never publishes.
@@ -740,7 +740,7 @@ A write into a pipeline of several stages lands on the output of the last stage.
 
 ### @rule a-staged-effect-is-a-pipeline-ending-in-a-commit
 
-> `effect([stage0, …, stageN], commit)` runs the same pipeline a computed runs, and passes the final stage's resolved value to `commit`. It commits again whenever the pipeline produces a new value.
+> `effect([stage0, …, stageN], commit)` runs the same pipeline a computed runs, and passes the final stage's resolved value to `commit`. It commits again whenever the pipeline produces a new value, and skips a value `Object.is`-equal to the one it last committed.
 
 Stages may be sync or async. An async stage delays the commit until it resolves. A value equal to the last committed one, by `Object.is`, is not committed again.
 

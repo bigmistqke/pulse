@@ -124,3 +124,21 @@ test('disposal stops the staged effect from firing further commits', () => {
     expect(seen).toEqual([10, 20]) // no further commits
   })
 })
+
+/**
+ * @canon rule-a-staged-effect-is-a-pipeline-ending-in-a-commit
+ */
+test('a staged effect skips a commit equal to the one it last made', () => {
+  const [n, setN] = signal(1)
+  const commits: string[] = []
+  createRoot(() => {
+    effect([() => n(), (value: number) => (value % 2 === 0 ? 'even' : 'odd')], (parity) => {
+      commits.push(parity)
+    })
+  })
+  expect(commits).toEqual(['odd'])
+  setN(3) // the pipeline re-runs, and produces 'odd' again
+  expect(commits).toEqual(['odd'])
+  setN(4)
+  expect(commits).toEqual(['odd', 'even'])
+})
