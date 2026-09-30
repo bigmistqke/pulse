@@ -2,6 +2,9 @@ import { expect, test } from 'vitest'
 import { createScope, chainFor, writeSlot, readSlot, chainMatch, linkEdge, edgesToFire, closeScopeEdges, ROOT_KIND, ROOT_SCOPE, DIRTY, getCurrentScope, getCurrentTracker, runInScope, signalNode, computedNode, readValue, writeValue, commit, discard, action, onSettled, type Scope, type Node, type Slot, type Edge } from '../src/scope'
 import { read as r3Read } from 'r3'
 
+/**
+ * @canon rule-a-scope-reads-through-its-chain
+ */
 test('createScope produces an open scope with empty bags', () => {
   const s = createScope(undefined, 'speculative')
   expect(s.parent).toBeUndefined()
@@ -14,6 +17,9 @@ test('createScope produces an open scope with empty bags', () => {
   expect(s.children.size).toBe(0)
 })
 
+/**
+ * @canon rule-a-scope-reads-through-its-chain
+ */
 test('a child scope links to its parent and registers in the parent children', () => {
   const root = createScope(undefined, 'owner')
   const child = createScope(root, 'speculative')
@@ -21,6 +27,9 @@ test('a child scope links to its parent and registers in the parent children', (
   expect(root.children.has(child)).toBe(true)
 })
 
+/**
+ * @canon rule-a-scope-reads-through-its-chain
+ */
 test('chainFor walks parents most-specific to terminal', () => {
   const root = createScope(undefined, 'owner')
   const outer = createScope(root, 'speculative')
@@ -31,6 +40,9 @@ test('chainFor walks parents most-specific to terminal', () => {
 
 const sigNode = (): Node => ({ subs: new Set() })
 
+/**
+ * @canon rule-only-written-nodes-are-promoted-at-commit
+ */
 test('writeSlot stores a slot on the scope and records the write', () => {
   const root = createScope(undefined, 'owner')
   const name = sigNode()
@@ -40,6 +52,9 @@ test('writeSlot stores a slot on the scope and records the write', () => {
   expect(root.writeSet.has(name)).toBe(true)
 })
 
+/**
+ * @canon rule-a-scope-reads-through-its-chain
+ */
 test('readSlot falls through the chain to the nearest slot', () => {
   const root = createScope(undefined, 'owner')
   const s = createScope(root, 'speculative')
@@ -49,6 +64,9 @@ test('readSlot falls through the chain to the nearest slot', () => {
   expect(readSlot(sigNode(), s)).toBeUndefined()
 })
 
+/**
+ * @canon rule-a-scope-reads-through-its-chain
+ */
 test('a more-specific slot shadows an ancestor slot', () => {
   const root = createScope(undefined, 'owner')
   const s = createScope(root, 'speculative')
@@ -59,6 +77,9 @@ test('a more-specific slot shadows an ancestor slot', () => {
   expect(readSlot(name, root)?.cached).toBe('foo')
 })
 
+/**
+ * @canon rule-a-speculative-write-reaches-only-consumers-in-its-chain
+ */
 test('chainMatch fires when writeScope is in the target chain and unshadowed', () => {
   const root = createScope(undefined, 'owner')
   const name = sigNode()
@@ -67,6 +88,9 @@ test('chainMatch fires when writeScope is in the target chain and unshadowed', (
   expect(chainMatch(edge, root)).toBe(true)
 })
 
+/**
+ * @canon rule-a-speculative-write-reaches-only-consumers-in-its-chain
+ */
 test('chainMatch does NOT fire when writeScope is outside the target chain', () => {
   const root = createScope(undefined, 'owner')
   const s = createScope(root, 'speculative')
@@ -76,6 +100,9 @@ test('chainMatch does NOT fire when writeScope is outside the target chain', () 
   expect(chainMatch(edge, s)).toBe(false)
 })
 
+/**
+ * @canon rule-a-speculative-write-reaches-only-consumers-in-its-chain
+ */
 test('chainMatch does NOT fire when a more-specific scope shadows the write', () => {
   const root = createScope(undefined, 'owner')
   const s = createScope(root, 'speculative')
@@ -87,6 +114,9 @@ test('chainMatch does NOT fire when a more-specific scope shadows the write', ()
   expect(chainMatch(edge, s)).toBe(true)
 })
 
+/**
+ * @canon rule-a-speculative-write-reaches-only-consumers-in-its-chain
+ */
 test('linkEdge indexes on the source and records on the target scope', () => {
   const root = createScope(undefined, 'owner')
   const name = sigNode()
@@ -97,6 +127,9 @@ test('linkEdge indexes on the source and records on the target scope', () => {
   expect(target.deps).toContain(edge)
 })
 
+/**
+ * @canon rule-a-speculative-write-reaches-only-consumers-in-its-chain
+ */
 test('edgesToFire fixes the doubleName break: write under S fires the S-scoped edge', () => {
   const root = createScope(undefined, 'owner')
   const s = createScope(root, 'speculative')
@@ -109,6 +142,9 @@ test('edgesToFire fixes the doubleName break: write under S fires the S-scoped e
   expect(fired.map((e) => e.target)).toContain(doubleNameSlotInS)
 })
 
+/**
+ * @canon rule-a-speculative-write-reaches-only-consumers-in-its-chain
+ */
 test('edgesToFire does not fire consumers outside the write chain', () => {
   const root = createScope(undefined, 'owner')
   const s = createScope(root, 'speculative')
@@ -120,6 +156,9 @@ test('edgesToFire does not fire consumers outside the write chain', () => {
   expect(fired.map((e) => e.target)).not.toContain(rootConsumer)
 })
 
+/**
+ * @canon rule-only-written-nodes-are-promoted-at-commit
+ */
 test('closeScopeEdges unlinks the scope edges from their sources and drops slots', () => {
   const root = createScope(undefined, 'owner')
   const s = createScope(root, 'speculative')
@@ -137,11 +176,17 @@ test('closeScopeEdges unlinks the scope edges from their sources and drops slots
   expect(root.children.has(s)).toBe(false)
 })
 
+/**
+ * @canon rule-a-scope-reads-through-its-chain
+ */
 test('current scope defaults to ROOT_SCOPE, tracker to undefined', () => {
   expect(getCurrentScope()).toBe(ROOT_SCOPE)
   expect(getCurrentTracker()).toBeUndefined()
 })
 
+/**
+ * @canon rule-a-scope-reads-through-its-chain
+ */
 test('runInScope pushes and restores the scope (and tracker) even on throw', () => {
   const s = createScope(ROOT_SCOPE, 'speculative')
   const slot: Slot = { recipe: undefined, cached: undefined, deps: [], node: sigNode() }
@@ -155,6 +200,9 @@ test('runInScope pushes and restores the scope (and tracker) even on throw', () 
   expect(getCurrentScope()).toBe(ROOT_SCOPE) // restored despite throw
 })
 
+/**
+ * @canon rule-r3-holds-only-committed-values
+ */
 test('signalNode wraps an r3 signal holding the committed value', () => {
   const n = signalNode(5)
   expect(n.subs.size).toBe(0)
@@ -162,12 +210,18 @@ test('signalNode wraps an r3 signal holding the committed value', () => {
   expect(r3Read(n.backing!)).toBe(5)
 })
 
+/**
+ * @canon rule-r3-holds-only-committed-values
+ */
 test('computedNode carries the recipe as defaultRecipe and an r3 computed backing', () => {
   const n = computedNode(() => 7)
   expect(n.defaultRecipe).toBeDefined()
   expect(r3Read(n.backing!)).toBe(7)
 })
 
+/**
+ * @canon rule-r3-holds-only-committed-values
+ */
 test('read/write with no active speculation go through r3 (committed)', () => {
   const n = signalNode(0)
   expect(readValue(n)).toBe(0)      // ambient scope is ROOT_SCOPE
@@ -175,6 +229,9 @@ test('read/write with no active speculation go through r3 (committed)', () => {
   expect(readValue(n)).toBe(5)      // committed value updated via r3
 })
 
+/**
+ * @canon rule-a-speculative-write-stays-out-of-committed-state
+ */
 test('a speculative write is isolated from committed state and visible under its scope', () => {
   const n = signalNode('foo')
   const s = createScope(ROOT_SCOPE, 'speculative')
@@ -185,6 +242,9 @@ test('a speculative write is isolated from committed state and visible under its
   expect(runInScope(s, undefined, () => readValue(n))).toBe('bar')
 })
 
+/**
+ * @canon rule-speculative-derivation-is-pulled-on-read
+ */
 test('a speculative write marks matching downstream speculative slots dirty', () => {
   const name = signalNode('foo')
   const s = createScope(ROOT_SCOPE, 'speculative')
@@ -195,6 +255,9 @@ test('a speculative write marks matching downstream speculative slots dirty', ()
   expect(derivedSlot.cached).toBe(DIRTY) // dirtied (cached dropped)
 })
 
+/**
+ * @canon rule-speculative-derivation-is-pulled-on-read
+ */
 test('a slot whose recipe returns undefined is cached, not recomputed on each read', () => {
   let runs = 0
   const node = computedNode(() => {
@@ -211,6 +274,9 @@ test('a slot whose recipe returns undefined is cached, not recomputed on each re
   expect(runs).toBe(1) // undefined is a real value; the slot memoizes it
 })
 
+/**
+ * @canon rule-speculative-derivation-is-pulled-on-read
+ */
 test('a slot holding undefined still recomputes after a write dirties it', () => {
   const src = signalNode(1)
   let runs = 0
@@ -230,6 +296,9 @@ test('a slot holding undefined still recomputes after a write dirties it', () =>
   expect(runs).toBe(2)
 })
 
+/**
+ * @canon rule-speculative-derivation-is-pulled-on-read
+ */
 test('reading a computed under a speculation runs its recipe into an S-slot and links deps', () => {
   const name = signalNode('foo')
   const doubleName = computedNode(() => readValue(name) + readValue(name))
@@ -242,6 +311,9 @@ test('reading a computed under a speculation runs its recipe into an S-slot and 
   expect([...name.subs].some((e) => e.target === s.slots.get(doubleName))).toBe(true)
 })
 
+/**
+ * @canon rule-a-speculation-reads-its-own-writes
+ */
 test('doubleName trace steps 1-4: speculative recompute is isolated and reactive', () => {
   const name = signalNode('foo')
   const doubleName = computedNode(() => readValue(name) + readValue(name))
@@ -259,6 +331,9 @@ test('doubleName trace steps 1-4: speculative recompute is isolated and reactive
   expect(readValue(doubleName)).toBe('foofoo')
 })
 
+/**
+ * @canon rule-speculative-derivation-is-pulled-on-read
+ */
 test('recompute does not accumulate edges across cycles', () => {
   const name = signalNode('foo')
   const doubleName = computedNode(() => readValue(name) + readValue(name))
@@ -277,6 +352,9 @@ test('recompute does not accumulate edges across cycles', () => {
   })
 })
 
+/**
+ * @canon rule-outside-a-speculation-a-write-commits-at-once
+ */
 test('a committed computed reacts to a committed signal write (no speculation)', () => {
   const name = signalNode('foo')
   const doubleName = computedNode(() => readValue(name) + readValue(name))
@@ -285,6 +363,9 @@ test('a committed computed reacts to a committed signal write (no speculation)',
   expect(readValue(doubleName)).toBe('barbar') // committed computed recomputed
 })
 
+/**
+ * @canon rule-a-commit-promotes-every-write-at-once
+ */
 test('commit promotes a speculative signal write to committed (doubleName step 5a)', () => {
   const name = signalNode('foo')
   const doubleName = computedNode(() => readValue(name) + readValue(name))
@@ -303,6 +384,9 @@ test('commit promotes a speculative signal write to committed (doubleName step 5
   expect(s.slots.size).toBe(0) // slots dropped
 })
 
+/**
+ * @canon rule-a-discard-leaves-no-trace
+ */
 test('discard drops speculative writes, fires cleanups, leaves committed intact (step 5b)', () => {
   const name = signalNode('foo')
   const s = createScope(ROOT_SCOPE, 'speculative')
@@ -318,12 +402,18 @@ test('discard drops speculative writes, fires cleanups, leaves committed intact 
   expect(fired).toEqual(['b', 'a'])     // cleanups fire LIFO
 })
 
+/**
+ * @canon rule-a-commit-promotes-every-write-at-once
+ */
 test('action commits its writes on normal return', () => {
   const name = signalNode('foo')
   action(() => writeValue(name, 'bar'))
   expect(readValue(name)).toBe('bar')
 })
 
+/**
+ * @canon rule-a-discard-leaves-no-trace
+ */
 test('action discards its writes when the body throws', async () => {
   const name = signalNode('foo')
   const handle = action(() => {
@@ -336,6 +426,9 @@ test('action discards its writes when the body throws', async () => {
   expect((handle.error() as Error).message).toBe('boom')
 })
 
+/**
+ * @canon rule-nesting-makes-actions-share-fate
+ */
 test('G2: inner action promotes to outer, outer promotes to ROOT', () => {
   const x = signalNode('x0')
   const y = signalNode('y0')
@@ -353,6 +446,9 @@ test('G2: inner action promotes to outer, outer promotes to ROOT', () => {
   expect(readValue(y)).toBe('y1')
 })
 
+/**
+ * @canon rule-nesting-makes-actions-share-fate
+ */
 test('G3: inner commits, outer discards → nothing reaches committed', async () => {
   const y = signalNode('y0')
   const handle = action(() => {
@@ -364,6 +460,9 @@ test('G3: inner commits, outer discards → nothing reaches committed', async ()
   expect(handle.error()).toBeInstanceOf(Error)
 })
 
+/**
+ * @canon rule-nesting-makes-actions-share-fate
+ */
 test('G4: inner discards, outer continues and commits', () => {
   const x = signalNode('x0')
   const y = signalNode('y0')
@@ -382,6 +481,9 @@ test('G4: inner discards, outer continues and commits', () => {
   expect(readValue(y)).toBe('y0') // inner's write never survived
 })
 
+/**
+ * @canon rule-only-written-nodes-are-promoted-at-commit
+ */
 test('committing a scope where a computed was only read does not promote/corrupt the computed', () => {
   const name = signalNode('foo')
   const doubleName = computedNode(() => readValue(name) + readValue(name))
@@ -398,6 +500,9 @@ test('committing a scope where a computed was only read does not promote/corrupt
   expect(readValue(doubleName)).toBe('barbar')
 })
 
+/**
+ * @canon rule-a-speculation-announces-how-it-closed
+ */
 test('onSettled fires with committed when the scope commits', () => {
   const s = createScope(ROOT_SCOPE, 'speculative')
   const seen: string[] = []
@@ -406,6 +511,9 @@ test('onSettled fires with committed when the scope commits', () => {
   expect(seen).toEqual(['committed'])
 })
 
+/**
+ * @canon rule-a-speculation-announces-how-it-closed
+ */
 test('onSettled fires with discarded when the scope is discarded', () => {
   const s = createScope(ROOT_SCOPE, 'speculative')
   const seen: string[] = []
@@ -414,6 +522,9 @@ test('onSettled fires with discarded when the scope is discarded', () => {
   expect(seen).toEqual(['discarded'])
 })
 
+/**
+ * @canon rule-a-speculation-announces-how-it-closed
+ */
 test('onSettled fires each callback once, in last-in-first-out order', () => {
   const s = createScope(ROOT_SCOPE, 'speculative')
   const order: number[] = []
@@ -425,10 +536,16 @@ test('onSettled fires each callback once, in last-in-first-out order', () => {
   expect(order).toEqual([2, 1])
 })
 
+/**
+ * @canon rule-speculation-only-calls-refuse-to-run-outside-one
+ */
 test('onSettled throws when called with no active speculative scope', () => {
   expect(() => onSettled(() => {})).toThrow()
 })
 
+/**
+ * @canon rule-a-speculation-announces-how-it-closed
+ */
 test('a throwing settle callback does not strand the scope or block siblings', () => {
   const s = createScope(ROOT_SCOPE, 'speculative')
   const fired: string[] = []

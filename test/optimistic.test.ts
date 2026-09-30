@@ -15,6 +15,9 @@ function gate<T = void>() {
   return { promise, resolve, reject }
 }
 
+/**
+ * @canon exception-a-prediction-shows-outside-its-action
+ */
 test('a consumer sees the overlay value while the action is in flight', async () => {
   const [value] = signal('saved')
   const [optimisticValue, setOptimisticValue] = optimistic(value)
@@ -29,6 +32,9 @@ test('a consumer sees the overlay value while the action is in flight', async ()
   await handle.settled
 })
 
+/**
+ * @canon rule-a-prediction-sits-in-front-of-its-derivation
+ */
 test('the wrapped signal reads canonical truth, not the overlay', async () => {
   const [value] = signal('saved')
   const [optimisticValue, setOptimisticValue] = optimistic(value)
@@ -43,6 +49,9 @@ test('the wrapped signal reads canonical truth, not the overlay', async () => {
   await handle.settled
 })
 
+/**
+ * @canon rule-a-prediction-expires-with-its-action
+ */
 test('a discarded action reverts the overlay to the prior value', async () => {
   const [value] = signal('saved')
   const [optimisticValue, setOptimisticValue] = optimistic(value)
@@ -59,6 +68,9 @@ test('a discarded action reverts the overlay to the prior value', async () => {
   expect(optimisticValue()).toBe('saved')
 })
 
+/**
+ * @canon rule-a-prediction-expires-with-its-action
+ */
 test('a committed action settles through to the canonical value', async () => {
   const [value, setValue] = signal('saved')
   const [optimisticValue, setOptimisticValue] = optimistic(value)
@@ -75,6 +87,9 @@ test('a committed action settles through to the canonical value', async () => {
   expect(value()).toBe('draft') // canonical committed
 })
 
+/**
+ * @canon rule-a-prediction-expires-with-its-action
+ */
 test('committing does not flash the prior value through the overlay reader', async () => {
   setScheduler(syncScheduler(flush))
   try {
@@ -100,6 +115,9 @@ test('committing does not flash the prior value through the overlay reader', asy
   }
 })
 
+/**
+ * @canon rule-a-prediction-expires-with-its-action
+ */
 test('isOptimistic reflects whether an overlay is live', async () => {
   const [value] = signal('x')
   const [, setOptimisticValue, isOptimistic] = optimistic(value)
@@ -115,6 +133,9 @@ test('isOptimistic reflects whether an overlay is live', async () => {
   expect(isOptimistic()).toBe(false)
 })
 
+/**
+ * @canon exception-a-prediction-shows-outside-its-action
+ */
 test('two concurrent actions show the most recent write and clean up independently', async () => {
   const [value] = signal('base')
   const [optimisticValue, setOptimisticValue] = optimistic(value)
@@ -137,6 +158,9 @@ test('two concurrent actions show the most recent write and clean up independent
   expect(optimisticValue()).toBe('base') // both cleared → canonical
 })
 
+/**
+ * @canon rule-speculation-only-calls-refuse-to-run-outside-one
+ */
 test('setOptimisticValue throws when called with no active speculative scope', () => {
   const [value] = signal('x')
   const [, setOptimisticValue] = optimistic(value)
@@ -233,6 +257,9 @@ test('a live prediction also masks a failed source', async () => {
   expect((error(view) as Error).message).toBe('boom') // reported again once the layer goes
 })
 
+/**
+ * @canon rule-a-prediction-expires-with-its-action
+ */
 test('a recipe that produces its own value needs no separate source', async () => {
   const [view, setView, isOptimistic] = optimistic(() => Promise.resolve(['a']))
   await tick()
@@ -291,6 +318,9 @@ test('a background refresh of a wrapped node is reported through the optimistic 
 // A layer sits in front of the derivation, and is scoped to the action that
 // wrote it. Neither of these held while a layer was written INTO the node.
 
+/**
+ * @canon rule-sibling-speculations-do-not-see-each-other
+ */
 test('an action reads back its own prediction, and a sibling action does not', async () => {
   const [source] = signal(() => Promise.resolve(['saved'] as string[]), [] as string[])
   const [view, setView] = optimistic(source, [] as string[])
@@ -322,6 +352,9 @@ test('an action reads back its own prediction, and a sibling action does not', a
   await runB.settled
 })
 
+/**
+ * @canon rule-sibling-speculations-do-not-see-each-other
+ */
 test('a refused action does not leave its prediction inside a later action layer', async () => {
   const [source] = signal(() => Promise.resolve(['saved'] as string[]), [] as string[])
   const [view, setView] = optimistic(source, [] as string[])
@@ -351,6 +384,9 @@ test('a refused action does not leave its prediction inside a later action layer
   expect(latest(view)).toEqual(['saved'])
 })
 
+/**
+ * @canon rule-a-prediction-sits-in-front-of-its-derivation
+ */
 test('a source that changes while a prediction is live does not overwrite it', async () => {
   const [n, setN] = signal(0)
   const [source] = signal(() => Promise.resolve([`server-${n()}`]), [] as string[])
@@ -375,6 +411,9 @@ test('a source that changes while a prediction is live does not overwrite it', a
   expect(latest(view)).toEqual(['server-1']) // the newer truth was waiting underneath
 })
 
+/**
+ * @canon rule-a-prediction-sits-in-front-of-its-derivation
+ */
 test('the derivation keeps following its sources while a prediction hides it', async () => {
   const [n, setN] = signal(0)
   const [source] = signal(() => Promise.resolve([`server-${n()}`]), [] as string[])

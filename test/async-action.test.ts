@@ -23,6 +23,9 @@ const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
  * resolves either way, and an error is reported through `error()` instead.
  */
 
+/**
+ * @canon rule-an-action-body-is-speculative-while-pulse-drives-it
+ */
 test('an async action holds the speculation open across the await and commits on success', async () => {
   const [name, setName] = signal('alice')
   const save = (v: string) => tick().then(() => v)
@@ -43,6 +46,9 @@ test('an async action holds the speculation open across the await and commits on
   expect(handle.error()).toBeNull()
 })
 
+/**
+ * @canon rule-a-discard-leaves-no-trace
+ */
 test('an async action rolls back every speculative write when the mutation fails', async () => {
   const [name, setName] = signal('alice')
   const save = () => tick().then<string>(() => Promise.reject(new Error('save failed')))
@@ -61,6 +67,9 @@ test('an async action rolls back every speculative write when the mutation fails
   expect((handle.error() as Error).message).toBe('save failed')
 })
 
+/**
+ * @canon rule-an-action-body-is-speculative-while-pulse-drives-it
+ */
 test('derived state follows the speculation across the await', async () => {
   const [n, setN] = signal(1)
   const doubled = computed(() => n() * 2)
@@ -80,6 +89,9 @@ test('derived state follows the speculation across the await', async () => {
 
 // ---- async (non-generator) bodies: the common write-then-await shape ----
 
+/**
+ * @canon rule-an-action-body-is-speculative-while-pulse-drives-it
+ */
 test('an async body: the sync prefix is speculative and commits when the mutation resolves', async () => {
   const [name, setName] = signal('alice')
   const handle = action(async () => {
@@ -92,6 +104,9 @@ test('an async body: the sync prefix is speculative and commits when the mutatio
   expect(committed(name)).toBe('bob') // resolved → committed
 })
 
+/**
+ * @canon rule-a-discard-leaves-no-trace
+ */
 test('an async body rolls back when the mutation rejects', async () => {
   const [name, setName] = signal('alice')
   const handle = action(async () => {
@@ -115,6 +130,9 @@ test('an async body rolls back when the mutation rejects', async () => {
 //
 // Use a GENERATOR body when you need to write after awaiting (see the tests
 // above): pulse drives those resumptions itself and re-enters the scope.
+/**
+ * @canon exception-a-write-after-an-await-escapes-the-speculation
+ */
 test('SHARP EDGE: a write after an await in an async body escapes the speculation', async () => {
   const [name, setName] = signal('alice')
   const handle = action(async () => {
@@ -127,6 +145,9 @@ test('SHARP EDGE: a write after an await in an async body escapes the speculatio
   expect(committed(name)).toBe('bob')
 })
 
+/**
+ * @canon rule-sibling-speculations-do-not-see-each-other
+ */
 test('two concurrent async actions are isolated from each other', async () => {
   const [a, setA] = signal('a0')
   const [b, setB] = signal('b0')
@@ -148,6 +169,9 @@ test('two concurrent async actions are isolated from each other', async () => {
 
 // ---- ActionHandle-specific behaviour ----
 
+/**
+ * @canon rule-a-failed-action-is-reported-not-thrown
+ */
 test('a sync body that throws does not throw synchronously; the error is reported through error()', async () => {
   let ran = false
   const handle = action(() => {
@@ -160,6 +184,9 @@ test('a sync body that throws does not throw synchronously; the error is reporte
   expect((handle.error() as Error).message).toBe('sync boom')
 })
 
+/**
+ * @canon rule-the-handle-reports-its-newest-attempt
+ */
 test('retry() re-runs the action from scratch after an error', async () => {
   const [name, setName] = signal('alice')
   let attempt = 0
@@ -186,6 +213,9 @@ test('retry() re-runs the action from scratch after an error', async () => {
   expect(attempt).toBe(2)
 })
 
+/**
+ * @canon rule-the-handle-reports-its-newest-attempt
+ */
 test('settled reflects whichever attempt is current, so reading it again after retry() gives a new promise', async () => {
   let attempt = 0
   const save = () =>
@@ -209,6 +239,9 @@ test('settled reflects whichever attempt is current, so reading it again after r
   expect(handle.error()).toBeNull()
 })
 
+/**
+ * @canon rule-the-handle-reports-its-newest-attempt
+ */
 test('retry() clears error() synchronously, before the new attempt has settled', async () => {
   let attempt = 0
   let resolveSecond: (() => void) | null = null
@@ -237,6 +270,9 @@ test('retry() clears error() synchronously, before the new attempt has settled',
   expect(handle.error()).toBeNull()
 })
 
+/**
+ * @canon rule-the-handle-reports-its-newest-attempt
+ */
 test('a superseded attempt settling later does not overwrite the outcome of a newer one', async () => {
   let callCount = 0
   let resolveSlow: (() => void) | null = null
