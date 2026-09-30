@@ -16,6 +16,7 @@ import {
   onCleanup,
   runWithOwner,
   type BindingController,
+  type ErrorHandlerEntry,
   type ErrorScope,
   type Owner,
 } from './owner'
@@ -483,9 +484,10 @@ export interface ActionHandle {
  * to handle — it is captured and reported through the returned handle's `error`,
  * and `settled` resolves regardless of which way the attempt ended.
  *
- * An error also registers itself with the nearest ambient `<Errored>` boundary
- * automatically, the same way a binding that reads a parked computed/signal
- * error already does — no wiring needed at the call site. This only reaches a
+ * An error also registers itself with the nearest ambient boundary that accepts
+ * it — an `<Errored>`, a root's default boundary, or a `catchError`, whose
+ * handler is then called — the same way a binding that reads a parked
+ * computed/signal error already does. No wiring is needed at the call site. This only reaches a
  * boundary when `action()` is called from somewhere with an owner to walk from:
  * a component's render, or an `on:` event handler (which captures and restores
  * the owner it was bound under — see `bindProp` in `src/dom/bindings.ts`). Called
@@ -498,8 +500,8 @@ export function action(body: () => Promise<void>): ActionHandle
 export function action(body: () => void): ActionHandle
 export function action(body: () => unknown): ActionHandle {
   const [error, setError] = makeErrorCell()
-  // Every <Errored> between the calling owner and the nearest catchError (or
-  // the root) — collected ONCE, at the moment action() is called, exactly
+  // Every <Errored> and catchError between the calling owner and the root,
+  // nearest first — collected ONCE, at the moment action() is called, exactly
   // like the single-candidate version this replaces. Filtering by error
   // type needs the error itself to pick a winner, and the error does not
   // exist until an attempt later fails — so discovery still happens
@@ -514,10 +516,9 @@ export function action(body: () => unknown): ActionHandle {
   // where a farther one (most commonly the always-accepting implicit root)
   // had to settle for it before.
   //
-  // action() never talks to catchError itself: the walk below stops,
-  // unconditionally, the moment it reaches one, without checking its own
-  // for and without invoking it — matching today's behaviour, where an
-  // action error with no <Errored> found is not routed anywhere either.
+  // A catchError is a peer of <Errored> in this list, exactly as it is in
+  // the walk a failed node makes: the nearest candidate that accepts the
+  // error claims it. A catchError that claims it has its handler called.
   const candidates = collectErrorCandidates(getOwner())
   let claimedCandidate: ErrorCandidate | null = null
   let controller: BindingController | null = null
@@ -546,8 +547,29 @@ export function action(body: () => unknown): ActionHandle {
   // a candidate whose boundary already unmounted before action() ever
   // failed is correctly skipped with no bookkeeping installed for it at
   // all — the disposed-ness is the owner's own state, not this closure's.
-  const accepts = (candidate: ErrorCandidate, e: unknown): boolean =>
-    !candidate.owner.disposed && (candidate.scope.for === undefined || candidate.scope.for(e))
+  const accepts = (candidate: ErrorCandidate, e: unknown): boolean => {
+    if (candidate.owner.disposed) return false
+    const filter = candidate.kind === 'boundary' ? candidate.scope.for : candidate.handler.for
+    return filter === undefined || filter(e)
+  }
+
+  /** The nearest candidate that accepts `e`, calling a catchError handler on
+   *  the way. A handler that throws passes its own error on to the candidates
+   *  beyond it, as a handler that throws does for a failed node. */
+  const claim = (e: unknown): ErrorCandidate | null => {
+    let current = e
+    for (const candidate of candidates) {
+      if (!accepts(candidate, current)) continue
+      if (candidate.kind === 'boundary') return candidate
+      try {
+        candidate.handler.handle(current)
+        return candidate
+      } catch (next) {
+        current = next
+      }
+    }
+    return null
+  }
 
   const runAttempt = (): Promise<void> => {
     const myGeneration = ++generation
@@ -581,12 +603,12 @@ export function action(body: () => unknown): ActionHandle {
         // retry back, since the always-accepting root never itself
         // declines. Mirrors findNearestErrorScope's own unconditional,
         // every-error walk in effect.ts.
-        const winner = candidates.find((c) => accepts(c, e)) ?? null
+        const winner = claim(e)
         if (winner !== claimedCandidate) {
           controller?.unregister()
           controller = null
           claimedCandidate = winner
-          if (winner !== null && !cleanupInstalledFor.has(winner)) {
+          if (winner?.kind === 'boundary' && !cleanupInstalledFor.has(winner)) {
             cleanupInstalledFor.add(winner)
             // Safe to install lazily here specifically because accepts()
             // just confirmed the owner is not disposed. This is hygiene,
@@ -608,7 +630,7 @@ export function action(body: () => unknown): ActionHandle {
             })
           }
         }
-        if (claimedCandidate !== null) {
+        if (claimedCandidate?.kind === 'boundary') {
           controller ??= claimedCandidate.scope.register()
           controller.report({ status: 'error', error: e, source: null, retry })
         }
@@ -631,24 +653,27 @@ export function action(body: () => unknown): ActionHandle {
   }
 }
 
-interface ErrorCandidate {
-  readonly owner: Owner
-  readonly scope: ErrorScope
-}
+/** A place a failed action can report to: an `<Errored>` boundary (or a
+ *  root's default one), or a `catchError` handler. */
+type ErrorCandidate =
+  | { readonly kind: 'boundary'; readonly owner: Owner; readonly scope: ErrorScope }
+  | { readonly kind: 'handler'; readonly owner: Owner; readonly handler: ErrorHandlerEntry }
 
-/** Walk up from `start`, collecting every `<Errored>` boundary in nearest-
- *  first order, stopping unconditionally at the first `catchError` (action()
- *  never reaches past one, and never invokes it — see action()'s own doc
- *  comment). Does not check any filter, or disposal, itself: both happen
- *  later, in action()'s own error branch, once the error is known. */
+/** Walk up from `start`, collecting every `<Errored>` boundary and every
+ *  `catchError` handler in nearest-first order. On one owner the boundary
+ *  comes first, since a `catchError` owner installs no boundary of its own.
+ *  Does not check any filter, or disposal, itself: both happen later, in
+ *  action()'s own error branch, once the error is known. */
 function collectErrorCandidates(start: Owner | null): ErrorCandidate[] {
   const candidates: ErrorCandidate[] = []
   let owner = start
   while (owner !== null) {
     if (owner.boundaries.error !== null) {
-      candidates.push({ owner, scope: owner.boundaries.error })
+      candidates.push({ kind: 'boundary', owner, scope: owner.boundaries.error })
     }
-    if (owner.errorHandler !== null) break
+    if (owner.errorHandler !== null) {
+      candidates.push({ kind: 'handler', owner, handler: owner.errorHandler })
+    }
     owner = owner.parent
   }
   return candidates

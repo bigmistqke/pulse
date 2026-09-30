@@ -410,10 +410,11 @@ test('action() with no explicit <Errored> anywhere still reaches the implicit ro
 })
 
 /**
- * @canon exception-a-catch-error-ends-an-actions-search-silently
+ * @canon rule-a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller
  */
-test('action() stops candidate-collection at the nearest catchError, never reaching a farther <Errored> (the implicit root)', async () => {
+test('a failed action under a catchError calls its handler, and the root boundary beyond it hears nothing', async () => {
   const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+  const handled: unknown[] = []
   let handle!: ReturnType<typeof action>
   createRoot(() => {
     catchError(
@@ -422,11 +423,38 @@ test('action() stops candidate-collection at the nearest catchError, never reach
           yield* from(Promise.reject(new Error('boom')))
         })
       },
-      () => {},
+      (e) => handled.push(e),
     )
   })
   await handle.settled
-  expect(spy).not.toHaveBeenCalled()
+  expect((handled[0] as Error).message).toBe('boom') // the catchError claimed it
+  expect(handled).toHaveLength(1)
+  expect(spy).not.toHaveBeenCalled() // the root's default boundary never logged it
+  expect((handle.error() as Error).message).toBe('boom')
+  spy.mockRestore()
+})
+
+/**
+ * @canon rule-a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller
+ */
+test('a catchError whose for declines the error passes a failed action on to the boundary beyond it', async () => {
+  const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+  const handled: unknown[] = []
+  let handle!: ReturnType<typeof action>
+  createRoot(() => {
+    catchError(
+      () => {
+        handle = action(function* () {
+          yield* from(Promise.reject(new Error('boom')))
+        })
+      },
+      (e) => handled.push(e),
+      { for: () => false },
+    )
+  })
+  await handle.settled
+  expect(handled).toEqual([]) // declined
+  expect(spy).toHaveBeenCalled() // the root's default boundary took it and logged it
   spy.mockRestore()
 })
 
