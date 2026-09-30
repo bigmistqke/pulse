@@ -18,6 +18,7 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule an-action-body-is-speculative-while-pulse-drives-it`](#rule-an-action-body-is-speculative-while-pulse-drives-it) — An action's body writes speculatively for as long as pulse is running it.
     - [`@exception a-write-after-an-await-escapes-the-speculation`](#exception-a-write-after-an-await-escapes-the-speculation) — In an async body, a write after the first `await` lands in committed state, and the action's commit then overwrites it.
   - [`@rule a-speculation-announces-how-it-closed`](#rule-a-speculation-announces-how-it-closed) — A callback registered with `onSettled` fires once when its speculation closes, and is told whether the speculation committed or was discarded.
+  - [`@rule a-speculation-refuses-to-create-an-effect`](#rule-a-speculation-refuses-to-create-an-effect) — Creating an effect inside a speculation throws. That includes a JSX binding, which is an effect.
   - [`@rule a-prediction-expires-with-its-action`](#rule-a-prediction-expires-with-its-action) — A prediction is dropped when the action that wrote it closes, whether it commits or is discarded.
   - [`@rule a-prediction-sits-in-front-of-its-derivation`](#rule-a-prediction-sits-in-front-of-its-derivation) — A prediction is a layer in front of the derivation, never written into it. The derivation keeps following its sources underneath, and shows through when the last layer drops.
   - [`@rule a-write-to-a-derivation-cancels-only-once-committed`](#rule-a-write-to-a-derivation-cancels-only-once-committed) — A write to a derivation made inside an action abandons the derivation's run in progress only when the write reaches committed state. At commit, the written value replaces anything the derivation published while the action was open.
@@ -35,7 +36,6 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule a-speculative-write-reaches-only-consumers-in-its-chain`](#rule-a-speculative-write-reaches-only-consumers-in-its-chain) — A write in a scope invalidates only the consumers whose scope has the writing scope in its chain, and only where no nearer scope has its own slot for the written node.
   - [`@rule speculative-derivation-is-pulled-on-read`](#rule-speculative-derivation-is-pulled-on-read) — Under a speculation, a computed is recomputed when it is read, into a slot of that scope, and a write only marks the affected slots dirty.
   - [`@rule only-written-nodes-are-promoted-at-commit`](#rule-only-written-nodes-are-promoted-at-commit) — A commit promotes the nodes the speculation wrote, and drops everything else it holds.
-  - [`@rule an-effect-created-in-an-action-misses-what-the-action-wrote`](#rule-an-effect-created-in-an-action-misses-what-the-action-wrote) — An effect created inside an action reads the action's writes on its first run, but does not re-run when a source the action wrote changes afterwards. Once it re-runs for any other reason, it follows that source again.
   - [`@rule pulse-reaches-r3-only-through-its-exports`](#rule-pulse-reaches-r3-only-through-its-exports) — Pulse uses r3 through the functions r3 exports. Where pulse needs more, the fork gains an export instead of pulse reaching into r3's internals.
   - [`@rule a-throwing-run-keeps-dependencies-it-did-not-reread`](#rule-a-throwing-run-keeps-dependencies-it-did-not-reread) — A computed whose run throws partway stays subscribed to sources it read in an earlier run but not in the throwing one. A later change to such a source re-runs it.
 - [`@axiom teardown-unwinds`](#axiom-teardown-unwinds) — What runs when something closes runs in reverse order of registration, and a callback that throws stops neither the others nor the close.
@@ -276,6 +276,12 @@ After the first `await`, the async function has returned control to pulse, and t
 
 > A callback registered with `onSettled` fires once when its speculation closes, and is told whether the speculation committed or was discarded.
 
+### @rule a-speculation-refuses-to-create-an-effect
+
+> Creating an effect inside a speculation throws. That includes a JSX binding, which is an effect.
+
+An effect pushes values out of the reactive graph: into the DOM, a log, the network. One created inside a speculation would push the speculation's writes out before they commit, and a discard could not take them back. So the speculation refuses it, and the throw fails the action like any other error in its body.
+
 ### @rule a-prediction-expires-with-its-action
 
 > A prediction is dropped when the action that wrote it closes, whether it commits or is discarded.
@@ -377,12 +383,6 @@ A slot caches whatever its recipe returned, `undefined` included, until a write 
 > A commit promotes the nodes the speculation wrote, and drops everything else it holds.
 
 A computed the speculation only read is not promoted, so its committed value stays derived from committed state. Closing a scope, either way, removes its slots and its links from the sources they listened to.
-
-### @rule an-effect-created-in-an-action-misses-what-the-action-wrote
-
-> An effect created inside an action reads the action's writes on its first run, but does not re-run when a source the action wrote changes afterwards. Once it re-runs for any other reason, it follows that source again.
-
-Its first run reads a node the action wrote from the action's slot, which links the effect through the overlay's own dependency links instead of through r3. Those links are removed when the action closes, so nothing is left to tell the effect about later changes to that node. A source the action did not write is read through r3, and is followed normally. An effect created inside an action that wrote nothing behaves like any other effect.
 
 ### @rule pulse-reaches-r3-only-through-its-exports
 
@@ -1306,7 +1306,6 @@ The canon states what the code does. Where a document said nothing, or said some
 
 ### Probably unintended behaviour the canon records as it is
 
-- [`rule-an-effect-created-in-an-action-misses-what-the-action-wrote`](#rule-an-effect-created-in-an-action-misses-what-the-action-wrote). ADR 0010 says effects are forbidden inside a speculation, and `docs/pulse/CONTEXT.md` says `effect(...)` throws when an ancestor scope is speculative. Neither is true. The effect's first run reads the action's writes, and it then stops following a source the action wrote until it re-runs for another reason.
 - [`exception-a-catch-error-ends-an-actions-search-silently`](#exception-a-catch-error-ends-an-actions-search-silently). A failed action under a `catchError` does not call the handler and reports to no boundary. The error is visible only on the action's handle. The nearest accepting boundary is found, and then nothing is told.
 - [`rule-a-throw-from-a-catch-error-body-reaches-only-catch-error-handlers`](#rule-a-throw-from-a-catch-error-body-reaches-only-catch-error-handlers). A throw from a `catchError` body walks only `catchError` handlers, never an `<Errored>` or the root's boundary, and is re-thrown even inside a root. A throw from a node considers both kinds. There are two routes for one kind of event.
 - [`rule-a-catch-error-handler-is-called-for-each-throw-under-it`](#rule-a-catch-error-handler-is-called-for-each-throw-under-it). A `catchError` handler is a callback called once per throw, possibly several times for one rejection. [`axiom-an-error-is-graph-state-not-an-event`](#axiom-an-error-is-graph-state-not-an-event) says a boundary shows state and does not count throws; `catchError` is the part of the error system that does not follow it.

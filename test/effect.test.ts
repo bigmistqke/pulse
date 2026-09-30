@@ -1,7 +1,7 @@
 import { afterEach, expect, test } from 'vitest'
 import { effect } from '../src/effect'
 import { onCleanup, createRoot, catchError } from '../src/owner'
-import { action, getOwner } from '../src/index'
+import { action, from, getOwner } from '../src/index'
 import { type LoadingScope } from '../src/owner'
 import {
   flush,
@@ -276,63 +276,81 @@ test('effect that never suspends does not touch the pending boundary scope', () 
 const settle = () => new Promise<void>((resolve) => setTimeout(resolve))
 
 /**
- * @canon rule-an-effect-created-in-an-action-misses-what-the-action-wrote
+ * @canon rule-a-speculation-refuses-to-create-an-effect
  */
-test('an effect created inside an action does not re-run when a source the action wrote changes', async () => {
+test('creating an effect inside an action throws, and the action fails with nothing leaked', async () => {
   const [n, setN] = signal(1)
   const seen: number[] = []
+  let handle!: ReturnType<typeof action>
   createRoot(() => {
-    action(() => {
+    handle = action(() => {
       setN(2)
       effect(() => {
         seen.push(n())
       })
     })
   })
-  await settle()
-  setN(3)
-  await settle()
-  expect(seen).toEqual([2]) // the first run read the action's write, and nothing since
+  await handle.settled
+  expect(handle.error()).toBeInstanceOf(Error)
+  expect(seen).toEqual([]) // the effect never ran, so the speculative 2 never left the action
+  expect(n()).toBe(1) // the failed action was discarded
 })
 
 /**
- * @canon rule-an-effect-created-in-an-action-misses-what-the-action-wrote
+ * @canon rule-a-speculation-refuses-to-create-an-effect
  */
-test('once such an effect re-runs for another source, it follows the written source again', async () => {
-  const [n, setN] = signal(1)
-  const [m, setM] = signal('m1')
-  const seen: string[] = []
+test('a staged effect inside an action is refused too', async () => {
+  const [n] = signal(1)
+  const committed: number[] = []
+  let handle!: ReturnType<typeof action>
   createRoot(() => {
-    action(() => {
-      setN(2)
-      effect(() => {
-        seen.push(`${n()}/${m()}`)
+    handle = action(() => {
+      effect([() => n()], (value) => {
+        committed.push(value)
       })
     })
   })
-  await settle()
-  setM('m2') // a source the action did not write: the effect follows it
-  await settle()
-  setN(3) // followed again, because the re-run read it outside the action
-  await settle()
-  expect(seen).toEqual(['2/m1', '2/m2', '3/m2'])
+  await handle.settled
+  expect(handle.error()).toBeInstanceOf(Error)
+  expect(committed).toEqual([])
 })
 
 /**
- * @canon rule-an-effect-created-in-an-action-misses-what-the-action-wrote
+ * @canon rule-a-speculation-refuses-to-create-an-effect
  */
-test('an effect created inside an action that wrote nothing follows its sources normally', async () => {
+test('an effect created after a generator action resumes is refused', async () => {
+  const [n, setN] = signal(1)
+  let handle!: ReturnType<typeof action>
+  createRoot(() => {
+    handle = action(function* () {
+      setN(2)
+      yield* from(settle())
+      effect(() => {
+        n()
+      })
+    })
+  })
+  await handle.settled
+  expect(handle.error()).toBeInstanceOf(Error)
+  expect(n()).toBe(1)
+})
+
+/**
+ * @canon rule-a-speculation-refuses-to-create-an-effect
+ */
+test('an effect created once the action has closed follows its sources normally', async () => {
   const [n, setN] = signal(1)
   const seen: number[] = []
   createRoot(() => {
     action(() => {
-      effect(() => {
-        seen.push(n())
-      })
+      setN(2)
+    })
+    effect(() => {
+      seen.push(n())
     })
   })
   await settle()
   setN(3)
   await settle()
-  expect(seen).toEqual([1, 3])
+  expect(seen).toEqual([2, 3])
 })

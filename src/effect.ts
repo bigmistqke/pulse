@@ -12,6 +12,7 @@ import {
   type BindingController,
   type ErrorScope,
 } from './owner'
+import { chainFor, getCurrentScope } from './scope'
 import { signal } from './signal'
 import { clearErrorSource, runBindingCompute, takeErrorSource } from './transition-tracker'
 
@@ -54,12 +55,30 @@ export function effect(
     | [fn: () => void]
     | [stages: Array<(value: any) => unknown>, commit: (value: unknown) => void]
 ): void {
+  refuseInsideSpeculation()
   if (typeof args[0] === 'function') {
     return singleArgEffect(args[0] as () => void)
   }
   const stages = args[0] as Array<(value: unknown) => unknown>
   const commit = args[1] as (value: unknown) => void
   return stagedEffect(stages, commit)
+}
+
+/**
+ * An effect pushes values out of the reactive graph, so one created inside a
+ * speculation would publish the speculation's writes before they commit, where
+ * a discard could no longer take them back. Every effect, and every JSX
+ * binding, is created through `effect()`, so refusing here covers them all.
+ * The throw lands in the action body, which fails the action like any other
+ * error there.
+ */
+function refuseInsideSpeculation(): void {
+  if (chainFor(getCurrentScope()).some((scope) => scope.kind === 'speculative')) {
+    throw new Error(
+      'effect: cannot create an effect inside an action. An effect would publish the ' +
+        "action's writes before they commit; create it outside the action instead.",
+    )
+  }
 }
 
 function stagedEffect(
