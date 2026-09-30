@@ -1356,7 +1356,7 @@ The canon states what the code does. Where a document said nothing, or said some
 - `test/smoke.test.ts` calls r3 directly and pins nothing about how pulse uses it.
 - `test/driver.test.ts`: "async stage with pending promise -> suspended (carries the same promise instance)" never checks the instance.
 - `test/dom/loading.test.tsx`: "useLoading() inside subtree reflects pending state" and "isLoading() inside subtree reflects pending state" assert only the settled state. "rapid src-swap keeps pending count at 1" never asserts the count.
-- `test/dom/loading-atomic.test.tsx`: "mid-flight mount without fallback: prior tree retained until gate opens" asserts the opposite of its title. "newly-mounted binding inside <Loading> joins the gather" shows no gather. "coherent transitions" carries a stale "← FAILS" comment.
+- `test/dom/loading-atomic.test.tsx`: "mid-flight mount without fallback: prior tree retained until gate opens" asserts the opposite of its title. "newly-mounted binding inside <Loading> joins the gather" shows no gather. "coherent transitions" carries a "← FAILS" comment on an assertion that passes.
 - `test/dom/binding-events.test.ts`: "on:event passes the lowercased event name". The name is not lowercased.
 - `test/dom/binding-ref.test.ts`: "ref is invoked once even if its underlying value is a signal accessor" passes a plain function.
 - `test/babel-plugin.test.ts`: two tests check only the compiled shape of what their titles describe at runtime.
@@ -1366,4 +1366,3 @@ The canon states what the code does. Where a document said nothing, or said some
 
 - `test/dom/smoke.test.ts` checks that the browser test environment works. It pins nothing about pulse and is left untagged.
 - `src/vite-jsx-plugin.ts` has no test, so no rule states it.
-- The DOM suites were not run while the canon was written: Playwright's Chromium is not installed in that environment. The rules pinned only by DOM tests are stated from reading the tests and the source. `pnpm exec playwright install chromium` and then `pnpm test` would confirm them.
