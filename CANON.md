@@ -200,7 +200,7 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule a-dom-child-is-one-thunk-per-dynamic-child`](#rule-a-dom-child-is-one-thunk-per-dynamic-child) — On a DOM element or a Fragment, each dynamic child becomes its own thunk, never a getter. A literal, a function expression, or a nested JSX element stays as written.
   - [`@rule component-children-become-one-getter`](#rule-component-children-become-one-getter) — On a component, the children become one getter over the whole value, and are not wrapped child by child.
 - [`@axiom control-flow-bakes-in-no-async-policy`](#axiom-control-flow-bakes-in-no-async-policy) — `Show`, `Switch` and `For` are ordinary components. They coerce a pending input to its empty form, and decide nothing else about async.
-  - [`@rule a-pending-condition-reads-as-falsy`](#rule-a-pending-condition-reads-as-falsy) — A `when` that is a pending promise counts as falsy, so `Show` renders its fallback.
+  - [`@rule a-pending-condition-reads-as-falsy`](#rule-a-pending-condition-reads-as-falsy) — A `when` that is a pending promise counts as falsy: `Show` renders its fallback, and `Switch` skips that `Match`.
   - [`@rule a-pending-list-reads-as-empty`](#rule-a-pending-list-reads-as-empty) — A list that is a pending promise counts as an empty list: `mapArray` returns no entries, and `For` renders its fallback.
 <!-- toc:end -->
 
@@ -1306,7 +1306,7 @@ The *Control flow* entry of [`CONTEXT.md`](CONTEXT.md) states this: async behavi
 
 ### @rule a-pending-condition-reads-as-falsy
 
-> A `when` that is a pending promise counts as falsy, so `Show` renders its fallback.
+> A `when` that is a pending promise counts as falsy: `Show` renders its fallback, and `Switch` skips that `Match`.
 
 ### @rule a-pending-list-reads-as-empty
 
@@ -1315,17 +1315,6 @@ The *Control flow* entry of [`CONTEXT.md`](CONTEXT.md) states this: async behavi
 ## Open questions
 
 The canon states what the code does. Where a document said nothing, or said something the code does not do, it follows the code. The items below record those places, so that a review can decide whether each behaviour is the one pulse should have. An item is removed once it is decided: by changing the code and the canon, by changing the document, or by accepting the behaviour as stated.
-
-### Where the code contradicts a document
-
-- `docs/pulse/framings.md`, P3: a plain read "never throws". Reading the accessor of a failed async computed, or of a failed `signal(fn)`, throws the rejection reason. Only `peek` and `latest` never throw. [`axiom-plain-reads-are-honest`](#axiom-plain-reads-are-honest) is worded to what holds.
-- `CONTEXT.md`, the Owner entry: orphaned reactive nodes warn. Only DOM bindings and event listeners do; a bare `effect()` or `computed()` outside every owner is silent, and `onCleanup` there is a silent no-op.
-- `CONTEXT.md` and `docs/pulse/CONTEXT.md` describe the error boundary as `catchError` only. `<Errored>`, report collections, `for` predicates and the root's default boundary are not described. ADR 0006 predates `<Errored>` joining the walk as a peer and the `for` predicate.
-- `docs/pulse/CONTEXT.md` uses the old names: `latest` for what is now `peek`, and `yield* read` for what is now `from`. ADR 0013 also says `read`.
-- The README's "Prior art" says props are passed as plain values rather than Solid-style getters. Since commit 593d3a2 the compiler emits real getters.
-- `docs/follow-ups.md` says `Fragment` now resolves its children into DOM nodes. It returns its raw children, tagged with the owner current when it was built. The effect described is the same; the mechanism is not.
-- `src/dom/error.ts`: the doc comment on `useErrored` says it returns an always-inactive state under a root with no `<Errored>`. It returns the root's boundary. `test/error.test.ts` opens with a "not implemented yet; these are red" comment on tests that pass.
-- `CONTEXT.md`'s Control flow entry covers `Show` and `For`. `Switch` also skips a `Match` whose condition is pending; no test pins it.
 
 ### Tests whose title claims more than they assert
 

@@ -67,10 +67,10 @@ const CONST_ERROR_STATE: ErroredState<unknown> = {
 /**
  * Reads the nearest enclosing `<Errored>` boundary's state — active/error/retry
  * — without swapping anything, the same way `useLoading()` reads a `<Loading>`
- * boundary's pending state. Returns a safe, always-inactive state when no
- * boundary is found (mirrors `useLoading()`'s `CONST_FALSE_ACCESSOR`) — today
- * that includes both "called with no owner at all" and "called under a root
- * with no explicit `<Errored>` anywhere in it".
+ * boundary's pending state. Every root installs a default boundary, so under
+ * a root with no explicit `<Errored>` this reads the root's boundary. Called
+ * with no owner at all, it returns a safe, always-inactive state (mirroring
+ * `useLoading()`'s `CONST_FALSE_ACCESSOR`).
  *
  * Uses `findBoundaryScope`, not `findNearestErrorScope` — a plain owner walk
  * that does not stop early for a nearer `catchError`, unlike the walk actual

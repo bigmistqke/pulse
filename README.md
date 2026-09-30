@@ -296,9 +296,9 @@ them.
   async design; the whole framework is framed against it (see
   [`docs/solid-2x-comparison.md`](./docs/solid-2x-comparison.md)).
 - **[Voby](https://github.com/vobyjs/voby)** — Fabio Spampinato's
-  high-performance observable framework. Pulse follows voby in passing props as
-  destructurable plain values (rather than Solid-style prop getters), and
-  borrows voby's approach to context providers.
+  high-performance observable framework. Pulse borrows voby's approach to
+  context providers. Props, however, are Solid-style: the compiler turns each
+  dynamic prop into a getter on the props object.
 - **[Pota](https://github.com/potahtml/pota)** — Tito Bouzout's small, pluggable
   reactive renderer. Pulse's JSX binding model — explicit namespaced prefixes
   (`on:`, `prop:`, `attr:`, `class:`, `style:`) with no heuristics — is

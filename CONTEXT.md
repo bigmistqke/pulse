@@ -298,7 +298,8 @@ The safe pattern is `use(...)` inside a JSX hole, not in the body.
 **Control flow**:
 `Show`, `Switch`, `For` are ordinary Components. They apply trivial total
 coercions of pending state at their inputs: `For` treats a pending list as
-`[]` (zero rows); `Show` treats a pending condition as falsy. No async policy
+`[]` (zero rows); `Show` treats a pending condition as falsy, and `Switch`
+skips a `Match` whose condition is pending. No async policy
 is baked in — async behavior is decided entirely by what the caller passes
 and where they put `use`. Pass a raw accessor → total coercion; pass
 `use(...)` at the call site → throws → caught by the surrounding effect (and
@@ -398,22 +399,33 @@ Created by `createRoot((dispose) => …)`. Disposal cascades top-down.
 `getOwner()` returns the current ambient owner. `runWithOwner(owner, fn)` is
 the explicit override. `createRoot` always creates a root (nesting does not
 parent inner to outer). Outside any root, reactive nodes work but live
-forever — a `warnIfOrphaned` warning surfaces the leak. **Signals are not
-owned** — plain data with no lifecycle.
+forever. Only DOM bindings and event listeners warn about it
+(`warnIfOrphaned`); a bare `effect()` or `computed()` outside every root is
+silent, and `onCleanup` there registers nothing. **Signals are not owned** —
+plain data with no lifecycle.
 
 `<Loading>` creates its own `boundaryOwner` and attaches a `LoadingScope` to
 it. `useLoading()` and the binding-controller machinery walk owners to find
 the nearest scope.
 
 **Error Boundary**:
-A sub-`Owner` with an attached error handler. Created by
-`catchError(fn, handler)`: child owner with `handler` registered, `fn` runs
-with it as ambient. When a reactive node owned by this sub-owner (or a
-descendant) throws a non-`NotReadyYet` error, the wrapper walks up via
-`parent` links and invokes the nearest handler. A throwing node stays alive
-but frozen — its r3 value is whatever it was before the throw, and it may
-re-run if its tracked deps change; the handler is observational, recovery
-state is user-managed via signals.
+A sub-`Owner` that errors under it are routed to. There are two kinds, peers
+in one walk up the owner chain; the nearest one that accepts an error claims
+it, and either kind can decline an error with a `for` predicate.
+
+- `catchError(fn, handler)` is pulse's `try`/`catch`: its handler is called
+  once per throw that reaches it. A synchronous throw from `fn` itself reaches
+  only `catchError` handlers, and is re-thrown when none accepts it.
+- `<Errored fallback>` shows state rather than counting throws. It holds one
+  report per failed binding under it, shows its fallback while any is failed,
+  and its reset retries them. `useErrored()`, `isErrored()` and
+  `<Errored.Error>` read that state from below without swapping anything.
+
+`createRoot` installs a default `<Errored>`-style boundary on every root,
+which claims what nothing nearer claims and logs it. A failed action reports
+to the nearest accepting boundary of either kind above the owner it was
+called under. A failed node keeps its last good value; the failure is graph
+state, read with `error(x)`.
 _Note_: throwing is reserved for genuine errors AND for `NotReadyYet`
 suspension (which is its own routed-through-effects flow). Pending values
 appear as `Promise<T>` plus pending-tracker entries; the throw is the

@@ -83,6 +83,8 @@ A plain `get(node)` returns whatever's cached (committed or speculative overlay)
 
 Rejects: any design where reading a value is a discipline you must learn to do safely.
 
+_Note, 2026-10-01:_ what shipped keeps the separate queries but not the "never throws". Calling the accessor of a failed async computed, or of a failed `signal(fn)`, throws the rejection reason, because that accessor is the strict read that feeds an error boundary. The tolerant reads, `peek` and `latest`, never throw. The current statement is `axiom-plain-reads-are-honest` in `CANON.md`.
+
 ### P4 — Explicit boundaries over implicit pervasiveness
 
 A speculative scope is _opt-in_. Outside a scope, writes commit immediately and reads are honest. Inside a scope, write-level speculation semantics apply. There is no implicit ambient speculation that every write must reckon with.

@@ -4,7 +4,7 @@ import { computed, error, isPending, peek, signal, use } from '../src/index'
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
 
 /**
- * TARGET — error as node state (not implemented yet; these are red).
+ * Error as node state.
  *
  * An error is graph state, exactly like pending: it is parked out of band, it
  * propagates along the upstream chain, and it does NOT destroy the value the node

@@ -150,3 +150,23 @@ test('disposing surrounding owner disposes active branch', () => {
   dispose()
   expect(cleaned).toBe(true)
 })
+
+/**
+ * @canon rule-a-pending-condition-reads-as-falsy
+ */
+test('a Match whose when is a pending promise is skipped', () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+  const pending = new Promise<boolean>(() => {})
+  const dispose = render(
+    () => (
+      <Switch fallback={<p>none</p>}>
+        <Match when={pending}><p>a</p></Match>
+        <Match when={true}><p>b</p></Match>
+      </Switch>
+    ),
+    target,
+  )
+  expect(target.textContent).toBe('b')
+  dispose()
+})
