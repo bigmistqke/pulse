@@ -72,12 +72,6 @@ const CONFIG = (
 const DOCS = CONFIG.documents ?? ['CANON.md'];
 
 /**
- * The directory a `@spec` path is resolved against: the project root, so a
- * test cites `CANON.md#rule-x` whatever directory the test lives in.
- */
-const SPEC_ROOT = '.';
-
-/**
  * The declared suites: every file in this directory, no exceptions.
  *
  * Scope is a claim a suite makes, and here the claim is where it lives. Moving
@@ -122,8 +116,7 @@ const MEANS: Record<Kind, string> = {
   'rule-': 'a consequence of an axiom, stated so it can be contradicted',
   'exception-':
     'a carve-out that cannot be stated without naming the rule it narrows',
-  'case-':
-    'one instance of a rule — a place in the code or a situation — and the verdict for it'
+  'case-': 'one place the code answers a rule, and the verdict for it'
 };
 
 /** kind → the kinds it must cite at least one of; `null` means it owes nothing. */
@@ -687,15 +680,17 @@ function treeOf(
 
 /**
  * A heading's rendered anchor, by the rule GitHub and GitLab both slug with:
- * lowercase, drop punctuation, spaces become hyphens. A unit heading slugs to
- * exactly its declared id, which is what `OVERFULL_HEADING` protects.
+ * lowercase, drop punctuation, each space becomes a hyphen. Each space, not
+ * each run of them: `P1 — Speculation` slugs to `p1--speculation`, because the
+ * dropped dash leaves two spaces behind. A unit heading slugs to exactly its
+ * declared id, which is what `OVERFULL_HEADING` protects.
  */
 const slug = (heading: string): string =>
   heading
     .toLowerCase()
     .trim()
     .replace(/[^\p{L}\p{N}\p{M}\p{Pc}\- ]/gu, '')
-    .replace(/ +/g, '-');
+    .replace(/ /g, '-');
 
 /**
  * Every fragment a citation could resolve to in one file — which is what the
@@ -988,6 +983,46 @@ function analyse(write: boolean): Analysis {
     /(?:^|\n)([ \t]*)(?:\/\*\*([\s\S]*?)\*\/\s*\n[ \t]*)?(?:it|test)(?:\.\w+)*\s*\(\s*(['"`])((?:\\.|(?!\3)[\s\S])*)\3/g;
 
   /**
+   * Every unit id, and the documents that declare it.
+   *
+   * A citation names a unit by its id alone — `@canon rule-x` — so an id must
+   * be unique across every canon document. The file adds nothing a unique id
+   * does not already say, and leaving it out means moving a unit between
+   * documents breaks no test.
+   */
+  const docsOf = new Map<string, string[]>();
+  for (const unit of units.values()) {
+    docsOf.set(unit.id, [...(docsOf.get(unit.id) ?? []), unit.doc]);
+  }
+  for (const [id, docs] of docsOf) {
+    if (docs.length > 1) {
+      findings.rot.push(
+        `${id} is declared in ${docs.join(' and ')} — a citation cannot tell which`
+      );
+    }
+  }
+
+  /**
+   * Resolve one `@canon` or `@axiom` citation to its unit's key, reporting
+   * `rot` and returning undefined when it names no unit or more than one.
+   */
+  function resolveCitation(cite: string, where: string): string | undefined {
+    if (cite.includes('#')) {
+      findings.rot.push(
+        `${where} — citation "${cite}" names a file; cite the id alone, as "${cite.split('#').pop()}"`
+      );
+      return undefined;
+    }
+    const docs = docsOf.get(cite);
+    if (docs === undefined) {
+      findings.rot.push(`${where} — citation "${cite}" names no unit`);
+      return undefined;
+    }
+    if (docs.length > 1) return undefined; // already reported above
+    return `${docs[0]}#${cite}`;
+  }
+
+  /**
    * Read one suite's citations.
    *
    * `enforced` separates the two things declared scope was doing at once. A file
@@ -1033,17 +1068,19 @@ function analyse(write: boolean): Analysis {
         const line = src
           .slice(0, (m.index ?? 0) + m[0].length - call.length)
           .split('\n').length;
-        const axioms = [...doc.matchAll(/@axiom\s+(\S+)/g)].map(x => x[1]);
-        const specs = [...doc.matchAll(/@spec\s+(\S+)/g)].map(x => x[1]);
+        const axioms = [...doc.matchAll(/@axiom\s+(\S+)/g)].map(x =>
+          x[1].startsWith('axiom-') ? x[1] : `axiom-${x[1]}`
+        );
+        const specs = [...doc.matchAll(/@canon\s+(\S+)/g)].map(x => x[1]);
 
         // A test owes a RULE. Citing an axiom is not a different way of saying the
         // same thing — it says the canon has no addressable rule for what is being
         // asserted, which is a gap in the canon rather than in the test. Both the
-        // dedicated tag and an `@spec` whose fragment happens to be an axiom mean
+        // dedicated tag and an `@canon` that happens to name an axiom mean
         // that, and only checking the tag let the second form through unnoticed.
         const axiomCitations = [
           ...axioms,
-          ...specs.filter(s => kindOf(s.split('#')[1] ?? '') === 'axiom-')
+          ...specs.filter(s => kindOf(s) === 'axiom-')
         ];
         for (const a of enforced ? axiomCitations : []) {
           findings['missing-rule'].push(
@@ -1053,43 +1090,26 @@ function analyse(write: boolean): Analysis {
 
         if (enforced && axioms.length === 0 && specs.length === 0) {
           findings.uncited.push(
-            `${rel}:${line} "${title}" — no @spec / @axiom`
+            `${rel}:${line} "${title}" — no @canon / @axiom`
           );
         }
 
         for (const s of [...specs, ...axioms]) {
-          if (!s.includes('#')) {
-            findings.rot.push(
-              `${rel}:${line} — citation "${s}" carries no fragment`
-            );
-            continue;
-          }
-          const [path, frag] = s.split('#');
-          const target = join(ROOT, SPEC_ROOT, path);
-          if (!existsSync(target)) {
-            findings.rot.push(
-              `${rel}:${line} — citation "${s}" points at no such file`
-            );
-          } else if (!idsOf(target).has(frag)) {
-            findings.rot.push(
-              `${rel}:${line} — citation "${s}" resolves to no id in ${path}`
-            );
-          } else {
-            const key = `${relative(ROOT, target)}#${frag}`;
-            citedTargets.add(key);
-            testedTargets.add(key);
-            testsPer.set(key, (testsPer.get(key) ?? 0) + 1);
+          const key = resolveCitation(s, `${rel}:${line}`);
+          if (key === undefined) continue;
+          citedTargets.add(key);
+          testedTargets.add(key);
+          testsPer.set(key, (testsPer.get(key) ?? 0) + 1);
 
-            // A test owes the NARROWEST unit its assertion could contradict,
-            // and where a unit has cases the claim is in one of them. Citing
-            // the parent instead leaves that case reading as uncovered in
-            // `dead`, which is the coverage backlog; citing it as well is a
-            // second statement of what the case's own position already says.
-            if (enforced && holdsCases.has(key)) {
-              findings['not-narrowest'].push(
-                `${rel}:${line} "${title}" — cites ${frag}, which has cases`
-              );
-            }
+          // A test owes the NARROWEST unit its assertion could contradict,
+          // and where a unit has cases the claim is in one of them. Citing
+          // the parent instead leaves that case reading as uncovered in
+          // `dead`, which is the coverage backlog; citing it as well is a
+          // second statement of what the case's own position already says.
+          if (enforced && holdsCases.has(key)) {
+            findings['not-narrowest'].push(
+              `${rel}:${line} "${title}" — cites ${s}, which has cases`
+            );
           }
         }
       }
@@ -1131,7 +1151,7 @@ function analyse(write: boolean): Analysis {
    * that explain the canon, whose links must resolve.
    *
    * Markdown only. A `.ts` beside them may be tooling that writes the literal
-   * `@spec` in its own strings because it is what parses the tag — so reading
+   * `@canon` in its own strings because it is what parses the tag — so reading
    * it would find citations that were never citations.
    */
   function allReferences(path: string, out: string[] = []): string[] {
@@ -1146,7 +1166,7 @@ function analyse(write: boolean): Analysis {
   }
 
   /**
-   * Check a module's `@spec` tags resolve, and nothing else.
+   * Check a module's `@canon` tags resolve, and nothing else.
    *
    * A citation is a true statement about a link wherever it is written, which is
    * the same argument `readSuite` makes for reading an undeclared suite. It does
@@ -1156,26 +1176,9 @@ function analyse(write: boolean): Analysis {
   function readModule(file: string): void {
     const rel = relative(ROOT, file);
     const src = readFileSync(file, 'utf8');
-    for (const m of src.matchAll(/@spec\s+(\S+)/g)) {
-      const cite = m[1];
+    for (const m of src.matchAll(/@canon\s+(\S+)/g)) {
       const line = src.slice(0, m.index ?? 0).split('\n').length;
-      if (!cite.includes('#')) {
-        findings.rot.push(
-          `${rel}:${line} — citation "${cite}" carries no fragment`
-        );
-        continue;
-      }
-      const [path, frag] = cite.split('#');
-      const target = join(ROOT, SPEC_ROOT, path);
-      if (!existsSync(target)) {
-        findings.rot.push(
-          `${rel}:${line} — citation "${cite}" points at no such file`
-        );
-      } else if (!idsOf(target).has(frag)) {
-        findings.rot.push(
-          `${rel}:${line} — citation "${cite}" resolves to no id in ${path}`
-        );
-      }
+      resolveCitation(m[1], `${rel}:${line}`);
     }
   }
 
@@ -1189,7 +1192,7 @@ function analyse(write: boolean): Analysis {
   /**
    * Check a reference's citations resolve, and nothing else.
    *
-   * The `@spec` tags `readModule` already reads, plus the markdown links prose
+   * The `@canon` tags `readModule` already reads, plus the markdown links prose
    * cites with. Without this, a renamed unit leaves a dead link in the very
    * document a reader learns the canon from, and nothing reports it.
    *
@@ -1233,7 +1236,7 @@ function analyse(write: boolean): Analysis {
 
   // dead — a unit nothing cites. Last, after every suite has been read: a rule
   // kept alive by a test it has not reached yet would otherwise report dead,
-  // and the list would read as a spec full of unreachable units.
+  // and the list would read as a canon full of unreachable units.
   for (const [key, unit] of units) {
     if (!citedTargets.has(key))
       findings.dead.push(`${key} (a ${noun(unit.kind)})`);
@@ -1308,7 +1311,7 @@ const HELP = `canon — derivation links for a project's canon
 
 Every unit that makes a derived claim carries a machine-checkable link to what
 it derives from — its position under the unit it derives from, a prose link in
-a document, a @spec JSDoc tag in a test — and the documents' index and the
+a document, a @canon JSDoc tag in a test — and the documents' index and the
 table of kinds are generated from those links rather than hand-kept. check is
 the gate, generate is the writer, tree is the map.
 

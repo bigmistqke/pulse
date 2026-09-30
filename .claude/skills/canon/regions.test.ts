@@ -4,7 +4,7 @@
  * region name, and must come back canonical after a rewrite.
  *
  * This file tests the checker's own tooling, not a project's canon, so it lives
- * outside any declared suite directory and carries no `@spec` tag.
+ * outside any declared suite directory and carries no `@canon` tag.
  */
 import { describe, expect, it } from 'vitest';
 import { beginMarker, regionAt, replaceRegion } from './regions.ts';

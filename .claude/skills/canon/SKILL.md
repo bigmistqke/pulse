@@ -5,7 +5,7 @@ description: Work through a project's canon — the CANON.md document of axioms,
 
 # Canon
 
-A canon states how a system behaves now, as a tree of claims that tests cite. It is a way of working, not a document written once and forgotten. The document is `CANON.md` at the project root. The checker beside this file holds the links between the document and the tests closed.
+A canon states how a system behaves now, as a tree of claims that tests cite. It is a way of working, not a document written once and forgotten. It is the guideline for every choice made in the system, internal ones included. An internal choice is where the canon matters most, because nothing outside the system will ever check it. The document is `CANON.md` at the project root. The checker beside this file holds the links between the document and the tests closed.
 
 The canon holds the present tense only. What someone believed on a date belongs in a decision record, where the date is the point. An axiom that stops being true is revised or retired, and the decision record says why.
 
@@ -16,13 +16,13 @@ The canon holds the present tense only. What someone believed on a date belongs 
 
 - An axiom is a general principle. Nothing in the canon derives it.
 - A rule is a behaviour of the system, derived from an axiom and stated so that a test could contradict it.
-- A case is one explicit instance of a rule, with the verdict for it.
-- A test pins exactly one claim: a case where the rule has cases, the rule where it has none.
+- A case is one place in the code that answers a rule, with the verdict there. Only a rule that answers for named places has cases.
+- A test pins the narrowest claim it could contradict: a case where the rule has cases, the rule where it has none. Several tests may pin one rule.
 - The implementation follows the tests.
 
 ## Work points down, defects point up
 
-New behaviour is derived downward. Name the axiom it follows from, state the rule, name the cases, write one test per case, then write the code. If no axiom yields the rule, the rule does not get to decide for itself. Stop and find the missing axiom first.
+New behaviour is derived downward. Name the axiom it follows from, state the rule, name its cases where it answers for named places, write the tests, then write the code. If no axiom yields the rule, the rule does not get to decide for itself. Stop and find the missing axiom first.
 
 A defect is read upward. A bug in the implementation is not something to patch. It shows that a test is missing, which shows that a case is missing. That may show a missing rule, and a missing rule may show a missing axiom. Climb until you reach the first layer that already covers the situation, and write down what was missing below it. Then come back down: case, test, and only then the fix.
 
@@ -36,7 +36,7 @@ At each layer the question is the same: does the layer above already answer this
 | `@axiom` | a principle nothing here derives from | nothing — primitive by kind |
 | `@rule` | a consequence of an axiom, stated so it can be contradicted | `@axiom` |
 | `@exception` | a carve-out that cannot be stated without naming the rule it narrows | `@rule` |
-| `@case` | one instance of a rule — a place in the code or a situation — and the verdict for it | `@rule` · `@exception` |
+| `@case` | one place the code answers a rule, and the verdict for it | `@rule` · `@exception` |
 <!-- kinds:end -->
 
 ## How a unit is written
@@ -65,7 +65,7 @@ An explicit link therefore means one thing: an edge the tree cannot hold. Exampl
 
 ## Cases
 
-A case is one rule applied to one place or one situation, with the verdict there. Its statement names both. Where a case is about a place in the code, the statement opens by naming it, and the checker verifies that the place exists:
+A case is one rule at one place in the code, with the verdict there. The case step exists only where a rule answers for named places in the code, such as the calls that leave the system or the fields that hold work across a turn. Most tests therefore cite a rule directly. A case's statement opens by naming its place, and the checker verifies that the place exists:
 
 ```md
 #### @case drain-runs-each-listener-in-its-own-guard
@@ -77,7 +77,7 @@ Each listener runs inside its own guard, so one that throws costs the others not
 
 One place often answers to several rules, and it gets one case under each. That is why the stem states the claim instead of naming the place: `drain` might be three cases.
 
-A rule that says one thing and has one test needs no cases. The tree command's `--suspect` option lists rules that carry many tests and no cases. Such a rule usually says several things with no way to tell them apart.
+A rule with no named places has no cases, and its tests cite it directly. The tree command's `--suspect` option lists rules that carry many tests and no cases. Such a rule usually says several things with no way to tell them apart, and splitting it into several rules is often the fix.
 
 ## Exceptions
 
@@ -87,11 +87,11 @@ A case sits under the rule it is an instance of, never under a rule it is an exc
 
 ## What a test cites
 
-A test cites the narrowest unit its assertion could contradict: the case where the rule has cases, the rule where it has none. The citation is a `@spec` tag in the test's JSDoc, with a path from the project root.
+A test cites the narrowest unit its assertion could contradict: the case where the rule has cases, the rule where it has none. The citation is a `@canon` tag in the test's JSDoc, naming the unit by its id alone. The file is left out: ids are unique across every canon document, and the checker reports a duplicate. Moving a unit between documents therefore breaks no test.
 
 ```ts
 /**
- * @spec CANON.md#case-drain-runs-each-listener-in-its-own-guard
+ * @canon case-drain-runs-each-listener-in-its-own-guard
  */
 test('a throwing listener does not stop the next one', () => {
 ```
@@ -106,7 +106,7 @@ Only leaf tests cite. A `describe` block groups tests; it does not make a claim.
 
 Prose, and no citations. A block comment at the top of each source file says what the file is, how its pieces fit, and which axiom it serves.
 
-Per-symbol `@spec` tags in source code were tried and dropped. A tag plus a sentence is a snapshot of one consequence. A reader who does not already hold the model cannot assemble dozens of snapshots into it. Coverage never depended on those tags, because only a test credits a unit.
+Per-symbol `@canon` tags in source code were tried and dropped. A tag plus a sentence is a snapshot of one consequence. A reader who does not already hold the model cannot assemble dozens of snapshots into it. Coverage never depended on those tags, because only a test credits a unit.
 
 ## Scope
 
