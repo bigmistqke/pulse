@@ -20,7 +20,7 @@ export default defineConfig({
         resolve: { alias: aliases },
         test: {
           name: 'unit',
-          include: ['test/**/*.test.ts'],
+          include: ['test/**/*.test.ts', '.claude/skills/**/*.test.ts'],
           exclude: ['test/dom/**'],
         },
       },
