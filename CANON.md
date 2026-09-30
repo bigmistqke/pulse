@@ -148,7 +148,7 @@ The canon was written backwards from the existing tests and documents, and descr
     - [`@case a-reactive-child-that-called-use-waits-for-the-gate`](#case-a-reactive-child-that-called-use-waits-for-the-gate) — `bindings.ts` `insertChild`.
     - [`@case a-reactive-prop-that-called-use-waits-for-the-gate`](#case-a-reactive-prop-that-called-use-waits-for-the-gate) — `bindings.ts` `bindProp`.
     - [`@case a-staged-effect-reads-its-pipeline-with-use`](#case-a-staged-effect-reads-its-pipeline-with-use) — `effect.ts` `stagedEffect`.
-    - [`@exception structure-mounts-at-once-inside-a-pending-boundary`](#exception-structure-mounts-at-once-inside-a-pending-boundary) — A structural mount inside a pending boundary is not held by the gate. A branch that `Show` or `For` mounts while the boundary waits appears at once, with its suspended content holes empty until they settle.
+  - [`@rule a-structural-commit-waits-for-the-content-it-brings`](#rule-a-structural-commit-waits-for-the-content-it-brings) — A reactive child whose new content contains a suspended reactive child of the same boundary commits through that boundary's gate. The new structure lands in the same pass as that content, and the structure it replaces stays on screen until then.
   - [`@rule a-read-without-use-commits-at-once`](#rule-a-read-without-use-commits-at-once) — A binding that did not call `use` commits as soon as it runs, whatever state its boundary is in.
   - [`@rule latest-reports-loading-without-waiting`](#rule-latest-reports-loading-without-waiting) — `latest(x)` returns the last resolved value, never throws, and never makes the binding wait. While `x` is pending it reports the load to the nearest boundary: a first load drives the boundary's first-load placeholder, and a refresh drives `isLoading()` only.
   - [`@rule peek-reports-nothing`](#rule-peek-reports-nothing) — `peek(x)` returns the last resolved value and reports nothing to any boundary, neither a first load nor a refresh.
@@ -1017,13 +1017,13 @@ A reactive property, such as a `class:` binding, routes its commit through the g
 
 A staged effect reads its whole pipeline with `use`, so its commit always joins the gate, and waits for a suspended sibling even after its own stages have resolved.
 
-#### @exception structure-mounts-at-once-inside-a-pending-boundary
+### @rule a-structural-commit-waits-for-the-content-it-brings
 
-> A structural mount inside a pending boundary is not held by the gate. A branch that `Show` or `For` mounts while the boundary waits appears at once, with its suspended content holes empty until they settle.
+> A reactive child whose new content contains a suspended reactive child of the same boundary commits through that boundary's gate. The new structure lands in the same pass as that content, and the structure it replaces stays on screen until then.
 
-Only content commits go through the gate. The gap is recorded in [`docs/follow-ups.md`](docs/follow-ups.md).
+This is how `Show`, `Switch` and `For` hold a branch or a row that is not ready: each renders through a reactive child, and a hole inside the new content that called `use` on a pending value is suspended. The waiting still comes from `use`, inside the new content, so a structural read that did not call `use` makes nothing wait by itself.
 
-This is a known defect, not a design: the gate was meant to hold the whole prior tree. It is tracked in `docs/follow-ups.md`, and the canon states it until it is fixed.
+The content is checked as DOM. A suspended reactive child leaves its marker in the nodes about to be inserted, however and whenever those nodes were built, a `For` row built by its own computation included. A suspended hole under a nested boundary belongs to that boundary, and does not hold the outer structure. Only a suspended reactive child counts: a reactive prop that suspends does not hold the structure around it. When a later run replaces a held commit, the held commit is withdrawn and the subtree built for it is disposed.
 
 ### @rule a-read-without-use-commits-at-once
 

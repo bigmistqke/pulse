@@ -213,6 +213,28 @@ function warnIfOrphaned(kind: string, owner: Owner | null = getOwner()): void {
 }
 
 /**
+ * The start marker of every reactive child that is suspended right now, and
+ * the boundary it is suspended in. A structural hole reads this to tell
+ * whether the content it is about to insert is ready: the DOM says it,
+ * whenever and wherever that content was built.
+ */
+const suspendedHoles = new WeakMap<Node, object>()
+
+/** Whether `value` holds, anywhere inside it, a reactive child suspended in
+ *  `scope`. Content under a nested boundary is suspended in that boundary,
+ *  and does not count. */
+function holdsSuspendedHole(value: unknown, scope: object): boolean {
+  if (Array.isArray(value)) return value.some((item) => holdsSuspendedHole(item, scope))
+  if (!(value instanceof Node)) return false
+  if (suspendedHoles.get(value) === scope) return true
+  const walker = document.createTreeWalker(value, NodeFilter.SHOW_COMMENT)
+  for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
+    if (suspendedHoles.get(node) === scope) return true
+  }
+  return false
+}
+
+/**
  * Insert `value` as a child (or children) of `parent`.
  *
  * - string / number → text node
@@ -243,6 +265,11 @@ export function insertChild(parent: Node, value: unknown): void {
     parent.appendChild(start)
     parent.appendChild(end)
     let runOwner: Owner | null = null
+    // The owner of a run whose commit is waiting at the gate for the content
+    // it built. A later run replaces that commit, so it withdraws it and
+    // disposes what it built — the content's own suspended bindings with it,
+    // or they would hold the gate shut for a commit that will never land.
+    let heldRunOwner: Owner | null = null
     let controller: BindingController | null = null
     const ensureController = (): BindingController | null => {
       if (controller !== null) return controller
@@ -253,22 +280,40 @@ export function insertChild(parent: Node, value: unknown): void {
     }
     const ambientErrors = makeAmbientErrorReporter(parentOwner)
     onCleanup(() => {
+      suspendedHoles.delete(start)
       controller?.unregister()
       controller = null
       ambientErrors.dispose()
     })
     effect(() => {
+      if (heldRunOwner !== null) {
+        // Withdraw the held commit first, so disposing its content cannot
+        // open the gate and apply it.
+        controller?.report({ status: 'idle' })
+        disposeOwner(heldRunOwner)
+        heldRunOwner = null
+      }
       // Build the fragment FIRST inside a fresh sub-owner so any nested
       // binding-effects/computeds the user creates are bound to this run.
       const nextRunOwner = createSubOwner(parentOwner)
       let frag: DocumentFragment | null = null
       let engagedTransition = false
+      let heldValue: { next: unknown } | null = null
+      const heldScope = findBoundaryScope(parentOwner, 'pending')
       let ambientError: { error: unknown; source: Accessor<unknown> } | null = null
       let pendingReads: readonly PendingValueRead[] = []
       try {
         runWithOwner(nextRunOwner, () => {
           const result = runBindingCompute(() => {
             const next = (value as () => unknown)()
+            // Content that is not ready yet means this run will be held. Its
+            // nodes are then placed only when the commit lands: a row that
+            // For reuses is a live node, and placing it into a fragment now
+            // would pull it off the screen that is meant to stay.
+            if (heldScope !== null && holdsSuspendedHole(next, heldScope)) {
+              heldValue = { next }
+              return
+            }
             frag = document.createDocumentFragment()
             insertChild(frag, next)
           })
@@ -285,6 +330,8 @@ export function insertChild(parent: Node, value: unknown): void {
         // any partial nested registrations.
         disposeOwner(nextRunOwner)
         if (e instanceof NotReadyYet) {
+          const suspendedIn = ensureController() === null ? null : heldScope
+          if (suspendedIn !== null) suspendedHoles.set(start, suspendedIn)
           ensureController()?.report({ status: 'throwing' })
           // Re-throw so the outer effect() handles re-run-on-settle.
           // The outer effect's controller registration becomes redundant
@@ -316,7 +363,15 @@ export function insertChild(parent: Node, value: unknown): void {
           disposeOwner(nextRunOwner)
           return
         }
+        if (frag === null && heldValue !== null) {
+          const held = heldValue
+          runWithOwner(nextRunOwner, () => {
+            frag = document.createDocumentFragment()
+            insertChild(frag, held.next)
+          })
+        }
         // Dispose the previous run's owner; install the new one.
+        if (heldRunOwner === nextRunOwner) heldRunOwner = null
         if (oldRunOwner !== null) disposeOwner(oldRunOwner)
         runOwner = nextRunOwner
         // Clear DOM between markers and insert the fragment.
@@ -327,6 +382,16 @@ export function insertChild(parent: Node, value: unknown): void {
           cur = after
         }
         end.parentNode.insertBefore(frag!, end)
+      }
+      // The content this run built suspended into our boundary: the new
+      // structure waits at the gate and lands in the same pass as that
+      // content, while the structure it replaces stays on screen.
+      suspendedHoles.delete(start)
+      const scope = heldScope
+      if (scope !== null && heldValue !== null) {
+        heldRunOwner = nextRunOwner
+        ensureController()!.report({ status: 'ready', commit })
+        return
       }
       // If there's a prior controller (binding previously threw), always go
       // through the controller to consume its pendingSet entry.
@@ -339,12 +404,9 @@ export function insertChild(parent: Node, value: unknown): void {
       // now. The scope's tail-check at end of microtask decides whether to
       // fire immediately or defer; this avoids the false-negative race when
       // a sibling that will throw in the same flush hasn't reported yet.
-      if (engagedTransition) {
-        const scope = findBoundaryScope(parentOwner, 'pending')
-        if (scope !== null) {
-          scope.deferOrCommit(commit)
-          return
-        }
+      if (engagedTransition && scope !== null) {
+        scope.deferOrCommit(commit)
+        return
       }
       // No coordination needed — commit immediately.
       commit()

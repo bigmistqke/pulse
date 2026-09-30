@@ -619,11 +619,14 @@ together when `list` settles.
   same action just made; and both the reader and its tracker entry read the
   derivation on every call, or nothing pulls the pipeline while a prediction is
   showing and dropping the layer reveals a stale value.
+- **v1.7** (shipped): structural mounts in `<Loading>` wait for their
+  content. A reactive child whose new content contains a suspended reactive
+  child of the same boundary commits through the gate, so a `Show` branch or
+  a `For` row lands together with its content, and the structure it replaces
+  stays on screen until then.
 - **later**: make `retry`/`reset` genuinely absent when nothing is retryable,
   instead of present and inert for a non-re-runnable source (see
-  `docs/follow-ups.md`); structural-mount gating in `<Loading>` (current bug:
-  `<Show>`/`<For>` mount/unmount commits don't defer with the boundary — only
-  content hole commits do); optimistic store; explicit `transition()` value
+  `docs/follow-ups.md`); optimistic store; explicit `transition()` value
   for cross-tree coordination beyond what `<Loading>` placement covers.
 
 See [`docs/follow-ups.md`](./docs/follow-ups.md) for the live tracker of

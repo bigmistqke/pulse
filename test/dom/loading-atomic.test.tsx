@@ -3,7 +3,7 @@ import { flush, microtaskScheduler, render, setScheduler, signal, syncScheduler,
 import { Loading } from '../../src/dom/loading'
 import { findBoundaryScope, getOwner, runWithOwner, type LoadingScope } from '../../src/owner'
 import { use } from '../../src/async'
-import { Show } from '../../src/dom'
+import { For, Show } from '../../src/dom'
 
 beforeEach(() => setScheduler(syncScheduler(flush)))
 afterEach(() => {
@@ -428,7 +428,7 @@ test('binding without use() inside <Loading> commits immediately regardless of b
 })
 
 /**
- * @canon exception-structure-mounts-at-once-inside-a-pending-boundary
+ * @canon rule-a-structural-commit-waits-for-the-content-it-brings
  */
 test('a binding mounted inside a pending <Loading> shows its value once the boundary settles', async () => {
   const target = document.createElement('section')
@@ -471,11 +471,10 @@ test('a binding mounted inside a pending <Loading> shows its value once the boun
   setVisible(true)
   await new Promise((r) => queueMicrotask(() => r(undefined)))
   flush()
-  // Boundary is now pending again because B's binding throws.
-  // hasEverLoaded is true so the return-accessor returns fallback ?? loadedSubtree.
-  // No fallback set on this Loading — so loadedSubtree is held; A stays at 'A1';
-  // the .b span is added structurally but its content hole is empty (held).
+  // B's binding suspends, so the Show's commit waits with it: A stays at 'A1',
+  // and the .b span is not mounted yet.
   expect(target.querySelector('.a')!.textContent).toBe('A1')
+  expect(target.querySelector('.b')).toBeNull()
 
   // Resolve B; gate opens — B's content commits.
   resolveB1('B1')
@@ -490,9 +489,9 @@ test('a binding mounted inside a pending <Loading> shows its value once the boun
 })
 
 /**
- * @canon exception-structure-mounts-at-once-inside-a-pending-boundary
+ * @canon rule-a-structural-commit-waits-for-the-content-it-brings
  */
-test('mid-flight mount without fallback: the new structure appears at once, its content empty until the gate opens', async () => {
+test('mid-flight mount without fallback: the new structure lands together with its content', async () => {
   const target = document.createElement('section')
   document.body.append(target)
   const [visible, setVisible] = signal(false)
@@ -500,15 +499,15 @@ test('mid-flight mount without fallback: the new structure appears at once, its 
   let resolveB1: (v: string) => void = () => {}
   const pA1 = new Promise<string>((r) => (resolveA1 = r))
   const pB1 = new Promise<string>((r) => (resolveB1 = r))
-  const [srcA, _setSrcA] = signal<string | Promise<string>>(pA1)
-  const [srcB, _setSrcB] = signal<string | Promise<string>>(pB1)
+  const [srcA] = signal<string | Promise<string>>(pA1)
+  const [srcB] = signal<string | Promise<string>>(pB1)
   const dispose = render(
     () => (
       <Loading initial={<p>loading</p>}>
         {() => (
           <div>
             <span class="a">{() => use(srcA())}</span>
-            <Show when={visible()}>
+            <Show when={visible()} fallback={<i class="off">off</i>}>
               {() => <span class="b">{() => use(srcB())}</span>}
             </Show>
           </div>
@@ -517,26 +516,138 @@ test('mid-flight mount without fallback: the new structure appears at once, its 
     ),
     target,
   )
-  // First load A.
   resolveA1('A1')
   await new Promise((r) => queueMicrotask(() => r(undefined)))
   flush()
-  expect(target.querySelector('.a')!.textContent).toBe('A1')
-  // Mount B with pending source mid-flight.
+  expect(target.querySelector('.off')).not.toBeNull()
+  // Mount B while its source is pending: the prior branch stays on screen.
   setVisible(true)
   await new Promise((r) => queueMicrotask(() => r(undefined)))
   flush()
-  // .b span structure is mounted; its content hole is empty (B's hole throws,
-  // markers only). The atomic-commit guarantee covers content commits inside
-  // bindings — structural mounts (Show) are not currently gated. Verify the
-  // content hole is empty.
-  const bSpan = target.querySelector('.b')
-  expect(bSpan).not.toBeNull()
-  expect(bSpan!.textContent).toBe('')
+  expect(target.querySelector('.b')).toBeNull()
+  expect(target.querySelector('.off')).not.toBeNull()
   resolveB1('B1')
   await new Promise((r) => queueMicrotask(() => r(undefined)))
   flush()
+  expect(target.querySelector('.off')).toBeNull()
   expect(target.querySelector('.b')!.textContent).toBe('B1')
+  dispose()
+})
+
+/**
+ * @canon rule-a-structural-commit-waits-for-the-content-it-brings
+ */
+test('a held branch replaced before its content loads is discarded, and does not hold the gate', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+  const [visible, setVisible] = signal(false)
+  const [label, setLabel] = signal('x')
+  const never = new Promise<string>(() => {})
+  const dispose = render(
+    () => (
+      <Loading>
+        {() => (
+          <div>
+            <span class="label">{() => use(label())}</span>
+            <Show when={visible()} fallback={<i class="off">off</i>}>
+              {() => <span class="b">{() => use(never)}</span>}
+            </Show>
+          </div>
+        )}
+      </Loading>
+    ),
+    target,
+  )
+  flush()
+  setVisible(true) // held: its content never loads
+  flush()
+  expect(target.querySelector('.b')).toBeNull()
+  setVisible(false) // replaces the held commit
+  flush()
+  await new Promise((r) => queueMicrotask(() => r(undefined)))
+  setLabel('y') // an engaged sibling commits: the discarded branch holds nothing
+  flush()
+  await new Promise((r) => queueMicrotask(() => r(undefined)))
+  flush()
+  expect(target.querySelector('.label')!.textContent).toBe('y')
+  expect(target.querySelector('.off')).not.toBeNull()
+  expect(target.querySelector('.b')).toBeNull()
+  dispose()
+})
+
+/**
+ * @canon rule-a-structural-commit-waits-for-the-content-it-brings
+ */
+test('content under a nested boundary does not hold the outer structure', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+  const [visible, setVisible] = signal(false)
+  const never = new Promise<string>(() => {})
+  const dispose = render(
+    () => (
+      <Loading>
+        {() => (
+          <div>
+            <Show when={visible()}>
+              {() => (
+                <section class="b">
+                  <Loading initial={<i class="inner">inner loading</i>}>
+                    {() => <span>{() => use(never)}</span>}
+                  </Loading>
+                </section>
+              )}
+            </Show>
+          </div>
+        )}
+      </Loading>
+    ),
+    target,
+  )
+  flush()
+  setVisible(true)
+  flush()
+  await new Promise((r) => queueMicrotask(() => r(undefined)))
+  flush()
+  expect(target.querySelector('.b')).not.toBeNull()
+  expect(target.querySelector('.inner')).not.toBeNull()
+  dispose()
+})
+
+/**
+ * @canon rule-a-structural-commit-waits-for-the-content-it-brings
+ */
+test('a For row whose content is pending lands together with it', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+  const ready = { id: 'ready', value: 'R' as string | Promise<string> }
+  let resolveLate: (v: string) => void = () => {}
+  const late = { id: 'late', value: new Promise<string>((r) => (resolveLate = r)) as string | Promise<string> }
+  const [rows, setRows] = signal([ready])
+  const dispose = render(
+    () => (
+      <Loading>
+        {() => (
+          <ul>
+            <For each={rows()}>{(row) => <li class={row.id}>{() => use(row.value)}</li>}</For>
+          </ul>
+        )}
+      </Loading>
+    ),
+    target,
+  )
+  flush()
+  await new Promise((r) => queueMicrotask(() => r(undefined)))
+  expect(target.querySelector('.ready')!.textContent).toBe('R')
+  setRows([ready, late])
+  flush()
+  await new Promise((r) => queueMicrotask(() => r(undefined)))
+  flush()
+  expect(target.querySelector('.late')).toBeNull() // held with its content
+  expect(target.querySelector('.ready')!.textContent).toBe('R') // the prior list stays
+  resolveLate('L')
+  await new Promise((r) => queueMicrotask(() => r(undefined)))
+  flush()
+  expect(target.querySelector('.late')!.textContent).toBe('L')
   dispose()
 })
 
