@@ -15,6 +15,9 @@ afterEach(() => {
   document.body.innerHTML = ''
 })
 
+/**
+ * @canon rule-an-attribute-follows-its-value-and-is-removed-on-nothing
+ */
 test('attr:name explicitly sets the attribute', () => {
   createRoot(() => {
     const el = h('div', { 'attr:aria-label': 'box' }) as HTMLElement
@@ -23,6 +26,9 @@ test('attr:name explicitly sets the attribute', () => {
   })
 })
 
+/**
+ * @canon rule-an-attribute-follows-its-value-and-is-removed-on-nothing
+ */
 test('default (bare) prop with function value is reactive', () => {
   createRoot(() => {
     const [id, setId] = signal('a')
@@ -34,6 +40,9 @@ test('default (bare) prop with function value is reactive', () => {
   })
 })
 
+/**
+ * @canon rule-an-attribute-follows-its-value-and-is-removed-on-nothing
+ */
 test('reactive attr is removed when value goes null/false', () => {
   createRoot(() => {
     const [v, setV] = signal<string | null>('x')
@@ -47,6 +56,9 @@ test('reactive attr is removed when value goes null/false', () => {
   })
 })
 
+/**
+ * @canon rule-an-attribute-follows-its-value-and-is-removed-on-nothing
+ */
 test('attr: with function value is reactive', () => {
   createRoot(() => {
     const [v, setV] = signal('one')

@@ -15,6 +15,9 @@ afterEach(() => {
   document.body.innerHTML = ''
 })
 
+/**
+ * @canon rule-a-class-prefix-toggles-one-class-by-truthiness
+ */
 test('class:name toggles a class based on truthiness', () => {
   createRoot(() => {
     const el = h('div', { 'class:active': true, 'class:disabled': false }) as HTMLElement
@@ -24,6 +27,9 @@ test('class:name toggles a class based on truthiness', () => {
   })
 })
 
+/**
+ * @canon rule-a-class-prefix-toggles-one-class-by-truthiness
+ */
 test('class:name is reactive with a function value', () => {
   createRoot(() => {
     const [on, setOn] = signal(false)
@@ -37,6 +43,9 @@ test('class:name is reactive with a function value', () => {
   })
 })
 
+/**
+ * @canon rule-a-style-prefix-sets-one-style-property
+ */
 test('style:name sets a single CSS property', () => {
   createRoot(() => {
     const el = h('div', { 'style:color': 'red' }) as HTMLElement
@@ -45,6 +54,9 @@ test('style:name sets a single CSS property', () => {
   })
 })
 
+/**
+ * @canon rule-a-style-prefix-sets-one-style-property
+ */
 test('style:name is reactive with a function value', () => {
   createRoot(() => {
     const [c, setC] = signal('red')
@@ -56,6 +68,9 @@ test('style:name is reactive with a function value', () => {
   })
 })
 
+/**
+ * @canon rule-a-style-prefix-sets-one-style-property
+ */
 test('style:name removes the property on nullish/false value', () => {
   createRoot(() => {
     const [c, setC] = signal<string | null>('red')

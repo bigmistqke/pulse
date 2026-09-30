@@ -4,6 +4,9 @@ import { computed, peek, from, signal, use, type PipelineRead, type Resolved } f
 /** Resolve after all microtasks have drained (a macrotask boundary). */
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
 
+/**
+ * @canon rule-an-async-node-reads-as-a-plain-promise
+ */
 test('end-to-end: signal -> sync stage -> async stage -> generator stage', async () => {
   const [id] = signal(1)
   const pipeline = computed(
@@ -25,6 +28,9 @@ test('end-to-end: signal -> sync stage -> async stage -> generator stage', async
   expect(use(pipeline)).toBe('result=FETCHED:10')
 })
 
+/**
+ * @canon rule-an-async-node-keeps-its-last-value-while-it-refetches
+ */
 test('pipeline re-runs when its signal input changes', async () => {
   const [id, setId] = signal(1)
   const pipeline = computed(
@@ -45,6 +51,9 @@ test('pipeline re-runs when its signal input changes', async () => {
   expect(use(pipeline)).toBe('value:2')
 })
 
+/**
+ * @canon rule-the-read-type-carries-the-async-colour
+ */
 test('Resolved<T> type unwraps signals, promises, and generators (compile-time)', () => {
   // This is a typecheck-only assertion — runtime is irrelevant.
   type A = Resolved<number>                                    // number
@@ -56,6 +65,9 @@ test('Resolved<T> type unwraps signals, promises, and generators (compile-time)'
   expect([_a, _b, _c]).toEqual([1, 2, 3])
 })
 
+/**
+ * @canon rule-the-read-type-carries-the-async-colour
+ */
 test('PipelineRead keeps async colour honestly (compile-time)', () => {
   // Each `const … : T = value` line is the compile-time assertion — a wrong type
   // would fail to compile.
@@ -79,6 +91,9 @@ test('PipelineRead keeps async colour honestly (compile-time)', () => {
   expect([s1async, s1condAsync, s2up].every((x) => x instanceof Promise)).toBe(true)
 })
 
+/**
+ * @canon rule-the-read-type-carries-the-async-colour
+ */
 test('PipelineRead colours a generator stage by what it actually yields, not by being a generator (compile-time)', () => {
   // Three shapes of `function*` stage, colour derived from their `yield*
   // from(x)` calls rather than asserted for every generator: one that only

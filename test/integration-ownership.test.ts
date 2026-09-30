@@ -14,6 +14,9 @@ import {
 
 afterEach(() => setScheduler(microtaskScheduler(flush)))
 
+/**
+ * @canon rule-disposing-an-owner-ends-what-it-owns
+ */
 test('end-to-end: signals + computeds + effects in a root, dispose cleans everything', () => {
   setScheduler(syncScheduler(flush))
   const log: string[] = []
@@ -38,6 +41,9 @@ test('end-to-end: signals + computeds + effects in a root, dispose cleans everyt
   expect(log).toEqual(['d=0', 'd=2', 'root cleanup']) // unchanged
 })
 
+/**
+ * @canon rule-there-is-no-ambient-owner-outside-every-root
+ */
 test('getOwner is null outside any root, even after the integration scenario', () => {
   expect(getOwner()).toBeNull()
 })

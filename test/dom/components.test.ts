@@ -15,6 +15,9 @@ afterEach(() => {
   document.body.innerHTML = ''
 })
 
+/**
+ * @canon rule-a-function-tag-is-called-once-with-its-props
+ */
 test('a function tag is invoked once with props', () => {
   const Greeting = (props: { name: string }) =>
     h('p', null, 'Hello, ', props.name) as HTMLElement
@@ -26,6 +29,9 @@ test('a function tag is invoked once with props', () => {
   })
 })
 
+/**
+ * @canon rule-a-function-tag-is-called-once-with-its-props
+ */
 test('a function tag receives children via props.children', () => {
   const Box = (props: { children: unknown }) =>
     h('div', { 'class:box': true }, props.children) as HTMLElement
@@ -37,6 +43,9 @@ test('a function tag receives children via props.children', () => {
   })
 })
 
+/**
+ * @canon rule-a-function-child-is-a-reactive-hole
+ */
 test('components compose with reactive children', () => {
   const Label = (props: { value: () => unknown }) =>
     h('span', null, props.value) as HTMLElement
@@ -50,6 +59,9 @@ test('components compose with reactive children', () => {
   })
 })
 
+/**
+ * @canon rule-a-fragment-is-its-children-as-an-array
+ */
 test('Fragment returns children as an array', () => {
   createRoot(() => {
     const result = h(Fragment, null, 'a', 'b', 'c')
@@ -58,6 +70,9 @@ test('Fragment returns children as an array', () => {
   })
 })
 
+/**
+ * @canon rule-a-fragment-is-its-children-as-an-array
+ */
 test('Fragment composed inside an element flattens', () => {
   createRoot(() => {
     const el = h('div', null, h(Fragment, null, 'a', 'b'), 'c') as HTMLElement

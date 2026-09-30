@@ -9,21 +9,33 @@ import { signal } from '../src/signal'
 /** Resolve after all microtasks have drained (a macrotask boundary). */
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
 
+/**
+ * @canon rule-pending-is-asked-and-answered-directly
+ */
 test('isPending is false for a signal holding a plain value', () => {
   const [s] = signal(0)
   expect(isPending(s)).toBe(false)
 })
 
+/**
+ * @canon rule-pending-is-asked-and-answered-directly
+ */
 test('isPending is true for a signal holding a pending promise', () => {
   const [s] = signal(new Promise<number>(() => {}))
   expect(isPending(s)).toBe(true)
 })
 
+/**
+ * @canon rule-peek-returns-the-last-resolved-value-and-never-throws
+ */
 test('peek is undefined before the first resolution', () => {
   const [s] = signal(new Promise<number>(() => {})) // never resolves
   expect(peek(s)).toBeUndefined()
 })
 
+/**
+ * @canon rule-peek-returns-the-last-resolved-value-and-never-throws
+ */
 test('peek returns the resolved value after the promise settles', async () => {
   const [s] = signal(Promise.resolve(1))
   expect(peek(s)).toBeUndefined()
@@ -31,6 +43,9 @@ test('peek returns the resolved value after the promise settles', async () => {
   expect(peek(s)).toBe(1)
 })
 
+/**
+ * @canon rule-peek-returns-the-last-resolved-value-and-never-throws
+ */
 test('peek keeps the last resolved value while a newer promise is pending', async () => {
   const [s, setS] = signal<Promise<number>>(Promise.resolve(1))
   await tick()
@@ -45,11 +60,17 @@ test('peek keeps the last resolved value while a newer promise is pending', asyn
   expect(peek(s)).toBe(2) // now the new resolved value
 })
 
+/**
+ * @canon rule-peek-returns-the-last-resolved-value-and-never-throws
+ */
 test('peek(s, fallback) returns the fallback before the first resolution', () => {
   const [s] = signal(new Promise<number[]>(() => {})) // never resolves
   expect(peek(s, [] as number[])).toEqual([])
 })
 
+/**
+ * @canon rule-peek-returns-the-last-resolved-value-and-never-throws
+ */
 test('peek(s, fallback) reports the real value once resolved, not the fallback', async () => {
   const [s] = signal(Promise.resolve([1, 2]))
   expect(peek(s, [] as number[])).toEqual([])
@@ -57,11 +78,17 @@ test('peek(s, fallback) reports the real value once resolved, not the fallback',
   expect(peek(s, [] as number[])).toEqual([1, 2])
 })
 
+/**
+ * @canon rule-peek-returns-the-last-resolved-value-and-never-throws
+ */
 test('peek(s, fallback) falls back again after a rejection with nothing seeded', () => {
   const [s] = signal(Promise.reject(new Error('nope')))
   expect(peek(s, 'fallback')).toBe('fallback')
 })
 
+/**
+ * @canon rule-a-signal-stores-a-promise-as-it-is
+ */
 test('peek is reactive — updates when the signal is written to a new value', () => {
   // peek re-runs the effect when the signal *value* changes (a write). It does
   // NOT push on the same-Promise-settling, since signal stores values as-is and
@@ -77,48 +104,78 @@ test('peek is reactive — updates when the signal is written to a new value', (
   setScheduler(microtaskScheduler(flush))
 })
 
+/**
+ * @canon case-track-seeds-the-stale-prior
+ */
 test('track seeds the stale prior on a pending promise', () => {
   const p = new Promise<number>(() => {}) // never settles
   expect(track(p, 7).value).toBe(7)
   expect(track(p).status).toBe('pending')
 })
 
+/**
+ * @canon case-a-published-result-reads-fulfilled-at-once
+ */
 test('resolvedPromise reads as fulfilled synchronously', () => {
   const p = resolvedPromise(42)
   expect(track(p).status).toBe('fulfilled')
   expect(track(p).value).toBe(42)
 })
 
+/**
+ * @canon rule-use-returns-the-value-or-throws-not-ready-yet
+ */
 test('use returns a plain (non-promise) value unchanged', () => {
   expect(use(5)).toBe(5)
   expect(use('hello')).toBe('hello')
 })
 
+/**
+ * @canon rule-use-returns-the-value-or-throws-not-ready-yet
+ */
 test('use(0) returns 0 (falsy value, not pending)', () => {
   expect(use(0)).toBe(0)
 })
 
+/**
+ * @canon rule-use-returns-the-value-or-throws-not-ready-yet
+ */
 test('use(null) returns null', () => {
   expect(use(null)).toBe(null)
 })
 
+/**
+ * @canon rule-use-returns-the-value-or-throws-not-ready-yet
+ */
 test('use(undefined) returns undefined', () => {
   expect(use(undefined)).toBe(undefined)
 })
 
+/**
+ * @canon rule-use-returns-the-value-or-throws-not-ready-yet
+ */
 test('use(false) returns false', () => {
   expect(use(false)).toBe(false)
 })
 
+/**
+ * @canon rule-use-returns-the-value-or-throws-not-ready-yet
+ */
 test('use("") returns empty string', () => {
   expect(use('')).toBe('')
 })
 
+/**
+ * @canon rule-use-returns-the-value-or-throws-not-ready-yet
+ */
 test('use throws NotReadyYet for a pending promise', () => {
   const pending = new Promise<number>(() => {})
   expect(() => use(pending)).toThrow(NotReadyYet)
 })
 
+/**
+ * @canon rule-use-returns-the-value-or-throws-not-ready-yet
+ */
 test('the thrown NotReadyYet carries the promise', () => {
   const pending = new Promise<number>(() => {})
   try {
@@ -130,6 +187,9 @@ test('the thrown NotReadyYet carries the promise', () => {
   }
 })
 
+/**
+ * @canon rule-use-returns-the-value-or-throws-not-ready-yet
+ */
 test('use resolves a promise synchronously once it has settled', async () => {
   const p = Promise.resolve(7)
   expect(() => use(p)).toThrow(NotReadyYet) // first call: still pending to use
@@ -137,6 +197,9 @@ test('use resolves a promise synchronously once it has settled', async () => {
   expect(use(p)).toBe(7) // settled now — use returns synchronously
 })
 
+/**
+ * @canon rule-use-returns-the-value-or-throws-not-ready-yet
+ */
 test('use re-throws the rejection reason of a settled rejected promise', async () => {
   const reason = new Error('boom')
   const p = Promise.reject(reason)
@@ -145,6 +208,9 @@ test('use re-throws the rejection reason of a settled rejected promise', async (
   expect(() => use(p)).toThrow('boom') // settled rejected: re-throws the reason
 })
 
+/**
+ * @canon rule-from-yields-what-it-is-given
+ */
 test('from of a plain value yields it; yield* expression resolves to it', () => {
   // Drive `from(42)` manually (no driver yet here — we drive by hand for the unit test).
   const gen = from(42)
@@ -156,6 +222,9 @@ test('from of a plain value yields it; yield* expression resolves to it', () => 
   expect(final.value).toBe(42)
 })
 
+/**
+ * @canon rule-from-yields-what-it-is-given
+ */
 test('from of a signal calls its accessor (tracking happens via the call)', () => {
   const [s] = signal(7)
   const gen = from(s)
@@ -165,6 +234,9 @@ test('from of a signal calls its accessor (tracking happens via the call)', () =
   expect(final.value).toBe(7)
 })
 
+/**
+ * @canon rule-from-yields-what-it-is-given
+ */
 test('from of a promise yields the promise itself', () => {
   const p = Promise.resolve(1)
   const gen = from(p)
@@ -172,11 +244,17 @@ test('from of a promise yields the promise itself', () => {
   expect(step.value).toBe(p)
 })
 
+/**
+ * @canon rule-use-returns-the-value-or-throws-not-ready-yet
+ */
 test('use() accepts an accessor (signal getter)', () => {
   const [count] = signal(42)
   expect(use(count)).toBe(42)
 })
 
+/**
+ * @canon rule-use-returns-the-value-or-throws-not-ready-yet
+ */
 test('use() accessor form unwraps pending promises (throws NotReadyYet)', () => {
   const [s] = signal<Promise<number>>(new Promise(() => {}))
   expect(() => use(s)).toThrow(NotReadyYet)
@@ -185,6 +263,9 @@ test('use() accessor form unwraps pending promises (throws NotReadyYet)', () => 
 
 // Plan B: use(accessor) now throws NotReadyYet when isPending(accessor) is true.
 // For the "give me stale" semantics, use `peek(c)` instead.
+/**
+ * @canon rule-use-of-an-accessor-throws-while-it-is-pending
+ */
 test('use(accessor) throws NotReadyYet during SWR refetch (Plan B behavior; use peek() for stale)', async () => {
   const [id, setId] = signal(1)
   let release!: (v: number) => void
@@ -210,6 +291,9 @@ test('use(accessor) throws NotReadyYet during SWR refetch (Plan B behavior; use 
 
 
 describe('use(accessor) — Plan B: throws on isPending', () => {
+  /**
+   * @canon rule-use-of-an-accessor-throws-while-it-is-pending
+   */
   test('use(swrComputed) throws NotReadyYet during refetch, even though accessor returns stale', async () => {
     const [page, setPage] = signal(1)
     let activeResolve: (v: string) => void = () => {}
@@ -249,11 +333,17 @@ describe('use(accessor) — Plan B: throws on isPending', () => {
 // would make use(x) throw returns the stale value instead. use(x) itself is
 // unchanged — the tests above stay correct and untouched.
 describe('use.latest(accessor) — throws only before the first value, tolerant after', () => {
+  /**
+   * @canon rule-use-latest-throws-only-before-the-first-value
+   */
   test('throws NotReadyYet while nothing has ever resolved, exactly like use()', () => {
     const [s] = signal<Promise<number>>(new Promise(() => {})) // never resolves
     expect(() => use.latest(s)).toThrow(NotReadyYet)
   })
 
+  /**
+   * @canon rule-use-latest-throws-only-before-the-first-value
+   */
   test('the thrown NotReadyYet carries the in-flight promise, exactly like use()', async () => {
     const [s] = signal<Promise<number>>(new Promise(() => {}))
     let threw: unknown = null
@@ -267,12 +357,18 @@ describe('use.latest(accessor) — throws only before the first value, tolerant 
     expect((threw as NotReadyYet).promise).toBe(promiseOf(s))
   })
 
+  /**
+   * @canon rule-use-latest-throws-only-before-the-first-value
+   */
   test('returns the resolved value once settled, same as use()', async () => {
     const [s] = signal(Promise.resolve(10))
     await tick()
     expect(use.latest(s)).toBe(10)
   })
 
+  /**
+   * @canon rule-use-latest-throws-only-before-the-first-value
+   */
   test('does NOT throw during an SWR refetch — returns the stale value instead of use()\'s throw', async () => {
     const [id, setId] = signal(1)
     let release!: (v: number) => void
@@ -295,6 +391,9 @@ describe('use.latest(accessor) — throws only before the first value, tolerant 
     expect(use.latest(c)).toBe(20)
   })
 
+  /**
+   * @canon rule-use-latest-throws-only-before-the-first-value
+   */
   test('use(swrComputed) throwing during refetch and use.latest(swrComputed) returning stale are both true at once', async () => {
     const [page, setPage] = signal(1)
     let activeResolve: (v: string) => void = () => {}
@@ -317,6 +416,9 @@ describe('use.latest(accessor) — throws only before the first value, tolerant 
 })
 
 describe('from — post-Plan-A (no brand suspension)', () => {
+  /**
+   * @canon rule-from-yields-what-it-is-given
+   */
   test('yield* from on an SWR-refetching computed yields the stale value, NOT brand.promise', async () => {
     const [page, setPage] = signal(1)
     let activeResolve: (v: string) => void = () => {}

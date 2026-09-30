@@ -9,6 +9,9 @@ const ticks = async (n: number) => {
   for (let i = 0; i < n; i++) await tick()
 }
 
+/**
+ * @canon rule-oncleanup-in-a-generator-stage-belongs-to-the-generator
+ */
 test('onCleanup before a pause does not fire when the generator resumes', async () => {
   const events: string[] = []
 
@@ -29,6 +32,9 @@ test('onCleanup before a pause does not fire when the generator resumes', async 
   expect(events).toEqual(['after-pause', 'cleanup'])
 })
 
+/**
+ * @canon rule-oncleanup-in-a-generator-stage-belongs-to-the-generator
+ */
 test('onCleanup fires when the generator completes', async () => {
   let cleaned = 0
 
@@ -46,6 +52,9 @@ test('onCleanup fires when the generator completes', async () => {
   expect(cleaned).toBe(1)
 })
 
+/**
+ * @canon rule-oncleanup-in-a-generator-stage-belongs-to-the-generator
+ */
 test('onCleanup fires when the generator is discarded on a dependency change', async () => {
   const [a, setA] = signal(1)
   let cleaned = 0
@@ -70,6 +79,9 @@ test('onCleanup fires when the generator is discarded on a dependency change', a
   expect(cleaned).toBe(2) // the discarded generator's, then the replacement's
 })
 
+/**
+ * @canon rule-oncleanup-in-a-generator-stage-belongs-to-the-generator
+ */
 test('onCleanup fires when the owner is disposed while paused', async () => {
   let cleaned = 0
   let dispose!: () => void
@@ -92,6 +104,9 @@ test('onCleanup fires when the owner is disposed while paused', async () => {
   expect(cleaned).toBe(1)
 })
 
+/**
+ * @canon rule-generator-cleanups-unwind-after-its-finally-blocks
+ */
 test('cleanups run most recently registered first, after finally blocks', async () => {
   const [a, setA] = signal(1)
   const events: string[] = []
@@ -119,6 +134,9 @@ test('cleanups run most recently registered first, after finally blocks', async 
   expect(events).toEqual(['finally', 'second', 'first'])
 })
 
+/**
+ * @canon rule-oncleanup-in-a-generator-stage-belongs-to-the-generator
+ */
 test('onCleanup fires when a generator completes without ever pausing', () => {
   // A generator stage whose body never yields anything async runs to
   // completion inside the very first `gen.next()` call, so it never becomes
@@ -134,6 +152,9 @@ test('onCleanup fires when a generator completes without ever pausing', () => {
   expect(cleaned).toBe(1)
 })
 
+/**
+ * @canon rule-oncleanup-in-a-generator-stage-belongs-to-the-generator
+ */
 test('onCleanup fires when a generator throws without ever pausing', () => {
   // Same gap as above, but for a generator that throws synchronously instead
   // of returning: `discardGen()` in the catch path must find a live generator
@@ -149,6 +170,9 @@ test('onCleanup fires when a generator throws without ever pausing', () => {
   expect(cleaned).toBe(1)
 })
 
+/**
+ * @canon rule-oncleanup-in-a-generator-stage-belongs-to-the-generator
+ */
 test('onCleanup outside a generator stage is unchanged', async () => {
   // A sync stage re-runs from the top, so per-run cleanup is still the right
   // meaning there. This guards the routing change from leaking.

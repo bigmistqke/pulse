@@ -18,6 +18,9 @@ const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
 // These tests use the synchronous scheduler so writes flush immediately.
 afterEach(() => setScheduler(microtaskScheduler(flush)))
 
+/**
+ * @canon rule-an-effect-runs-at-creation-and-after-each-change
+ */
 test('effect runs once immediately on creation', () => {
   setScheduler(syncScheduler(flush))
   const seen: number[] = []
@@ -26,6 +29,9 @@ test('effect runs once immediately on creation', () => {
   expect(seen).toEqual([0])
 })
 
+/**
+ * @canon rule-an-effect-runs-at-creation-and-after-each-change
+ */
 test('effect re-runs when a dependency changes', () => {
   setScheduler(syncScheduler(flush))
   const seen: number[] = []
@@ -36,6 +42,9 @@ test('effect re-runs when a dependency changes', () => {
   expect(seen).toEqual([0, 1, 2])
 })
 
+/**
+ * @canon rule-an-effects-cleanups-run-before-its-next-run
+ */
 test('onCleanup runs before an effect re-runs', () => {
   setScheduler(syncScheduler(flush))
   const log: string[] = []
@@ -50,6 +59,9 @@ test('onCleanup runs before an effect re-runs', () => {
   expect(log).toEqual(['run 0', 'cleanup 0', 'run 1'])
 })
 
+/**
+ * @canon rule-a-suspended-effect-re-runs-when-its-promise-settles
+ */
 test('an effect using a pending promise suspends, then runs when it settles', async () => {
   setScheduler(syncScheduler(flush))
   const seen: number[] = []
@@ -62,6 +74,9 @@ test('an effect using a pending promise suspends, then runs when it settles', as
   expect(seen).toEqual([10]) // re-ran with the resolved value
 })
 
+/**
+ * @canon rule-a-suspended-effect-re-runs-when-its-promise-settles
+ */
 test('an effect re-runs when a signal it uses is set to a new promise', async () => {
   setScheduler(syncScheduler(flush))
   const [s, setS] = signal<number | Promise<number>>(1)
@@ -74,6 +89,9 @@ test('an effect re-runs when a signal it uses is set to a new promise', async ()
   expect(seen).toEqual([1, 2]) // write-back flipped s to 2 -> effect re-ran (kick is a no-op via suspendedOn guard)
 })
 
+/**
+ * @canon rule-a-real-error-in-an-effect-goes-to-the-nearest-handler
+ */
 test('a genuine (non-NotReadyYet) error thrown in an effect is not swallowed', () => {
   setScheduler(syncScheduler(flush))
   expect(() => {
@@ -81,6 +99,9 @@ test('a genuine (non-NotReadyYet) error thrown in an effect is not swallowed', (
   }).toThrow('real error')
 })
 
+/**
+ * @canon rule-an-effect-is-disposed-with-its-owner
+ */
 test('owned effect is disposed when its root is disposed', () => {
   setScheduler(syncScheduler(flush))
   const log: number[] = []
@@ -96,6 +117,9 @@ test('owned effect is disposed when its root is disposed', () => {
   })
 })
 
+/**
+ * @canon rule-an-effects-cleanups-run-before-its-next-run
+ */
 test('onCleanup inside an effect body registers per-run (r3 behaviour), not on the owner', () => {
   setScheduler(syncScheduler(flush))
   const log: string[] = []
@@ -112,6 +136,9 @@ test('onCleanup inside an effect body registers per-run (r3 behaviour), not on t
   })
 })
 
+/**
+ * @canon rule-a-real-error-in-an-effect-goes-to-the-nearest-handler
+ */
 test('an effect created inside catchError routes its throw to the handler', () => {
   setScheduler(syncScheduler(flush))
   const errors: unknown[] = []
@@ -122,6 +149,9 @@ test('an effect created inside catchError routes its throw to the handler', () =
   expect((errors[0] as Error).message).toBe('effect failed')
 })
 
+/**
+ * @canon rule-a-real-error-in-an-effect-goes-to-the-nearest-handler
+ */
 test('an effect created outside any catchError still propagates uncaught (Plan 2a behaviour preserved)', () => {
   setScheduler(syncScheduler(flush))
   expect(() => {
@@ -129,6 +159,9 @@ test('an effect created outside any catchError still propagates uncaught (Plan 2
   }).toThrow('uncaught')
 })
 
+/**
+ * @canon rule-a-real-error-in-an-effect-goes-to-the-nearest-handler
+ */
 test('an effect re-throwing after a signal change routes the new throw too', () => {
   setScheduler(syncScheduler(flush))
   const errors: unknown[] = []
@@ -147,6 +180,9 @@ test('an effect re-throwing after a signal change routes the new throw too', () 
   expect((errors[1] as Error).message).toBe('fail 2')
 })
 
+/**
+ * @canon rule-a-suspension-is-reported-to-the-nearest-boundary
+ */
 test('effect that suspends increments nearest pending boundary scope', async () => {
   setScheduler(syncScheduler(flush))
   let count = 0
@@ -178,6 +214,9 @@ test('effect that suspends increments nearest pending boundary scope', async () 
   setScheduler(microtaskScheduler(flush))
 })
 
+/**
+ * @canon rule-a-disposed-binding-releases-its-boundary
+ */
 test('effect disposal while pending unregisters from the pending boundary scope', () => {
   setScheduler(syncScheduler(flush))
   let count = 0
@@ -206,6 +245,9 @@ test('effect disposal while pending unregisters from the pending boundary scope'
   setScheduler(microtaskScheduler(flush))
 })
 
+/**
+ * @canon rule-a-suspension-is-reported-to-the-nearest-boundary
+ */
 test('effect that never suspends does not touch the pending boundary scope', () => {
   setScheduler(syncScheduler(flush))
   let count = 0

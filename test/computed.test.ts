@@ -10,12 +10,18 @@ import { createRoot, catchError } from '../src/owner'
 /** Resolve after all microtasks have drained (a macrotask boundary). */
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
 
+/**
+ * @canon rule-a-read-is-current-without-a-flush
+ */
 test('computed derives an initial value from a signal', () => {
   const [count] = signal(2)
   const doubled = computed(() => count() * 2)
   expect(doubled()).toBe(4)
 })
 
+/**
+ * @canon rule-a-read-is-current-without-a-flush
+ */
 test('computed is pull-on-read correct after a write', () => {
   const [count, setCount] = signal(2)
   const doubled = computed(() => count() * 2)
@@ -23,6 +29,9 @@ test('computed is pull-on-read correct after a write', () => {
   expect(doubled()).toBe(6)
 })
 
+/**
+ * @canon rule-a-computed-is-a-pipeline-of-stages
+ */
 test('computed threads a value through a multi-stage pipeline', () => {
   const [n] = signal(3)
   const result = computed(
@@ -33,6 +42,9 @@ test('computed threads a value through a multi-stage pipeline', () => {
   expect(result()).toBe('value: 8')
 })
 
+/**
+ * @canon rule-a-computed-is-a-pipeline-of-stages
+ */
 test('multi-stage pipeline recomputes on dependency change', () => {
   const [n, setN] = signal(3)
   const result = computed(
@@ -44,6 +56,9 @@ test('multi-stage pipeline recomputes on dependency change', () => {
   expect(result()).toBe(20)
 })
 
+/**
+ * @canon rule-a-computed-is-a-pipeline-of-stages
+ */
 test('a stage in the middle of the pipeline may also read signals', () => {
   const [base] = signal(10)
   const [factor, setFactor] = signal(2)
@@ -56,6 +71,9 @@ test('a stage in the middle of the pipeline may also read signals', () => {
   expect(result()).toBe(30)
 })
 
+/**
+ * @canon rule-a-pipeline-reads-as-a-promise-while-its-value-came-through-async
+ */
 test('an async stage suspends the pipeline; the value flips to the resolved value on settle', async () => {
   let release!: (v: number) => void
   const c = computed(
@@ -75,6 +93,9 @@ test('an async stage suspends the pipeline; the value flips to the resolved valu
   expect(peek(c)).toBe(11)
 })
 
+/**
+ * @canon rule-a-pipeline-reads-as-a-promise-while-its-value-came-through-async
+ */
 test('a sync final stage fed by an async upstream reads as a Promise, not bare', async () => {
   const c = computed(
     async () => 1,
@@ -90,6 +111,9 @@ test('a sync final stage fed by an async upstream reads as a Promise, not bare',
   expect(peek(c)).toBe(2)
 })
 
+/**
+ * @canon rule-a-pipeline-reads-as-a-promise-while-its-value-came-through-async
+ */
 test('a conditionally-async stage flips its read shape honestly across evaluations', async () => {
   const [cond, setCond] = signal(true)
   const c = computed(() => (cond() ? Promise.resolve(5) : 5))
@@ -109,6 +133,9 @@ test('a conditionally-async stage flips its read shape honestly across evaluatio
   expect(use(c)).toBe(5)
 })
 
+/**
+ * @canon rule-from-yields-what-it-is-given
+ */
 test('a generator stage with yield* read of a settled value runs synchronously', () => {
   const [s] = signal(3)
   const c = computed(function* () {
@@ -118,6 +145,9 @@ test('a generator stage with yield* read of a settled value runs synchronously',
   expect(use(c)).toBe(6)
 })
 
+/**
+ * @canon rule-a-resumed-generator-does-not-rerun-code-before-its-pause
+ */
 test('a generator stage suspends on a pending promise, resumes on settle', async () => {
   let release!: (v: number) => void
   const p = new Promise<number>((resolve) => { release = resolve })
@@ -131,6 +161,9 @@ test('a generator stage suspends on a pending promise, resumes on settle', async
   expect(use(c)).toBe(105)
 })
 
+/**
+ * @canon rule-a-computed-is-a-pipeline-of-stages
+ */
 test('cross-stage caching: a sync stage downstream of an unchanged stage is not re-run', () => {
   setScheduler(syncScheduler(flush))
   const [a] = signal(1)
@@ -150,6 +183,9 @@ test('cross-stage caching: a sync stage downstream of an unchanged stage is not 
   setScheduler(microtaskScheduler(flush))
 })
 
+/**
+ * @canon rule-a-rejected-yield-is-thrown-into-the-generator
+ */
 test('a generator stage that try/catches a rejected yield resumes normally', async () => {
   const reason = new Error('boom')
   const p = Promise.reject(reason)
@@ -166,6 +202,9 @@ test('a generator stage that try/catches a rejected yield resumes normally', asy
   expect(use(c)).toBe('caught: boom')
 })
 
+/**
+ * @canon rule-disposing-an-owner-ends-what-it-owns
+ */
 test('owned computed is disposed when its root is disposed', () => {
   setScheduler(syncScheduler(flush))
   const seen: number[] = []
@@ -183,6 +222,9 @@ test('owned computed is disposed when its root is disposed', () => {
   setScheduler(microtaskScheduler(flush))
 })
 
+/**
+ * @canon rule-an-older-production-never-publishes-over-a-newer-one
+ */
 test('stash is discarded if upstream value changes before kick consumes it', async () => {
   const [id, setId] = signal<number>(1)
   let firstRelease!: (v: string) => void
@@ -217,6 +259,9 @@ test('stash is discarded if upstream value changes before kick consumes it', asy
   expect(use(c)).toBe('value:2')
 })
 
+/**
+ * @canon rule-a-catch-error-handler-is-called-for-each-throw-under-it
+ */
 test('a computed created inside catchError routes its throw to the handler', () => {
   const errors: unknown[] = []
   catchError(() => {
@@ -228,6 +273,9 @@ test('a computed created inside catchError routes its throw to the handler', () 
   expect((errors[0] as Error).message).toBe('compute failed')
 })
 
+/**
+ * @canon rule-a-recovery-clears-the-error
+ */
 test('after a caught throw, the computed is frozen at its previous good value', () => {
   setScheduler(syncScheduler(flush))
   const [trigger, setTrigger] = signal(0)
@@ -248,6 +296,9 @@ test('after a caught throw, the computed is frozen at its previous good value', 
   }, () => {})
 })
 
+/**
+ * @canon rule-a-recovery-clears-the-error
+ */
 test('a consumer recovers after a computed fails once and later succeeds', async () => {
   const [id, setId] = signal(1)
   const seen: string[] = []
@@ -283,11 +334,17 @@ test('a consumer recovers after a computed fails once and later succeeds', async
   expect(seen.at(-1)).toBe('recovered')
 })
 
+/**
+ * @canon rule-an-error-nothing-claims-is-thrown-on-a-first-run
+ */
 test('a computed throw outside any catchError still propagates uncaught', () => {
   const c = computed(() => { throw new Error('uncaught') })
   expect(() => c()).toThrow('uncaught')
 })
 
+/**
+ * @canon rule-a-catch-error-handler-is-called-for-each-throw-under-it
+ */
 test('mid-pipeline throw: stage-N throw freezes pipeline; downstream stage does not see throw', () => {
   setScheduler(syncScheduler(flush))
   const [trigger, setTrigger] = signal(false)
@@ -315,6 +372,9 @@ test('mid-pipeline throw: stage-N throw freezes pipeline; downstream stage does 
   setScheduler(microtaskScheduler(flush))
 })
 
+/**
+ * @canon rule-a-recovery-clears-the-error
+ */
 test('an unhandled-throw computed throws on every read until a successful re-run clears it', () => {
   setScheduler(syncScheduler(flush))
   const [trigger, setTrigger] = signal(0)
@@ -339,6 +399,9 @@ test('an unhandled-throw computed throws on every read until a successful re-run
   setScheduler(microtaskScheduler(flush))
 })
 
+/**
+ * @canon rule-a-catch-error-handler-is-called-for-each-throw-under-it
+ */
 test('async stage rejection: rejected promise re-thrown on next r3 invocation (reuse-value path)', async () => {
   setScheduler(syncScheduler(flush))
   const caught: unknown[] = []
@@ -367,6 +430,9 @@ test('async stage rejection: rejected promise re-thrown on next r3 invocation (r
   setScheduler(microtaskScheduler(flush))
 })
 
+/**
+ * @canon rule-an-async-computed-refetches-when-a-source-changes
+ */
 test('stage-0 returning Promise: dep stays tracked across settles (THE main bug)', async () => {
   setScheduler(syncScheduler(flush))
   const fetches: number[] = []
@@ -396,6 +462,9 @@ test('stage-0 returning Promise: dep stays tracked across settles (THE main bug)
   setScheduler(microtaskScheduler(flush))
 })
 
+/**
+ * @canon rule-an-async-computed-refetches-when-a-source-changes
+ */
 test('refetch with different resolved value: downstream effect re-runs', async () => {
   setScheduler(syncScheduler(flush))
   const [page, setPage] = signal(0)
@@ -427,6 +496,9 @@ test('refetch with different resolved value: downstream effect re-runs', async (
   setScheduler(microtaskScheduler(flush))
 })
 
+/**
+ * @canon rule-an-equal-value-does-not-notify-consumers
+ */
 test('refetch with same resolved value (Object.is): downstream effect does not re-run', async () => {
   setScheduler(syncScheduler(flush))
   const sameArray = [1, 2, 3]
@@ -463,6 +535,9 @@ test('refetch with same resolved value (Object.is): downstream effect does not r
   setScheduler(microtaskScheduler(flush))
 })
 
+/**
+ * @canon rule-an-async-node-keeps-its-last-value-while-it-refetches
+ */
 test('stale-while-revalidate: prior value visible during refetch', async () => {
   setScheduler(syncScheduler(flush))
   const [page, setPage] = signal(0)
@@ -498,6 +573,9 @@ test('stale-while-revalidate: prior value visible during refetch', async () => {
   setScheduler(microtaskScheduler(flush))
 })
 
+/**
+ * @canon rule-is-pending-reports-an-unsettled-pipeline
+ */
 test('isPending(computed) true during initial load, false after settle', async () => {
   setScheduler(syncScheduler(flush))
   let resolveP!: (v: number) => void
@@ -516,6 +594,9 @@ test('isPending(computed) true during initial load, false after settle', async (
   setScheduler(microtaskScheduler(flush))
 })
 
+/**
+ * @canon rule-is-pending-reports-an-unsettled-pipeline
+ */
 test('isPending(computed) true during refetch (after first settle)', async () => {
   setScheduler(syncScheduler(flush))
   const [page, setPage] = signal(0)
@@ -549,6 +630,9 @@ test('isPending(computed) true during refetch (after first settle)', async () =>
   setScheduler(microtaskScheduler(flush))
 })
 
+/**
+ * @canon rule-an-async-computed-refetches-when-a-source-changes
+ */
 test('.then-chained Promise identity (unstable per call): no infinite loop, settles correctly', async () => {
   setScheduler(syncScheduler(flush))
   const [page, setPage] = signal(0)
@@ -587,6 +671,9 @@ test('.then-chained Promise identity (unstable per call): no infinite loop, sett
   setScheduler(microtaskScheduler(flush))
 })
 
+/**
+ * @canon rule-an-async-computed-refetches-when-a-source-changes
+ */
 test('multi-stage: stage 1 returning Promise still works (regression check)', async () => {
   setScheduler(syncScheduler(flush))
   const [page, setPage] = signal(0)
@@ -621,6 +708,9 @@ test('multi-stage: stage 1 returning Promise still works (regression check)', as
   setScheduler(microtaskScheduler(flush))
 })
 
+/**
+ * @canon rule-an-older-production-never-publishes-over-a-newer-one
+ */
 test('supersession: stale settle of an old promise is ignored', async () => {
   setScheduler(syncScheduler(flush))
   const [page, setPage] = signal(0)
@@ -653,6 +743,9 @@ test('supersession: stale settle of an old promise is ignored', async () => {
   setScheduler(microtaskScheduler(flush))
 })
 
+/**
+ * @canon rule-a-computed-is-a-pipeline-of-stages
+ */
 test('generator stage: unchanged behaviour (regression check)', async () => {
   setScheduler(syncScheduler(flush))
   const [trigger, setTrigger] = signal(0)
@@ -678,6 +771,9 @@ test('generator stage: unchanged behaviour (regression check)', async () => {
   setScheduler(microtaskScheduler(flush))
 })
 
+/**
+ * @canon rule-is-pending-reports-an-unsettled-pipeline
+ */
 test('promiseOf(computed) returns the in-flight Promise during refetch', async () => {
   const [id, setId] = signal(1)
   let release!: (v: string) => void
@@ -702,6 +798,9 @@ test('promiseOf(computed) returns the in-flight Promise during refetch', async (
 import { describe } from 'vitest'
 
 describe('computed — NotReadyYet absorbed as suspension (Plan B)', () => {
+  /**
+   * @canon rule-a-stage-suspended-through-use-is-absorbed
+   */
   test('sync stage body throwing NotReadyYet suspends, then resumes on settle', async () => {
     let resolve!: (v: number) => void
     const p = new Promise<number>((r) => (resolve = r))
@@ -719,6 +818,9 @@ describe('computed — NotReadyYet absorbed as suspension (Plan B)', () => {
     expect(isPending(c)).toBe(false)
   })
 
+  /**
+   * @canon rule-a-stage-suspended-through-use-is-absorbed
+   */
   test('two-stage pipeline: stage 0 throws NotReadyYet; downstream stage sees the suspension', async () => {
     let resolve!: (v: number) => void
     const p = new Promise<number>((r) => (resolve = r))
@@ -730,6 +832,9 @@ describe('computed — NotReadyYet absorbed as suspension (Plan B)', () => {
     expect(stage1()).toBe(14)
   })
 
+  /**
+   * @canon rule-an-async-node-keeps-its-last-value-while-it-refetches
+   */
   test('SWR-refetch: stage body throwing NotReadyYet during refetch keeps prior value visible', async () => {
     const [src, setSrc] = signal(1)
     let activeResolve: (v: number) => void = () => {}

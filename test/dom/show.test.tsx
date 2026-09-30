@@ -16,6 +16,9 @@ afterEach(() => {
   document.body.innerHTML = ''
 })
 
+/**
+ * @canon rule-show-renders-its-children-when-truthy-and-its-fallback-otherwise
+ */
 test('truthy when mounts function child with narrowed value', () => {
   const target = document.createElement('section')
   document.body.append(target)
@@ -28,6 +31,9 @@ test('truthy when mounts function child with narrowed value', () => {
   dispose()
 })
 
+/**
+ * @canon rule-show-renders-its-children-when-truthy-and-its-fallback-otherwise
+ */
 test('falsy when mounts fallback', () => {
   const target = document.createElement('section')
   document.body.append(target)
@@ -44,6 +50,9 @@ test('falsy when mounts fallback', () => {
   dispose()
 })
 
+/**
+ * @canon rule-a-pending-condition-reads-as-falsy
+ */
 test('pending Promise<T> when → fallback', () => {
   const target = document.createElement('section')
   document.body.append(target)
@@ -61,6 +70,9 @@ test('pending Promise<T> when → fallback', () => {
   dispose()
 })
 
+/**
+ * @canon case-show-rebuilds-only-when-truthiness-flips
+ */
 test('truthy → truthy with different value preserves subtree (children not re-called)', () => {
   const target = document.createElement('section')
   document.body.append(target)
@@ -80,6 +92,9 @@ test('truthy → truthy with different value preserves subtree (children not re-
   dispose()
 })
 
+/**
+ * @canon case-show-rebuilds-only-when-truthiness-flips
+ */
 test('truthy → falsy disposes branch sub-owner', () => {
   const target = document.createElement('section')
   document.body.append(target)
@@ -102,6 +117,9 @@ test('truthy → falsy disposes branch sub-owner', () => {
   dispose()
 })
 
+/**
+ * @canon case-show-rebuilds-only-when-truthiness-flips
+ */
 test('falsy → truthy mounts fresh children invocation', () => {
   const target = document.createElement('section')
   document.body.append(target)
@@ -123,6 +141,9 @@ test('falsy → truthy mounts fresh children invocation', () => {
   dispose()
 })
 
+/**
+ * @canon case-show-rebuilds-only-when-truthiness-flips
+ */
 test('disposing surrounding owner disposes active branch', () => {
   const target = document.createElement('section')
   document.body.append(target)
@@ -144,6 +165,9 @@ test('disposing surrounding owner disposes active branch', () => {
   expect(cleaned).toBe(true)
 })
 
+/**
+ * @canon rule-show-renders-its-children-when-truthy-and-its-fallback-otherwise
+ */
 test('static (non-function) child renders when truthy', () => {
   const target = document.createElement('section')
   document.body.append(target)

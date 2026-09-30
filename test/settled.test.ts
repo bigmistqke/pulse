@@ -4,6 +4,9 @@ import { computed, effect, isPending, settled, signal, use } from '../src/index'
 /** Resolve after all microtasks have drained (a macrotask boundary). */
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
 
+/**
+ * @canon rule-settled-waits-until-every-input-is-fresh
+ */
 test('settled waits for ALL inputs, then produces the combined frame atomically', async () => {
   let ra!: (v: number) => void
   let rb!: (v: number) => void
@@ -28,6 +31,9 @@ test('settled waits for ALL inputs, then produces the combined frame atomically'
   expect(use(preview)).toBe(30) // both settled → the combined frame appears at once
 })
 
+/**
+ * @canon rule-settled-waits-until-every-input-is-fresh
+ */
 test('a consumer never observes a partial frame', async () => {
   const observed: string[] = []
   let ra!: (v: number) => void
@@ -56,6 +62,9 @@ test('a consumer never observes a partial frame', async () => {
   expect(observed).toEqual(['10+20'])
 })
 
+/**
+ * @canon rule-settled-waits-until-every-input-is-fresh
+ */
 test('an already-settled raw promise input converges (no re-suspend loop)', async () => {
   // Regression: settled used to re-add an already-settled promise to the wait set
   // on every re-run, yielding a fresh (always-pending) Promise.all — suspending,
@@ -71,6 +80,9 @@ test('an already-settled raw promise input converges (no re-suspend loop)', asyn
   expect(use(c)).toBe('7|42')
 })
 
+/**
+ * @canon rule-settled-waits-until-every-input-is-fresh
+ */
 test('settled throws a rejected input instead of silently yielding undefined', async () => {
   const [s] = signal(Promise.reject(new Error('nope')) as Promise<number>)
   await tick() // let the rejection settle
@@ -81,6 +93,9 @@ test('settled throws a rejected input instead of silently yielding undefined', a
   expect(() => c()).toThrow('nope')
 })
 
+/**
+ * @canon rule-settled-waits-until-every-input-is-fresh
+ */
 test('settled resolves immediately when every input is already settled', async () => {
   const A = computed(async () => 2)
   const B = computed(async () => 3)
@@ -93,6 +108,9 @@ test('settled resolves immediately when every input is already settled', async (
   expect(use(combined)).toBe(6)
 })
 
+/**
+ * @canon rule-settled-waits-until-every-input-is-fresh
+ */
 test('settled re-runs and re-coordinates when an input refetches', async () => {
   let ra!: (v: number) => void
   let rb!: (v: number) => void

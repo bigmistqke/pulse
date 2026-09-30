@@ -7,6 +7,9 @@ import { error } from '../src/error'
 import { action } from '../src/scope'
 import { effect } from '../src/effect'
 
+/**
+ * @canon rule-a-write-replaces-a-derived-value-without-rerunning-it
+ */
 test('W2: a write replaces the value and the body does not re-run', () => {
   let runs = 0
   const [count, setCount] = signal(() => {
@@ -21,6 +24,9 @@ test('W2: a write replaces the value and the body does not re-run', () => {
   expect(runs).toBe(1) // the derivation did not run again
 })
 
+/**
+ * @canon rule-an-update-function-receives-the-last-resolved-value
+ */
 test('W2: an update function receives the last resolved value', () => {
   const [list, setList] = signal(() => ['a'])
   expect(list()).toEqual(['a'])
@@ -28,6 +34,9 @@ test('W2: an update function receives the last resolved value', () => {
   expect(list()).toEqual(['a', 'b'])
 })
 
+/**
+ * @canon rule-an-update-function-receives-the-last-resolved-value
+ */
 test('W3: an update function receives the value an eagerly-run derivation produced', () => {
   let seen: unknown = 'not called'
   const [list, setList] = signal(() => ['a'])
@@ -39,6 +48,9 @@ test('W3: an update function receives the value an eagerly-run derivation produc
   expect(list()).toEqual(['seeded'])
 })
 
+/**
+ * @canon rule-an-update-function-receives-the-last-resolved-value
+ */
 test('W3: an update function receives undefined while nothing has resolved yet', () => {
   let seen: unknown = 'not called'
   const [list, setList] = signal(function* () {
@@ -51,6 +63,9 @@ test('W3: an update function receives undefined while nothing has resolved yet',
   expect(seen).toBeUndefined() // it ran at creation but suspended, so nothing resolved
 })
 
+/**
+ * @canon rule-an-update-function-receives-the-last-resolved-value
+ */
 test('W21: two writes in one tick chain, and the last one wins', () => {
   const [list, setList] = signal(() => ['a'])
   expect(list()).toEqual(['a'])
@@ -59,6 +74,9 @@ test('W21: two writes in one tick chain, and the last one wins', () => {
   expect(list()).toEqual(['a', 'b', 'c'])
 })
 
+/**
+ * @canon rule-a-signal-given-stages-is-a-writable-derivation
+ */
 test('the value form still works and is unchanged', () => {
   const [count, setCount] = signal(0)
   setCount(3)
@@ -67,6 +85,9 @@ test('the value form still works and is unchanged', () => {
   expect(count()).toBe(4)
 })
 
+/**
+ * @canon rule-a-signal-given-stages-is-a-writable-derivation
+ */
 test('a write into a multi-stage pipeline lands on the output', () => {
   const [n, setN] = signal(
     () => 2,
@@ -77,6 +98,9 @@ test('a write into a multi-stage pipeline lands on the output', () => {
   expect(n()).toBe(99)
 })
 
+/**
+ * @canon rule-a-pipeline-reads-as-a-promise-while-its-value-came-through-async
+ */
 test('a bare write into an asynchronously coloured stage keeps the read a promise', async () => {
   let resolveList: (v: string[]) => void = () => {}
   const [list, setList] = signal(function* () {
@@ -98,6 +122,9 @@ test('a bare write into an asynchronously coloured stage keeps the read a promis
   expect(use(list)).toEqual(['b'])
 })
 
+/**
+ * @canon rule-a-pipeline-reads-as-a-promise-while-its-value-came-through-async
+ */
 test('a write into a synchronously coloured stage does not introduce a promise', () => {
   const [n, setN] = signal(() => 1)
   expect(n()).toBe(1)
@@ -105,6 +132,9 @@ test('a write into a synchronously coloured stage does not introduce a promise',
   expect(n()).toBe(2) // still bare, not a promise
 })
 
+/**
+ * @canon rule-a-pipeline-reads-as-a-promise-while-its-value-came-through-async
+ */
 test('a generator stage that never suspends publishes its value bare', () => {
   let runs = 0
   const [list, setList] = signal(function* () {
@@ -125,6 +155,9 @@ test('a generator stage that never suspends publishes its value bare', () => {
   expect(list()).not.toBeInstanceOf(Promise)
 })
 
+/**
+ * @canon rule-a-pipeline-reads-as-a-promise-while-its-value-came-through-async
+ */
 test('a generator stage colours its read by what it actually reads, not by being a generator', async () => {
   const [syncSource] = signal(() => 5)
   const [syncDerived] = signal(function* () {
@@ -149,6 +182,9 @@ test('a generator stage colours its read by what it actually reads, not by being
 /** Resolve after all microtasks have drained (a macrotask boundary). */
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
 
+/**
+ * @canon rule-a-construction-default-seeds-only-the-tolerant-read
+ */
 test('signal(fn, default): peek() reports the default before the first resolution', () => {
   const [todos] = signal(function* () {
     return yield* from(new Promise<string[]>(() => {})) // never resolves
@@ -156,6 +192,9 @@ test('signal(fn, default): peek() reports the default before the first resolutio
   expect(peek(todos)).toEqual([])
 })
 
+/**
+ * @canon rule-a-construction-default-seeds-only-the-tolerant-read
+ */
 test('signal(fn, default): peek() reports the real value once resolved, not the default', async () => {
   let resolveList: (v: string[]) => void = () => {}
   const [todos] = signal(function* () {
@@ -167,6 +206,9 @@ test('signal(fn, default): peek() reports the real value once resolved, not the 
   expect(peek(todos)).toEqual(['a'])
 })
 
+/**
+ * @canon rule-a-construction-default-seeds-only-the-tolerant-read
+ */
 test('signal(fn, default) does not change the raw read — still a promise while pending', () => {
   const [todos] = signal(function* () {
     return yield* from(new Promise<string[]>(() => {})) // never resolves
@@ -177,6 +219,9 @@ test('signal(fn, default) does not change the raw read — still a promise while
   expect(isPending(todos)).toBe(true)
 })
 
+/**
+ * @canon rule-a-construction-default-seeds-only-the-tolerant-read
+ */
 test('signal(fn, default): peek(todos) needs no second argument to type as non-optional (compile-time)', () => {
   // This is mostly a typecheck-only assertion — the `const … : T = …` lines
   // are the compile-time checks; a wrong type would fail to compile.
@@ -199,6 +244,9 @@ test('signal(fn, default): peek(todos) needs no second argument to type as non-o
   expect(withoutDefaultValue).toBeUndefined()
 })
 
+/**
+ * @canon rule-a-construction-default-seeds-only-the-tolerant-read
+ */
 test('signal(fn, default): an update function sees the default in place of undefined before the first resolution', () => {
   let seen: unknown = 'not called'
   const [, setTodos] = signal(function* () {
@@ -211,6 +259,9 @@ test('signal(fn, default): an update function sees the default in place of undef
   expect(seen).toEqual([])
 })
 
+/**
+ * @canon rule-a-construction-default-seeds-only-the-tolerant-read
+ */
 test('signal(fn, default): an update function still sees the real resolved value once one exists, not the default', async () => {
   const [todos, setTodos] = signal(function* () {
     return yield* from(Promise.resolve(['a']))
@@ -225,6 +276,9 @@ test('signal(fn, default): an update function still sees the real resolved value
   expect(peek(todos)).toEqual(['a'])
 })
 
+/**
+ * @canon rule-a-construction-default-seeds-only-the-tolerant-read
+ */
 test('signal(fn, default): an update function needs no ?? default to type as non-optional (compile-time)', () => {
   // This is mostly a typecheck-only assertion — the `const … : T = …` lines
   // are the compile-time checks; a wrong type would fail to compile.
@@ -250,6 +304,9 @@ test('signal(fn, default): an update function needs no ?? default to type as non
   })
 })
 
+/**
+ * @canon rule-a-write-abandons-the-run-in-progress
+ */
 test('W1: a write abandons the fetch in flight and it never publishes', async () => {
   let resolveList: (v: string[]) => void = () => {}
   const [version, setVersion] = signal(1)
@@ -279,6 +336,9 @@ test('W1: a write abandons the fetch in flight and it never publishes', async ()
   expect(use(todos)).toEqual(['a', 'saved']) // the abandoned fetch published nothing
 })
 
+/**
+ * @canon rule-a-write-abandons-the-run-in-progress
+ */
 test('W13: abandoning a paused stage runs its cleanups', async () => {
   const aborted: string[] = []
   const [version, setVersion] = signal(1)
@@ -293,6 +353,9 @@ test('W13: abandoning a paused stage runs its cleanups', async () => {
   expect(aborted).toEqual(['run 1'])
 })
 
+/**
+ * @canon rule-a-write-abandons-the-run-in-progress
+ */
 test('a cleanup fired by a write sees the value that was written', () => {
   const seen: unknown[] = []
   const [todos, setTodos] = signal(function* () {
@@ -304,6 +367,9 @@ test('a cleanup fired by a write sees the value that was written', () => {
   expect(seen).toEqual([['written']])
 })
 
+/**
+ * @canon rule-a-write-abandons-the-run-in-progress
+ */
 test('W19: invalidating then writing in one tick makes no request at all', async () => {
   let requests = 0
   const [version, setVersion] = signal(1)
@@ -325,6 +391,9 @@ test('W19: invalidating then writing in one tick makes no request at all', async
   expect(use(todos)).toEqual(['pushed'])
 })
 
+/**
+ * @canon rule-a-write-abandons-the-run-in-progress
+ */
 test('W19: invalidating then writing with an update function also makes no request', async () => {
   let requests = 0
   const [version, setVersion] = signal(1)
@@ -345,6 +414,9 @@ test('W19: invalidating then writing with an update function also makes no reque
   expect(peek(todos)).toEqual(['from server', 'pushed'])
 })
 
+/**
+ * @canon rule-a-dependency-change-after-a-write-takes-over
+ */
 test('W20: writing then invalidating in one tick lets the request win', async () => {
   let requests = 0
   const [version, setVersion] = signal(1)
@@ -365,6 +437,9 @@ test('W20: writing then invalidating in one tick lets the request win', async ()
   expect(use(todos)).toEqual(['server 2'])
 })
 
+/**
+ * @canon rule-a-write-abandons-the-run-in-progress
+ */
 test('W9: a write abandons a fetch that is in a middle stage', async () => {
   let resolveList: (v: string[]) => void = () => {}
   const [version, setVersion] = signal(1)
@@ -385,6 +460,9 @@ test('W9: a write abandons a fetch that is in a middle stage', async () => {
   expect(use(todos)).toEqual(['written']) // the middle stage published nothing
 })
 
+/**
+ * @canon rule-a-dependency-change-after-a-write-takes-over
+ */
 test('W10: a stage whose request was abandoned refetches when the tail next needs it', async () => {
   let requests = 0
   let resolveList: (v: string[]) => void = () => {}
@@ -432,6 +510,9 @@ test('W10: a stage whose request was abandoned refetches when the tail next need
   expect(use(todos)).toEqual(['fresh', 'done'])
 })
 
+/**
+ * @canon rule-a-dependency-change-after-a-write-takes-over
+ */
 test('W11: a later change to the abandoned stage own dependency restarts it', async () => {
   let requests = 0
   let resolveList: (v: string[]) => void = () => {}
@@ -466,6 +547,9 @@ test('W11: a later change to the abandoned stage own dependency restarts it', as
   expect(use(todos)).toEqual(['third'])
 })
 
+/**
+ * @canon rule-a-write-abandons-the-run-in-progress
+ */
 test('W8: a write behaves the same when the fetch is in the tail', async () => {
   let resolveList: (v: string[]) => void = () => {}
   const [version, setVersion] = signal(1)
@@ -485,6 +569,9 @@ test('W8: a write behaves the same when the fetch is in the tail', async () => {
   expect(peek(todos)).toEqual(['written'])
 })
 
+/**
+ * @canon rule-a-write-abandons-the-run-in-progress
+ */
 test('W12: a write abandons every stage that has work, and resuming reissues both', async () => {
   let sessionRequests = 0
   let listRequests = 0
@@ -525,6 +612,9 @@ test('W12: a write abandons every stage that has work, and resuming reissues bot
   expect(listRequests).toBe(1)
 })
 
+/**
+ * @canon rule-a-write-clears-a-parked-failure
+ */
 test('W5: a write clears a parked error on a single stage', async () => {
   const [version, setVersion] = signal(1)
   const [todos, setTodos] = signal(function* () {
@@ -540,6 +630,9 @@ test('W5: a write clears a parked error on a single stage', async () => {
   expect(use(todos)).toEqual(['pushed'])
 })
 
+/**
+ * @canon rule-a-write-clears-a-parked-failure
+ */
 test('W5: a write clears an error parked on an earlier stage', async () => {
   const [version, setVersion] = signal(1)
   const [todos, setTodos] = signal(
@@ -558,6 +651,9 @@ test('W5: a write clears an error parked on an earlier stage', async () => {
   expect(use(todos)).toEqual(['pushed'])
 })
 
+/**
+ * @canon rule-a-write-clears-a-parked-failure
+ */
 test('W5: a write clears the error through more than one never-resolved stage', async () => {
   // A regression test. An earlier version of the error-clearing fix adopted
   // a rejected upstream as a stage's own new error whenever that stage had
@@ -585,6 +681,9 @@ test('W5: a write clears the error through more than one never-resolved stage', 
   expect(use(todos)).toEqual(['pushed'])
 })
 
+/**
+ * @canon rule-a-written-promise-is-published-like-a-produced-one
+ */
 test('W6: a written promise reports as pending and then resolves', async () => {
   const [todos, setTodos] = signal(function* () {
     return yield* from(Promise.resolve(['a']))
@@ -604,6 +703,9 @@ test('W6: a written promise reports as pending and then resolves', async () => {
   expect(use(todos)).toEqual(['a', 'saved'])
 })
 
+/**
+ * @canon rule-an-update-function-receives-the-last-resolved-value
+ */
 test('W6: an update function sees the value from before a written promise settles', async () => {
   const [todos, setTodos] = signal(function* () {
     return yield* from(Promise.resolve(['a']))
@@ -619,6 +721,9 @@ test('W6: an update function sees the value from before a written promise settle
   expect(seen).toEqual(['a']) // the last value that actually resolved
 })
 
+/**
+ * @canon rule-a-dependency-change-after-a-write-takes-over
+ */
 test('W7: a dependency change supersedes a written promise that has not settled', async () => {
   const [version, setVersion] = signal(1)
   const [todos, setTodos] = signal(function* () {
@@ -641,6 +746,9 @@ test('W7: a dependency change supersedes a written promise that has not settled'
   expect(use(todos)).toEqual(['server 2']) // the superseded write published nothing
 })
 
+/**
+ * @canon rule-a-written-promise-is-published-like-a-produced-one
+ */
 test('W6: a rejected written promise parks as an error', async () => {
   const [todos, setTodos] = signal(function* () {
     return yield* from(Promise.resolve(['a']))
@@ -653,6 +761,9 @@ test('W6: a rejected written promise parks as an error', async () => {
   expect(peek(todos)).toEqual(['a'])
 })
 
+/**
+ * @canon rule-a-speculative-write-stays-out-of-committed-state
+ */
 test('W14: a write inside an action is invisible until it commits', async () => {
   const [todos, setTodos] = signal(function* () {
     return yield* from(Promise.resolve(['a']))
@@ -670,6 +781,9 @@ test('W14: a write inside an action is invisible until it commits', async () => 
   expect(use(todos)).toEqual(['a', 'walk'])
 })
 
+/**
+ * @canon rule-a-write-to-a-derivation-cancels-only-once-committed
+ */
 test('W15: a discarded action leaves the reload alive', async () => {
   let resolveList: (v: string[]) => void = () => {}
   const [version, setVersion] = signal(1)
@@ -700,6 +814,9 @@ test('W15: a discarded action leaves the reload alive', async () => {
   expect(use(todos)).toEqual(['a', 'b'])
 })
 
+/**
+ * @canon rule-a-write-to-a-derivation-cancels-only-once-committed
+ */
 test('W16: cancelling waits until the value reaches the committed world', async () => {
   let resolveList: (v: string[]) => void = () => {}
   const [version, setVersion] = signal(1)
@@ -725,6 +842,9 @@ test('W16: cancelling waits until the value reaches the committed world', async 
   expect(isPending(todos)).toBe(true)
 })
 
+/**
+ * @canon rule-a-write-to-a-derivation-cancels-only-once-committed
+ */
 test('W17: a reload that lands while an action is open is replaced at commit', async () => {
   let resolveList: (v: string[]) => void = () => {}
   const [version, setVersion] = signal(1)
@@ -754,6 +874,9 @@ test('W17: a reload that lands while an action is open is replaced at commit', a
   expect(use(todos)).toEqual(['a', 'walk']) // replaced at commit
 })
 
+/**
+ * @canon rule-a-write-to-a-derivation-cancels-only-once-committed
+ */
 test('a queued recompute survives a write inside a discarded action', async () => {
   // A regression test for the withdrawal loop's scope gate. Withdrawing a
   // queued recompute is only safe once a write is known to be committed —
@@ -787,6 +910,9 @@ test('a queued recompute survives a write inside a discarded action', async () =
   expect(use(todos)).toEqual(['v2'])
 })
 
+/**
+ * @canon rule-a-write-to-a-derivation-cancels-only-once-committed
+ */
 test('writing a promise inside an action does not trigger a fresh recompute', async () => {
   // Covers the isPromise(value) branch of publishValue under the same
   // conditions Defect 1 was about — the bare-value branch is exercised by
@@ -818,6 +944,9 @@ test('writing a promise inside an action does not trigger a fresh recompute', as
   expect(use(todos)).toEqual(['a', 'walk'])
 })
 
+/**
+ * @canon rule-a-write-abandons-the-run-in-progress
+ */
 test('W22: a write from inside the derivation own body does not raise', async () => {
   // A write here cancels every stage's run, including this one's own — the
   // re-entrancy guard exists so that does not mean calling a generator's
@@ -847,6 +976,9 @@ test('W22: a write from inside the derivation own body does not raise', async ()
   expect(cleanups).toEqual(['ran'])
 })
 
+/**
+ * @canon rule-a-dependency-change-after-a-write-takes-over
+ */
 test('W4: a dependency change after a write takes the derivation back over', async () => {
   const [version, setVersion] = signal(1)
   const [todos, setTodos] = signal(function* () {
@@ -864,6 +996,9 @@ test('W4: a dependency change after a write takes the derivation back over', asy
   expect(use(todos)).toEqual(['server 2'])
 })
 
+/**
+ * @canon rule-a-dependency-change-after-a-write-takes-over
+ */
 test('a read from inside an effect while an earlier stage is waiting to reload', async () => {
   // Rewritten from the brief's original, which asserted the write survives
   // showAll's change — that assertion was never coherent. showAll is a
@@ -918,6 +1053,9 @@ test('a read from inside an effect while an earlier stage is waiting to reload',
   expect(seen.at(-1)).toEqual(['fresh', 'refetched'])
 })
 
+/**
+ * @canon rule-a-discard-leaves-no-trace
+ */
 test('a discarded action does not leave the change gate describing a rolled-back value', async () => {
   // The write inside the action (7) has to equal what a LATER, genuine
   // derivation run resolves to, or this proves nothing: the change gate
@@ -951,6 +1089,9 @@ test('a discarded action does not leave the change gate describing a rolled-back
   expect(use(count)).toBe(7)
 })
 
+/**
+ * @canon rule-an-update-function-that-throws-cancels-nothing
+ */
 test('an update function that throws leaves a queued run intact', async () => {
   // Found during the final whole-branch review, not by any scenario: at the
   // root, a queued run is withdrawn before the update function is called (it

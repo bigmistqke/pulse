@@ -13,6 +13,9 @@ beforeEach(() => setScheduler(syncScheduler(flush)))
 afterEach(() => setScheduler(microtaskScheduler(flush)))
 
 describe('effect — staged form', () => {
+  /**
+   * @canon rule-a-staged-effect-is-a-pipeline-ending-in-a-commit
+   */
   test('single sync stage: commit receives the value', () => {
     createRoot(() => {
       const seen: number[] = []
@@ -21,6 +24,9 @@ describe('effect — staged form', () => {
     })
   })
 
+  /**
+   * @canon rule-a-staged-effect-is-a-pipeline-ending-in-a-commit
+   */
   test('two sync stages: commit receives the final stage value', () => {
     createRoot(() => {
       const seen: number[] = []
@@ -29,6 +35,9 @@ describe('effect — staged form', () => {
     })
   })
 
+  /**
+   * @canon rule-a-staged-effect-is-a-pipeline-ending-in-a-commit
+   */
   test('async stage: commit fires after Promise resolves', async () => {
     await createRoot(async () => {
       const seen: string[] = []
@@ -44,6 +53,9 @@ describe('effect — staged form', () => {
     })
   })
 
+  /**
+   * @canon rule-a-staged-effect-is-a-pipeline-ending-in-a-commit
+   */
   test('reactive sync pipeline: commit fires on signal change', () => {
     createRoot(() => {
       const seen: number[] = []
@@ -58,6 +70,9 @@ describe('effect — staged form', () => {
   })
 })
 
+/**
+ * @canon rule-a-real-error-in-an-effect-goes-to-the-nearest-handler
+ */
 test('throw from a stage routes to nearest catchError', () => {
   createRoot(() => {
     let caught: unknown = null
@@ -74,6 +89,9 @@ test('throw from a stage routes to nearest catchError', () => {
   })
 })
 
+/**
+ * @canon rule-a-real-error-in-an-effect-goes-to-the-nearest-handler
+ */
 test('throw from commit routes to nearest catchError', () => {
   createRoot(() => {
     let caught: unknown = null
@@ -90,6 +108,9 @@ test('throw from commit routes to nearest catchError', () => {
   })
 })
 
+/**
+ * @canon rule-an-effect-is-disposed-with-its-owner
+ */
 test('disposal stops the staged effect from firing further commits', () => {
   createRoot((dispose) => {
     const seen: number[] = []

@@ -18,15 +18,24 @@ import { flush, microtaskScheduler, setScheduler } from '../src/scheduler'
 
 afterEach(() => setScheduler(microtaskScheduler(flush)))
 
+/**
+ * @canon rule-createroot-starts-a-new-owner-tree
+ */
 test('createRoot returns the callback return value', () => {
   const result = createRoot(() => 'hello')
   expect(result).toBe('hello')
 })
 
+/**
+ * @canon rule-there-is-no-ambient-owner-outside-every-root
+ */
 test('getOwner is null outside any root', () => {
   expect(getOwner()).toBeNull()
 })
 
+/**
+ * @canon rule-createroot-starts-a-new-owner-tree
+ */
 test('getOwner returns the current owner inside createRoot', () => {
   createRoot(() => {
     expect(getOwner()).not.toBeNull()
@@ -63,6 +72,9 @@ test('a throwing onCleanup callback stops neither the others nor the dispose', (
   expect(log).toEqual(['c', 'a'])
 })
 
+/**
+ * @canon rule-a-root-is-never-owned-by-an-enclosing-root
+ */
 test('createRoot is always a root — nested createRoot is independent', () => {
   let innerDispose!: () => void
   let innerCleanupRan = false
@@ -78,6 +90,9 @@ test('createRoot is always a root — nested createRoot is independent', () => {
   expect(innerCleanupRan).toBe(true)
 })
 
+/**
+ * @canon rule-runwithowner-restores-the-previous-owner
+ */
 test('runWithOwner sets the ambient owner for fn execution and restores after', () => {
   let captured: ReturnType<typeof getOwner> = null
   createRoot(() => {
@@ -93,6 +108,9 @@ test('runWithOwner sets the ambient owner for fn execution and restores after', 
   expect(captured).not.toBeNull()
 })
 
+/**
+ * @canon rule-a-disposed-owner-cannot-be-entered
+ */
 test('runWithOwner on a disposed owner throws', () => {
   let disposedOwner!: ReturnType<typeof getOwner>
   createRoot((dispose) => {
@@ -102,11 +120,17 @@ test('runWithOwner on a disposed owner throws', () => {
   expect(() => runWithOwner(disposedOwner, () => {})).toThrow(/disposed/)
 })
 
+/**
+ * @canon rule-oncleanup-without-an-owner-does-nothing
+ */
 test('onCleanup outside any context is a no-op (permissive)', () => {
   // Should not throw, should not crash.
   expect(() => onCleanup(() => {})).not.toThrow()
 })
 
+/**
+ * @canon rule-runwithowner-restores-the-previous-owner
+ */
 test('runWithOwner restores owner even when fn throws', () => {
   createRoot(() => {
     const owner = getOwner()
@@ -115,6 +139,9 @@ test('runWithOwner restores owner even when fn throws', () => {
   })
 })
 
+/**
+ * @canon rule-dispose-runs-once
+ */
 test('dispose is idempotent — calling twice does not throw or re-run cleanups', () => {
   const log: string[] = []
   createRoot((dispose) => {
@@ -125,6 +152,9 @@ test('dispose is idempotent — calling twice does not throw or re-run cleanups'
   expect(log).toEqual(['cleaned'])
 })
 
+/**
+ * @canon rule-catch-error-runs-its-body-in-a-sub-owner
+ */
 test('catchError invokes the handler on a synchronous throw inside fn', () => {
   const errors: unknown[] = []
   const result = catchError(
@@ -136,11 +166,17 @@ test('catchError invokes the handler on a synchronous throw inside fn', () => {
   expect(result).toBeUndefined() // fn threw, no return value
 })
 
+/**
+ * @canon rule-catch-error-runs-its-body-in-a-sub-owner
+ */
 test('catchError returns fn return value when fn does not throw', () => {
   const result = catchError(() => 42, () => {})
   expect(result).toBe(42)
 })
 
+/**
+ * @canon rule-the-nearest-accepting-boundary-claims-an-error
+ */
 test('nested catchError: inner handler catches its own subtree', () => {
   const inner: unknown[] = []
   const outer: unknown[] = []
@@ -154,6 +190,9 @@ test('nested catchError: inner handler catches its own subtree', () => {
   expect(outer).toHaveLength(0) // outer NOT involved
 })
 
+/**
+ * @canon rule-a-handler-that-throws-passes-its-error-outward
+ */
 test('handler that throws escalates to the next outer boundary', () => {
   const outer: unknown[] = []
   catchError(() => {
@@ -166,6 +205,9 @@ test('handler that throws escalates to the next outer boundary', () => {
   expect((outer[0] as Error).message).toBe('re-thrown by inner handler')
 })
 
+/**
+ * @canon rule-a-handler-that-throws-passes-its-error-outward
+ */
 test('unhandled throw (no boundary) propagates', () => {
   expect(() => {
     catchError(
@@ -175,6 +217,9 @@ test('unhandled throw (no boundary) propagates', () => {
   }).toThrow('escalated')
 })
 
+/**
+ * @canon rule-catch-error-runs-its-body-in-a-sub-owner
+ */
 test('catchError sub-owner is disposed when its parent root is disposed', () => {
   const log: string[] = []
   createRoot((dispose) => {
@@ -188,6 +233,9 @@ test('catchError sub-owner is disposed when its parent root is disposed', () => 
   expect(log).toEqual(['inner cleanup', 'outer cleanup'])
 })
 
+/**
+ * @canon rule-catch-error-runs-its-body-in-a-sub-owner
+ */
 test('catchError throws when called inside a disposed owner', () => {
   createRoot((dispose) => {
     dispose()
@@ -195,6 +243,9 @@ test('catchError throws when called inside a disposed owner', () => {
   })
 })
 
+/**
+ * @canon rule-the-nearest-accepting-boundary-claims-an-error
+ */
 test('catchError with a declining for lets the error propagate to an outer catchError', () => {
   const outerCaught: unknown[] = []
   const innerCaught: unknown[] = []
@@ -217,6 +268,9 @@ test('catchError with a declining for lets the error propagate to an outer catch
   expect((outerCaught[0] as Error).message).toBe('boom')
 })
 
+/**
+ * @canon rule-the-nearest-accepting-boundary-claims-an-error
+ */
 test('catchError with an accepting for claims the error itself, not an outer catchError', () => {
   const outerCaught: unknown[] = []
   const innerCaught: unknown[] = []
@@ -239,6 +293,9 @@ test('catchError with an accepting for claims the error itself, not an outer cat
   expect(outerCaught).toEqual([])
 })
 
+/**
+ * @canon rule-a-throw-from-a-catch-error-body-reaches-only-catch-error-handlers
+ */
 test('catchError with a declining for and no outer handler re-throws, same as no handler at all', () => {
   expect(() => {
     createRoot(() => {
@@ -253,6 +310,9 @@ test('catchError with a declining for and no outer handler re-throws, same as no
   }).toThrow('boom')
 })
 
+/**
+ * @canon rule-the-nearest-accepting-boundary-claims-an-error
+ */
 test('catchError omitting for still accepts everything, exactly as before', () => {
   const caught: unknown[] = []
   createRoot(() => {
@@ -266,6 +326,9 @@ test('catchError omitting for still accepts everything, exactly as before', () =
   expect(caught).toHaveLength(1)
 })
 
+/**
+ * @canon rule-the-nearest-accepting-boundary-claims-an-error
+ */
 test('findNearestErrorScope skips an ErrorScope whose for declines the error, finding a farther one that accepts', () => {
   createRoot(() => {
     const outer = createSubOwner(getOwner())
@@ -300,6 +363,9 @@ test('findNearestErrorScope skips an ErrorScope whose for declines the error, fi
   })
 })
 
+/**
+ * @canon rule-the-nearest-accepting-boundary-claims-an-error
+ */
 test('findNearestErrorScope claims the error at the nearest ErrorScope whose for accepts it', () => {
   createRoot(() => {
     let innerScope!: ErrorScope
@@ -323,6 +389,9 @@ test('findNearestErrorScope claims the error at the nearest ErrorScope whose for
   })
 })
 
+/**
+ * @canon rule-every-root-has-an-error-boundary
+ */
 test('findNearestErrorScope omitting for still accepts everything, exactly as before', () => {
   createRoot(() => {
     const found = findNearestErrorScope(getOwner(), new Error('x'))
@@ -330,6 +399,9 @@ test('findNearestErrorScope omitting for still accepts everything, exactly as be
   })
 })
 
+/**
+ * @canon rule-the-nearest-accepting-boundary-claims-an-error
+ */
 test('a nearer, accepting catchError still wins over a farther ErrorScope, exactly as before', () => {
   createRoot(() => {
     const outer = createSubOwner(getOwner())
@@ -354,6 +426,9 @@ test('a nearer, accepting catchError still wins over a farther ErrorScope, exact
   })
 })
 
+/**
+ * @canon rule-the-nearest-accepting-boundary-claims-an-error
+ */
 test('a nearer catchError that declines the error lets a farther ErrorScope claim it', () => {
   createRoot(() => {
     const outer = createSubOwner(getOwner())
@@ -380,6 +455,9 @@ test('a nearer catchError that declines the error lets a farther ErrorScope clai
   })
 })
 
+/**
+ * @canon rule-is-loading-reads-the-nearest-boundary
+ */
 test('Owner.boundaries.pending defaults to null', () => {
   createRoot(() => {
     const owner = getOwner()!
@@ -387,6 +465,9 @@ test('Owner.boundaries.pending defaults to null', () => {
   })
 })
 
+/**
+ * @canon rule-every-root-has-an-error-boundary
+ */
 test('createRoot installs a default ErrorScope on the root owner', () => {
   createRoot(() => {
     const owner = getOwner()!
@@ -394,6 +475,9 @@ test('createRoot installs a default ErrorScope on the root owner', () => {
   })
 })
 
+/**
+ * @canon rule-every-root-has-an-error-boundary
+ */
 test('the default ErrorScope tracks active/error like any other ErrorScope', () => {
   createRoot(() => {
     const found = findNearestErrorScope(getOwner(), new Error('x'))!
@@ -412,6 +496,9 @@ test('the default ErrorScope tracks active/error like any other ErrorScope', () 
   })
 })
 
+/**
+ * @canon rule-every-root-has-an-error-boundary
+ */
 test('the default ErrorScope logs every failed report to console.error', () => {
   const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
   const error = new Error('boom')
@@ -424,6 +511,9 @@ test('the default ErrorScope logs every failed report to console.error', () => {
   spy.mockRestore()
 })
 
+/**
+ * @canon rule-every-root-has-an-error-boundary
+ */
 test('an explicit ErrorScope nested inside createRoot still wins over the root default', () => {
   createRoot(() => {
     const rootFound = findNearestErrorScope(getOwner(), new Error('x'))!
@@ -444,6 +534,9 @@ test('an explicit ErrorScope nested inside createRoot still wins over the root d
   })
 })
 
+/**
+ * @canon rule-is-loading-reads-the-nearest-boundary
+ */
 test('findBoundaryScope walks parent chain to find first non-null entry', () => {
   let captured: LoadingScope | null = null
   const scope: LoadingScope = {
@@ -465,6 +558,9 @@ test('findBoundaryScope walks parent chain to find first non-null entry', () => 
   expect(captured).toBe(scope)
 })
 
+/**
+ * @canon rule-is-loading-reads-the-nearest-boundary
+ */
 test('findBoundaryScope returns null when no scope on chain', () => {
   let captured: LoadingScope | null = { kind: 'pending', active: () => false, register: () => ({ report() {}, unregister() {} }), deferOrCommit(commit) { commit() }, trackBackground() {}, trackFirstLoad() {} }
   createRoot(() => {
@@ -473,6 +569,9 @@ test('findBoundaryScope returns null when no scope on chain', () => {
   expect(captured).toBe(null)
 })
 
+/**
+ * @canon rule-a-boundary-holds-one-report-per-failed-binding
+ */
 test('ErrorScope.reports() reflects every currently-registered failed controller, in registration order', () => {
   const scope = createErrorScope()
   const errorA = new Error('a')
@@ -489,6 +588,9 @@ test('ErrorScope.reports() reflects every currently-registered failed controller
   expect(reports[1].error).toBe(errorB)
 })
 
+/**
+ * @canon rule-a-boundary-holds-one-report-per-failed-binding
+ */
 test('ErrorScope.reports() removes an entry once its controller reports idle or unregisters', () => {
   const scope = createErrorScope()
   const errorA = new Error('a')
@@ -508,6 +610,9 @@ test('ErrorScope.reports() removes an entry once its controller reports idle or 
   expect(scope.reports()).toHaveLength(0)
 })
 
+/**
+ * @canon rule-a-boundary-holds-one-report-per-failed-binding
+ */
 test('a controller re-reporting the identical error does not publish a new reports array', () => {
   const scope = createErrorScope()
   const error = new Error('boom')
@@ -522,6 +627,9 @@ test('a controller re-reporting the identical error does not publish a new repor
   expect(second).toBe(first)
 })
 
+/**
+ * @canon rule-reset-uses-the-latest-retry-a-binding-reported
+ */
 test('a later report of the identical error still refreshes source/retry, even though the published collection is not rewritten', () => {
   const scope = createErrorScope()
   const error = new Error('boom')
@@ -546,6 +654,9 @@ test('a later report of the identical error still refreshes source/retry, even t
   expect(secondRetryCalls).toBe(1)
 })
 
+/**
+ * @canon rule-every-root-has-an-error-boundary
+ */
 test('onErrorReport still fires on every failed report, even one that does not change the published collection', () => {
   const seen: unknown[] = []
   const scope = createErrorScope((error) => seen.push(error))
@@ -558,6 +669,9 @@ test('onErrorReport still fires on every failed report, even one that does not c
   expect(seen).toEqual([error, error])
 })
 
+/**
+ * @canon rule-a-boundary-holds-one-report-per-failed-binding
+ */
 test('ErrorScope.error()/active() still report the first entry, unaffected by reports() existing', () => {
   const scope = createErrorScope()
   const errorA = new Error('a')
@@ -575,6 +689,9 @@ test('ErrorScope.error()/active() still report the first entry, unaffected by re
   expect(scope.error()).toBe(errorA)
 })
 
+/**
+ * @canon rule-a-boundary-holds-one-report-per-failed-binding
+ */
 test('a change to a non-first report does not re-notify a consumer that only reads error()/active()', () => {
   const scope = createErrorScope()
   const controllerA = scope.register()

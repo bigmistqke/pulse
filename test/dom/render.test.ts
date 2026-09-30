@@ -16,6 +16,9 @@ afterEach(() => {
   document.body.innerHTML = ''
 })
 
+/**
+ * @canon rule-render-returns-a-dispose-that-removes-what-it-mounted
+ */
 test('render mounts a component and returns dispose', () => {
   const target = document.createElement('section')
   document.body.append(target)
@@ -25,6 +28,9 @@ test('render mounts a component and returns dispose', () => {
   dispose()
 })
 
+/**
+ * @canon rule-render-returns-a-dispose-that-removes-what-it-mounted
+ */
 test('render dispose removes the mounted nodes', () => {
   const target = document.createElement('section')
   document.body.append(target)
@@ -34,6 +40,9 @@ test('render dispose removes the mounted nodes', () => {
   expect(target.children.length).toBe(0)
 })
 
+/**
+ * @canon rule-render-returns-a-dispose-that-removes-what-it-mounted
+ */
 test('render dispose tears down binding-effects', () => {
   const target = document.createElement('section')
   document.body.append(target)
@@ -48,6 +57,9 @@ test('render dispose tears down binding-effects', () => {
   expect(renders).toHaveBeenCalledTimes(2) // no further runs after dispose
 })
 
+/**
+ * @canon rule-render-returns-a-dispose-that-removes-what-it-mounted
+ */
 test('render supports a component returning an array', () => {
   const target = document.createElement('section')
   document.body.append(target)
@@ -61,6 +73,10 @@ test('render supports a component returning an array', () => {
   expect(target.children.length).toBe(0)
 })
 
+/**
+ * @canon rule-render-returns-a-dispose-that-removes-what-it-mounted
+ * @canon rule-a-function-child-is-a-reactive-hole
+ */
 test('render accepts a top-level reactive (function) return', () => {
   const target = document.createElement('section')
   document.body.append(target)
@@ -75,6 +91,9 @@ test('render accepts a top-level reactive (function) return', () => {
   expect(target.childNodes.length).toBe(0)
 })
 
+/**
+ * @canon rule-render-returns-a-dispose-that-removes-what-it-mounted
+ */
 test('render accepts a top-level primitive return', () => {
   const target = document.createElement('section')
   document.body.append(target)
@@ -84,6 +103,9 @@ test('render accepts a top-level primitive return', () => {
   expect(target.childNodes.length).toBe(0)
 })
 
+/**
+ * @canon rule-a-component-that-throws-during-render-leaves-nothing-behind
+ */
 test('render() disposes root owner if component throws synchronously', () => {
   const target = document.createElement('section')
   document.body.append(target)

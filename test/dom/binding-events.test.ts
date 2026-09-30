@@ -4,6 +4,9 @@ import { createRoot, onCleanup } from '../../src/index'
 
 afterEach(() => { document.body.innerHTML = '' })
 
+/**
+ * @canon rule-an-event-prop-adds-a-listener-until-its-owner-is-disposed
+ */
 test('on:click attaches a listener', () => {
   const handler = vi.fn()
   createRoot(() => {
@@ -14,6 +17,9 @@ test('on:click attaches a listener', () => {
   })
 })
 
+/**
+ * @canon rule-an-event-prop-adds-a-listener-until-its-owner-is-disposed
+ */
 test('on:event passes the lowercased event name', () => {
   const handler = vi.fn()
   createRoot(() => {
@@ -24,6 +30,9 @@ test('on:event passes the lowercased event name', () => {
   })
 })
 
+/**
+ * @canon rule-an-event-prop-adds-a-listener-until-its-owner-is-disposed
+ */
 test('on:click listener is removed on owner dispose', () => {
   const handler = vi.fn()
   let el!: HTMLButtonElement
@@ -39,6 +48,9 @@ test('on:click listener is removed on owner dispose', () => {
   expect(handler).toHaveBeenCalledTimes(1) // unchanged after dispose
 })
 
+/**
+ * @canon rule-an-event-handler-runs-under-the-owner-it-was-bound-in
+ */
 test('on:click captures the owner at bind time, so onCleanup called from inside the handler attaches to it', () => {
   let cleaned = false
   let el!: HTMLButtonElement

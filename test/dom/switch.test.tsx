@@ -16,6 +16,9 @@ afterEach(() => {
   document.body.innerHTML = ''
 })
 
+/**
+ * @canon rule-switch-renders-the-first-truthy-match
+ */
 test('first truthy Match wins', () => {
   const target = document.createElement('section')
   document.body.append(target)
@@ -33,6 +36,9 @@ test('first truthy Match wins', () => {
   dispose()
 })
 
+/**
+ * @canon rule-switch-renders-the-first-truthy-match
+ */
 test('no Match truthy → fallback', () => {
   const target = document.createElement('section')
   document.body.append(target)
@@ -49,6 +55,9 @@ test('no Match truthy → fallback', () => {
   dispose()
 })
 
+/**
+ * @canon rule-switch-renders-the-first-truthy-match
+ */
 test('non-Match children inside Switch are ignored', () => {
   const target = document.createElement('section')
   document.body.append(target)
@@ -65,6 +74,9 @@ test('non-Match children inside Switch are ignored', () => {
   dispose()
 })
 
+/**
+ * @canon rule-switch-renders-the-first-truthy-match
+ */
 test('Match function child receives narrowed value', () => {
   const target = document.createElement('section')
   document.body.append(target)
@@ -81,6 +93,9 @@ test('Match function child receives narrowed value', () => {
   dispose()
 })
 
+/**
+ * @canon case-switch-rebuilds-only-when-the-winning-match-changes
+ */
 test('winner change disposes old branch sub-owner', () => {
   const target = document.createElement('section')
   document.body.append(target)
@@ -113,6 +128,9 @@ test('winner change disposes old branch sub-owner', () => {
   dispose()
 })
 
+/**
+ * @canon case-switch-rebuilds-only-when-the-winning-match-changes
+ */
 test('disposing surrounding owner disposes active branch', () => {
   const target = document.createElement('section')
   document.body.append(target)

@@ -11,6 +11,9 @@ const ticks = async (n: number) => {
   for (let i = 0; i < n; i++) await tick()
 }
 
+/**
+ * @canon rule-a-resumed-generator-does-not-rerun-code-before-its-pause
+ */
 test('a generator stage that builds its promise inside the body converges', async () => {
   let promisesCreated = 0
   const makePromise = () => {
@@ -30,6 +33,9 @@ test('a generator stage that builds its promise inside the body converges', asyn
   expect(promisesCreated).toBe(1)
 })
 
+/**
+ * @canon rule-a-resumed-generator-does-not-rerun-code-before-its-pause
+ */
 test('the code before a pause runs once, not once per settle', async () => {
   let before = 0
   const c = computed(function* () {
@@ -47,6 +53,9 @@ test('the code before a pause runs once, not once per settle', async () => {
   expect(before).toBe(1)
 })
 
+/**
+ * @canon rule-a-resumed-generator-does-not-rerun-code-before-its-pause
+ */
 test('a generator with two inline pauses converges and builds each promise once', async () => {
   let firstCreated = 0
   let secondCreated = 0
@@ -75,6 +84,9 @@ test('a generator with two inline pauses converges and builds each promise once'
   expect(secondCreated).toBe(1)
 })
 
+/**
+ * @canon rule-dependencies-read-before-a-pause-stay-linked
+ */
 test('a signal read before a pause stays a dependency across a resume', async () => {
   // The error this guards against: resuming runs only the code after the
   // pause, so r3 would drop `a` unless the recorded dependencies are replayed.
@@ -100,6 +112,9 @@ test('a signal read before a pause stays a dependency across a resume', async ()
   expect(runs).toBeGreaterThan(1)
 })
 
+/**
+ * @canon rule-a-changed-input-replaces-the-paused-generator
+ */
 test('a dependency changing mid-pause discards the generator and restarts', async () => {
   // The branch that makes retention safe. Without it a stale partial
   // computation would finish and publish a value derived from the old input.
@@ -138,6 +153,9 @@ test('a dependency changing mid-pause discards the generator and restarts', asyn
   expect(peek(c)).toBe(12)
 })
 
+/**
+ * @canon rule-a-rejected-yield-is-thrown-into-the-generator
+ */
 test('a rejected inline promise reaches the generator try/catch', async () => {
   const c = computed(function* () {
     try {
@@ -158,6 +176,9 @@ test('a rejected inline promise reaches the generator try/catch', async () => {
   expect(peek(c)).toBe('caught: boom')
 })
 
+/**
+ * @canon rule-a-discarded-generator-is-closed-with-return
+ */
 test('a discarded generator runs its finally block', async () => {
   const [a, setA] = signal(1)
   let opened = 0
@@ -187,6 +208,9 @@ test('a discarded generator runs its finally block', async () => {
   expect(peek(c)).toBe(12)
 })
 
+/**
+ * @canon rule-a-discarded-generator-is-closed-with-return
+ */
 test('a finally block reading a signal during a discard adds no dependency', async () => {
   // Scoped deliberately to the discard path. `untrack` wraps `gen.return()`,
   // not the whole generator — a `finally` that runs because the generator
@@ -224,6 +248,9 @@ test('a finally block reading a signal during a discard adds no dependency', asy
   expect(runs).toBe(runsWhilePaused)
 })
 
+/**
+ * @canon rule-a-discarded-generator-is-closed-with-return
+ */
 test('resetting a parked error discards a generator that has since re-paused', async () => {
   // Covers the `discardGen()` call in the error entry's `reset`. Reaching a
   // live generator there takes three steps: the stage fails and parks the
@@ -265,6 +292,9 @@ test('resetting a parked error discards a generator that has since re-paused', a
   expect(closed).toBe(closedAfterError + 1)
 })
 
+/**
+ * @canon rule-a-discarded-generator-is-closed-with-return
+ */
 test('disposing the owner runs a paused generator finally block', async () => {
   let closed = 0
   let dispose!: () => void
@@ -290,6 +320,9 @@ test('disposing the owner runs a paused generator finally block', async () => {
   expect(closed).toBe(1)
 })
 
+/**
+ * @canon rule-use-inside-a-generator-stage-restarts-the-stage
+ */
 test('a generator stage repeatedly hitting use() on the same still-pending promise attaches no extra settle listener', async () => {
   // Regression guard for an interaction between two fixes: discarding a
   // generator that reached the NotReadyYet catch (a `use()` call, not a
@@ -345,6 +378,9 @@ test('a generator stage repeatedly hitting use() on the same still-pending promi
   expect(peek(c)).toBe(42)
 })
 
+/**
+ * @canon rule-use-inside-a-generator-stage-restarts-the-stage
+ */
 test('use(promise) inside a generator stage resolves and the stage publishes the derived result', async () => {
   // use() throws NotReadyYet directly out of gen.next() (not via a yield),
   // straight into the sync-stage NotReadyYet catch in makeStageNode. That
@@ -363,6 +399,9 @@ test('use(promise) inside a generator stage resolves and the stage publishes the
   expect(peek(c)).toBe(10)
 })
 
+/**
+ * @canon rule-dependencies-read-before-a-pause-stay-linked
+ */
 test('use(...) then yield* from(...) inside a generator stage converges', async () => {
   const [a, setA] = signal(1)
   const c = computed(function* () {
@@ -382,6 +421,9 @@ test('use(...) then yield* from(...) inside a generator stage converges', async 
   expect(peek(c)).toBe(12)
 })
 
+/**
+ * @canon rule-a-changed-input-replaces-the-paused-generator
+ */
 test('a discarded generator does not leave its abandoned promise able to re-run the stage', async () => {
   // The reproduction: restart into a synchronously-throwing generator, then
   // let the FIRST (abandoned) generator's promise settle. If discardGen()
@@ -417,6 +459,9 @@ test('a discarded generator does not leave its abandoned promise able to re-run 
   expect(bodyRuns).toBe(2) // not 3 — the abandoned promise must not re-run the stage
 })
 
+/**
+ * @canon rule-a-returned-promise-is-the-result-not-a-pause
+ */
 test('a generator stage that returns a pending promise resolves to its value', async () => {
   const c = computed(function* () {
     return new Promise<number>((resolve) => setTimeout(() => resolve(7), 5))
@@ -428,6 +473,9 @@ test('a generator stage that returns a pending promise resolves to its value', a
   expect(peek(c)).toBe(7)
 })
 
+/**
+ * @canon rule-a-returned-promise-is-the-result-not-a-pause
+ */
 test('a generator stage that pauses and then returns a pending promise resolves to its value', async () => {
   // The same ending reached from a resumed generator rather than a fresh one:
   // the body pauses on a yield, is resumed, and then returns a promise. The
@@ -446,6 +494,9 @@ test('a generator stage that pauses and then returns a pending promise resolves 
   expect(peek(c)).toBe(30)
 })
 
+/**
+ * @canon rule-a-returned-promise-is-the-result-not-a-pause
+ */
 test('a generator stage that pauses, resumes, then returns a promise stays reactive', async () => {
   // The reactive guard for the resumed path. The test below covers the same
   // property for a generator that never paused; this one reaches the returned
@@ -474,6 +525,9 @@ test('a generator stage that pauses, resumes, then returns a promise stays react
   expect(bodyRuns).toBe(2)
 })
 
+/**
+ * @canon rule-a-returned-promise-is-the-result-not-a-pause
+ */
 test('a generator stage whose returned promise rejects parks the error', async () => {
   // The rejected half of the same decision. A generator that has already
   // returned cannot catch its returned promise's rejection — the try/catch
@@ -492,6 +546,9 @@ test('a generator stage whose returned promise rejects parks the error', async (
   expect((error(rejecting) as Error).message).toBe('server said no')
 })
 
+/**
+ * @canon rule-a-returned-promise-is-the-result-not-a-pause
+ */
 test('a generator stage returning a pending promise stays reactive to its dependencies', async () => {
   // Ending the finished generator must also clear the retained-generator field.
   // Left set, the next run would find a finished generator with an empty

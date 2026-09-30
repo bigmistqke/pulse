@@ -13,6 +13,9 @@ import {
 
 afterEach(() => setScheduler(microtaskScheduler(flush)))
 
+/**
+ * @canon rule-a-catch-error-handler-is-called-for-each-throw-under-it
+ */
 test('end-to-end: signal -> throwing computed -> effect -> catchError catches and user observes via signal', () => {
   setScheduler(syncScheduler(flush))
   const [id, setId] = signal(0)
@@ -56,6 +59,9 @@ test('end-to-end: signal -> throwing computed -> effect -> catchError catches an
   expect(renders[renders.length - 1]).toBe('user-5')
 })
 
+/**
+ * @canon rule-an-error-nothing-claims-is-thrown-on-a-first-run
+ */
 test('uncaught throw still propagates outside any catchError', () => {
   setScheduler(syncScheduler(flush))
   expect(() => {

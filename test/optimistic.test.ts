@@ -173,6 +173,9 @@ test('setOptimisticValue throws when called with no active speculative scope', (
 
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
 
+/**
+ * @canon rule-an-optimistic-value-is-read-like-any-node
+ */
 test('a use() read through the optimistic node suspends until the source resolves', async () => {
   const [source] = signal(() => Promise.resolve('loaded'))
   const [view] = optimistic(source)
@@ -184,6 +187,9 @@ test('a use() read through the optimistic node suspends until the source resolve
   expect(isPending(view)).toBe(false)
 })
 
+/**
+ * @canon rule-a-live-prediction-reports-neither-pending-nor-failed
+ */
 test('a live prediction stops the node reporting pending, so a use() read shows it', async () => {
   const first = gate<string>()
   const second = gate<string>()
@@ -217,6 +223,9 @@ test('a live prediction stops the node reporting pending, so a use() read shows 
   expect(use(view)).toBe('server2')
 })
 
+/**
+ * @canon rule-an-optimistic-value-is-read-like-any-node
+ */
 test('a failed source reports through the optimistic node, and a retry resets that source', async () => {
   let failing = true
   const [source] = signal(() => (failing ? Promise.reject(new Error('boom')) : Promise.resolve('ok')))
@@ -235,6 +244,9 @@ test('a failed source reports through the optimistic node, and a retry resets th
   expect(peek(view)).toBe('ok')
 })
 
+/**
+ * @canon rule-a-live-prediction-reports-neither-pending-nor-failed
+ */
 test('a live prediction also masks a failed source', async () => {
   let failing = true
   const [source] = signal(() => (failing ? Promise.reject(new Error('boom')) : Promise.resolve('ok')))
@@ -281,12 +293,18 @@ test('a recipe that produces its own value needs no separate source', async () =
   expect(use(view)).toEqual(['a']) // the layer expired; the recipe is back
 })
 
+/**
+ * @canon rule-an-optimistic-value-is-read-like-any-node
+ */
 test('a construction-time fallback seeds the tolerant read', () => {
   const [view] = optimistic(() => new Promise<string[]>(() => {}), [] as string[])
   expect(latest(view)).toEqual([])
   expect(peek(view)).toEqual([])
 })
 
+/**
+ * @canon rule-pending-follows-where-a-value-came-from
+ */
 test('a background refresh of a wrapped node is reported through the optimistic node', async () => {
   const first = gate<string>()
   const second = gate<string>()

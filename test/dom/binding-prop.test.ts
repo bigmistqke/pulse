@@ -15,6 +15,9 @@ afterEach(() => {
   document.body.innerHTML = ''
 })
 
+/**
+ * @canon rule-a-prop-prefix-sets-the-dom-property
+ */
 test('prop:value sets the DOM property, not the attribute', () => {
   createRoot(() => {
     const el = h('input', { 'prop:value': 'hi' }) as HTMLInputElement
@@ -24,6 +27,9 @@ test('prop:value sets the DOM property, not the attribute', () => {
   })
 })
 
+/**
+ * @canon rule-a-prop-prefix-sets-the-dom-property
+ */
 test('prop:disabled toggles the boolean property correctly', () => {
   createRoot(() => {
     const el = h('button', { 'prop:disabled': true }) as HTMLButtonElement
@@ -32,6 +38,9 @@ test('prop:disabled toggles the boolean property correctly', () => {
   })
 })
 
+/**
+ * @canon rule-a-prop-prefix-sets-the-dom-property
+ */
 test('prop: with function value is reactive', () => {
   createRoot(() => {
     const [v, setV] = signal('a')

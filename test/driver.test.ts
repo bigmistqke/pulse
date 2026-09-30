@@ -4,17 +4,26 @@ import { resumeStage, runStage } from '../src/driver'
 /** Resolve after all microtasks have drained (a macrotask boundary). */
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
 
+/**
+ * @canon rule-a-stage-result-is-settled-before-it-is-passed-on
+ */
 test('sync stage returning a plain value', () => {
   const r = runStage((v: number) => v * 2, 3)
   expect(r).toEqual({ pending: false, value: 6 })
 })
 
+/**
+ * @canon rule-a-stage-result-is-settled-before-it-is-passed-on
+ */
 test('sync stage returning a pending promise -> suspended', () => {
   const p = new Promise<number>(() => {})
   const r = runStage(() => p, 0)
   expect(r).toEqual({ pending: true, promise: p })
 })
 
+/**
+ * @canon rule-a-stage-result-is-settled-before-it-is-passed-on
+ */
 test('sync stage returning a settled promise -> resolved synchronously on second call', async () => {
   const p = Promise.resolve(7)
   const first = runStage(() => p, 0)
@@ -24,6 +33,9 @@ test('sync stage returning a settled promise -> resolved synchronously on second
   expect(second).toEqual({ pending: false, value: 7 })
 })
 
+/**
+ * @canon rule-a-stage-result-is-settled-before-it-is-passed-on
+ */
 test('async stage with pending promise -> suspended (carries the same promise instance)', () => {
   let release!: (v: number) => void
   const stage = async (_: unknown) => {
@@ -33,6 +45,9 @@ test('async stage with pending promise -> suspended (carries the same promise in
   expect(r.pending).toBe(true)
 })
 
+/**
+ * @canon rule-a-stage-result-is-settled-before-it-is-passed-on
+ */
 test('generator stage yielding a settled value -> returns synchronously', () => {
   function* stage(input: number) {
     const x: number = yield input + 1
@@ -43,6 +58,9 @@ test('generator stage yielding a settled value -> returns synchronously', () => 
   expect(r).toEqual({ pending: false, value: 8 })
 })
 
+/**
+ * @canon rule-a-stage-result-is-settled-before-it-is-passed-on
+ */
 test('generator stage yielding a pending promise -> suspended', () => {
   const p = new Promise<number>(() => {})
   function* stage(_: unknown) {
@@ -56,6 +74,9 @@ test('generator stage yielding a pending promise -> suspended', () => {
   expect(r.gen).toBeDefined()
 })
 
+/**
+ * @canon rule-a-stage-result-is-settled-before-it-is-passed-on
+ */
 test('generator stage: settled promise resolves synchronously on re-call', async () => {
   const p = Promise.resolve(42)
   function* stage(_: unknown) {
@@ -67,6 +88,9 @@ test('generator stage: settled promise resolves synchronously on re-call', async
   expect(runStage(stage, 0)).toEqual({ pending: false, value: 43 })
 })
 
+/**
+ * @canon rule-a-rejected-yield-is-thrown-into-the-generator
+ */
 test('generator stage: rejected promise throws into the generator', async () => {
   const reason = new Error('boom')
   const p = Promise.reject(reason)
@@ -83,6 +107,9 @@ test('generator stage: rejected promise throws into the generator', async () => 
   expect(runStage(stage, 0)).toEqual({ pending: false, value: 'caught: boom' })
 })
 
+/**
+ * @canon rule-a-rejected-yield-is-thrown-into-the-generator
+ */
 test('generator stage: uncaught rejection propagates out of runStage', async () => {
   const reason = new Error('uncaught')
   const p = Promise.reject(reason)
@@ -95,6 +122,9 @@ test('generator stage: uncaught rejection propagates out of runStage', async () 
   expect(() => runStage(stage, 0)).toThrow('uncaught')
 })
 
+/**
+ * @canon rule-a-resumed-generator-does-not-rerun-code-before-its-pause
+ */
 test('a suspended generator stage hands its generator back in the outcome', () => {
   const p = new Promise<number>(() => {})
   const outcome = runStage(function* () {
@@ -107,6 +137,9 @@ test('a suspended generator stage hands its generator back in the outcome', () =
   expect(typeof outcome.gen!.next).toBe('function')
 })
 
+/**
+ * @canon rule-a-resumed-generator-does-not-rerun-code-before-its-pause
+ */
 test('resumeStage drives a retained generator forward with a value', () => {
   const p = new Promise<number>(() => {})
   const outcome = runStage(function* () {
@@ -118,6 +151,9 @@ test('resumeStage drives a retained generator forward with a value', () => {
   expect(resumed).toEqual({ pending: false, value: 105 })
 })
 
+/**
+ * @canon rule-a-resumed-generator-does-not-rerun-code-before-its-pause
+ */
 test('resumeStage does not re-run the code before the pause', () => {
   let before = 0
   const p = new Promise<number>(() => {})
@@ -132,6 +168,9 @@ test('resumeStage does not re-run the code before the pause', () => {
   expect(before).toBe(1)
 })
 
+/**
+ * @canon rule-a-rejected-yield-is-thrown-into-the-generator
+ */
 test('resumeStage with a throw seed reaches the generator try/catch', () => {
   const p = new Promise<number>(() => {})
   const outcome = runStage(function* () {
@@ -147,6 +186,9 @@ test('resumeStage with a throw seed reaches the generator try/catch', () => {
   expect(resumed).toEqual({ pending: false, value: 'caught: boom' })
 })
 
+/**
+ * @canon rule-a-resumed-generator-does-not-rerun-code-before-its-pause
+ */
 test('a generator that pauses twice hands back the same generator each time', () => {
   const p1 = new Promise<number>(() => {})
   const p2 = new Promise<number>(() => {})
@@ -165,6 +207,9 @@ test('a generator that pauses twice hands back the same generator each time', ()
   })
 })
 
+/**
+ * @canon rule-a-resumed-generator-does-not-rerun-code-before-its-pause
+ */
 test('a sync stage outcome carries no generator', () => {
   const p = new Promise<number>(() => {})
   const outcome = runStage(() => p, 0)

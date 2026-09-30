@@ -8,6 +8,9 @@ import {
 } from '../src/scheduler'
 import { signal } from '../src/signal'
 
+/**
+ * @canon rule-one-scheduler-flushes-every-consumer
+ */
 test('syncScheduler flushes immediately on request', () => {
   let flushes = 0
   const flushFn: FlushFn = () => { flushes++ }
@@ -18,6 +21,9 @@ test('syncScheduler flushes immediately on request', () => {
   expect(flushes).toBe(2)
 })
 
+/**
+ * @canon rule-one-scheduler-flushes-every-consumer
+ */
 test('microtaskScheduler batches requests into a single flush', async () => {
   let flushes = 0
   const flushFn: FlushFn = () => { flushes++ }
@@ -30,6 +36,9 @@ test('microtaskScheduler batches requests into a single flush', async () => {
   expect(flushes).toBe(1) // exactly one flush for the batch
 })
 
+/**
+ * @canon rule-one-scheduler-flushes-every-consumer
+ */
 test('setter requests a flush from the active scheduler', () => {
   let requests = 0
   setScheduler({ request: () => { requests++ } })

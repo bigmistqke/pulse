@@ -15,6 +15,9 @@ const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
  *   error(c) -> the error, or null  (query)
  */
 
+/**
+ * @canon rule-peek-returns-the-last-resolved-value-and-never-throws
+ */
 test('a failed refetch keeps the stale value readable through peek', async () => {
   const [id, setId] = signal(1)
   const c = computed(() =>
@@ -37,6 +40,9 @@ test('a failed refetch keeps the stale value readable through peek', async () =>
   expect(isPending(c)).toBe(false)
 })
 
+/**
+ * @canon rule-error-returns-the-failure-of-a-node-or-anything-upstream
+ */
 test('error() reports the error, and null while healthy', async () => {
   const [id, setId] = signal(1)
   const c = computed(() =>
@@ -55,6 +61,9 @@ test('error() reports the error, and null while healthy', async () => {
   expect((error(c) as Error).message).toBe('boom')
 })
 
+/**
+ * @canon rule-use-throws-a-parked-error
+ */
 test('use() still throws on error — the fatal read is unchanged', async () => {
   const c = computed(() => Promise.reject(new Error('boom')))
   try {
@@ -66,6 +75,9 @@ test('use() still throws on error — the fatal read is unchanged', async () => 
   expect(() => use(c)).toThrow('boom')
 })
 
+/**
+ * @canon rule-peek-returns-the-last-resolved-value-and-never-throws
+ */
 test('peek returns undefined (not a throw) when a node fails with no prior value', async () => {
   const c = computed(() => Promise.reject(new Error('boom')))
   try {
@@ -78,6 +90,9 @@ test('peek returns undefined (not a throw) when a node fails with no prior value
   expect((error(c) as Error).message).toBe('boom')
 })
 
+/**
+ * @canon rule-a-recovery-clears-the-error
+ */
 test('a recovery clears the error', async () => {
   const [id, setId] = signal(1)
   const c = computed(() =>
@@ -97,6 +112,9 @@ test('a recovery clears the error', async () => {
   expect(peek(c)).toBe('ok')
 })
 
+/**
+ * @canon rule-error-returns-the-failure-of-a-node-or-anything-upstream
+ */
 test('error propagates downstream along the pipeline', async () => {
   const c = computed(
     () => Promise.reject(new Error('upstream boom')),

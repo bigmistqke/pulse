@@ -11,6 +11,9 @@ afterEach(() => {
   document.body.innerHTML = ''
 })
 
+/**
+ * @canon rule-a-boundary-flushes-ready-commits-together
+ */
 test('scope gathers and flushes atomically: two throwing → both succeed → one flush', () => {
   const target = document.createElement('section')
   document.body.append(target)
@@ -55,6 +58,9 @@ test('scope gathers and flushes atomically: two throwing → both succeed → on
   dispose()
 })
 
+/**
+ * @canon rule-a-boundary-flushes-ready-commits-together
+ */
 test('idle reports do not flush but contribute to pending while throwing', () => {
   const target = document.createElement('section')
   document.body.append(target)
@@ -90,6 +96,9 @@ test('idle reports do not flush but contribute to pending while throwing', () =>
   dispose()
 })
 
+/**
+ * @canon rule-a-boundary-flushes-ready-commits-together
+ */
 test('unregister removes the binding from both sets', () => {
   const target = document.createElement('section')
   document.body.append(target)
@@ -119,6 +128,9 @@ test('unregister removes the binding from both sets', () => {
   dispose()
 })
 
+/**
+ * @canon case-a-reactive-child-that-called-use-waits-for-the-gate
+ */
 test('two reactive children inside <Loading> commit atomically when their promises settle at different ticks', async () => {
   const target = document.createElement('section')
   document.body.append(target)
@@ -182,6 +194,9 @@ test('two reactive children inside <Loading> commit atomically when their promis
 })
 
 // Part A: Task 4 test — reactive class binding defers its commit when a sibling use is still pending
+/**
+ * @canon case-a-reactive-prop-that-called-use-waits-for-the-gate
+ */
 test('reactive class binding commit defers under <Loading> until gate opens', async () => {
   const target = document.createElement('section')
   document.body.append(target)
@@ -259,6 +274,9 @@ test('reactive class binding commit defers under <Loading> until gate opens', as
 })
 
 // Part B: Task 3 regression — reactive child unmounted while throwing releases its controller
+/**
+ * @canon rule-a-disposed-binding-releases-its-boundary
+ */
 test('reactive child unmounted while throwing releases its controller (does not block boundary)', async () => {
   const target = document.createElement('section')
   document.body.append(target)
@@ -299,6 +317,9 @@ test('reactive child unmounted while throwing releases its controller (does not 
 // Task 5.5: use(plainSignal) engages transition coordination.
 // A binding that calls use(signal) — even without throwing — defers its DOM
 // commit until the boundary gate opens, so it moves atomically with siblings.
+/**
+ * @canon case-a-reactive-child-that-called-use-waits-for-the-gate
+ */
 test('use(plainSignal) inside <Loading> defers commit when sibling is pending', async () => {
   const target = document.createElement('section')
   document.body.append(target)
@@ -361,6 +382,9 @@ test('use(plainSignal) inside <Loading> defers commit when sibling is pending', 
 })
 
 // Task 5.5: bindings that do NOT call use() are unaffected and commit immediately.
+/**
+ * @canon rule-a-read-without-use-commits-at-once
+ */
 test('binding without use() inside <Loading> commits immediately regardless of boundary pending state', async () => {
   const target = document.createElement('section')
   document.body.append(target)
@@ -403,6 +427,9 @@ test('binding without use() inside <Loading> commits immediately regardless of b
   dispose()
 })
 
+/**
+ * @canon exception-structure-mounts-at-once-inside-a-pending-boundary
+ */
 test('newly-mounted binding inside <Loading> joins the gather (option A: hold prior tree)', async () => {
   const target = document.createElement('section')
   document.body.append(target)
@@ -462,6 +489,9 @@ test('newly-mounted binding inside <Loading> joins the gather (option A: hold pr
   dispose()
 })
 
+/**
+ * @canon exception-structure-mounts-at-once-inside-a-pending-boundary
+ */
 test('mid-flight mount without fallback: prior tree retained until gate opens', async () => {
   const target = document.createElement('section')
   document.body.append(target)
@@ -510,6 +540,9 @@ test('mid-flight mount without fallback: prior tree retained until gate opens', 
   dispose()
 })
 
+/**
+ * @canon rule-a-disposed-binding-releases-its-boundary
+ */
 test('deferred non-throwing use() binding: unmount before gate opens does not NPE', async () => {
   const target = document.createElement('section')
   document.body.append(target)
@@ -596,6 +629,9 @@ test('deferred non-throwing use() binding: unmount before gate opens does not NP
   dispose2()
 })
 
+/**
+ * @canon case-a-reactive-child-that-called-use-waits-for-the-gate
+ */
 test('coherent transitions: use(plainSignal) + sibling computed-going-pending in same flush — commit must defer', async () => {
   const target = document.createElement('section')
   document.body.append(target)
@@ -658,6 +694,9 @@ test('coherent transitions: use(plainSignal) + sibling computed-going-pending in
   dispose()
 })
 
+/**
+ * @canon rule-use-keeps-the-binding-subscribed-while-suspended
+ */
 test('use(computed) inside binding: single-stage Promise computed propagates new value after refetch', async () => {
   const target = document.createElement('section')
   document.body.append(target)
@@ -709,6 +748,9 @@ test('use(computed) inside binding: single-stage Promise computed propagates new
   expect(target.querySelector('.list')!.textContent).toBe('c,d')
 })
 
+/**
+ * @canon rule-use-keeps-the-binding-subscribed-while-suspended
+ */
 test('use(computed) inside binding: two-stage pipeline (async + sync map) propagates after refetch — regression for r3 auto-dispose-on-zero-subs', async () => {
   const target = document.createElement('section')
   document.body.append(target)
@@ -768,6 +810,9 @@ test('use(computed) inside binding: two-stage pipeline (async + sync map) propag
 // later, unrelated call site (not boundaryOwner). Fixed by having h()'s
 // Fragment branch resolve its children into real nodes immediately, the same
 // way the DOM-tag branch already did - see src/dom/h.ts.
+/**
+ * @canon rule-is-loading-reads-the-nearest-boundary
+ */
 test('top-level component inside Loading reaches scope via useLoading()', async () => {
   const target = document.createElement('section')
   document.body.append(target)

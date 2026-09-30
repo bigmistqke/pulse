@@ -333,6 +333,9 @@ test('a superseded attempt settling later does not overwrite the outcome of a ne
   expect((handle.error() as Error).message).toBe('third failed') // unchanged
 })
 
+/**
+ * @canon rule-a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller
+ */
 test('action() skips a nearer ErrorScope whose for declines the error, registering with a farther one that accepts', async () => {
   const outerReports: unknown[] = []
   const innerReports: unknown[] = []
@@ -387,6 +390,9 @@ test('action() skips a nearer ErrorScope whose for declines the error, registeri
   expect((outerReports[0] as Error).message).toBe('boom')
 })
 
+/**
+ * @canon rule-every-root-has-an-error-boundary
+ */
 test('action() with no explicit <Errored> anywhere still reaches the implicit root, unaffected by candidate collection', async () => {
   const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
   const handle = createRoot(() =>
@@ -403,6 +409,9 @@ test('action() with no explicit <Errored> anywhere still reaches the implicit ro
   spy.mockRestore()
 })
 
+/**
+ * @canon exception-a-catch-error-ends-an-actions-search-silently
+ */
 test('action() stops candidate-collection at the nearest catchError, never reaching a farther <Errored> (the implicit root)', async () => {
   const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
   let handle!: ReturnType<typeof action>
@@ -421,6 +430,9 @@ test('action() stops candidate-collection at the nearest catchError, never reach
   spy.mockRestore()
 })
 
+/**
+ * @canon rule-a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller
+ */
 test('action() moves a claim to a boundary that now accepts a retry, releasing the one that claimed an earlier, differently-typed error', async () => {
   const outerReports: unknown[] = []
   const outerUnregisters: number[] = []
@@ -491,6 +503,9 @@ test('action() moves a claim to a boundary that now accepts a retry, releasing t
   expect(innerUnregisters).toEqual([1])
 })
 
+/**
+ * @canon rule-a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller
+ */
 test('action() moves a claim back to a nearer boundary once a retry fails with an error that boundary accepts, even though a farther boundary already claimed an earlier error', async () => {
   const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
   const innerReports: unknown[] = []

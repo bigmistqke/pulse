@@ -15,6 +15,9 @@ afterEach(() => {
   document.body.innerHTML = ''
 })
 
+/**
+ * @canon rule-a-function-child-is-a-reactive-hole
+ */
 test('function child renders the current value as text', () => {
   createRoot(() => {
     const [count] = signal(0)
@@ -24,6 +27,9 @@ test('function child renders the current value as text', () => {
   })
 })
 
+/**
+ * @canon rule-a-function-child-is-a-reactive-hole
+ */
 test('function child re-renders when its signal changes', () => {
   createRoot(() => {
     const [count, setCount] = signal(0)
@@ -34,6 +40,9 @@ test('function child re-renders when its signal changes', () => {
   })
 })
 
+/**
+ * @canon rule-a-function-child-is-a-reactive-hole
+ */
 test('function child replaces previous DOM each run', () => {
   createRoot(() => {
     const [which, setWhich] = signal<'a' | 'b'>('a')
@@ -45,6 +54,9 @@ test('function child replaces previous DOM each run', () => {
   })
 })
 
+/**
+ * @canon rule-a-function-child-is-a-reactive-hole
+ */
 test('function child can return a DOM node', () => {
   createRoot(() => {
     const [which, setWhich] = signal<'x' | 'y'>('x')
@@ -60,6 +72,9 @@ test('function child can return a DOM node', () => {
   })
 })
 
+/**
+ * @canon rule-a-function-child-is-a-reactive-hole
+ */
 test('function child preserves marker order for static siblings', () => {
   createRoot(() => {
     const [mid, setMid] = signal('M')
@@ -71,6 +86,9 @@ test('function child preserves marker order for static siblings', () => {
   })
 })
 
+/**
+ * @canon case-each-run-of-a-reactive-child-owns-what-it-creates
+ */
 test('nested reactive child does not leak the inner effect on outer re-run', () => {
   createRoot(() => {
     const [outer, setOuter] = signal(0)

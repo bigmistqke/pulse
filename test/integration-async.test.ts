@@ -5,6 +5,9 @@ import { isPending } from '../src/pending'
 /** Resolve after all microtasks have drained (a macrotask boundary). */
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
 
+/**
+ * @canon rule-use-returns-the-value-or-throws-not-ready-yet
+ */
 test('a promise-holding signal flows through an effect via use', async () => {
   const [user] = signal(Promise.resolve({ name: 'ada' }))
   const seen: string[] = []
@@ -23,6 +26,9 @@ test('a promise-holding signal flows through an effect via use', async () => {
   expect(use(user())).toEqual({ name: 'ada' }) // use of a settled value is synchronous
 })
 
+/**
+ * @canon rule-peek-returns-the-last-resolved-value-and-never-throws
+ */
 test('peek gives stale-while-revalidate across a re-fetch', async () => {
   const [data, setData] = signal<Promise<number>>(Promise.resolve(1))
   await tick()
