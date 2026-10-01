@@ -189,6 +189,7 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule a-boundary-without-for-accepts-every-error`](#rule-a-boundary-without-for-accepts-every-error) — A `catchError` or `<Errored>` given no `for` predicate accepts every error that reaches it.
   - [`@rule catch-error-and-errored-are-peers-in-one-walk`](#rule-catch-error-and-errored-are-peers-in-one-walk) — `catchError` and `<Errored>` are found by the same walk up the owner chain, so the nearest accepting one claims the error whichever kind it is, and a nearer one of either kind wins over a farther one of the other.
   - [`@rule the-boundary-is-chosen-again-for-every-error`](#rule-the-boundary-is-chosen-again-for-every-error) — The walk runs again for every error, so a node that fails again with a different kind of error moves to the boundary that accepts the new one.
+  - [`@rule a-catch-error-handler-is-called-for-each-throw-under-it`](#rule-a-catch-error-handler-is-called-for-each-throw-under-it) — A `catchError` handler is called for each throw that reaches it, from its body and from any node created under it, on the first run and on later re-runs.
   - [`@rule a-handler-that-throws-passes-its-error-outward`](#rule-a-handler-that-throws-passes-its-error-outward) — When a `catchError` handler throws, the walk continues past it with the handler's error. When nothing further up takes it, it is thrown to the caller.
   - [`@rule use-errored-without-an-errored-reads-the-roots-boundary`](#rule-use-errored-without-an-errored-reads-the-roots-boundary) — Under a root with no explicit `<Errored>`, `useErrored()` reads the root's boundary, which holds every error nothing nearer claimed in that root.
   - [`@rule a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller`](#rule-a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller) — A failed action reports to the nearest boundary that accepts its error, above the owner it was called under: an `<Errored>`, a root's default boundary, or a `catchError`, whose handler is then called with the error.
@@ -198,18 +199,17 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule a-loading-boundary-does-not-catch-a-real-error`](#rule-a-loading-boundary-does-not-catch-a-real-error) — A `<Loading>` boundary between a binding and an error handler lets a real error from that binding pass on to the handler. It takes only suspensions.
   - [`@rule a-hole-that-throws-reports-to-the-nearest-catch-error`](#rule-a-hole-that-throws-reports-to-the-nearest-catch-error) — An error thrown inside a reactive child reaches the handler of the nearest enclosing `catchError`, and does not escape the write that caused it.
   - [`@rule with-no-owner-the-boundary-state-is-inert`](#rule-with-no-owner-the-boundary-state-is-inert) — Called with no owner at all, `useErrored()` returns a state that is never active and whose retry does nothing, and `isErrored()` returns `undefined`.
-- [`@axiom catch-error-is-the-callers-try-and-catch`](#axiom-catch-error-is-the-callers-try-and-catch) — `catchError` is the caller's `try` and `catch`: it hears each throw that reaches it, and a throw on the caller's own stack goes no further than the handlers on that stack.
+- [`@axiom a-throw-belongs-to-the-call-that-ran-the-code-raising-it`](#axiom-a-throw-belongs-to-the-call-that-ran-the-code-raising-it) — A throw belongs to the call that ran the code that raised it. It is caught by a `catchError` on that call's stack, the way a `try` and `catch` would catch it, or it reaches that call's caller. It is never thrown at a call that did not run that code.
   - [`@rule a-throw-from-a-catch-error-body-reaches-only-catch-error-handlers`](#rule-a-throw-from-a-catch-error-body-reaches-only-catch-error-handlers) — A synchronous throw from a `catchError` body is routed only to `catchError` handlers, never to an `<Errored>` or a root's boundary. When none accepts it, it is thrown to the caller.
-  - [`@rule a-catch-error-handler-is-called-for-each-throw-under-it`](#rule-a-catch-error-handler-is-called-for-each-throw-under-it) — A `catchError` handler is called for each throw that reaches it, from its body and from any node created under it, on the first run and on later re-runs.
   - [`@rule an-error-nothing-claims-is-thrown-on-a-first-run`](#rule-an-error-nothing-claims-is-thrown-on-a-first-run) — Outside any root, an error from a node that no boundary claims is thrown to the caller when it happens during the node's first run.
   - [`@rule an-error-nothing-claims-on-a-re-run-is-logged`](#rule-an-error-nothing-claims-on-a-re-run-is-logged) — Outside any root, an error from a node that no boundary claims is logged to the console when it happens during a later re-run, and is not thrown at the writer whose write caused the re-run.
-- [`@axiom every-failure-in-a-root-is-held`](#axiom-every-failure-in-a-root-is-held) — Every failure inside a root is held by some boundary: none is lost, and none is thrown at a writer that did not cause it.
+- [`@axiom every-failure-in-a-root-is-held`](#axiom-every-failure-in-a-root-is-held) — Every failure of a node or an action inside a root is held by some boundary: none is lost.
   - [`@rule every-root-has-an-error-boundary`](#rule-every-root-has-an-error-boundary) — `createRoot` installs an error boundary on the root owner. It claims every error no nearer boundary claims, and tracks it like any other boundary.
   - [`@rule a-failed-action-reports-after-its-calling-owner-is-disposed`](#rule-a-failed-action-reports-after-its-calling-owner-is-disposed) — A failed action reports to the boundary above the owner it was called under even when that owner was disposed before the action failed.
   - [`@rule a-failed-action-whose-boundary-is-gone-reports-to-the-next-one-up`](#rule-a-failed-action-whose-boundary-is-gone-reports-to-the-next-one-up) — When the boundary a failed action would report to has been disposed, the report goes to the next accepting boundary above it, at the latest the root's.
 - [`@axiom an-unhandled-failure-is-never-silent`](#axiom-an-unhandled-failure-is-never-silent) — A failure that nothing handles reaches the developer: it is thrown to a caller it belongs to, or else logged. It never disappears without a word.
   - [`@rule the-roots-boundary-logs-every-failed-report`](#rule-the-roots-boundary-logs-every-failed-report) — The root's error boundary logs each failed report it receives to the console with `console.error`, a repeated report of the same error included.
-- [`@axiom an-error-is-graph-state-not-an-event`](#axiom-an-error-is-graph-state-not-an-event) — A failure is state held on the node that failed, beside its last resolved value, and it propagates along the graph the way pending does. A boundary shows that state; it does not count throws.
+- [`@axiom an-error-is-graph-state-not-an-event`](#axiom-an-error-is-graph-state-not-an-event) — A failure is state held on the node that failed, beside its last resolved value, and it propagates along the graph the way pending does. An `<Errored>` and a root's boundary show that state; they do not count throws.
   - [`@rule error-returns-the-failure-of-a-node-or-anything-upstream`](#rule-error-returns-the-failure-of-a-node-or-anything-upstream) — `error(x)` returns the error of `x`, or of the nearest failed stage upstream of it, and `null` while the chain is healthy.
   - [`@rule a-recovery-clears-the-error`](#rule-a-recovery-clears-the-error) — When a failed node computes successfully again, its error is cleared and its new value is published.
   - [`@rule suspension-is-not-a-failure`](#rule-suspension-is-not-a-failure) — A pending read, `use(x)` included, reaches `<Loading>` and never an error boundary or an error handler.
@@ -1674,6 +1674,16 @@ This follows because [`axiom-error-boundaries-are-sub-owners`](#axiom-error-boun
 
 This follows because [`axiom-error-boundaries-are-sub-owners`](#axiom-error-boundaries-are-sub-owners) says an error goes to the nearest boundary that accepts it: acceptance depends on the error, so each new error is routed by its own walk.
 
+### @rule a-catch-error-handler-is-called-for-each-throw-under-it
+
+> A `catchError` handler is called for each throw that reaches it, from its body and from any node created under it, on the first run and on later re-runs.
+
+Derives from: [`rule-the-boundary-is-chosen-again-for-every-error`](#rule-the-boundary-is-chosen-again-for-every-error)
+
+This follows because a `catchError` is a boundary in the owner tree, and the walk to a boundary runs again for every error: each throw whose walk ends at a `catchError` calls its handler once.
+
+A handler is a callback, not a collection. One rejection can re-run the reading binding several times, and the handler may then be called once per re-run. A boundary that shows state instead holds one report per failed binding, as [the rule on reports](#rule-a-boundary-holds-one-report-per-failed-binding) states.
+
 ### @rule a-handler-that-throws-passes-its-error-outward
 
 > When a `catchError` handler throws, the walk continues past it with the handler's error. When nothing further up takes it, it is thrown to the caller.
@@ -1744,33 +1754,23 @@ This follows because [`axiom-error-boundaries-are-sub-owners`](#axiom-error-boun
 
 This follows because [`axiom-error-boundaries-are-sub-owners`](#axiom-error-boundaries-are-sub-owners) says boundaries are owners in the owner tree: with no owner there is no tree above the reader, so no boundary is found and nothing can be active.
 
-## @axiom catch-error-is-the-callers-try-and-catch
+## @axiom a-throw-belongs-to-the-call-that-ran-the-code-raising-it
 
-> `catchError` is the caller's `try` and `catch`: it hears each throw that reaches it, and a throw on the caller's own stack goes no further than the handlers on that stack.
+> A throw belongs to the call that ran the code that raised it. It is caught by a `catchError` on that call's stack, the way a `try` and `catch` would catch it, or it reaches that call's caller. It is never thrown at a call that did not run that code.
 
-An error held by the graph is state, and reaches every kind of boundary. A throw on the stack belongs to whoever is running, the way a throw inside `try` belongs to its `catch`. `catchError` is the event-shaped part of the error system, kept for code that wants to hear each throw.
+`catchError` is the caller's `try` and `catch`. A node's first run is run by the call that creates the node, so a throw from it belongs to that call. A re-run is run by the graph, not by the writer whose write caused it, so a throw from a re-run belongs to no caller. An error held by the graph is state instead, and reaches every kind of boundary, as [the axiom on error state](#axiom-an-error-is-graph-state-not-an-event) states.
 
 ### @rule a-throw-from-a-catch-error-body-reaches-only-catch-error-handlers
 
 > A synchronous throw from a `catchError` body is routed only to `catchError` handlers, never to an `<Errored>` or a root's boundary. When none accepts it, it is thrown to the caller.
 
-This follows because a throw on the caller's stack belongs to the handlers on that stack: a throw from a `catchError` body is such a throw, so only `catchError` handlers take it.
-
-`catchError` is pulse's `try` and `catch`. A synchronous throw from its body belongs to the caller's stack, the way a throw inside `try` belongs to its `catch`, so only `catchError` handlers on that stack take it. An error in a node is graph state, not part of anyone's stack, which is why it reaches every kind of boundary.
-
-### @rule a-catch-error-handler-is-called-for-each-throw-under-it
-
-> A `catchError` handler is called for each throw that reaches it, from its body and from any node created under it, on the first run and on later re-runs.
-
-A handler is a callback, not a collection. One rejection can re-run the reading binding several times, and the handler may be called once per re-run.
-
-`catchError` is the event-shaped part of the error system, kept for code that wants to hear each throw, such as logging. It is deliberately outside [the axiom that an error is graph state](#axiom-an-error-is-graph-state-not-an-event): that axiom describes `<Errored>` and `error(x)`, which show state and do not count throws.
+This follows because a `catchError` body is run by the call to `catchError`, so a throw from it belongs to that call: only the `catchError` handlers on its stack take it, and otherwise its caller receives it. An `<Errored>` or a root's boundary holds the error state of nodes, and a throw from plain code is not a node's state.
 
 ### @rule an-error-nothing-claims-is-thrown-on-a-first-run
 
 > Outside any root, an error from a node that no boundary claims is thrown to the caller when it happens during the node's first run.
 
-This follows because a throw on the caller's stack belongs to the caller: a node's first run happens on the stack of the code that created it, so an error nothing claims is thrown there.
+This follows because a node's first run is run by the call that creates it, so a throw from it belongs to that call: with no boundary to claim it, it reaches that call's caller.
 
 Inside a root this never happens, because [the root's own boundary](#rule-every-root-has-an-error-boundary) claims whatever nothing nearer does.
 
@@ -1780,19 +1780,19 @@ Inside a root this never happens, because [the root's own boundary](#rule-every-
 
 Derives from: [`axiom-an-unhandled-failure-is-never-silent`](#axiom-an-unhandled-failure-is-never-silent)
 
-This follows because a throw on the caller's stack belongs to the caller: a re-run happens on the stack of a writer the error does not belong to, so it is not thrown there. A failure nothing handles must still reach the developer, so with no caller to throw it to, it is logged.
+This follows because a re-run is run by the graph, not by the writer whose write caused it, so its throw belongs to no caller and is not thrown at the writer. A failure nothing handles must still reach the developer, so with no caller to throw it to, it is logged.
 
 ## @axiom every-failure-in-a-root-is-held
 
-> Every failure inside a root is held by some boundary: none is lost, and none is thrown at a writer that did not cause it.
+> Every failure of a node or an action inside a root is held by some boundary: none is lost.
 
-No design document states this. It was accepted as a principle when the canon was reviewed.
+No design document states this. It was accepted as a principle when the canon was reviewed. A throw from plain code, such as a `catchError` body, is not the failure of a node or an action: it belongs to the call that ran it, as [the axiom on throws](#axiom-a-throw-belongs-to-the-call-that-ran-the-code-raising-it) states.
 
 ### @rule every-root-has-an-error-boundary
 
 > `createRoot` installs an error boundary on the root owner. It claims every error no nearer boundary claims, and tracks it like any other boundary.
 
-This follows because every failure inside a root is held by some boundary: the root itself must therefore hold what nothing nearer does.
+This follows because every failure of a node or an action inside a root is held by some boundary: the root itself must therefore hold what nothing nearer does.
 
 An explicit boundary below the root is nearer, so [it wins over the root's](#rule-the-nearest-accepting-boundary-claims-an-error).
 
@@ -1802,7 +1802,7 @@ An explicit boundary below the root is nearer, so [it wins over the root's](#rul
 
 Derives from: [`rule-a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller`](#rule-a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller)
 
-This follows because every failure inside a root is held by some boundary: the boundary above the calling owner is still mounted, and dropping the report because the owner below it is gone would lose the failure.
+This follows because every failure of an action inside a root is held by some boundary: the boundary above the calling owner is still mounted, and dropping the report because the owner below it is gone would lose the failure.
 
 The calling owner can be gone before the action fails, for example a list row recreated by the action's own optimistic write.
 
@@ -1812,7 +1812,7 @@ The calling owner can be gone before the action fails, for example a list row re
 
 Derives from: [`rule-a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller`](#rule-a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller), [`rule-every-root-has-an-error-boundary`](#rule-every-root-has-an-error-boundary)
 
-This follows because every failure inside a root is held by some boundary: a disposed boundary can no longer hold or show the report, so it must go to a boundary that still can, and the root's boundary is always there.
+This follows because every failure of an action inside a root is held by some boundary: a disposed boundary can no longer hold or show the report, so it must go to a boundary that still can, and the root's boundary is always there.
 
 ## @axiom an-unhandled-failure-is-never-silent
 
@@ -1830,7 +1830,7 @@ This follows because a failure that reaches the root's boundary is one nothing n
 
 ## @axiom an-error-is-graph-state-not-an-event
 
-> A failure is state held on the node that failed, beside its last resolved value, and it propagates along the graph the way pending does. A boundary shows that state; it does not count throws.
+> A failure is state held on the node that failed, beside its last resolved value, and it propagates along the graph the way pending does. An `<Errored>` and a root's boundary show that state; they do not count throws.
 
 A single rejection can re-run the reading binding several times. A boundary that counted throws would react several times to one failure. A boundary that collects failed bindings holds one entry, and shows its fallback exactly while the collection is not empty. The design is in [the failure boundary design](docs/superpowers/specs/2026-07-14-failure-boundary-design.md).
 
