@@ -8,6 +8,7 @@ import type { Completion, StageHandle } from './computed'
 import { whenCommitted } from './derived-signal'
 import { resumeStage, runStage, type StageOutcome } from './driver'
 import { isPromise } from './is-promise'
+import { lookupPending } from './pending'
 import { getCurrentScope, ROOT_SCOPE, type Scope } from './scope'
 import { NODE, type Accessor } from './signal'
 
@@ -52,8 +53,15 @@ export function registerRefreshable(
 export function refresh<T>(x: Accessor<T>): Promise<Awaited<T>> {
   const target = registry.get(x as Accessor<unknown>)
   if (target === undefined) {
-    console.warn('refresh: only a derivation can be refreshed; this call ran nothing.', x)
-    const current = typeof x === 'function' && NODE in x ? peek(x) : undefined
+    console.warn(
+      'refresh: only a computed or a signal given stages can be refreshed; this call ran nothing.',
+      x,
+    )
+    // A pulse accessor is read for its current value. Anything else is never
+    // called: it may be a function with effects of its own.
+    const isPulseAccessor =
+      typeof x === 'function' && (NODE in x || lookupPending(x as Accessor<unknown>) !== undefined)
+    const current = isPulseAccessor ? peek(x) : undefined
     return Promise.resolve(current) as Promise<Awaited<T>>
   }
   const scope = getCurrentScope()
@@ -87,6 +95,7 @@ function refreshCommitted(target: Refreshable): Promise<unknown> {
  * Start a refresh: abandon what is in flight, arm every stage, and run the
  * first one. A stage that completes with a changed value has the next one run
  * through the graph; one that completes unchanged has the next one run here.
+ * A stage that is revised instead disarms the stages after it.
  * `settle` hears the next completion of the last stage, whichever run it is.
  */
 function start(target: Refreshable, settle: (completion: Completion) => void): void {
@@ -96,6 +105,12 @@ function start(target: Refreshable, settle: (completion: Completion) => void): v
   for (const handle of built) handle.armRefresh()
   built.forEach((handle, i) => {
     if (i === built.length - 1) return
+    // A revision of this stage reaches the later stages as a revision too, so
+    // none of their next runs belongs to the refresh.
+    handle.onceRevised(() => {
+      if (target.generation !== generation) return
+      for (let j = i + 1; j < built.length; j++) built[j].disarmRefresh()
+    })
     handle.onceCompleted((completion) => {
       if (target.generation !== generation) return
       if (completion.failed || completion.changed) return

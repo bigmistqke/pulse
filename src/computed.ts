@@ -129,6 +129,10 @@ export type StageHandle = {
   /** Call `listener` once, on the next run of the stage that ends with a value
    *  or a failure, rather than a suspension. */
   onceCompleted: (listener: (completion: Completion) => void) => void
+  /** Call `listener` once, when a revision ends the stage's part in a refresh. */
+  onceRevised: (listener: () => void) => void
+  /** End the stage's part in a refresh without running it. */
+  disarmRefresh: () => void
 }
 
 /** How a run of a stage ended. `changed` says whether it published a new
@@ -379,11 +383,24 @@ function makeStageNode(
   // Set just before the stage kicks itself to carry a run on past a settled
   // promise, so that run is told apart from a revision.
   let continuing = false
+  // The dependencies the stage had when a refresh kicked it, with their values.
+  // The run the kick starts compares them: a dependency that moved means a
+  // revision landed in the same run, and the run answers the revision.
+  let refreshDeps: DepRecord[] | null = null
   let completionListeners: Array<(completion: Completion) => void> = []
+  let revisionListeners: Array<() => void> = []
   const endRefresh = (): void => {
+    refreshDeps = null
     if (refreshPhase === 'none') return
     refreshPhase = 'none'
     setRefreshingSig(false)
+  }
+  /** A revision ends this stage's part in the refresh. */
+  const revised = (): void => {
+    endRefresh()
+    const listeners = revisionListeners
+    revisionListeners = []
+    for (const listener of listeners) listener()
   }
   /** Suspended: a refresh run reports refreshing, any other run pending. */
   const setSuspended = (): void => {
@@ -476,8 +493,18 @@ function makeStageNode(
 
       const isContinuation = continuing
       continuing = false
-      if (refreshPhase === 'armed') refreshPhase = 'running'
-      else if (refreshPhase === 'running' && !isContinuation) endRefresh()
+      if (refreshPhase === 'armed') {
+        // Compared without reading: r3 has already brought every dependency
+        // up to date before it runs this one.
+        const moved =
+          refreshDeps !== null &&
+          refreshDeps.some((record) => !Object.is(record.dep.value, record.value))
+        refreshDeps = null
+        if (moved) revised()
+        else refreshPhase = 'running'
+      } else if (refreshPhase === 'running' && !isContinuation) {
+        revised()
+      }
 
       let input: unknown = undefined
       // Did this evaluation's input arrive as a promise (an async upstream)? If
@@ -1019,6 +1046,8 @@ function makeStageNode(
 
   /** Mark this stage as part of a refresh. */
   const armRefresh = (): void => {
+    // Listeners of an earlier refresh this one supersedes have nothing to do.
+    revisionListeners = []
     refreshPhase = 'armed'
     setRefreshingSig(true)
   }
@@ -1028,7 +1057,12 @@ function makeStageNode(
   const kickRefresh = (): void => {
     if (refreshPhase !== 'armed') return
     continuing = false
+    refreshDeps = snapshotDeps(depTracker as R3Computed<unknown>, kickNode)
     setKick(++kickCount)
+  }
+
+  const onceRevised = (listener: () => void): void => {
+    revisionListeners.push(listener)
   }
 
   const onceCompleted = (listener: (completion: Completion) => void): void => {
@@ -1130,5 +1164,7 @@ function makeStageNode(
     armRefresh,
     kickRefresh,
     onceCompleted,
+    onceRevised,
+    disarmRefresh: endRefresh,
   }
 }

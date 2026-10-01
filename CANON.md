@@ -58,7 +58,7 @@ This document is the project. It holds the theory of pulse: why it is the way it
       - [`@spec a-refresh-inside-an-action-is-part-of-its-speculation`](#spec-a-refresh-inside-an-action-is-part-of-its-speculation) — A refresh started inside an action is part of the action's speculation. Its result is visible inside the action, reaches committed state when the action commits, and is discarded with it.
         - [`@exception a-refresh-after-an-await-escapes-the-speculation`](#exception-a-refresh-after-an-await-escapes-the-speculation) — In an async action body, a refresh started after the first `await` is not part of the speculation. Its result lands in committed state.
       - [`@spec a-refresh-reports-to-no-loading-boundary`](#spec-a-refresh-reports-to-no-loading-boundary) — A refresh reports nothing to a loading boundary: it brings back no placeholder, and leaves `isLoading()` as it was.
-      - [`@spec a-refresh-of-something-that-is-not-a-derivation-warns`](#spec-a-refresh-of-something-that-is-not-a-derivation-warns) — `refresh(x)` accepts a [derivation](#term-derivation): a computed, a signal given stages, or an optimistic value. Given anything else, such as a plain signal or a function that is not a pulse accessor, it runs nothing. It logs a warning naming the reason on every such call, and returns a promise for the current value of `x`.
+      - [`@spec a-refresh-of-something-it-cannot-rerun-warns`](#spec-a-refresh-of-something-it-cannot-rerun-warns) — `refresh(x)` accepts a computed or a signal given stages. Given anything else, such as an [optimistic value](#term-optimistic-value), a plain signal or a function that is not a pulse accessor, it runs nothing. It logs a warning naming the reason on every such call, and returns a promise for the current value of `x`.
       - [`@spec a-refresh-reruns-every-stage-of-its-pipeline-once`](#spec-a-refresh-reruns-every-stage-of-its-pipeline-once) — `refresh(x)` runs every stage of `x`'s pipeline again, in order, each once. It does not refresh the derivations `x` reads.
     - [`@spec a-computed-is-a-pipeline-of-stages`](#spec-a-computed-is-a-pipeline-of-stages) — `computed(s0, s1, …)` threads each [stage](#term-stage)'s resolved value into the next. Any stage may read signals, and a change to something a stage read re-runs that stage and passes its new value on.
     - [`@spec a-computed-has-no-setter`](#spec-a-computed-has-no-setter) — `computed` returns an [accessor](#term-accessor) and nothing to write with. A derivation that can also be written is made with `signal`.
@@ -742,11 +742,13 @@ After the first `await`, the speculation is no longer ambient, so nothing ties t
 
 This follows because a boundary coordinates loading, and a refresh loads nothing new for the region: the answer it shows still stands. A source polled every few seconds would otherwise make the boundary's loading state flicker.
 
-##### @spec a-refresh-of-something-that-is-not-a-derivation-warns
+##### @spec a-refresh-of-something-it-cannot-rerun-warns
 
-> `refresh(x)` accepts a [derivation](#term-derivation): a computed, a signal given stages, or an optimistic value. Given anything else, such as a plain signal or a function that is not a pulse accessor, it runs nothing. It logs a warning naming the reason on every such call, and returns a promise for the current value of `x`.
+> `refresh(x)` accepts a computed or a signal given stages. Given anything else, such as an [optimistic value](#term-optimistic-value), a plain signal or a function that is not a pulse accessor, it runs nothing. It logs a warning naming the reason on every such call, and returns a promise for the current value of `x`.
 
 This follows because a refresh re-runs a recipe, and something without a recipe has nothing to run again. The call does no harm, only nothing, so pulse stays permissive and reports it instead of refusing. Generic code, such as a helper that refreshes a list of accessors, keeps working. Nothing re-ran, so the next value `x` settles on is the one it holds.
+
+An optimistic value has a recipe, but a refresh of it runs nothing for now. How a refreshed answer meets the predictions in front of it is not settled, and running nothing commits pulse to no answer until it is.
 
 ##### @spec a-refresh-reruns-every-stage-of-its-pipeline-once
 

@@ -7,6 +7,7 @@ import { afterEach, expect, test, vi } from 'vitest'
 import {
   action,
   computed,
+  optimistic,
   from,
   isPending,
   isRefreshing,
@@ -109,7 +110,7 @@ test('refresh runs every stage of the pipeline once, even a stage whose input is
 })
 
 /**
- * @canon spec-a-refresh-of-something-that-is-not-a-derivation-warns
+ * @canon spec-a-refresh-of-something-it-cannot-rerun-warns
  */
 test('refresh of a plain signal or a plain function runs nothing, warns on every call, and resolves to the current value', async () => {
   const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
@@ -128,6 +129,26 @@ test('refresh of a plain signal or a plain function runs nothing, warns on every
   expect(fromFunction).toBeUndefined()
   expect(called).toBe(0)
   expect(warn).toHaveBeenCalledTimes(3)
+})
+
+/**
+ * @canon spec-a-refresh-of-something-it-cannot-rerun-warns
+ */
+test('refresh of an optimistic value runs nothing, warns, and resolves to the current value', async () => {
+  const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+  let runs = 0
+  const [value] = optimistic(() => {
+    runs++
+    return 'held'
+  })
+  expect(runs).toBe(1)
+
+  const delivered = await refresh(value)
+  await ticks(2)
+
+  expect(delivered).toBe('held')
+  expect(runs).toBe(1)
+  expect(warn).toHaveBeenCalledTimes(1)
 })
 
 /**
@@ -233,6 +254,75 @@ test('isRefreshing is true while a refresh is in flight, and isPending stays fal
   await ticks(2)
   expect(isRefreshing(source)).toBe(false)
   expect(isPending(source)).toBe(false)
+})
+
+/**
+ * A source whose every run waits on a promise the test settles by hand, and
+ * whose recipe reads the signal `n`, so a write to `n` starts a revision.
+ */
+function controlledSourceOf(n: () => number) {
+  const settlers: Array<(value: string) => void> = []
+  const source = computed(() => {
+    const value = n()
+    return new Promise<string>((resolve) => settlers.push((suffix) => resolve(`${value}${suffix}`)))
+  })
+  return { source, settle: (run: number, suffix = '') => settlers[run - 1](suffix) }
+}
+
+/**
+ * @canon spec-is-refreshing-reports-a-refresh-in-flight
+ * @canon spec-is-pending-reports-an-unsettled-pipeline
+ */
+test('a revision that lands in the same run a refresh starts is pending, not refreshing', async () => {
+  const [n, setN] = signal(1)
+  const { source, settle } = controlledSourceOf(n)
+  peek(source)
+  settle(1)
+  await ticks(2)
+
+  refresh(source)
+  // The refresh starts at the end of this tick. The write lands after it
+  // starts and before the run it asked for, so one run answers both.
+  await Promise.resolve()
+  setN(2)
+  await ticks(2)
+
+  expect(isPending(source)).toBe(true)
+  expect(isRefreshing(source)).toBe(false)
+})
+
+/**
+ * @canon spec-is-refreshing-reports-a-refresh-in-flight
+ * @canon spec-is-pending-reports-an-unsettled-pipeline
+ */
+test('a revision of an earlier stage during a refresh leaves the later stages pending, not refreshing', async () => {
+  const [n, setN] = signal(1)
+  const first: Array<(value: number) => void> = []
+  const second: Array<(value: string) => void> = []
+  const pipeline = computed(
+    () => {
+      const value = n()
+      return new Promise<number>((resolve) => first.push(() => resolve(value)))
+    },
+    (value: number) => new Promise<string>((resolve) => second.push(() => resolve(`user ${value}`))),
+  )
+  peek(pipeline)
+  first[0](0)
+  await ticks(2)
+  second[0]('')
+  await ticks(2)
+  expect(peek(pipeline)).toBe('user 1')
+
+  refresh(pipeline)
+  await ticks(2) // the refresh's run of the first stage is in flight
+  setN(2) // a revision supersedes it
+  await ticks(2)
+  first[first.length - 1](0)
+  await ticks(2) // the second stage now runs for the revision
+
+  expect(second.length).toBe(2)
+  expect(isPending(pipeline)).toBe(true)
+  expect(isRefreshing(pipeline)).toBe(false)
 })
 
 /**
