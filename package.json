@@ -33,7 +33,7 @@
     "documents": [
       "CANON.md"
     ],
-    "suites": "test/canon",
+    "suites": "test",
     "sources": [
       "src",
       "test"
