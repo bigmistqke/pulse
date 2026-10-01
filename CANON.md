@@ -58,6 +58,22 @@ The canon was written backwards from the existing tests and documents, and descr
       - [`@case a-slot-caches-undefined-like-any-value`](#case-a-slot-caches-undefined-like-any-value) — `scope.ts` `DIRTY`.
       - [`@case a-recompute-replaces-its-links`](#case-a-recompute-replaces-its-links) — `scope.ts` `resetSlotDeps`.
     - [`@rule a-derivation-runs-when-it-is-created`](#rule-a-derivation-runs-when-it-is-created) — A derivation runs when it is created, wherever it is created, inside a running computation included.
+  - [`@axiom the-latest-production-wins`](#axiom-the-latest-production-wins) — A derived value shows whatever produced it last — a dependency change or a direct write — and a production that was started earlier never publishes over a later one.
+    - [`@rule a-write-replaces-a-derived-value-without-rerunning-it`](#rule-a-write-replaces-a-derived-value-without-rerunning-it) — A write to a writable derivation replaces its value at once, and the body does not run again because of it.
+    - [`@rule a-write-abandons-the-run-in-progress`](#rule-a-write-abandons-the-run-in-progress) — A write abandons every stage's run in progress, a fetch in flight or a paused generator, in whichever stage it is, and the abandoned run never publishes.
+    - [`@rule a-write-withdraws-a-recompute-queued-in-the-same-tick`](#rule-a-write-withdraws-a-recompute-queued-in-the-same-tick) — A recompute queued earlier in the same tick as a write is withdrawn before it starts, so it makes no request, also when the write is an update function.
+    - [`@rule a-write-from-inside-the-derivation-abandons-its-own-run-without-raising`](#rule-a-write-from-inside-the-derivation-abandons-its-own-run-without-raising) — A write made from inside the derivation's own body abandons that run without raising, and the cleanups the run registered still run.
+    - [`@rule a-dependency-change-after-a-write-takes-over`](#rule-a-dependency-change-after-a-write-takes-over) — When a source the derivation reads changes after a write, the derivation runs again and its result replaces the written value. This holds when the change comes in the same tick as the write, and when the written value is a promise that has not settled.
+    - [`@rule the-written-value-stays-visible-while-the-derivation-reloads`](#rule-the-written-value-stays-visible-while-the-derivation-reloads) — While the run started by a dependency change is in flight, the derivation keeps showing the written value, and reports the reload as pending.
+    - [`@rule an-older-production-never-publishes-over-a-newer-one`](#rule-an-older-production-never-publishes-over-a-newer-one) — A promise that settles after its stage has started a newer run is ignored, even when it settles before the flush that runs the newer input.
+    - [`@rule a-write-clears-a-parked-failure`](#rule-a-write-clears-a-parked-failure) — A write to a derivation holding a parked failure clears the failure, whichever stage of the pipeline it was parked on.
+    - [`@rule an-update-function-that-throws-cancels-nothing`](#rule-an-update-function-that-throws-cancels-nothing) — If an update function throws, the write does not happen, and a recompute that was queued before it still runs.
+    - [`@rule a-written-promise-is-published-like-a-produced-one`](#rule-a-written-promise-is-published-like-a-produced-one) — A promise written into a derivation is its value: pending until it settles, then the resolved value, or a parked failure if it rejects.
+    - [`@rule the-handle-reports-its-newest-attempt`](#rule-the-handle-reports-its-newest-attempt) — An action's handle reports only its newest attempt: `settled` is a promise for that attempt, and an older attempt that settles after a newer one started changes nothing.
+    - [`@rule retry-runs-the-action-again-as-a-new-speculation`](#rule-retry-runs-the-action-again-as-a-new-speculation) — `retry()` runs the action's body again from the start as a new speculation, and clears `error()` at once, before the new attempt has settled.
+  - [`@rule an-update-function-receives-the-last-resolved-value`](#rule-an-update-function-receives-the-last-resolved-value) — An update function on a writable derivation receives the last value that actually resolved, never a promise, and `undefined` when nothing has resolved yet.
+  - [`@rule an-update-function-sees-the-value-a-sync-derivation-produced-at-creation`](#rule-an-update-function-sees-the-value-a-sync-derivation-produced-at-creation) — An update function on a sync derivation receives the value the derivation produced when it was created, even before any write, wherever the derivation was created. An async derivation that suspended has produced nothing yet.
+- [`@axiom nothing-is-hidden-from-the-code-that-uses-it`](#axiom-nothing-is-hidden-from-the-code-that-uses-it) — What a value is, including that it is still pending or has failed, is visible to the code that reads it, rather than smoothed over by the framework.
   - [`@axiom plain-reads-are-honest`](#axiom-plain-reads-are-honest) — A read reports what is there. Whether a value is still pending, or has failed, is a separate question asked through its own verb.
     - [`@rule peek-returns-the-last-resolved-value`](#rule-peek-returns-the-last-resolved-value) — `peek(x)` returns the most recent value that resolved for `x`. A value that is not a promise counts as resolved, and is returned as it is.
     - [`@rule peek-returns-undefined-before-anything-resolved`](#rule-peek-returns-undefined-before-anything-resolved) — `peek(x)` returns `undefined` while nothing has ever resolved for `x`.
@@ -75,21 +91,24 @@ The canon was written backwards from the existing tests and documents, and descr
     - [`@rule a-read-through-peek-carries-no-pending-state-into-its-reader`](#rule-a-read-through-peek-carries-no-pending-state-into-its-reader) — A computed that read a pending source only through `peek` does not report pending because of it.
     - [`@rule a-seeded-source-still-counts-as-a-first-load`](#rule-a-seeded-source-still-counts-as-a-first-load) — A source given a construction default is on its first load until it genuinely resolves. A `latest` read of it during that time drives the boundary's first-load placeholder, although the read has a value to return.
     - [`@rule a-live-prediction-reports-neither-pending-nor-failed`](#rule-a-live-prediction-reports-neither-pending-nor-failed) — While a prediction is live, the optimistic node reports neither pending nor failed, and `use` returns the prediction. The source underneath keeps reporting its own state, and when the last layer drops the node reports that state again, a masked failure included.
-  - [`@axiom the-latest-production-wins`](#axiom-the-latest-production-wins) — A derived value shows whatever produced it last — a dependency change or a direct write — and a production that was started earlier never publishes over a later one.
-    - [`@rule a-write-replaces-a-derived-value-without-rerunning-it`](#rule-a-write-replaces-a-derived-value-without-rerunning-it) — A write to a writable derivation replaces its value at once, and the body does not run again because of it.
-    - [`@rule a-write-abandons-the-run-in-progress`](#rule-a-write-abandons-the-run-in-progress) — A write abandons every stage's run in progress, a fetch in flight or a paused generator, in whichever stage it is, and the abandoned run never publishes.
-    - [`@rule a-write-withdraws-a-recompute-queued-in-the-same-tick`](#rule-a-write-withdraws-a-recompute-queued-in-the-same-tick) — A recompute queued earlier in the same tick as a write is withdrawn before it starts, so it makes no request, also when the write is an update function.
-    - [`@rule a-write-from-inside-the-derivation-abandons-its-own-run-without-raising`](#rule-a-write-from-inside-the-derivation-abandons-its-own-run-without-raising) — A write made from inside the derivation's own body abandons that run without raising, and the cleanups the run registered still run.
-    - [`@rule a-dependency-change-after-a-write-takes-over`](#rule-a-dependency-change-after-a-write-takes-over) — When a source the derivation reads changes after a write, the derivation runs again and its result replaces the written value. This holds when the change comes in the same tick as the write, and when the written value is a promise that has not settled.
-    - [`@rule the-written-value-stays-visible-while-the-derivation-reloads`](#rule-the-written-value-stays-visible-while-the-derivation-reloads) — While the run started by a dependency change is in flight, the derivation keeps showing the written value, and reports the reload as pending.
-    - [`@rule an-older-production-never-publishes-over-a-newer-one`](#rule-an-older-production-never-publishes-over-a-newer-one) — A promise that settles after its stage has started a newer run is ignored, even when it settles before the flush that runs the newer input.
-    - [`@rule a-write-clears-a-parked-failure`](#rule-a-write-clears-a-parked-failure) — A write to a derivation holding a parked failure clears the failure, whichever stage of the pipeline it was parked on.
-    - [`@rule an-update-function-that-throws-cancels-nothing`](#rule-an-update-function-that-throws-cancels-nothing) — If an update function throws, the write does not happen, and a recompute that was queued before it still runs.
-    - [`@rule a-written-promise-is-published-like-a-produced-one`](#rule-a-written-promise-is-published-like-a-produced-one) — A promise written into a derivation is its value: pending until it settles, then the resolved value, or a parked failure if it rejects.
-    - [`@rule the-handle-reports-its-newest-attempt`](#rule-the-handle-reports-its-newest-attempt) — An action's handle reports only its newest attempt: `settled` is a promise for that attempt, and an older attempt that settles after a newer one started changes nothing.
-    - [`@rule retry-runs-the-action-again-as-a-new-speculation`](#rule-retry-runs-the-action-again-as-a-new-speculation) — `retry()` runs the action's body again from the start as a new speculation, and clears `error()` at once, before the new attempt has settled.
-  - [`@rule an-update-function-receives-the-last-resolved-value`](#rule-an-update-function-receives-the-last-resolved-value) — An update function on a writable derivation receives the last value that actually resolved, never a promise, and `undefined` when nothing has resolved yet.
-  - [`@rule an-update-function-sees-the-value-a-sync-derivation-produced-at-creation`](#rule-an-update-function-sees-the-value-a-sync-derivation-produced-at-creation) — An update function on a sync derivation receives the value the derivation produced when it was created, even before any write, wherever the derivation was created. An async derivation that suspended has produced nothing yet.
+  - [`@axiom async-is-acknowledged-not-hidden`](#axiom-async-is-acknowledged-not-hidden) — A value that has a future says so: an async node reads as a promise, in its type and in what a read returns.
+    - [`@rule an-async-node-reads-as-a-plain-promise`](#rule-an-async-node-reads-as-a-plain-promise) — An async signal or computed reads as a plain `Promise`, before it settles and after. It never turns into its bare value on settle.
+    - [`@rule the-read-type-carries-the-async-colour`](#rule-the-read-type-carries-the-async-colour) — A computed's read type is a `Promise` exactly where a stage can make it one, and a stage's input type is its upstream's value with the colour removed.
+      - [`@case pipeline-read-colours-by-the-stages-that-can-be-async`](#case-pipeline-read-colours-by-the-stages-that-can-be-async) — `async.ts` `PipelineRead`.
+      - [`@case a-generator-stage-is-coloured-by-what-it-reads`](#case-a-generator-stage-is-coloured-by-what-it-reads) — `async.ts` `PipelineRead`.
+      - [`@case resolved-unwraps-what-a-stage-receives`](#case-resolved-unwraps-what-a-stage-receives) — `async.ts` `Resolved`.
+    - [`@rule a-pipeline-reads-as-a-promise-while-its-value-came-through-async`](#rule-a-pipeline-reads-as-a-promise-while-its-value-came-through-async) — The raw read of a pipeline is a promise when its current value was produced through an asynchronous stage, and bare otherwise. A sync last stage fed by an async stage still reads as a promise, and a stage that is async on one evaluation and sync on the next flips its read shape each time, even when the value is the same.
+    - [`@rule a-write-keeps-a-pipelines-colour`](#rule-a-write-keeps-a-pipelines-colour) — A write into a pipeline stage keeps the colour the stage already has: a bare write into an asynchronously coloured stage still reads as a promise, and a write into a synchronously coloured stage does not introduce one.
+    - [`@rule a-generator-stage-is-asynchronous-only-when-it-suspends`](#rule-a-generator-stage-is-asynchronous-only-when-it-suspends) — A generator stage counts as an asynchronous stage only when it actually suspended on a pending promise. One that ran to completion without suspending publishes its value bare.
+    - [`@rule a-use-suspended-stage-reads-as-its-promise-until-it-settles`](#rule-a-use-suspended-stage-reads-as-its-promise-until-it-settles) — While a sync stage that suspended through `use` waits on a first load, the pipeline reads as the promise in flight. Once that promise settles, the sync stage publishes its bare value.
+    - [`@rule a-promise-carries-its-state-in-one-weakmap`](#rule-a-promise-carries-its-state-in-one-weakmap) — The status, value, rejection reason and stale prior of a promise live in one `WeakMap` keyed on the promise. The promise itself carries nothing extra.
+      - [`@case track-seeds-the-stale-prior`](#case-track-seeds-the-stale-prior) — `async.ts` `track`.
+      - [`@case a-published-result-reads-fulfilled-at-once`](#case-a-published-result-reads-fulfilled-at-once) — `async.ts` `resolvedPromise`.
+      - [`@case the-driver-reads-settledness-from-the-promise-map`](#case-the-driver-reads-settledness-from-the-promise-map) — `driver.ts` `runStage`.
+    - [`@rule use-treats-a-promise-it-has-not-seen-settle-as-pending`](#rule-use-treats-a-promise-it-has-not-seen-settle-as-pending) — A promise whose settle `use` has not yet recorded is pending to it, even when the promise has already settled: the first `use` of `Promise.resolve(7)` throws `NotReadyYet`. Once the settle is recorded, `use` returns the value synchronously.
+    - [`@rule a-construction-default-leaves-the-raw-read-a-promise`](#rule-a-construction-default-leaves-the-raw-read-a-promise) — With `signal(fn, default)`, the raw read is still a pending promise until the derivation first resolves.
+    - [`@rule pending-follows-where-a-value-came-from`](#rule-pending-follows-where-a-value-came-from) — A node is pending when any stage upstream of it is pending, or when a source its value was read from is. `promiseOf` returns the nearest promise in flight along the same path.
+    - [`@rule is-pending-reports-an-unsettled-pipeline`](#rule-is-pending-reports-an-unsettled-pipeline) — `isPending(c)` is true while any stage of the pipeline is waiting on a promise, on the first load and during a refetch, and `promiseOf(c)` returns that promise. Both clear when it settles.
 - [`@axiom only-what-changed-runs-again`](#axiom-only-what-changed-runs-again) — When something changes, only the work that depends on the change runs again, and only from the point where it depends on it.
   - [`@rule an-equal-value-does-not-propagate`](#rule-an-equal-value-does-not-propagate) — A value equal to the one a node already holds does not reach the node's consumers: nothing re-runs. Two values are equal when they are SameValueZero-equal: `===`, except that `NaN` equals `NaN`. So `0` and `-0` are equal.
     - [`@case a-computed-publishes-only-a-changed-value`](#case-a-computed-publishes-only-a-changed-value) — `computed.ts` `makeStageNode`.
@@ -149,27 +168,10 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule list-rows-are-keyed-by-reference`](#rule-list-rows-are-keyed-by-reference) — A list row belongs to an item by strict reference. The same reference keeps its row, its mapped output and its DOM nodes in the new order. A different reference gets a new row even when its contents are equal.
   - [`@rule error-and-active-describe-the-first-report`](#rule-error-and-active-describe-the-first-report) — A boundary's `error()` and `active()` describe its first report. A change to a report other than the first does not notify a reader of `error()` or `active()`.
 - [`@axiom every-choice-is-stated-where-the-code-is-written`](#axiom-every-choice-is-stated-where-the-code-is-written) — What pulse does is decided by what the code states, at the place it is written. Pulse infers no choice from a name, a value or a convention, and applies none silently.
-  - [`@axiom async-is-acknowledged-not-hidden`](#axiom-async-is-acknowledged-not-hidden) — A value that has a future says so. An async node reads as a promise, and unwrapping it is an explicit act at the read site.
-    - [`@rule an-async-node-reads-as-a-plain-promise`](#rule-an-async-node-reads-as-a-plain-promise) — An async signal or computed reads as a plain `Promise`, before it settles and after. It never turns into its bare value on settle.
-    - [`@rule the-read-type-carries-the-async-colour`](#rule-the-read-type-carries-the-async-colour) — A computed's read type is a `Promise` exactly where a stage can make it one, and a stage's input type is its upstream's value with the colour removed.
-      - [`@case pipeline-read-colours-by-the-stages-that-can-be-async`](#case-pipeline-read-colours-by-the-stages-that-can-be-async) — `async.ts` `PipelineRead`.
-      - [`@case a-generator-stage-is-coloured-by-what-it-reads`](#case-a-generator-stage-is-coloured-by-what-it-reads) — `async.ts` `PipelineRead`.
-      - [`@case resolved-unwraps-what-a-stage-receives`](#case-resolved-unwraps-what-a-stage-receives) — `async.ts` `Resolved`.
-    - [`@rule a-pipeline-reads-as-a-promise-while-its-value-came-through-async`](#rule-a-pipeline-reads-as-a-promise-while-its-value-came-through-async) — The raw read of a pipeline is a promise when its current value was produced through an asynchronous stage, and bare otherwise. A sync last stage fed by an async stage still reads as a promise, and a stage that is async on one evaluation and sync on the next flips its read shape each time, even when the value is the same.
-    - [`@rule a-write-keeps-a-pipelines-colour`](#rule-a-write-keeps-a-pipelines-colour) — A write into a pipeline stage keeps the colour the stage already has: a bare write into an asynchronously coloured stage still reads as a promise, and a write into a synchronously coloured stage does not introduce one.
-    - [`@rule a-generator-stage-is-asynchronous-only-when-it-suspends`](#rule-a-generator-stage-is-asynchronous-only-when-it-suspends) — A generator stage counts as an asynchronous stage only when it actually suspended on a pending promise. One that ran to completion without suspending publishes its value bare.
-    - [`@rule a-use-suspended-stage-reads-as-its-promise-until-it-settles`](#rule-a-use-suspended-stage-reads-as-its-promise-until-it-settles) — While a sync stage that suspended through `use` waits on a first load, the pipeline reads as the promise in flight. Once that promise settles, the sync stage publishes its bare value.
-    - [`@rule a-promise-carries-its-state-in-one-weakmap`](#rule-a-promise-carries-its-state-in-one-weakmap) — The status, value, rejection reason and stale prior of a promise live in one `WeakMap` keyed on the promise. The promise itself carries nothing extra.
-      - [`@case track-seeds-the-stale-prior`](#case-track-seeds-the-stale-prior) — `async.ts` `track`.
-      - [`@case a-published-result-reads-fulfilled-at-once`](#case-a-published-result-reads-fulfilled-at-once) — `async.ts` `resolvedPromise`.
-      - [`@case the-driver-reads-settledness-from-the-promise-map`](#case-the-driver-reads-settledness-from-the-promise-map) — `driver.ts` `runStage`.
-    - [`@rule use-treats-a-promise-it-has-not-seen-settle-as-pending`](#rule-use-treats-a-promise-it-has-not-seen-settle-as-pending) — A promise whose settle `use` has not yet recorded is pending to it, even when the promise has already settled: the first `use` of `Promise.resolve(7)` throws `NotReadyYet`. Once the settle is recorded, `use` returns the value synchronously.
+  - [`@rule the-value-of-an-async-node-is-taken-out-at-the-read-site`](#rule-the-value-of-an-async-node-is-taken-out-at-the-read-site) — The value of an async node is taken out by the code that reads it, with a verb at the read site, such as `use`, `latest`, `peek` or a stage's `yield* from`. Pulse never takes it out on the reader's behalf.
     - [`@rule a-signal-stores-a-promise-as-it-is`](#rule-a-signal-stores-a-promise-as-it-is) — A signal holding a promise stores the promise itself, not its result. Writing a new promise re-runs its consumers; the promise settling is not a write.
     - [`@rule from-yields-what-it-is-given`](#rule-from-yields-what-it-is-given) — `yield* from(x)` yields a plain value or a promise as it is, and calls a signal's accessor so the read is tracked. It does not look at pending state.
     - [`@rule a-stage-result-is-settled-before-it-is-passed-on`](#rule-a-stage-result-is-settled-before-it-is-passed-on) — Each value a stage returns or a generator yields is settled before it is used. A plain value or a fulfilled promise is used at once, and a pending promise suspends the stage on that promise.
-    - [`@rule a-construction-default-leaves-the-raw-read-a-promise`](#rule-a-construction-default-leaves-the-raw-read-a-promise) — With `signal(fn, default)`, the raw read is still a pending promise until the derivation first resolves.
-    - [`@rule pending-follows-where-a-value-came-from`](#rule-pending-follows-where-a-value-came-from) — A node is pending when any stage upstream of it is pending, or when a source its value was read from is. `promiseOf` returns the nearest promise in flight along the same path.
-    - [`@rule is-pending-reports-an-unsettled-pipeline`](#rule-is-pending-reports-an-unsettled-pipeline) — `isPending(c)` is true while any stage of the pipeline is waiting on a promise, on the first load and during a refetch, and `promiseOf(c)` returns that promise. Both clear when it settles.
   - [`@rule the-read-verb-decides-what-renders-and-what-waits`](#rule-the-read-verb-decides-what-renders-and-what-waits) — The verb a binding reads with decides what the binding renders and whether it waits for its neighbours. Everything else in the loading lifecycle is reported ambiently, from the reads the binding makes.
     - [`@rule use-returns-a-value-that-is-not-a-promise-unchanged`](#rule-use-returns-a-value-that-is-not-a-promise-unchanged) — `use(x)` returns `x` unchanged when `x` is not a promise. A falsy value is a value: `use(0)`, `use(null)`, `use(undefined)`, `use(false)` and `use('')` return it.
     - [`@rule use-returns-a-settled-promises-value`](#rule-use-returns-a-settled-promises-value) — `use(promise)` returns the value of a promise it has seen fulfil.
@@ -755,13 +757,127 @@ This follows because a read is current the moment it is made: a derivation that 
 
 r3 puts off the first run of a computed created inside a running computation that has already read something. Pulse creates its derivations with no computation running, so they run at once.
 
+### @axiom the-latest-production-wins
+
+> A derived value shows whatever produced it last — a dependency change or a direct write — and a production that was started earlier never publishes over a later one.
+
+This narrows the axiom above to a value with two producers: a writable derivation shows whichever production came last in program order, rather than ranking writes above dependency changes or the reverse, so a reader never has to know which one that was.
+
+A write to a derivation cancels the run in progress exactly as a dependency change does, and a dependency change cancels a pending write the same way. Program order decides. The decision and the alternatives it rejects are in [the writable derived signal design](docs/superpowers/specs/2026-08-18-writable-derived-signals-design.md#a-new-production-cancels-the-previous-one-whoever-started-it).
+
+#### @rule a-write-replaces-a-derived-value-without-rerunning-it
+
+> A write to a writable derivation replaces its value at once, and the body does not run again because of it.
+
+This follows because a derived value shows whatever produced it last, and a direct write is a production: the written value is shown, and nothing re-derives it.
+
+The write leaves the derivation following the same sources; what happens when one of them changes is [the dependency rule](#rule-a-dependency-change-after-a-write-takes-over).
+
+#### @rule a-write-abandons-the-run-in-progress
+
+> A write abandons every stage's run in progress, a fetch in flight or a paused generator, in whichever stage it is, and the abandoned run never publishes.
+
+This follows because a production started earlier never publishes over a later one: a run started before the write is the earlier production, so it is abandoned.
+
+#### @rule a-write-withdraws-a-recompute-queued-in-the-same-tick
+
+> A recompute queued earlier in the same tick as a write is withdrawn before it starts, so it makes no request, also when the write is an update function.
+
+This follows because a production started earlier never publishes over a later one, and a recompute queued before the write would be the earlier production: withdrawing it before it starts is abandoning it at the cheapest point.
+
+#### @rule a-write-from-inside-the-derivation-abandons-its-own-run-without-raising
+
+> A write made from inside the derivation's own body abandons that run without raising, and the cleanups the run registered still run.
+
+This follows because a production started earlier never publishes over a later one: the write is later than the run it is made from, so that run is abandoned like any other.
+
+#### @rule a-dependency-change-after-a-write-takes-over
+
+> When a source the derivation reads changes after a write, the derivation runs again and its result replaces the written value. This holds when the change comes in the same tick as the write, and when the written value is a promise that has not settled.
+
+This follows because a derived value shows whatever produced it last: a dependency change after a write is the later production, so its result replaces the written value.
+
+A write followed by a change in the same tick is still a write followed by a change, so the change is the later production.
+
+#### @rule the-written-value-stays-visible-while-the-derivation-reloads
+
+> While the run started by a dependency change is in flight, the derivation keeps showing the written value, and reports the reload as pending.
+
+This follows because a derived value shows whatever produced it last: the reload has not produced anything yet, so the last production that has published is still the write.
+
+#### @rule an-older-production-never-publishes-over-a-newer-one
+
+> A promise that settles after its stage has started a newer run is ignored, even when it settles before the flush that runs the newer input.
+
+This follows because a production that was started earlier never publishes over a later one: a promise from a run its stage has since moved past is such a production.
+
+#### @rule a-write-clears-a-parked-failure
+
+> A write to a derivation holding a parked failure clears the failure, whichever stage of the pipeline it was parked on.
+
+This follows because a derived value shows whatever produced it last: the write is that production, so a failure from an earlier production cannot stay on the node.
+
+The written value wins over the derivation, and a node holding a written value while reporting a failure would not be coherent.
+
+#### @rule an-update-function-that-throws-cancels-nothing
+
+> If an update function throws, the write does not happen, and a recompute that was queued before it still runs.
+
+This follows because only a production cancels an earlier one: an update function that throws produces no write, so the recompute it would have cancelled still runs.
+
+#### @rule a-written-promise-is-published-like-a-produced-one
+
+> A promise written into a derivation is its value: pending until it settles, then the resolved value, or a parked failure if it rejects.
+
+Derives from: [`axiom-async-is-acknowledged-not-hidden`](#axiom-async-is-acknowledged-not-hidden)
+
+This follows because a direct write and a dependency change are both productions of the derived value, and a value that has a future says so: a written promise is published exactly as a produced promise would be.
+
+#### @rule the-handle-reports-its-newest-attempt
+
+> An action's handle reports only its newest attempt: `settled` is a promise for that attempt, and an older attempt that settles after a newer one started changes nothing.
+
+Derives from: [`axiom-a-speculation-commits-or-is-discarded-whole`](#axiom-a-speculation-commits-or-is-discarded-whole)
+
+This follows because each attempt is a speculation of its own, and a production started earlier never publishes over a later one: an older attempt settling after a newer one started changes nothing.
+
+#### @rule retry-runs-the-action-again-as-a-new-speculation
+
+> `retry()` runs the action's body again from the start as a new speculation, and clears `error()` at once, before the new attempt has settled.
+
+Derives from: [`axiom-a-speculation-commits-or-is-discarded-whole`](#axiom-a-speculation-commits-or-is-discarded-whole)
+
+This follows because the failed attempt was discarded whole and cannot be resumed, so a retry is a new production from the start, and the newest production has not failed.
+
+### @rule an-update-function-receives-the-last-resolved-value
+
+> An update function on a writable derivation receives the last value that actually resolved, never a promise, and `undefined` when nothing has resolved yet.
+
+This follows because reading is not a discipline, so code that builds on a value never unwraps a promise: an update function builds on the derivation's value, so it is handed the last resolved one, not a promise in flight.
+
+A written promise has not resolved while it is pending, so an update function called then receives the value from before it.
+
+### @rule an-update-function-sees-the-value-a-sync-derivation-produced-at-creation
+
+> An update function on a sync derivation receives the value the derivation produced when it was created, even before any write, wherever the derivation was created. An async derivation that suspended has produced nothing yet.
+
+Derives from: [`rule-a-derivation-runs-when-it-is-created`](#rule-a-derivation-runs-when-it-is-created), [`rule-an-update-function-receives-the-last-resolved-value`](#rule-an-update-function-receives-the-last-resolved-value)
+
+This follows because a derivation runs when it is created and an update function receives the last resolved value: a sync derivation has resolved by the time anything can write to it, and an async one that suspended has not.
+
+## @axiom nothing-is-hidden-from-the-code-that-uses-it
+
+> What a value is, including that it is still pending or has failed, is visible to the code that reads it, rather than smoothed over by the framework.
+
+Two principles of the exploration record make this commitment from two sides. [P2](docs/pulse/framings.md#p2--acknowledge-async-dont-hide-it) keeps a future in the type rather than erasing it, and [P3](docs/pulse/framings.md#p3--plain-reads-are-honest) has a read report what is there rather than raise what it was not asked about.
+
 ### @axiom plain-reads-are-honest
 
 > A read reports what is there. Whether a value is still pending, or has failed, is a separate question asked through its own verb.
 
-This narrows the axiom above to state: a read reports what is there, rather than raising pending or failure at the reader, so the reader never has to check either before reading.
+This narrows the axiom above to a read: it reports what is there, and pending and failure are asked through verbs of their own, rather than raised at the reader or folded into the value.
 
-Reading a value should not be a discipline to learn. Pending state and failure are queried through `isPending`, `promiseOf` and `error`, not raised by the tolerant reads. The principle is [P3 in the exploration record](docs/pulse/framings.md#p3--plain-reads-are-honest).
+Pending state and failure are queried through `isPending`, `promiseOf` and `error`, not raised by the tolerant reads. The principle is [P3 in the exploration record](docs/pulse/framings.md#p3--plain-reads-are-honest).
 
 #### @rule peek-returns-the-last-resolved-value
 
@@ -887,113 +1003,135 @@ This follows because a read reports what is there, and a prediction sits in fron
 
 A prediction is on screen, so nothing suspends behind it or replaces it with an error.
 
-### @axiom the-latest-production-wins
+### @axiom async-is-acknowledged-not-hidden
 
-> A derived value shows whatever produced it last — a dependency change or a direct write — and a production that was started earlier never publishes over a later one.
+> A value that has a future says so: an async node reads as a promise, in its type and in what a read returns.
 
-This narrows the axiom above to a value with two producers: a writable derivation shows whichever production came last in program order, rather than ranking writes above dependency changes or the reverse, so a reader never has to know which one that was.
+This narrows the axiom above to async: that a value has a future stays visible in its type and in its read, rather than being erased once the value arrives.
 
-A write to a derivation cancels the run in progress exactly as a dependency change does, and a dependency change cancels a pending write the same way. Program order decides. The decision and the alternatives it rejects are in [the writable derived signal design](docs/superpowers/specs/2026-08-18-writable-derived-signals-design.md#a-new-production-cancels-the-previous-one-whoever-started-it).
+A promise in the type is information: the value has, or had, a future. Pulse gives tools to take the future in, never an erasure that pretends it is not there. The colour stays visible through every stage, but it is cheap to carry: one read path serves sync and async inputs alike. The principle is [P2 in the exploration record](docs/pulse/framings.md#p2--acknowledge-async-dont-hide-it), and the decisions are [ADR 0004](docs/adr/0004-propagate-async-color.md) and [ADR 0012](docs/adr/0012-weakmap-backed-promise-read-model.md).
 
-#### @rule a-write-replaces-a-derived-value-without-rerunning-it
+#### @rule an-async-node-reads-as-a-plain-promise
 
-> A write to a writable derivation replaces its value at once, and the body does not run again because of it.
+> An async signal or computed reads as a plain `Promise`, before it settles and after. It never turns into its bare value on settle.
 
-This follows because a derived value shows whatever produced it last, and a direct write is a production: the written value is shown, and nothing re-derives it.
+This follows because a value that has a future says so: an async node reads as a promise, and turning into its bare value on settle would erase that it had a future.
 
-The write leaves the derivation following the same sources; what happens when one of them changes is [the dependency rule](#rule-a-dependency-change-after-a-write-takes-over).
+Its value is taken out through a verb such as `use`. The promise a settled async stage publishes is [already recorded as fulfilled](#case-a-published-result-reads-fulfilled-at-once).
 
-#### @rule a-write-abandons-the-run-in-progress
+#### @rule the-read-type-carries-the-async-colour
 
-> A write abandons every stage's run in progress, a fetch in flight or a paused generator, in whichever stage it is, and the abandoned run never publishes.
+> A computed's read type is a `Promise` exactly where a stage can make it one, and a stage's input type is its upstream's value with the colour removed.
 
-This follows because a production started earlier never publishes over a later one: a run started before the write is the earlier production, so it is abandoned.
+This follows because a value that has a future says so in its type: a stage that can produce a promise makes the read a promise, and unwrapping happens explicitly before the next stage.
 
-#### @rule a-write-withdraws-a-recompute-queued-in-the-same-tick
+##### @case pipeline-read-colours-by-the-stages-that-can-be-async
 
-> A recompute queued earlier in the same tick as a write is withdrawn before it starts, so it makes no request, also when the write is an update function.
+> `async.ts` `PipelineRead`.
 
-This follows because a production started earlier never publishes over a later one, and a recompute queued before the write would be the earlier production: withdrawing it before it starts is abandoning it at the cheapest point.
+An async upstream stage makes the whole read a `Promise`. A stage that may or may not return a promise makes the read a union of both.
 
-#### @rule a-write-from-inside-the-derivation-abandons-its-own-run-without-raising
+##### @case a-generator-stage-is-coloured-by-what-it-reads
 
-> A write made from inside the derivation's own body abandons that run without raising, and the cleanups the run registered still run.
+> `async.ts` `PipelineRead`.
 
-This follows because a production started earlier never publishes over a later one: the write is later than the run it is made from, so that run is abandoned like any other.
+A generator stage is coloured by what its `yield* from(…)` calls read, not by being a generator. One that reads only settled values reads bare.
 
-#### @rule a-dependency-change-after-a-write-takes-over
+##### @case resolved-unwraps-what-a-stage-receives
 
-> When a source the derivation reads changes after a write, the derivation runs again and its result replaces the written value. This holds when the change comes in the same tick as the write, and when the written value is a promise that has not settled.
+> `async.ts` `Resolved`.
 
-This follows because a derived value shows whatever produced it last: a dependency change after a write is the later production, so its result replaces the written value.
+`Resolved<T>` removes the colour from what a stage receives: a signal gives its value, a promise what it fulfils to, and a generator what it returns.
 
-A write followed by a change in the same tick is still a write followed by a change, so the change is the later production.
+#### @rule a-pipeline-reads-as-a-promise-while-its-value-came-through-async
 
-#### @rule the-written-value-stays-visible-while-the-derivation-reloads
+> The raw read of a pipeline is a promise when its current value was produced through an asynchronous stage, and bare otherwise. A sync last stage fed by an async stage still reads as a promise, and a stage that is async on one evaluation and sync on the next flips its read shape each time, even when the value is the same.
 
-> While the run started by a dependency change is in flight, the derivation keeps showing the written value, and reports the reload as pending.
+This follows because a value that has a future says so, and the colour stays visible through every stage: a value produced through an async stage reads as a promise however late in the pipeline.
 
-This follows because a derived value shows whatever produced it last: the reload has not produced anything yet, so the last production that has published is still the write.
+#### @rule a-write-keeps-a-pipelines-colour
 
-#### @rule an-older-production-never-publishes-over-a-newer-one
+> A write into a pipeline stage keeps the colour the stage already has: a bare write into an asynchronously coloured stage still reads as a promise, and a write into a synchronously coloured stage does not introduce one.
 
-> A promise that settles after its stage has started a newer run is ignored, even when it settles before the flush that runs the newer input.
+Derives from: [`rule-a-pipeline-reads-as-a-promise-while-its-value-came-through-async`](#rule-a-pipeline-reads-as-a-promise-while-its-value-came-through-async)
 
-This follows because a production that was started earlier never publishes over a later one: a promise from a run its stage has since moved past is such a production.
+This follows because a node's read shape says whether it has a future, which is a property of how the node produces its value, and a write stands in for one production without changing how the node produces.
 
-#### @rule a-write-clears-a-parked-failure
+#### @rule a-generator-stage-is-asynchronous-only-when-it-suspends
 
-> A write to a derivation holding a parked failure clears the failure, whichever stage of the pipeline it was parked on.
+> A generator stage counts as an asynchronous stage only when it actually suspended on a pending promise. One that ran to completion without suspending publishes its value bare.
 
-This follows because a derived value shows whatever produced it last: the write is that production, so a failure from an earlier production cannot stay on the node.
+This follows because a value says so only when it has a future: a generator that ran to completion without waiting produced a value with no future, so it is published bare.
 
-The written value wins over the derivation, and a node holding a written value while reporting a failure would not be coherent.
+#### @rule a-use-suspended-stage-reads-as-its-promise-until-it-settles
 
-#### @rule an-update-function-that-throws-cancels-nothing
+> While a sync stage that suspended through `use` waits on a first load, the pipeline reads as the promise in flight. Once that promise settles, the sync stage publishes its bare value.
 
-> If an update function throws, the write does not happen, and a recompute that was queued before it still runs.
+Derives from: [`rule-a-stage-suspended-through-use-is-absorbed`](#rule-a-stage-suspended-through-use-is-absorbed)
 
-This follows because only a production cancels an earlier one: an update function that throws produces no write, so the recompute it would have cancelled still runs.
+This follows because a sync stage that suspends through `use` waits on a promise, and a value that has a future says so: until that promise settles, the pipeline's value is the promise in flight.
 
-#### @rule a-written-promise-is-published-like-a-produced-one
+#### @rule a-promise-carries-its-state-in-one-weakmap
 
-> A promise written into a derivation is its value: pending until it settles, then the resolved value, or a parked failure if it rejects.
+> The status, value, rejection reason and stale prior of a promise live in one `WeakMap` keyed on the promise. The promise itself carries nothing extra.
 
-Derives from: [`axiom-async-is-acknowledged-not-hidden`](#axiom-async-is-acknowledged-not-hidden)
+Derives from: [`rule-an-async-node-reads-as-a-plain-promise`](#rule-an-async-node-reads-as-a-plain-promise)
 
-This follows because a direct write and a dependency change are both productions of the derived value, and a value that has a future says so: a written promise is published exactly as a produced promise would be.
+This follows because an async node reads as a plain promise, and a value with a future must still say so: a plain promise has no fields for status or value, so that state lives outside it, keyed on it.
 
-#### @rule the-handle-reports-its-newest-attempt
+##### @case track-seeds-the-stale-prior
 
-> An action's handle reports only its newest attempt: `settled` is a promise for that attempt, and an older attempt that settles after a newer one started changes nothing.
+> `async.ts` `track`.
 
-Derives from: [`axiom-a-speculation-commits-or-is-discarded-whole`](#axiom-a-speculation-commits-or-is-discarded-whole)
+The first time a promise is seen, it is recorded as pending, carrying the prior value it replaces, so a tolerant read of a pending promise can still return that prior. A later `track` of the same promise returns the recorded state unchanged.
 
-This follows because each attempt is a speculation of its own, and a production started earlier never publishes over a later one: an older attempt settling after a newer one started changes nothing.
+##### @case a-published-result-reads-fulfilled-at-once
 
-#### @rule retry-runs-the-action-again-as-a-new-speculation
+> `async.ts` `resolvedPromise`.
 
-> `retry()` runs the action's body again from the start as a new speculation, and clears `error()` at once, before the new attempt has settled.
+The promise pulse publishes when an async stage settles is recorded fulfilled the moment it is made, so a synchronous read reports its value without waiting a microtask.
 
-Derives from: [`axiom-a-speculation-commits-or-is-discarded-whole`](#axiom-a-speculation-commits-or-is-discarded-whole)
+##### @case the-driver-reads-settledness-from-the-promise-map
 
-This follows because the failed attempt was discarded whole and cannot be resumed, so a retry is a new production from the start, and the newest production has not failed.
+> `driver.ts` `runStage`.
 
-### @rule an-update-function-receives-the-last-resolved-value
+The driver decides whether a returned or yielded promise has settled by reading the same map. Read state and the driver's memory of settled promises are one mechanism: a promise the map records as fulfilled is used at once, even on the first run that sees it.
 
-> An update function on a writable derivation receives the last value that actually resolved, never a promise, and `undefined` when nothing has resolved yet.
+#### @rule use-treats-a-promise-it-has-not-seen-settle-as-pending
 
-This follows because reading is not a discipline, so code that builds on a value never unwraps a promise: an update function builds on the derivation's value, so it is handed the last resolved one, not a promise in flight.
+> A promise whose settle `use` has not yet recorded is pending to it, even when the promise has already settled: the first `use` of `Promise.resolve(7)` throws `NotReadyYet`. Once the settle is recorded, `use` returns the value synchronously.
 
-A written promise has not resolved while it is pending, so an update function called then receives the value from before it.
+Derives from: [`rule-a-promise-carries-its-state-in-one-weakmap`](#rule-a-promise-carries-its-state-in-one-weakmap)
 
-### @rule an-update-function-sees-the-value-a-sync-derivation-produced-at-creation
+This follows because an async value is read through its recorded state, and a promise carries its state only in pulse's map, which records it as pending when first seen: until the settle is recorded, `use` sees pending.
 
-> An update function on a sync derivation receives the value the derivation produced when it was created, even before any write, wherever the derivation was created. An async derivation that suspended has produced nothing yet.
+A promise carries no readable state of its own. Its state is recorded when its settle callback runs, which is always at least a microtask after the promise is first seen.
 
-Derives from: [`rule-a-derivation-runs-when-it-is-created`](#rule-a-derivation-runs-when-it-is-created), [`rule-an-update-function-receives-the-last-resolved-value`](#rule-an-update-function-receives-the-last-resolved-value)
+#### @rule a-construction-default-leaves-the-raw-read-a-promise
 
-This follows because a derivation runs when it is created and an update function receives the last resolved value: a sync derivation has resolved by the time anything can write to it, and an async one that suspended has not.
+> With `signal(fn, default)`, the raw read is still a pending promise until the derivation first resolves.
+
+This follows because an async node reads as a promise until it settles, and a default standing in for the raw read would hide the future it has.
+
+#### @rule pending-follows-where-a-value-came-from
+
+> A node is pending when any stage upstream of it is pending, or when a source its value was read from is. `promiseOf` returns the nearest promise in flight along the same path.
+
+Derives from: [`axiom-plain-reads-are-honest`](#axiom-plain-reads-are-honest)
+
+This follows because a value that has a future says so, and pending is asked through its own verb: a value made from a pending source has a future too, so the pending verbs report it until its sources settle.
+
+The walk follows two chains: the static pipeline, stage by stage, and the sources the node's recipe read through a verb on its last run. The second chain is how an optimistic value reports a background refresh of the node it wraps: its own stage holds a value and is not in flight, but the node it read is.
+
+#### @rule is-pending-reports-an-unsettled-pipeline
+
+> `isPending(c)` is true while any stage of the pipeline is waiting on a promise, on the first load and during a refetch, and `promiseOf(c)` returns that promise. Both clear when it settles.
+
+Derives from: [`axiom-plain-reads-are-honest`](#axiom-plain-reads-are-honest), [`rule-pending-follows-where-a-value-came-from`](#rule-pending-follows-where-a-value-came-from)
+
+This follows because pending follows where a value came from, a value with a future says so, and pending is its own question: while any stage waits on a promise, `isPending` reports the pipeline as pending.
+
+A stage that reads another node as its input reports that node's pending state as well, as [the pending walk](#rule-pending-follows-where-a-value-came-from) states.
 
 ## @axiom only-what-changed-runs-again
 
@@ -1411,109 +1549,13 @@ The order began as whatever order the boundary's collection happened to iterate 
 
 The introduction of [`CONTEXT.md`](CONTEXT.md) names this as the framework's bet: every coordination choice is visible at the call site and can be found by searching for it, at the price of verbosity. [P4 in the exploration record](docs/pulse/framings.md#p4--explicit-boundaries-over-implicit-pervasiveness) states it for speculation, and [P2](docs/pulse/framings.md#p2--acknowledge-async-dont-hide-it) for async.
 
-### @axiom async-is-acknowledged-not-hidden
+### @rule the-value-of-an-async-node-is-taken-out-at-the-read-site
 
-> A value that has a future says so. An async node reads as a promise, and unwrapping it is an explicit act at the read site.
+> The value of an async node is taken out by the code that reads it, with a verb at the read site, such as `use`, `latest`, `peek` or a stage's `yield* from`. Pulse never takes it out on the reader's behalf.
 
-This narrows the axiom above to async: that a value has a future is stated in its type, and taking the value out is stated at the read site, rather than unwrapped for the reader out of sight.
+Derives from: [`axiom-async-is-acknowledged-not-hidden`](#axiom-async-is-acknowledged-not-hidden)
 
-A promise in the type is information: the value has, or had, a future. Pulse gives tools to take the future in, never an erasure that pretends it is not there. The colour stays visible through every stage, but it is cheap to carry: one read path serves sync and async inputs alike. The principle is [P2 in the exploration record](docs/pulse/framings.md#p2--acknowledge-async-dont-hide-it), and the decisions are [ADR 0004](docs/adr/0004-propagate-async-color.md) and [ADR 0012](docs/adr/0012-weakmap-backed-promise-read-model.md).
-
-#### @rule an-async-node-reads-as-a-plain-promise
-
-> An async signal or computed reads as a plain `Promise`, before it settles and after. It never turns into its bare value on settle.
-
-This follows because a value that has a future says so: an async node reads as a promise, and turning into its bare value on settle would erase that it had a future.
-
-Its value is taken out through a verb such as `use`. The promise a settled async stage publishes is [already recorded as fulfilled](#case-a-published-result-reads-fulfilled-at-once).
-
-#### @rule the-read-type-carries-the-async-colour
-
-> A computed's read type is a `Promise` exactly where a stage can make it one, and a stage's input type is its upstream's value with the colour removed.
-
-This follows because a value that has a future says so in its type: a stage that can produce a promise makes the read a promise, and unwrapping happens explicitly before the next stage.
-
-##### @case pipeline-read-colours-by-the-stages-that-can-be-async
-
-> `async.ts` `PipelineRead`.
-
-An async upstream stage makes the whole read a `Promise`. A stage that may or may not return a promise makes the read a union of both.
-
-##### @case a-generator-stage-is-coloured-by-what-it-reads
-
-> `async.ts` `PipelineRead`.
-
-A generator stage is coloured by what its `yield* from(…)` calls read, not by being a generator. One that reads only settled values reads bare.
-
-##### @case resolved-unwraps-what-a-stage-receives
-
-> `async.ts` `Resolved`.
-
-`Resolved<T>` removes the colour from what a stage receives: a signal gives its value, a promise what it fulfils to, and a generator what it returns.
-
-#### @rule a-pipeline-reads-as-a-promise-while-its-value-came-through-async
-
-> The raw read of a pipeline is a promise when its current value was produced through an asynchronous stage, and bare otherwise. A sync last stage fed by an async stage still reads as a promise, and a stage that is async on one evaluation and sync on the next flips its read shape each time, even when the value is the same.
-
-This follows because a value that has a future says so, and the colour stays visible through every stage: a value produced through an async stage reads as a promise however late in the pipeline.
-
-#### @rule a-write-keeps-a-pipelines-colour
-
-> A write into a pipeline stage keeps the colour the stage already has: a bare write into an asynchronously coloured stage still reads as a promise, and a write into a synchronously coloured stage does not introduce one.
-
-Derives from: [`rule-a-pipeline-reads-as-a-promise-while-its-value-came-through-async`](#rule-a-pipeline-reads-as-a-promise-while-its-value-came-through-async)
-
-This follows because a node's read shape says whether it has a future, which is a property of how the node produces its value, and a write stands in for one production without changing how the node produces.
-
-#### @rule a-generator-stage-is-asynchronous-only-when-it-suspends
-
-> A generator stage counts as an asynchronous stage only when it actually suspended on a pending promise. One that ran to completion without suspending publishes its value bare.
-
-This follows because a value says so only when it has a future: a generator that ran to completion without waiting produced a value with no future, so it is published bare.
-
-#### @rule a-use-suspended-stage-reads-as-its-promise-until-it-settles
-
-> While a sync stage that suspended through `use` waits on a first load, the pipeline reads as the promise in flight. Once that promise settles, the sync stage publishes its bare value.
-
-Derives from: [`rule-a-stage-suspended-through-use-is-absorbed`](#rule-a-stage-suspended-through-use-is-absorbed)
-
-This follows because a sync stage that suspends through `use` waits on a promise, and a value that has a future says so: until that promise settles, the pipeline's value is the promise in flight.
-
-#### @rule a-promise-carries-its-state-in-one-weakmap
-
-> The status, value, rejection reason and stale prior of a promise live in one `WeakMap` keyed on the promise. The promise itself carries nothing extra.
-
-Derives from: [`rule-an-async-node-reads-as-a-plain-promise`](#rule-an-async-node-reads-as-a-plain-promise)
-
-This follows because an async node reads as a plain promise, and a value with a future must still say so: a plain promise has no fields for status or value, so that state lives outside it, keyed on it.
-
-##### @case track-seeds-the-stale-prior
-
-> `async.ts` `track`.
-
-The first time a promise is seen, it is recorded as pending, carrying the prior value it replaces, so a tolerant read of a pending promise can still return that prior. A later `track` of the same promise returns the recorded state unchanged.
-
-##### @case a-published-result-reads-fulfilled-at-once
-
-> `async.ts` `resolvedPromise`.
-
-The promise pulse publishes when an async stage settles is recorded fulfilled the moment it is made, so a synchronous read reports its value without waiting a microtask.
-
-##### @case the-driver-reads-settledness-from-the-promise-map
-
-> `driver.ts` `runStage`.
-
-The driver decides whether a returned or yielded promise has settled by reading the same map. Read state and the driver's memory of settled promises are one mechanism: a promise the map records as fulfilled is used at once, even on the first run that sees it.
-
-#### @rule use-treats-a-promise-it-has-not-seen-settle-as-pending
-
-> A promise whose settle `use` has not yet recorded is pending to it, even when the promise has already settled: the first `use` of `Promise.resolve(7)` throws `NotReadyYet`. Once the settle is recorded, `use` returns the value synchronously.
-
-Derives from: [`rule-a-promise-carries-its-state-in-one-weakmap`](#rule-a-promise-carries-its-state-in-one-weakmap)
-
-This follows because an async value is read through its recorded state, and a promise carries its state only in pulse's map, which records it as pending when first seen: until the settle is recorded, `use` sees pending.
-
-A promise carries no readable state of its own. Its state is recorded when its settle callback runs, which is always at least a microtask after the promise is first seen.
+This follows because a value that has a future says so, and every choice is stated where the code is written: what to do about a value that is not there yet, whether to wait for it, take the stale one or only look, is the reader's choice, so the reader states it with a verb.
 
 #### @rule a-signal-stores-a-promise-as-it-is
 
@@ -1538,32 +1580,6 @@ What happens to the yielded value next is [the driver settling it](#rule-a-stage
 This follows because a stage's input is its upstream's value with the colour removed, unwrapped explicitly: the driver must settle a returned or yielded promise before passing its value on.
 
 An async stage suspends on the promise it returns, like any other pending promise.
-
-#### @rule a-construction-default-leaves-the-raw-read-a-promise
-
-> With `signal(fn, default)`, the raw read is still a pending promise until the derivation first resolves.
-
-This follows because an async node reads as a promise until it settles, and a default standing in for the raw read would hide the future it has.
-
-#### @rule pending-follows-where-a-value-came-from
-
-> A node is pending when any stage upstream of it is pending, or when a source its value was read from is. `promiseOf` returns the nearest promise in flight along the same path.
-
-Derives from: [`axiom-plain-reads-are-honest`](#axiom-plain-reads-are-honest)
-
-This follows because a value that has a future says so, and pending is asked through its own verb: a value made from a pending source has a future too, so the pending verbs report it until its sources settle.
-
-The walk follows two chains: the static pipeline, stage by stage, and the sources the node's recipe read through a verb on its last run. The second chain is how an optimistic value reports a background refresh of the node it wraps: its own stage holds a value and is not in flight, but the node it read is.
-
-#### @rule is-pending-reports-an-unsettled-pipeline
-
-> `isPending(c)` is true while any stage of the pipeline is waiting on a promise, on the first load and during a refetch, and `promiseOf(c)` returns that promise. Both clear when it settles.
-
-Derives from: [`axiom-plain-reads-are-honest`](#axiom-plain-reads-are-honest), [`rule-pending-follows-where-a-value-came-from`](#rule-pending-follows-where-a-value-came-from)
-
-This follows because pending follows where a value came from, a value with a future says so, and pending is its own question: while any stage waits on a promise, `isPending` reports the pipeline as pending.
-
-A stage that reads another node as its input reports that node's pending state as well, as [the pending walk](#rule-pending-follows-where-a-value-came-from) states.
 
 ### @rule the-read-verb-decides-what-renders-and-what-waits
 
