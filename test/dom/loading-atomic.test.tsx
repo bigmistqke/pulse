@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, test } from 'vitest'
-import { flush, microtaskScheduler, render, setScheduler, signal, syncScheduler, useLoading } from '../../src/index'
+import { effect, flush, microtaskScheduler, render, setScheduler, signal, syncScheduler, useLoading } from '../../src/index'
 import { Loading } from '../../src/dom/loading'
 import { findBoundaryScope, getOwner, runWithOwner, type LoadingScope } from '../../src/owner'
 import { use } from '../../src/async'
@@ -382,6 +382,88 @@ test('use(plainSignal) inside <Loading> defers commit when sibling is pending', 
 })
 
 /**
+ * @canon spec-use-enrols-the-binding-in-its-boundarys-gate
+ */
+test('a reactive child, a reactive prop and a staged effect that called use all wait for a suspended sibling and land with it', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+  const [n, setN] = signal(0)
+  let resolve1!: (v: string) => void
+  const [srcP, setSrcP] = signal<string | Promise<string>>(new Promise<string>((r) => (resolve1 = r)))
+  // A mutation observer delivers one batch per synchronous turn of DOM
+  // writes, so counting batches tells whether writes landed in one pass.
+  let mutationBatches = 0
+  const observer = new MutationObserver(() => mutationBatches++)
+  // Each effect commit records the sibling's text and how many batches had
+  // been delivered when it ran.
+  const effectCommits: Array<{ n: number; p: string; batches: number }> = []
+
+  const dispose = render(
+    () => (
+      <Loading>
+        {() => {
+          // None of these three bindings suspends itself: each reads a ready
+          // signal through use, and only the sibling .p suspends.
+          effect([() => use(n)], (value) => {
+            effectCommits.push({
+              n: value as number,
+              p: target.querySelector('.p')?.textContent ?? '',
+              batches: mutationBatches,
+            })
+          })
+          return (
+            <div>
+              <span class="n" class:odd={() => use(n) % 2 === 1}>
+                {() => use(n)}
+              </span>
+              <span class="p">{() => use(srcP())}</span>
+            </div>
+          )
+        }}
+      </Loading>
+    ),
+    target,
+  )
+
+  resolve1('first')
+  await new Promise((r) => queueMicrotask(() => r(undefined)))
+  flush()
+  expect(target.querySelector('.n')!.textContent).toBe('0')
+  expect(target.querySelector('.p')!.textContent).toBe('first')
+  const committedBefore = effectCommits.length
+
+  // The sibling suspends again, then the signal the three bindings read changes.
+  let resolve2!: (v: string) => void
+  setSrcP(new Promise<string>((r) => (resolve2 = r)))
+  await new Promise((r) => queueMicrotask(() => r(undefined)))
+  setN(1)
+  await new Promise((r) => queueMicrotask(() => r(undefined)))
+  flush()
+
+  // All three waited: the text, the class and the effect are unchanged.
+  expect(target.querySelector('.n')!.textContent).toBe('0')
+  expect(target.querySelector('.n')!.classList.contains('odd')).toBe(false)
+  expect(effectCommits.length).toBe(committedBefore)
+
+  observer.observe(target, { subtree: true, childList: true, characterData: true, attributes: true })
+  resolve2('second')
+  await new Promise((r) => setTimeout(r))
+  flush()
+  await new Promise((r) => setTimeout(r))
+  observer.disconnect()
+
+  // All three landed with the sibling. The DOM writes of the child, the prop
+  // and the sibling arrived as one batch, and the effect committed after the
+  // sibling's write but before that batch was delivered: the same pass.
+  expect(target.querySelector('.n')!.textContent).toBe('1')
+  expect(target.querySelector('.n')!.classList.contains('odd')).toBe(true)
+  expect(target.querySelector('.p')!.textContent).toBe('second')
+  expect(mutationBatches).toBe(1)
+  expect(effectCommits.slice(committedBefore)).toEqual([{ n: 1, p: 'second', batches: 0 }])
+  dispose()
+})
+
+/**
  * @canon spec-use-latest-enrols-the-binding-in-its-boundarys-gate
  */
 test('use.latest(plainSignal) inside <Loading> defers its commit while a sibling is pending', async () => {
@@ -582,6 +664,60 @@ test('mid-flight mount without fallback: the new structure lands together with i
   flush()
   expect(target.querySelector('.off')).toBeNull()
   expect(target.querySelector('.b')!.textContent).toBe('B1')
+  dispose()
+})
+
+/**
+ * @canon spec-a-structural-commit-waits-for-the-content-it-brings
+ */
+test('a reactive child that swaps in structure holding a suspended child keeps the old structure until both land in one pass', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+  const [mode, setMode] = signal<'old' | 'new'>('old')
+  let resolveContent: (v: string) => void = () => {}
+  const content = new Promise<string>((r) => (resolveContent = r))
+  // Record every state of the new structure as it is written, so a moment
+  // where it was on screen without its content cannot go unseen.
+  const seen: string[] = []
+  const observer = new MutationObserver(() => {
+    const b = target.querySelector('.b')
+    if (b) seen.push(b.textContent ?? '')
+  })
+  const dispose = render(
+    () => (
+      <Loading>
+        {() => (
+          <div>
+            {/* A plain reactive child, with no control-flow component in between. */}
+            {() => (mode() === 'old' ? <i class="old">old</i> : <b class="b">{() => use(content)}</b>)}
+          </div>
+        )}
+      </Loading>
+    ),
+    target,
+  )
+  flush()
+  expect(target.querySelector('.old')).not.toBeNull()
+  observer.observe(target, { subtree: true, childList: true, characterData: true })
+
+  setMode('new')
+  flush()
+  await new Promise((r) => setTimeout(r))
+  flush()
+  // The new structure waits for its content, and the old one stays meanwhile.
+  expect(target.querySelector('.b')).toBeNull()
+  expect(target.querySelector('.old')).not.toBeNull()
+
+  resolveContent('B')
+  await new Promise((r) => setTimeout(r))
+  flush()
+  await new Promise((r) => setTimeout(r))
+  observer.disconnect()
+  expect(target.querySelector('.old')).toBeNull()
+  expect(target.querySelector('.b')!.textContent).toBe('B')
+  // The structure and its content landed in one batch of writes: the new
+  // structure was never seen empty.
+  expect(seen).toEqual(['B'])
   dispose()
 })
 

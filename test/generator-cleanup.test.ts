@@ -3,6 +3,7 @@ import { computed } from '../src/computed'
 import { signal } from '../src/signal'
 import { peek, from } from '../src/async'
 import { createRoot, onCleanup } from '../src/owner'
+import { action, onSettled } from '../src/scope'
 
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
 const ticks = async (n: number) => {
@@ -218,3 +219,30 @@ test('a generator cleanup that throws does not stop the cleanups registered befo
   expect(events).toEqual(['third', 'first']) // newest first, the throw in between stops nothing
   expect((errors[0] as Error)?.message).toBe('cleanup failed')
 })
+
+/**
+ * @canon spec-closing-runs-callbacks-newest-first
+ */
+test('settle callbacks, owner cleanups and generator cleanups all run newest first', () => {
+  const settled: number[] = []
+  const owned: number[] = []
+  const generated: number[] = []
+
+  createRoot((dispose) => {
+    for (const i of [1, 2, 3]) onCleanup(() => owned.push(i))
+    action(() => {
+      for (const i of [1, 2, 3]) onSettled(() => settled.push(i))
+    })
+    const c = computed(function* () {
+      for (const i of [1, 2, 3]) onCleanup(() => generated.push(i))
+      return 1
+    })
+    c() // the generator completes without pausing, so its cleanups run here
+    dispose()
+  })
+
+  expect(settled).toEqual([3, 2, 1])
+  expect(owned).toEqual([3, 2, 1])
+  expect(generated).toEqual([3, 2, 1])
+})
+

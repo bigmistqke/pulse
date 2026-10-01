@@ -838,6 +838,86 @@ test('<Errored> without a fallback keeps its children mounted through an error',
 })
 
 /**
+ * @canon spec-a-boundarys-state-can-be-read-without-swapping
+ */
+test('every reader below a boundary reads the nearest boundary\'s state, and reading it swaps nothing', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+  const [id, setId] = signal(1)
+  const c = computed(() =>
+    id() === 1 ? Promise.reject(new Error('boom')) : Promise.resolve('ok'),
+  )
+  let outerState!: ReturnType<typeof useErrored>
+  let innerState!: ReturnType<typeof useErrored>
+
+  // Each boundary has the same three readers below it. Only the inner
+  // boundary holds the failing binding.
+  const readers = (name: string) => (
+    <>
+      <Show when={isErrored() !== undefined} fallback={<i>{name} isErrored healthy;</i>}>
+        {() => <i>{name} isErrored failed;</i>}
+      </Show>
+      <Errored.Error>{() => <i>{name} Errored.Error failed;</i>}</Errored.Error>
+    </>
+  )
+  render(
+    () => (
+      <Errored>
+        {() => {
+          outerState = useErrored()
+          return (
+            <div>
+              {readers('outer')}
+              <Errored>
+                {() => {
+                  innerState = useErrored()
+                  return (
+                    <div>
+                      {readers('inner')}
+                      <span data-testid="content">{() => use(c)}</span>
+                    </div>
+                  )
+                }}
+              </Errored>
+            </div>
+          )
+        }}
+      </Errored>
+    ),
+    target,
+  )
+  flush()
+  const content = target.querySelector('[data-testid="content"]')
+  expect(content).not.toBeNull()
+  expect(target.textContent).toContain('inner isErrored healthy;')
+
+  await tick()
+  flush()
+
+  // The inner boundary is failed and every reader below it says so; the
+  // outer boundary is healthy and every reader directly below it says so.
+  expect(innerState.active()).toBe(true)
+  expect((innerState.error() as Error).message).toBe('boom')
+  expect(outerState.active()).toBe(false)
+  expect(target.textContent).toContain('inner isErrored failed;')
+  expect(target.textContent).toContain('inner Errored.Error failed;')
+  expect(target.textContent).toContain('outer isErrored healthy;')
+  expect(target.textContent).not.toContain('outer Errored.Error failed;')
+  // Reading the state swapped nothing: the failing content is the same node.
+  expect(target.querySelector('[data-testid="content"]')).toBe(content)
+
+  setId(2)
+  await tick()
+  flush()
+
+  expect(innerState.active()).toBe(false)
+  expect(target.textContent).toContain('inner isErrored healthy;')
+  expect(target.textContent).not.toContain('inner Errored.Error failed;')
+  expect(target.querySelector('[data-testid="content"]')).toBe(content)
+  expect(content?.textContent).toBe('ok')
+})
+
+/**
  * @canon spec-use-errored-returns-accessors-to-the-nearest-boundary
  */
 test('useErrored() reflects the nearest boundary reactively, with nothing swapped', async () => {
@@ -865,6 +945,97 @@ test('useErrored() reflects the nearest boundary reactively, with nothing swappe
 
   expect(state.active()).toBe(true)
   expect((state.error() as Error).message).toBe('boom')
+})
+
+/**
+ * @canon spec-every-retry-affordance-performs-the-boundarys-reset
+ */
+test('the fallback\'s reset and every retry read from below all retry both failed reports a boundary holds', async () => {
+  type Affordance = 'fallback reset' | 'useErrored retry' | 'isErrored retry' | 'Errored.Error retry'
+  const affordances: Affordance[] = ['fallback reset', 'useErrored retry', 'isErrored retry', 'Errored.Error retry']
+  const outcomes: Record<string, unknown> = {}
+
+  for (const affordance of affordances) {
+    const target = document.createElement('section')
+    document.body.append(target)
+    // Two sources fail on their first attempt, each read by its own binding,
+    // so the boundary holds two reports. Only the first is what error() describes.
+    const attempts = { first: 0, second: 0 }
+    const failOnce = (name: 'first' | 'second') =>
+      computed(() => {
+        attempts[name]++
+        return attempts[name] === 1 ? Promise.reject(new Error(name)) : Promise.resolve(`${name} ok;`)
+      })
+    const first = failOnce('first')
+    const second = failOnce('second')
+    let retry: (() => void) | undefined
+    let state!: ReturnType<typeof useErrored>
+
+    const content = () => (
+      <div>
+        <span>{() => use(first)}</span>
+        <span>{() => use(second)}</span>
+      </div>
+    )
+    render(
+      () => {
+        if (affordance === 'fallback reset') {
+          return (
+            <Errored fallback={(_error, reset) => { retry = reset; return <p>failed</p> }}>
+              {() => content()}
+            </Errored>
+          )
+        }
+        return (
+          <Errored>
+            {() => {
+              state = useErrored()
+              if (affordance === 'useErrored retry') retry = state.retry
+              return (
+                <div>
+                  {affordance === 'isErrored retry' && (
+                    <Show when={isErrored()}>
+                      {(errored) => { retry = errored.retry; return <p>failed</p> }}
+                    </Show>
+                  )}
+                  {affordance === 'Errored.Error retry' && (
+                    <Errored.Error>{(_error, errorRetry) => { retry = errorRetry; return <p>failed</p> }}</Errored.Error>
+                  )}
+                  {content()}
+                </div>
+              )
+            }}
+          </Errored>
+        )
+      },
+      target,
+    )
+    flush()
+    await tick()
+    flush()
+    const failedBeforeRetry = affordance === 'useErrored retry'
+      ? state.active()
+      : target.textContent?.includes('failed')
+
+    retry?.()
+    await tick()
+    flush()
+
+    outcomes[affordance] = {
+      failedBeforeRetry,
+      attempts: { ...attempts },
+      text: target.textContent,
+    }
+    target.remove()
+  }
+
+  for (const affordance of affordances) {
+    expect(outcomes[affordance], affordance).toEqual({
+      failedBeforeRetry: true,
+      attempts: { first: 2, second: 2 },
+      text: 'first ok;second ok;',
+    })
+  }
 })
 
 /**

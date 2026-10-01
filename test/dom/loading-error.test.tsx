@@ -9,6 +9,7 @@ import {
   microtaskScheduler,
   render,
   setScheduler,
+  signal,
   syncScheduler,
   use,
   useLoading,
@@ -249,4 +250,70 @@ test('a staged effect whose pipeline rejects under Loading does not pin the boun
   expect(caught.length).toBeGreaterThan(0)
   expect(pending()).toBe(false)
   expect(target.textContent).toBe('ok')
+})
+
+/**
+ * @canon spec-a-failed-binding-leaves-the-pending-set
+ */
+test('a binding that suspends on a refresh and then fails clears the fallback and opens the gate for a held sibling', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+  const [n, setN] = signal(0)
+  const [source, setSource] = signal<string | Promise<string>>('first')
+  const caught: unknown[] = []
+  let pending!: ReturnType<typeof useLoading>
+
+  render(
+    () =>
+      catchError(
+        () => (
+          <Loading fallback={<p>loading</p>}>
+            {() => {
+              pending = useLoading()
+              return (
+                <>
+                  <span class="source">{() => use(source())}</span>
+                  <span class="n">{() => use(n)}</span>
+                </>
+              )
+            }}
+          </Loading>
+        ),
+        (e) => caught.push(e),
+      ) as Node,
+    target,
+  )
+  flush()
+  await tick()
+  flush()
+  expect(target.querySelector('.source')!.textContent).toBe('first')
+  // The sibling's element is kept to read it while the fallback swaps it out.
+  const sibling = target.querySelector('.n')!
+  expect(sibling.textContent).toBe('0')
+
+  // The binding suspends on a refresh, so the boundary shows its fallback,
+  // and a sibling that called use has its next commit held at the gate.
+  let reject!: (e: Error) => void
+  setSource(new Promise<string>((_, r) => (reject = r)))
+  flush()
+  setN(1)
+  flush()
+  await tick()
+  flush()
+  expect(pending()).toBe(true)
+  expect(target.textContent).toBe('loading')
+  expect(sibling.textContent).toBe('0')
+
+  // The suspended binding now fails for real. It is no longer pending, so
+  // the boundary has nothing left in flight: the fallback clears and the
+  // held sibling commit lands.
+  reject(new Error('boom'))
+  await tick()
+  flush()
+
+  expect((caught[0] as Error).message).toBe('boom')
+  expect(pending()).toBe(false)
+  expect(target.textContent).not.toContain('loading')
+  expect(target.querySelector('.n')).toBe(sibling)
+  expect(sibling.textContent).toBe('1')
 })

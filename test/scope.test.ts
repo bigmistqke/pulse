@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
 import { createScope, chainFor, writeSlot, readSlot, chainMatch, linkEdge, edgesToFire, closeScopeEdges, ROOT_KIND, ROOT_SCOPE, DIRTY, getCurrentScope, getCurrentTracker, runInScope, signalNode, computedNode, readValue, writeValue, commit, discard, action, onSettled, type Scope, type Node, type Slot, type Edge } from '../src/scope'
-import { read as r3Read } from 'r3'
+import { read as r3Read, setSignal as r3SetSignal, type Signal as R3Signal } from 'r3'
 
 /**
  * @canon spec-a-new-scope-starts-open-and-empty
@@ -75,6 +75,30 @@ test('a more-specific slot shadows an ancestor slot', () => {
   writeSlot(name, s, { recipe: () => 'bar', cached: 'bar', deps: [], node: name })
   expect(readSlot(name, s)?.cached).toBe('bar')
   expect(readSlot(name, root)?.cached).toBe('foo')
+})
+
+/**
+ * @canon spec-a-scope-reads-through-its-chain
+ */
+test('a read takes the nearest write up its chain, and committed state when the chain has none', () => {
+  const n = signalNode('committed')
+  const upper = computedNode(() => readValue(n).toUpperCase())
+  const outer = createScope(ROOT_SCOPE, 'speculative')
+  const inner = createScope(outer, 'speculative')
+  const innermost = createScope(inner, 'speculative')
+  const unrelated = createScope(ROOT_SCOPE, 'speculative')
+  const readIn = (s: Scope) => runInScope(s, undefined, () => readValue(n))
+
+  runInScope(outer, undefined, () => writeValue(n, 'outer'))
+  expect(readIn(innermost)).toBe('outer') // two scopes up the chain
+  runInScope(inner, undefined, () => writeValue(n, 'inner'))
+  expect(readIn(innermost)).toBe('inner') // the nearer write wins over the farther one
+  expect(runInScope(innermost, undefined, () => readValue(upper))).toBe('INNER') // a recipe reads through the chain too
+  expect(readIn(outer)).toBe('outer') // a write below a scope is not in its chain
+  expect(readIn(unrelated)).toBe('committed') // no slot in the chain: falls through
+  writeValue(n, 'committed again')
+  expect(readIn(unrelated)).toBe('committed again') // falls through to committed state as it is now
+  expect(readIn(innermost)).toBe('inner')
 })
 
 /**
@@ -157,6 +181,30 @@ test('edgesToFire does not fire consumers outside the write chain', () => {
 })
 
 /**
+ * @canon spec-a-speculative-write-reaches-only-consumers-in-its-chain
+ */
+test('a speculative write dirties only consumers whose chain holds the writer and no nearer slot', () => {
+  const src = signalNode(1)
+  const derived = computedNode(() => readValue(src) * 10)
+  const writer = createScope(ROOT_SCOPE, 'speculative')
+  const child = createScope(writer, 'speculative') // writer is in its chain
+  const shadowing = createScope(writer, 'speculative') // writer is in its chain, but it has its own slot for src
+  const sibling = createScope(ROOT_SCOPE, 'speculative') // writer is not in its chain
+  runInScope(shadowing, undefined, () => writeValue(src, 5))
+  // each scope reads derived into a slot of its own (writer last, so the others do not fall through to it)
+  for (const s of [child, shadowing, sibling, writer]) runInScope(s, undefined, () => readValue(derived))
+
+  runInScope(writer, undefined, () => writeValue(src, 2))
+
+  expect(writer.slots.get(derived)!.cached).toBe(DIRTY)
+  expect(child.slots.get(derived)!.cached).toBe(DIRTY)
+  expect(shadowing.slots.get(derived)!.cached).toBe(50) // shadowed: not reached
+  expect(sibling.slots.get(derived)!.cached).toBe(10) // outside the chain: not reached
+  expect(r3Read(derived.backing!)).toBe(10) // committed state: not reached
+  expect(runInScope(child, undefined, () => readValue(derived))).toBe(20)
+})
+
+/**
  * @canon spec-closing-a-scope-unlinks-it-from-its-sources
  */
 test('closeScopeEdges unlinks the scope edges from their sources and drops slots', () => {
@@ -227,6 +275,28 @@ test('read/write with no active speculation go through r3 (committed)', () => {
   expect(readValue(n)).toBe(0)      // ambient scope is ROOT_SCOPE
   writeValue(n, 5)
   expect(readValue(n)).toBe(5)      // committed value updated via r3
+})
+
+/**
+ * @canon spec-r3-holds-only-committed-values
+ */
+test('r3 keeps the committed value while a speculation holds another, and a root read or write goes to r3', () => {
+  const n = signalNode(1)
+  const doubled = computedNode(() => readValue(n) * 2)
+  const s = createScope(ROOT_SCOPE, 'speculative')
+  runInScope(s, undefined, () => writeValue(n, 2))
+  expect(runInScope(s, undefined, () => readValue(doubled))).toBe(4)
+  // the speculation has its values, but r3 holds only the committed ones
+  expect(r3Read(n.backing!)).toBe(1)
+  expect(r3Read(doubled.backing!)).toBe(2)
+  // a write with the root ambient lands in r3 at once
+  writeValue(n, 3)
+  expect(r3Read(n.backing!)).toBe(3)
+  // a read with the root ambient answers what r3 holds, with no copy kept on the pulse side
+  r3SetSignal(n.backing as R3Signal<number>, 5)
+  expect(readValue(n)).toBe(5)
+  expect(readValue(doubled)).toBe(10)
+  discard(s)
 })
 
 /**
@@ -309,6 +379,30 @@ test('reading a computed under a speculation runs its recipe into an S-slot and 
   expect(s.slots.has(doubleName)).toBe(true)
   expect([...name.subs].some((e) => e.targetScope === s)).toBe(true)
   expect([...name.subs].some((e) => e.target === s.slots.get(doubleName))).toBe(true)
+})
+
+/**
+ * @canon spec-speculative-derivation-is-pulled-on-read
+ */
+test('under a speculation a write runs no recipe; the next read recomputes into the slot', () => {
+  const src = signalNode(1)
+  let runs = 0
+  const derived = computedNode(() => {
+    runs++
+    return readValue(src) * 10
+  })
+  const s = createScope(ROOT_SCOPE, 'speculative')
+  expect(runInScope(s, undefined, () => readValue(derived))).toBe(10)
+  runs = 0
+
+  runInScope(s, undefined, () => writeValue(src, 2))
+  expect(runs).toBe(0) // the write ran nothing, neither the slot's recipe nor r3's
+  expect(s.slots.get(derived)!.cached).toBe(DIRTY) // it only marked the slot
+
+  expect(runInScope(s, undefined, () => readValue(derived))).toBe(20)
+  expect(runs).toBe(1) // the read recomputed it once
+  expect(s.slots.get(derived)!.cached).toBe(20) // into the slot of s
+  expect(r3Read(derived.backing!)).toBe(10) // committed derivation untouched
 })
 
 /**
@@ -499,6 +593,31 @@ test('committing a scope where a computed was only read does not promote/corrupt
   // signal promoted, computed intact and reactive (not overwritten by r3SetSignal):
   expect(readValue(name)).toBe('bar')
   expect(readValue(doubleName)).toBe('barbar')
+})
+
+/**
+ * @canon spec-only-written-nodes-are-promoted-at-commit
+ */
+test('a commit promotes what the speculation wrote and drops what it only read', () => {
+  const written = signalNode(0)
+  const onlyRead = signalNode(0)
+  const derived = computedNode(() => readValue(onlyRead) * 10)
+  const s = createScope(ROOT_SCOPE, 'speculative')
+  runInScope(s, undefined, () => {
+    writeValue(written, 1)
+    readValue(onlyRead)
+    readValue(derived) // a slot of s caches 0
+  })
+  writeValue(onlyRead, 5) // committed state moves on while s is open
+
+  commit(s)
+
+  expect(readValue(written)).toBe(1) // promoted
+  expect(readValue(onlyRead)).toBe(5) // not set back to what s read
+  expect(readValue(derived)).toBe(50) // derived by r3, not the 0 that s cached
+  expect(s.slots.size).toBe(0)
+  expect(s.edges.size).toBe(0)
+  expect(onlyRead.subs.size).toBe(0)
 })
 
 /**

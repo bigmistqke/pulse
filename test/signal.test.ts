@@ -93,6 +93,71 @@ test('SWR: while a refetch is pending the prior resolved value stays available v
   expect(peek(s)).toBe(1) // prior held (seeded from the current node value)
 })
 
+/**
+ * @canon spec-an-equal-value-does-not-propagate
+ */
+test('a SameValueZero-equal value re-runs no consumer, wherever it enters the graph', async () => {
+  const { createRoot } = await import('../src/owner')
+  const { effect } = await import('../src/effect')
+  const { use } = await import('../src/async')
+
+  // Each entry point holds `first`, then takes in `next`. `consumer` counts the
+  // runs of whatever reads the value directly from that entry point.
+  type Entry = (first: number, next: number, consumer: (v: number) => number) => () => void
+  const entries: Record<string, Entry> = {
+    'a signal write': (first, next, consumer) => {
+      const [s, setS] = signal(first)
+      const c = computed(() => consumer(s()))
+      effect(() => { c() })
+      return () => setS(next)
+    },
+    'a sync stage result': (first, next, consumer) => {
+      const [on, setOn] = signal(false)
+      const c = computed(() => (on() ? next : first), consumer)
+      effect(() => { c() })
+      return () => setOn(true)
+    },
+    'an async stage settle': (first, next, consumer) => {
+      const [on, setOn] = signal(false)
+      const c = computed(() => on(), (v: boolean) => Promise.resolve(v ? next : first), consumer)
+      effect(() => { c() })
+      return () => setOn(true)
+    },
+    'a promise a use settles': (first, next, consumer) => {
+      const [p, setP] = signal(Promise.resolve(first))
+      const c = computed(() => use(p()), consumer)
+      effect(() => { c() })
+      return () => setP(Promise.resolve(next))
+    },
+  }
+  const pairs: Array<[number, number]> = [[Number.NaN, Number.NaN], [0, -0], [-0, 0], [1, 2]]
+
+  const reruns: Record<string, number[]> = {}
+  for (const [name, entry] of Object.entries(entries)) {
+    reruns[name] = []
+    for (const [first, next] of pairs) {
+      let runs = 0
+      let change!: () => void
+      createRoot(() => {
+        change = entry(first, next, (v) => { runs++; return v })
+      })
+      await tick()
+      runs = 0
+      change()
+      await tick()
+      reruns[name].push(runs)
+    }
+  }
+  // NaN after NaN, 0 after -0 and -0 after 0 re-run nothing; 1 after 2 is a
+  // real change, so each entry point is shown to propagate one.
+  expect(reruns).toEqual({
+    'a signal write': [0, 0, 0, 1],
+    'a sync stage result': [0, 0, 0, 1],
+    'an async stage settle': [0, 0, 0, 1],
+    'a promise a use settles': [0, 0, 0, 1],
+  })
+})
+
 // ---- an equal committed write re-runs nothing ----
 
 async function runsAfterWrite<T>(initial: T, next: T): Promise<number> {

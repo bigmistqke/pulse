@@ -52,6 +52,69 @@ test('pipeline re-runs when its signal input changes', async () => {
 })
 
 /**
+ * @canon spec-the-read-type-carries-the-async-colour
+ */
+test('computed() types its read as a Promise exactly where a stage can make it one, and each stage input bare (compile-time)', () => {
+  // Exact type equality, so a read typed wider or narrower than the claim fails
+  // to compile, not just one that is unassignable.
+  type Equal<X, Y> = (<T>() => T extends X ? 1 : 2) extends <T>() => T extends Y ? 1 : 2 ? true : false
+  const [n] = signal(1)
+  const [flag] = signal(true)
+
+  // No stage can produce a promise: the read is bare.
+  const sync = computed(
+    () => n(),
+    (v) => {
+      const input: Equal<typeof v, number> = true
+      void input
+      return `${v}`
+    },
+  )
+  // An async stage in the middle colours the read, though the last stage is sync,
+  // and the stage after it receives the value the promise fulfils to.
+  const viaAsync = computed(
+    () => n(),
+    async (v) => v * 2,
+    (v) => {
+      const input: Equal<typeof v, number> = true
+      void input
+      return `${v}`
+    },
+  )
+  // A stage that may or may not return a promise makes the read a union.
+  const maybeAsync = computed(
+    () => flag(),
+    (on) => (on ? Promise.resolve(1) : 2),
+    (v) => {
+      const input: Equal<typeof v, number> = true
+      void input
+      return v
+    },
+  )
+  // A generator stage that suspends on a promise colours the read; the next
+  // stage receives what the generator returns.
+  const viaGenerator = computed(
+    () => n(),
+    function* (v) {
+      return yield* from(Promise.resolve(`${v}`))
+    },
+    (v) => {
+      const input: Equal<typeof v, string> = true
+      void input
+      return v.length
+    },
+  )
+
+  const syncRead: Equal<ReturnType<typeof sync>, string> = true
+  const asyncRead: Equal<ReturnType<typeof viaAsync>, Promise<string>> = true
+  const maybeRead: Equal<ReturnType<typeof maybeAsync>, number | Promise<number>> = true
+  const generatorRead: Equal<ReturnType<typeof viaGenerator>, Promise<number>> = true
+  expect([syncRead, asyncRead, maybeRead, generatorRead]).toEqual([true, true, true, true])
+  expect(sync()).toBe('1')
+  expect(viaAsync()).toBeInstanceOf(Promise)
+})
+
+/**
  * @canon spec-resolved-unwraps-what-a-stage-receives
  */
 test('Resolved<T> type unwraps signals, promises, and generators (compile-time)', () => {

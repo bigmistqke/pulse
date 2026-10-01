@@ -126,6 +126,50 @@ test('resolvedPromise reads as fulfilled synchronously', () => {
 })
 
 /**
+ * @canon spec-a-promise-carries-its-state-in-one-weakmap
+ */
+test('a promise pulse tracks and settles carries no state of its own; its state is read from the map', async () => {
+  // Frozen, so an implementation that wrote status or value onto the promise
+  // would throw here (modules run in strict mode) instead of passing silently.
+  const fulfils = Object.freeze(Promise.resolve(3))
+  const failure = new Error('nope')
+  const rejects = Object.freeze(Promise.reject(failure))
+  rejects.catch(() => {})
+  const [a] = signal(fulfils)
+  const [b] = signal(rejects)
+  expect(() => use(a)).toThrow(NotReadyYet)
+  expect(() => use(b)).toThrow(NotReadyYet)
+
+  // A promise written over a settled one is pending and holds the prior it
+  // replaces, so a stale read can return that prior.
+  const [c, setC] = signal<Promise<number>>(Promise.resolve(10))
+  await tick()
+  expect(use(c)).toBe(10)
+  let release!: (v: number) => void
+  const refetch = Object.freeze(new Promise<number>((resolve) => { release = resolve }))
+  setC(refetch)
+  expect(() => use(c)).toThrow(NotReadyYet)
+  expect(peek(c)).toBe(10)
+  release(20)
+  // An async computed publishes a promise of its own when it settles.
+  const d = computed(async () => 5)
+  d()
+  await tick()
+
+  expect(use(a)).toBe(3)
+  expect(() => use(b)).toThrow(failure)
+  expect(use(c)).toBe(20)
+  expect(use(d)).toBe(5)
+  // The status, value, reason and prior were all read back through the map;
+  // none of the promises gained a property.
+  for (const p of [fulfils, rejects, refetch, d()]) {
+    expect(Reflect.ownKeys(p)).toEqual([])
+  }
+  expect(track(fulfils)).toMatchObject({ status: 'fulfilled', value: 3 })
+  expect(track(rejects)).toMatchObject({ status: 'rejected', reason: failure })
+})
+
+/**
  * @canon spec-use-returns-a-value-that-is-not-a-promise-unchanged
  */
 test('use returns a plain (non-promise) value unchanged', () => {

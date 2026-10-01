@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, expect, test } from 'vitest'
 import { Show } from '../../src/dom/show'
+import { Match, Switch } from '../../src/dom/switch'
 import {
   flush,
   microtaskScheduler,
@@ -163,6 +164,62 @@ test('disposing surrounding owner disposes active branch', () => {
   expect(cleaned).toBe(false)
   dispose()
   expect(cleaned).toBe(true)
+})
+
+/**
+ * @canon spec-a-branch-is-rebuilt-only-when-the-choice-changes
+ */
+test('Show and Switch keep the DOM of the branch they built while the same branch wins, and build new DOM when another wins', () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+  // One signal decides both components. Values 1 and 2 pick the same side of
+  // each; 0 picks the other side of each.
+  const [count, setCount] = signal(1)
+  const dispose = render(
+    () => (
+      <div>
+        <Show when={count()} fallback={<i data-testid="show">zero</i>}>
+          {() => <b data-testid="show">nonzero</b>}
+        </Show>
+        <Switch fallback={<i data-testid="switch">none</i>}>
+          <Match when={count() === 0}>{() => <u data-testid="switch">zero</u>}</Match>
+          <Match when={count() > 0}>{() => <b data-testid="switch">positive</b>}</Match>
+        </Switch>
+      </div>
+    ),
+    target,
+  )
+  const showNode = () => target.querySelector('[data-testid="show"]')
+  const switchNode = () => target.querySelector('[data-testid="switch"]')
+
+  const showFirst = showNode()
+  const switchFirst = switchNode()
+  expect(showFirst?.textContent).toBe('nonzero')
+  expect(switchFirst?.textContent).toBe('positive')
+
+  // The deciding value changes, but each component picks the same branch:
+  // the very same nodes stay in the page.
+  setCount(2)
+  expect(showNode()).toBe(showFirst)
+  expect(switchNode()).toBe(switchFirst)
+
+  // A different branch wins in each: both build new DOM for it.
+  setCount(0)
+  expect(showNode()?.textContent).toBe('zero')
+  expect(switchNode()?.textContent).toBe('zero')
+  const showZero = showNode()
+  const switchZero = switchNode()
+
+  // Back to the first side: the branch is built again, not the old nodes
+  // brought back, because the choice changed.
+  setCount(3)
+  expect(showNode()?.textContent).toBe('nonzero')
+  expect(switchNode()?.textContent).toBe('positive')
+  expect(showNode()).not.toBe(showFirst)
+  expect(switchNode()).not.toBe(switchFirst)
+  expect(showZero?.isConnected).toBe(false)
+  expect(switchZero?.isConnected).toBe(false)
+  dispose()
 })
 
 /**

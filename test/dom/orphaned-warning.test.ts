@@ -97,3 +97,53 @@ test('inside createRoot, no warnings', () => {
     expect(warnSpy).not.toHaveBeenCalled()
   })
 })
+
+/**
+ * @canon spec-a-dom-binding-without-an-owner-warns
+ */
+test('a binding and a listener with no owner still work, and each warns once however often it runs', () => {
+  const [text, setText] = signal('a')
+  let clicks = 0
+  const el = h('button', { 'on:click': () => clicks++ }, text) as HTMLElement
+  expect(warnSpy).toHaveBeenCalledTimes(2)
+  for (const call of warnSpy.mock.calls) {
+    expect(call[0]).toMatch(/will live forever/)
+  }
+
+  // Both keep working: the child follows its source, the listener fires.
+  setText('b')
+  setText('c')
+  el.click()
+  el.click()
+  expect(el.textContent).toBe('c')
+  expect(clicks).toBe(2)
+  // Running again is not a second warning.
+  expect(warnSpy).toHaveBeenCalledTimes(2)
+})
+
+/**
+ * @canon spec-a-dom-binding-without-an-owner-warns
+ */
+test('inside an owner nothing warns, also for bindings a re-run builds after the root has returned', () => {
+  const [round, setRound] = signal(0)
+  let clicks = 0
+  let el!: HTMLElement
+  createRoot(() => {
+    el = h('div', null, () => {
+      const built = round()
+      return h('button', { 'on:click': () => clicks++, title: () => `round ${built}` }, () => String(built))
+    }) as HTMLElement
+  })
+  const first = el.querySelector('button')
+  // The setter runs outside every owner, so the re-run that rebuilds the
+  // button, its listener and its bindings is started from no ambient owner.
+  setRound(1)
+  setRound(2)
+  const button = el.querySelector('button')!
+  expect(button).not.toBe(first)
+  button.click()
+  expect(button.textContent).toBe('2')
+  expect(button.title).toBe('round 2')
+  expect(clicks).toBe(1)
+  expect(warnSpy).not.toHaveBeenCalled()
+})

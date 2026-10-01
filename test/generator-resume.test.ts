@@ -12,6 +12,42 @@ const ticks = async (n: number) => {
 }
 
 /**
+ * @canon spec-a-resumed-generator-does-not-rerun-code-before-its-pause
+ */
+test('each pause resumes with its settled value, and every stretch of the body runs once', async () => {
+  // A stage that re-ran its body from the top on each settle, answering
+  // earlier pauses from a cache, would publish the same value; the stretch
+  // counts and the values handed back are what tell the two apart.
+  const first = { label: 'first' }
+  const second = { label: 'second' }
+  const stretches = { beforeFirst: 0, betweenPauses: 0, afterSecond: 0 }
+  const received: unknown[] = []
+
+  const c = computed(function* () {
+    stretches.beforeFirst++
+    const a: { label: string } = yield* from(
+      new Promise<{ label: string }>((resolve) => setTimeout(() => resolve(first), 1)),
+    )
+    received.push(a)
+    stretches.betweenPauses++
+    const b: { label: string } = yield* from(
+      new Promise<{ label: string }>((resolve) => setTimeout(() => resolve(second), 1)),
+    )
+    received.push(b)
+    stretches.afterSecond++
+    return `${a.label}+${b.label}`
+  })
+
+  c()
+  await ticks(10)
+
+  expect(peek(c)).toBe('first+second')
+  expect(received[0]).toBe(first)
+  expect(received[1]).toBe(second)
+  expect(stretches).toEqual({ beforeFirst: 1, betweenPauses: 1, afterSecond: 1 })
+})
+
+/**
  * @canon spec-a-stage-node-resumes-its-paused-generator
  */
 test('a generator stage that builds its promise inside the body converges', async () => {
@@ -85,6 +121,57 @@ test('a generator with two inline pauses converges and builds each promise once'
 })
 
 /**
+ * @canon spec-dependencies-read-before-a-pause-stay-linked
+ */
+test('every dependency read before a pause, however it was read, still re-runs the stage after the resume', async () => {
+  // Three inputs, read three ways: a signal through `from` and a computed by a
+  // plain call before the first pause, and a signal by a plain call between
+  // the pauses. After the stage has resumed past both pauses, a change to any
+  // one of them must still re-run it, including after earlier re-runs.
+  const [viaFrom, setViaFrom] = signal(1)
+  const [direct, setDirect] = signal(10)
+  const [base, setBase] = signal(100)
+  const derived = computed(() => base() * 2)
+  let runs = 0
+
+  const c = computed(function* () {
+    runs++
+    const a: number = yield* from(viaFrom)
+    const d = derived()
+    const p: number = yield* from(
+      new Promise<number>((resolve) => setTimeout(() => resolve(0), 1)),
+    )
+    const b = direct()
+    const q: number = yield* from(
+      new Promise<number>((resolve) => setTimeout(() => resolve(0), 1)),
+    )
+    return a + b + d + p + q
+  })
+
+  c()
+  await ticks(10)
+  expect(peek(c)).toBe(211)
+
+  const observed: Array<[number, number | undefined]> = []
+  const change = async (write: () => void) => {
+    const before = runs
+    write()
+    c()
+    await ticks(10)
+    observed.push([runs - before, peek(c)])
+  }
+  await change(() => setViaFrom(2))
+  await change(() => setDirect(20))
+  await change(() => setBase(200))
+
+  expect(observed).toEqual([
+    [1, 212],
+    [1, 222],
+    [1, 422],
+  ])
+})
+
+/**
  * @canon spec-a-resumed-stage-replays-its-recorded-dependencies
  */
 test('a signal read before a pause stays a dependency across a resume', async () => {
@@ -110,6 +197,40 @@ test('a signal read before a pause stays a dependency across a resume', async ()
   await ticks(10)
   expect(peek(c)).toBe(12)
   expect(runs).toBeGreaterThan(1)
+})
+
+/**
+ * @canon spec-a-changed-input-replaces-the-paused-generator
+ */
+test('a changed input ends the paused generator for good, and a fresh one runs from the top with the new input', async () => {
+  // A stage that resumed the stale generator and then also ran a fresh one
+  // would publish the same final value; which generators get past the pause
+  // is what tells them apart.
+  const [a, setA] = signal(1)
+  let generators = 0
+  const startedWith: number[] = []
+  const pastThePause: number[] = []
+
+  const c = computed(function* () {
+    const id = ++generators
+    const av: number = yield* from(a)
+    startedWith.push(av)
+    const p: number = yield* from(
+      new Promise<number>((resolve) => setTimeout(() => resolve(10), 20)),
+    )
+    pastThePause.push(id)
+    return av + p
+  })
+
+  c()
+  await tick() // the first generator is paused on its 20ms promise
+  setA(2)
+  c()
+  await ticks(40) // both generators' promises have settled
+
+  expect(startedWith).toEqual([1, 2])
+  expect(pastThePause).toEqual([2])
+  expect(peek(c)).toBe(12)
 })
 
 /**
