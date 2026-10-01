@@ -19,10 +19,11 @@ This document is the project. It holds the theory of pulse: why it is the way it
 - [`@term optimistic-value`](#term-optimistic-value) — A derivation whose setter writes a prediction instead of a value, made with `optimistic`.
 - [`@term prediction`](#term-prediction) — A value that an action writes through an optimistic setter, shown in front of the derivation's own value.
 - [`@term first-load`](#term-first-load) — A pending episode of a source that has never resolved a real value.
-- [`@term refresh`](#term-refresh) — A pending episode of a source that has resolved a real value before.
+- [`@term revision`](#term-revision) — A pending episode of a source that has resolved a real value before, started by a change to an input it reads.
+- [`@term refresh`](#term-refresh) — The current question asked again while its answer stands: a run of a derivation's recipe with unchanged inputs.
 - [`@term ambient-context`](#term-ambient-context) — A value set for the duration of one call and visible to everything the call runs: the current owner, speculation or binding.
-- [`@term report`](#term-report) — What a binding's read tells the boundaries above it about a source, loading, refreshing or failed, without the binding waiting.
-- [`@term pending`](#term-pending) — The state of a value that waits on a promise not yet settled, in it or in a source it came from.
+- [`@term report`](#term-report) — What a binding's read tells the boundaries above it about a source, on its first load, during a revision or failed, without the binding waiting.
+- [`@term pending`](#term-pending) — The state of a value that does not yet answer the current question, on its first load or during a revision. The cause may be in the value or in a source it came from.
 - [`@term suspension`](#term-suspension) — A run that stopped to wait on a pending promise, by throwing `NotReadyYet` or by a stage handing back the promise.
 - [`@term read-verb`](#term-read-verb) — A function that takes a value out of an accessor at the read site, and decides how: `use`, `use.latest`, `latest`, `peek`, or `from` in a generator stage.
 - [`@term tolerant-read`](#term-tolerant-read) — A read verb that returns the last resolved value, or a fallback, instead of waiting or throwing: `peek` or `latest`.
@@ -51,6 +52,14 @@ This document is the project. It holds the theory of pulse: why it is the way it
     - [`@spec a-promise-settling-requests-a-flush-from-the-active-scheduler`](#spec-a-promise-settling-requests-a-flush-from-the-active-scheduler) — When a promise a node is waiting on settles, pulse asks the active scheduler for a flush, the same way a write does. The readers re-run in that flush.
     - [`@spec an-error-write-schedules-its-own-flush`](#spec-an-error-write-schedules-its-own-flush) — A write to error state — a boundary's report collection, or an action's error — requests a flush itself, so its readers update without any other write happening.
   - [`@axiom compose-rather-than-proliferate`](#axiom-compose-rather-than-proliferate) — A small set of primitives covers the use cases. A new form is added only where composing the existing ones is awkward for a common case.
+    - [`@spec refresh-reruns-a-derivations-recipe-with-unchanged-inputs`](#spec-refresh-reruns-a-derivations-recipe-with-unchanged-inputs) — `refresh(x)` runs the recipe of the derivation `x` again, though none of its inputs changed.
+      - [`@spec a-refresh-returns-a-promise-for-the-next-settled-value`](#spec-a-refresh-returns-a-promise-for-the-next-settled-value) — `refresh(x)` returns a promise for the next value `x` settles on. If a later refresh or a revision supersedes this one, the promise delivers what finally lands. If the run fails, the promise rejects with the error, and an ignored rejection is not reported as unhandled.
+      - [`@spec a-refresh-abandons-the-run-in-flight`](#spec-a-refresh-abandons-the-run-in-flight) — Several refreshes of `x` in one tick start a single run. A refresh while a run of `x` is in flight abandons that run, and the abandoned run never publishes.
+      - [`@spec a-refresh-inside-an-action-is-part-of-its-speculation`](#spec-a-refresh-inside-an-action-is-part-of-its-speculation) — A refresh started inside an action is part of the action's speculation. Its result is visible inside the action, reaches committed state when the action commits, and is discarded with it.
+        - [`@exception a-refresh-after-an-await-escapes-the-speculation`](#exception-a-refresh-after-an-await-escapes-the-speculation) — In an async action body, a refresh started after the first `await` is not part of the speculation. Its result lands in committed state.
+      - [`@spec a-refresh-reports-to-no-loading-boundary`](#spec-a-refresh-reports-to-no-loading-boundary) — A refresh reports nothing to a loading boundary: it brings back no placeholder, and leaves `isLoading()` as it was.
+      - [`@spec a-refresh-of-something-that-is-not-a-derivation-warns`](#spec-a-refresh-of-something-that-is-not-a-derivation-warns) — `refresh(x)` accepts a [derivation](#term-derivation): a computed, a signal given stages, or an optimistic value. Given anything else, such as a plain signal or a function that is not a pulse accessor, it runs nothing. It logs a warning naming the reason on every such call, and returns a promise for the current value of `x`.
+      - [`@spec a-refresh-reruns-every-stage-of-its-pipeline-once`](#spec-a-refresh-reruns-every-stage-of-its-pipeline-once) — `refresh(x)` runs every stage of `x`'s pipeline again, in order, each once. It does not refresh the derivations `x` reads.
     - [`@spec a-computed-is-a-pipeline-of-stages`](#spec-a-computed-is-a-pipeline-of-stages) — `computed(s0, s1, …)` threads each [stage](#term-stage)'s resolved value into the next. Any stage may read signals, and a change to something a stage read re-runs that stage and passes its new value on.
     - [`@spec a-computed-has-no-setter`](#spec-a-computed-has-no-setter) — `computed` returns an [accessor](#term-accessor) and nothing to write with. A derivation that can also be written is made with `signal`.
     - [`@spec a-signal-given-stages-is-a-writable-derivation`](#spec-a-signal-given-stages-is-a-writable-derivation) — `signal(s0, s1, …)` builds the same [pipeline](#term-pipeline) `computed` builds and adds a setter, whose write lands on the output of the last stage. `signal(value)` given a value that is not a function stays a plain signal.
@@ -58,8 +67,8 @@ This document is the project. It holds the theory of pulse: why it is the way it
     - [`@spec a-construction-default-seeds-only-the-tolerant-read`](#spec-a-construction-default-seeds-only-the-tolerant-read) — `signal(fn, default)` makes `peek` return `default` until the derivation first resolves, and an update function receive `default` in place of `undefined`. Once a real value has resolved, both see it instead of the default.
     - [`@spec use-latest-throws-only-before-the-first-value`](#spec-use-latest-throws-only-before-the-first-value) — `use.latest(x)` throws `NotReadyYet` only while nothing has ever resolved for `x`, carrying `promiseOf(x)`, exactly as `use` would.
       - [`@spec use-latest-is-a-property-of-use`](#spec-use-latest-is-a-property-of-use) — `use.latest` is a property of `use`, not a separate export: importing `use` brings it.
-    - [`@spec use-latest-returns-the-last-resolved-value-during-a-refresh`](#spec-use-latest-returns-the-last-resolved-value-during-a-refresh) — Once something has resolved for `x`, `use.latest(x)` returns the last resolved value, also while a refresh is pending. At that moment `use(x)` throws, and `use.latest(x)` returns the stale value.
-    - [`@spec use-latest-reports-a-refresh-to-its-boundary`](#spec-use-latest-reports-a-refresh-to-its-boundary) — A `use.latest(x)` read made while a refresh of `x` is pending reports the refresh to the surrounding loading boundary, so `isLoading()` there is true, while the binding keeps showing the last resolved value.
+    - [`@spec use-latest-returns-the-last-resolved-value-during-a-revision`](#spec-use-latest-returns-the-last-resolved-value-during-a-revision) — Once something has resolved for `x`, `use.latest(x)` returns the last resolved value, also while a revision is pending. At that moment `use(x)` throws, and `use.latest(x)` returns the stale value.
+    - [`@spec use-latest-reports-a-revision-to-its-boundary`](#spec-use-latest-reports-a-revision-to-its-boundary) — A `use.latest(x)` read made while a revision of `x` is pending reports the revision to the surrounding loading boundary, so `isLoading()` there is true, while the binding keeps showing the last resolved value.
     - [`@spec use-latest-enrols-the-binding-in-its-boundarys-gate`](#spec-use-latest-enrols-the-binding-in-its-boundarys-gate) — A binding that called `use.latest(x)` commits through its boundary's gate: while a sibling binding of the boundary is suspended, its commit waits, even when `use.latest(x)` returned a value.
     - [`@spec the-jsx-runtime-builds-every-element-with-h`](#spec-the-jsx-runtime-builds-every-element-with-h) — The JSX runtime's `jsx`, `jsxs` and `jsxDEV` build every element with `h`. A component receives its props object as it is, `children` included and getters intact. A DOM tag or a `Fragment` receives its children as separate arguments and the rest of its props with their getters intact.
     - [`@spec an-optimistic-value-is-a-signal-variant`](#spec-an-optimistic-value-is-a-signal-variant) — `optimistic(...stages)` builds the same pipeline `computed` and `signal` build, and returns an ordinary node. Only its setter differs: it writes a prediction rather than a value.
@@ -78,7 +87,7 @@ This document is the project. It holds the theory of pulse: why it is the way it
     - [`@spec an-update-function-on-a-signal-receives-its-current-value`](#spec-an-update-function-on-a-signal-receives-its-current-value) — A signal's setter given a function calls it with the signal's current value and writes what it returns.
     - [`@spec an-effect-runs-at-creation-and-after-each-change`](#spec-an-effect-runs-at-creation-and-after-each-change) — An effect runs once when it is created, wherever it is created, inside a running computation included, and again after each change to a source it read.
     - [`@spec several-writes-in-one-tick-re-run-an-effect-once`](#spec-several-writes-in-one-tick-re-run-an-effect-once) — Under the default scheduler, an effect does not re-run between a write and the end of the tick. Several writes in one tick re-run it once, with the last value. A read made between the writes does not change that: it brings the value it reads up to date, and runs nothing else.
-    - [`@spec an-async-computed-refreshes-when-a-source-changes`](#spec-an-async-computed-refreshes-when-a-source-changes) — An async stage keeps following the sources it read after its promise settles, and runs again when one of them changes. A consumer then receives the new resolved value.
+    - [`@spec an-async-computed-is-revised-when-a-source-changes`](#spec-an-async-computed-is-revised-when-a-source-changes) — An async stage keeps following the sources it read after its promise settles, and runs again when one of them changes. A consumer then receives the new resolved value.
     - [`@spec a-settled-promise-is-used-at-once-the-next-time-a-stage-runs`](#spec-a-settled-promise-is-used-at-once-the-next-time-a-stage-runs) — A promise that a stage saw pending, and that has settled since, is used at once the next time the stage runs. It does not suspend the stage again.
     - [`@spec writes-in-one-tick-chain-their-update-functions`](#spec-writes-in-one-tick-chain-their-update-functions) — Two writes in the same tick chain: the second update function receives the value the first one produced, and the last write is what the derivation holds.
     - [`@spec an-abandoned-stage-restarts-when-the-pipeline-is-next-pulled`](#spec-an-abandoned-stage-restarts-when-the-pipeline-is-next-pulled) — A stage whose run a write abandoned is left needing recomputation, not clean. When anything next pulls the pipeline up to date, that stage runs again and makes a fresh request.
@@ -103,13 +112,14 @@ This document is the project. It holds the theory of pulse: why it is the way it
     - [`@spec peek-returns-a-given-fallback-until-a-value-resolves`](#spec-peek-returns-a-given-fallback-until-a-value-resolves) — `peek(x, fallback)` returns `fallback` wherever `peek(x)` would return `undefined`: before the first resolution, and after a rejection when nothing resolved before it. Once a value has resolved, it returns that value.
     - [`@spec is-optimistic-is-true-while-a-prediction-is-live`](#spec-is-optimistic-is-true-while-a-prediction-is-live) — The `isOptimistic` accessor returned by `optimistic` reads true while a prediction is live, and false before any prediction and once the action that wrote it has closed.
     - [`@spec a-construction-default-removes-undefined-from-the-types`](#spec-a-construction-default-removes-undefined-from-the-types) — With a construction default given, the types of `peek` and of an update function's argument leave out `undefined`, so neither needs a check.
-    - [`@spec an-async-node-keeps-its-last-value-while-it-refreshes`](#spec-an-async-node-keeps-its-last-value-while-it-refreshes) — When an async node's inputs change, its last resolved value stays readable through `peek` until the new one settles, while `isPending` reports the refresh.
+    - [`@spec an-async-node-keeps-its-last-value-during-a-revision`](#spec-an-async-node-keeps-its-last-value-during-a-revision) — When an async node's inputs change, its last resolved value stays readable through `peek` until the new one settles, while `isPending` reports the revision.
     - [`@spec a-written-promise-leaves-the-prior-value-to-the-tolerant-read`](#spec-a-written-promise-leaves-the-prior-value-to-the-tolerant-read) — While a written promise is pending, and after it rejects, the [tolerant read](#term-tolerant-read) returns the value from before the write.
-    - [`@spec from-yields-the-stale-value-during-a-refresh`](#spec-from-yields-the-stale-value-during-a-refresh) — During a refresh, `yield* from(c)` on a computed yields the stale value its accessor returns, not the promise in flight.
+    - [`@spec from-yields-the-stale-value-during-a-revision`](#spec-from-yields-the-stale-value-during-a-revision) — During a revision, `yield* from(c)` on a computed yields the stale value its accessor returns, not the promise in flight.
     - [`@spec pending-is-asked-and-answered-directly`](#spec-pending-is-asked-and-answered-directly) — `isPending(x)` and `promiseOf(x)` answer whether `x` has a promise in flight, and which one, as plain values called fresh at each read site.
+      - [`@spec is-refreshing-reports-a-refresh-in-flight`](#spec-is-refreshing-reports-a-refresh-in-flight) — `isRefreshing(x)` is true while a [refresh](#term-refresh) of `x` is in flight, and false otherwise. A refresh leaves `isPending(x)` false.
       - [`@spec pending-is-a-reactive-read`](#spec-pending-is-a-reactive-read) — `isPending(x)` and `promiseOf(x)` are reactive reads: a consumer that read them runs again when their answer changes. That holds for a plain signal holding a promise as for a pipeline.
     - [`@spec a-signals-pending-state-is-the-state-of-the-promise-it-holds`](#spec-a-signals-pending-state-is-the-state-of-the-promise-it-holds) — A signal holding a plain value is never pending, and its `promiseOf` is `null`. A signal holding a promise is pending until that promise settles, and `promiseOf` returns it while it is.
-    - [`@spec a-read-through-latest-or-use-carries-loading-state-into-its-reader`](#spec-a-read-through-latest-or-use-carries-loading-state-into-its-reader) — A computed that read a pending source through `latest` or `use` reports pending, and hands out that source's promise through `promiseOf`, until the source settles, even though it holds a value of its own. The state composes through a chain of such readers, and survives the reader re-running during a refresh.
+    - [`@spec a-read-through-latest-or-use-carries-loading-state-into-its-reader`](#spec-a-read-through-latest-or-use-carries-loading-state-into-its-reader) — A computed that read a pending source through `latest` or `use` reports pending, and hands out that source's promise through `promiseOf`, until the source settles, even though it holds a value of its own. The state composes through a chain of such readers, and survives the reader re-running during a revision.
     - [`@spec a-read-through-peek-carries-no-pending-state-into-its-reader`](#spec-a-read-through-peek-carries-no-pending-state-into-its-reader) — A computed that read a pending source only through `peek` does not report pending because of it.
     - [`@spec a-seeded-source-still-counts-as-a-first-load`](#spec-a-seeded-source-still-counts-as-a-first-load) — A source given a construction default is on its first load until it genuinely resolves. A `latest` read of it during that time drives the boundary's first-load placeholder, although the read has a value to return.
     - [`@spec a-live-prediction-reports-neither-pending-nor-failed`](#spec-a-live-prediction-reports-neither-pending-nor-failed) — While a prediction is live, the optimistic node reports neither pending nor failed, and `use` returns the prediction. The source underneath keeps reporting its own state, and when the last layer drops the node reports that state again, a masked failure included.
@@ -130,7 +140,7 @@ This document is the project. It holds the theory of pulse: why it is the way it
     - [`@spec use-treats-a-promise-it-has-not-seen-settle-as-pending`](#spec-use-treats-a-promise-it-has-not-seen-settle-as-pending) — A promise whose settle `use` has not yet recorded is pending to it, even when the promise has already settled: the first `use` of `Promise.resolve(7)` throws `NotReadyYet`. Once the settle is recorded, `use` returns the value synchronously.
     - [`@spec a-construction-default-leaves-the-raw-read-a-promise`](#spec-a-construction-default-leaves-the-raw-read-a-promise) — With `signal(fn, default)`, the raw read is still a pending promise until the derivation first resolves.
     - [`@spec pending-follows-where-a-value-came-from`](#spec-pending-follows-where-a-value-came-from) — A node is pending when any stage upstream of it is pending, or when a source its value was read from is. `promiseOf` returns the nearest promise in flight along the same path.
-    - [`@spec is-pending-reports-an-unsettled-pipeline`](#spec-is-pending-reports-an-unsettled-pipeline) — `isPending(c)` is true while any stage of the pipeline is waiting on a promise, on the first load and during a refresh, and `promiseOf(c)` returns that promise. Both clear when it settles.
+    - [`@spec is-pending-reports-an-unsettled-pipeline`](#spec-is-pending-reports-an-unsettled-pipeline) — `isPending(c)` is true while any stage of the pipeline is waiting on a promise, on the first load and during a revision, and `promiseOf(c)` returns that promise. A [refresh](#term-refresh) is not pending: it leaves `isPending(c)` false. Both clear when it settles.
 - [`@axiom only-what-changed-runs-again`](#axiom-only-what-changed-runs-again) — When something changes, only the work that depends on the change runs again, and only from the point where it depends on it.
   - [`@spec an-equal-value-does-not-propagate`](#spec-an-equal-value-does-not-propagate) — A value equal to the one a node already holds does not reach the node's consumers: nothing re-runs. Two values are equal when they are SameValueZero-equal: `===`, except that `NaN` equals `NaN`. So `0` and `-0` are equal.
     - [`@spec a-computed-publishes-only-a-changed-value`](#spec-a-computed-publishes-only-a-changed-value) — `computed.ts` `makeStageNode`.
@@ -207,9 +217,10 @@ This document is the project. It holds the theory of pulse: why it is the way it
     - [`@spec settled-waits-until-every-input-is-fresh`](#spec-settled-waits-until-every-input-is-fresh) — `yield* settled([…])` suspends until every input's promise in flight has settled, then returns all the fresh values together, so a consumer never sees a frame where one input is new and another is stale.
       - [`@spec settled-does-not-wait-on-an-input-that-has-settled`](#spec-settled-does-not-wait-on-an-input-that-has-settled) — `settled` does not suspend for an input that has already settled, a raw promise included. A run whose inputs have all settled returns at once, so a stage fed an already-settled raw promise converges instead of suspending on every run.
       - [`@spec settled-throws-a-rejected-input`](#spec-settled-throws-a-rejected-input) — When an input of `settled` has rejected, `yield* settled([…])` throws its reason instead of returning a value for it.
-      - [`@spec settled-waits-again-when-an-input-refreshes`](#spec-settled-waits-again-when-an-input-refreshes) — When an input of `settled` refreshes, the stage waits on that input's promise in flight, found through `promiseOf`, not on the stale value its accessor returns, and publishes the new combination only once it has settled.
+      - [`@spec settled-waits-again-when-an-input-is-revised`](#spec-settled-waits-again-when-an-input-is-revised) — When an input of `settled` is revised, the stage waits on that input's promise in flight, found through `promiseOf`, not on the stale value its accessor returns, and publishes the new combination only once it has settled.
   - [`@spec the-read-verb-decides-what-renders-and-what-waits`](#spec-the-read-verb-decides-what-renders-and-what-waits) — The verb a binding reads with decides what the binding renders and whether it waits for its neighbours. Everything else in the loading lifecycle is [reported](#term-report), from the reads the binding makes.
     - [`@spec use-renders-only-a-current-value`](#spec-use-renders-only-a-current-value) — `use(x)` gives the binding the current value of `x` and nothing else: it returns a value that is there, and throws when there is none to give, whether `x` is pending or failed.
+      - [`@spec use-returns-the-standing-answer-during-a-refresh`](#spec-use-returns-the-standing-answer-during-a-refresh) — During a [refresh](#term-refresh) of `x`, `use(x)` returns the standing answer and does not suspend.
       - [`@spec use-is-typed-as-the-awaited-value`](#spec-use-is-typed-as-the-awaited-value) — `use(x)` is typed as the value `x` holds with any promise awaited, and never as possibly `undefined`.
       - [`@spec use-returns-a-value-that-is-not-a-promise-unchanged`](#spec-use-returns-a-value-that-is-not-a-promise-unchanged) — `use(x)` returns `x` unchanged when `x` is not a promise. A falsy value is a value: `use(0)`, `use(null)`, `use(undefined)`, `use(false)` and `use('')` return it.
       - [`@spec use-returns-a-settled-promises-value`](#spec-use-returns-a-settled-promises-value) — `use(promise)` returns the value of a promise it has seen fulfil.
@@ -221,10 +232,10 @@ This document is the project. It holds the theory of pulse: why it is the way it
       - [`@spec use-throws-a-parked-error`](#spec-use-throws-a-parked-error) — `use(x)` on a failed node throws the node's error.
     - [`@spec use-suspends-only-the-binding-that-reads-it`](#spec-use-suspends-only-the-binding-that-reads-it) — A binding whose `use(x)` meets a pending value renders nothing new and keeps what it showed, and the rest of the tree renders around it, with or without a `<Loading>` boundary above it. It recovers when the value settles.
     - [`@spec a-suspended-hole-keeps-what-it-showed`](#spec-a-suspended-hole-keeps-what-it-showed) — A reactive child whose run throws `NotReadyYet` commits nothing, so the DOM it showed before stays in place until a later run succeeds. On its first run it has shown nothing, so it stays empty until its source settles.
-    - [`@spec latest-reports-loading-without-waiting`](#spec-latest-reports-loading-without-waiting) — `latest(x)` returns the last resolved value, never throws, and never makes the binding wait. While `x` is pending it reports the load to the nearest boundary: a [first load](#term-first-load) drives the boundary's first-load placeholder, and a [refresh](#term-refresh) drives `isLoading()` only.
-      - [`@spec a-latest-report-survives-a-boundary-remount`](#spec-a-latest-report-survives-a-boundary-remount) — What `latest` and `use.latest` report about a source, a first load or a refresh, is the same after the boundary around them is removed and mounted again.
+    - [`@spec latest-reports-loading-without-waiting`](#spec-latest-reports-loading-without-waiting) — `latest(x)` returns the last resolved value, never throws, and never makes the binding wait. While `x` is pending it reports the load to the nearest boundary: a [first load](#term-first-load) drives the boundary's first-load placeholder, and a [revision](#term-revision) drives `isLoading()` only.
+      - [`@spec a-latest-report-survives-a-boundary-remount`](#spec-a-latest-report-survives-a-boundary-remount) — What `latest` and `use.latest` report about a source, a first load or a revision, is the same after the boundary around them is removed and mounted again.
     - [`@spec a-tolerant-read-reports-a-failure-to-the-boundary`](#spec-a-tolerant-read-reports-a-failure-to-the-boundary) — A binding that reads a failed node through `latest` reports the failure to the nearest accepting error boundary, though nothing throws, and reports its recovery when a later run sees no error.
-    - [`@spec peek-reports-nothing`](#spec-peek-reports-nothing) — `peek(x)` returns the last resolved value and reports nothing to any boundary, neither a first load nor a refresh.
+    - [`@spec peek-reports-nothing`](#spec-peek-reports-nothing) — `peek(x)` returns the last resolved value and reports nothing to any boundary, neither a first load nor a revision.
     - [`@spec use-enrols-the-binding-in-its-boundarys-gate`](#spec-use-enrols-the-binding-in-its-boundarys-gate) — A binding that called `use(x)` during its run commits through its boundary's [gate](#term-gate). While any binding of the boundary is suspended, its commit waits, and it lands in the same pass as the others.
       - [`@spec a-reactive-child-that-called-use-waits-for-the-gate`](#spec-a-reactive-child-that-called-use-waits-for-the-gate) — `bindings.ts` `insertChild`.
       - [`@spec a-reactive-prop-that-called-use-waits-for-the-gate`](#spec-a-reactive-prop-that-called-use-waits-for-the-gate) — `bindings.ts` `bindProp`.
@@ -238,7 +249,7 @@ This document is the project. It holds the theory of pulse: why it is the way it
       - [`@spec a-first-load-after-the-boundary-has-loaded-shows-the-fallback`](#spec-a-first-load-after-the-boundary-has-loaded-shows-the-fallback) — Once a boundary has loaded, a first load of a source read later through `latest` shows the boundary's `fallback`, not its `initial`.
     - [`@spec a-boundary-without-placeholders-swaps-nothing`](#spec-a-boundary-without-placeholders-swaps-nothing) — A boundary with neither `initial` nor `fallback` never swaps its subtree out. What does not depend on a pending value stays visible while it waits.
     - [`@spec a-boundary-flushes-ready-commits-together`](#spec-a-boundary-flushes-ready-commits-together) — A boundary holds the commits of its ready bindings until no binding registered with it is suspended, then runs them all in one pass. A binding that reports idle, or unregisters, stops holding the gate.
-    - [`@spec is-loading-reads-the-nearest-boundary`](#spec-is-loading-reads-the-nearest-boundary) — `isLoading()` and `useLoading()` report whether the nearest enclosing boundary has anything in flight: a suspended binding, or a first load or refresh reported by `latest`. A commit waiting at the gate is not in flight. `isLoading()` returns the answer at the call site, and `useLoading()` looks the boundary up once and returns an accessor to read later.
+    - [`@spec is-loading-reads-the-nearest-boundary`](#spec-is-loading-reads-the-nearest-boundary) — `isLoading()` and `useLoading()` report whether the nearest enclosing boundary has anything in flight: a suspended binding, or a first load or a revision reported by `latest`. A commit waiting at the gate is not in flight. `isLoading()` returns the answer at the call site, and `useLoading()` looks the boundary up once and returns an accessor to read later.
     - [`@spec a-lookup-from-a-fragment-child-starts-where-the-fragment-was-built`](#spec-a-lookup-from-a-fragment-child-starts-where-the-fragment-was-built) — A lookup of the nearest boundary from inside a function child of a `Fragment`, such as `useLoading()`, starts from the owner the `Fragment` was built in, wherever the array is inserted.
     - [`@spec loading-is-false-outside-any-boundary`](#spec-loading-is-false-outside-any-boundary) — Outside any loading boundary, `isLoading()` returns false, and `useLoading()` returns an accessor that always returns false.
     - [`@spec a-suspension-is-reported-to-the-nearest-boundary`](#spec-a-suspension-is-reported-to-the-nearest-boundary) — A [binding](#term-binding) that suspends reports to the nearest enclosing [loading boundary](#term-loading-boundary) and to no other. It reports again when it settles. One that never suspends never reports.
@@ -411,6 +422,7 @@ This document is the project. It holds the theory of pulse: why it is the way it
     - [`@spec a-write-records-its-node-for-promotion`](#spec-a-write-records-its-node-for-promotion) — `scope.ts` `writeSlot`.
     - [`@spec closing-a-scope-unlinks-it-from-its-sources`](#spec-closing-a-scope-unlinks-it-from-its-sources) — `scope.ts` `closeScopeEdges`.
     - [`@spec a-node-only-read-is-not-promoted`](#spec-a-node-only-read-is-not-promoted) — `scope.ts` `commit`.
+- [`@fact no-context-survives-an-await`](#fact-no-context-survives-an-await) — In browsers, no context set around a call reaches the code that runs after an `await` inside it. The proposal [`AsyncContext`](https://github.com/tc39/proposal-async-context) would carry one across, but browsers do not ship it yet.
 - [`@fact only-a-generator-can-be-resumed`](#fact-only-a-generator-can-be-resumed) — In JavaScript, only a generator can pause and be resumed where it paused by the code that drives it. A function that throws has ended, and an async function resumes after an `await` on its own, later and outside the call that started it.
 - [`@fact javascript-has-no-context-scoped-to-a-call`](#fact-javascript-has-no-context-scoped-to-a-call) — JavaScript has no way to hand a value to everything one call runs, other than state shared by every call, set before the call and read during it.
 - [`@fact an-attribute-holds-a-string-and-is-on-while-present`](#fact-an-attribute-holds-a-string-and-is-on-while-present) — A DOM attribute holds only a string, and a boolean attribute such as `disabled` is on whenever it is present, whatever its string says.
@@ -473,11 +485,19 @@ _Avoid_: layer, guess
 
 > A pending episode of a source that has never resolved a real value.
 
+### @term revision
+
+> A pending episode of a source that has resolved a real value before, started by a change to an input it reads.
+
+_Avoid_: reload, refetch
+
 ### @term refresh
 
-> A pending episode of a source that has resolved a real value before.
+> The current question asked again while its answer stands: a run of a derivation's recipe with unchanged inputs.
 
-_Avoid_: refetch, reload
+A refresh is not a revision. The answer a refresh asks again still stands, so a refresh is not pending, while a revision is.
+
+_Avoid_: refetch, reload, revalidation
 
 ### @term ambient-context
 
@@ -485,11 +505,11 @@ _Avoid_: refetch, reload
 
 ### @term report
 
-> What a binding's read tells the boundaries above it about a source, loading, refreshing or failed, without the binding waiting.
+> What a binding's read tells the boundaries above it about a source, on its first load, during a revision or failed, without the binding waiting.
 
 ### @term pending
 
-> The state of a value that waits on a promise not yet settled, in it or in a source it came from.
+> The state of a value that does not yet answer the current question, on its first load or during a revision. The cause may be in the value or in a source it came from.
 
 ### @term suspension
 
@@ -676,6 +696,68 @@ This narrows the axiom above to the public API: a use case is met by composing t
 
 The principle is [P5 in the exploration record](docs/pulse/framings.md#p5--compose-dont-proliferate-in-either-direction). It rejects both a separate primitive per use case and a refusal on principle to add sugar that earns its keep.
 
+#### @spec refresh-reruns-a-derivations-recipe-with-unchanged-inputs
+
+> `refresh(x)` runs the recipe of the derivation `x` again, though none of its inputs changed.
+
+This follows because a new form is added where composing the existing ones is awkward for a common case. Re-fetching server truth after a write is common, and the composition is awkward three ways. The recipe must read a version signal from the start, so a derivation made without one cannot be refreshed. It is a fake input: the recipe reads it only to be invalidated, so what the recipe says it depends on is untrue. And every derivation that may need a refresh carries one.
+
+##### @spec a-refresh-returns-a-promise-for-the-next-settled-value
+
+> `refresh(x)` returns a promise for the next value `x` settles on. If a later refresh or a revision supersedes this one, the promise delivers what finally lands. If the run fails, the promise rejects with the error, and an ignored rejection is not reported as unhandled.
+
+Derives from: [`axiom-the-latest-production-wins`](#axiom-the-latest-production-wins), [`spec-an-error-is-graph-state-not-an-event`](#spec-an-error-is-graph-state-not-an-event)
+
+This follows because a refresh is not pending, so `promiseOf(x)` does not expose it. Code that started one still needs a way to wait for it. A production started earlier never publishes over a later one, so the promise delivers the value that lands, not the one this run produced. A failure already reaches the readers of `x` as graph state, so an unawaited rejection hides nothing.
+
+Inside an action, `yield* from(refresh(x))` waits for server truth before the action goes on. A failed refresh throws there, and fails the action like any other failure in its body.
+
+##### @spec a-refresh-abandons-the-run-in-flight
+
+> Several refreshes of `x` in one tick start a single run. A refresh while a run of `x` is in flight abandons that run, and the abandoned run never publishes.
+
+Derives from: [`spec-a-write-abandons-the-run-in-progress`](#spec-a-write-abandons-the-run-in-progress), [`spec-several-writes-in-one-tick-re-run-an-effect-once`](#spec-several-writes-in-one-tick-re-run-an-effect-once)
+
+This follows because the latest production wins. A run in flight may have started before a write the caller has since made. Its answer can then be older than the one the refresh asks for. Joining it would deliver that older answer as the fresh one. Several refreshes in one tick ask the same thing at the same moment, so one run answers them all.
+
+##### @spec a-refresh-inside-an-action-is-part-of-its-speculation
+
+> A refresh started inside an action is part of the action's speculation. Its result is visible inside the action, reaches committed state when the action commits, and is discarded with it.
+
+Derives from: [`axiom-a-speculation-commits-or-is-discarded-whole`](#axiom-a-speculation-commits-or-is-discarded-whole), [`axiom-flows-share-fate-only-where-the-code-says-so`](#axiom-flows-share-fate-only-where-the-code-says-so)
+
+This follows because the code placed the refresh in the action's body, which ties it to the action. A speculation commits or is discarded as one unit. A discard can leave the derivation's committed answer older than the server's. The next refresh or revision corrects it, as it corrects anything else a discarded action asked for.
+
+###### @exception a-refresh-after-an-await-escapes-the-speculation
+
+> In an async action body, a refresh started after the first `await` is not part of the speculation. Its result lands in committed state.
+
+Derives from: [`fact-no-context-survives-an-await`](#fact-no-context-survives-an-await)
+
+After the first `await`, the speculation is no longer ambient, so nothing ties the refresh to it. A generator body keeps its speculation across every `yield`, and a refresh there stays part of it.
+
+##### @spec a-refresh-reports-to-no-loading-boundary
+
+> A refresh reports nothing to a loading boundary: it brings back no placeholder, and leaves `isLoading()` as it was.
+
+This follows because a boundary coordinates loading, and a refresh loads nothing new for the region: the answer it shows still stands. A source polled every few seconds would otherwise make the boundary's loading state flicker.
+
+##### @spec a-refresh-of-something-that-is-not-a-derivation-warns
+
+> `refresh(x)` accepts a [derivation](#term-derivation): a computed, a signal given stages, or an optimistic value. Given anything else, such as a plain signal or a function that is not a pulse accessor, it runs nothing. It logs a warning naming the reason on every such call, and returns a promise for the current value of `x`.
+
+This follows because a refresh re-runs a recipe, and something without a recipe has nothing to run again. The call does no harm, only nothing, so pulse stays permissive and reports it instead of refusing. Generic code, such as a helper that refreshes a list of accessors, keeps working. Nothing re-ran, so the next value `x` settles on is the one it holds.
+
+##### @spec a-refresh-reruns-every-stage-of-its-pipeline-once
+
+> `refresh(x)` runs every stage of `x`'s pipeline again, in order, each once. It does not refresh the derivations `x` reads.
+
+Derives from: [`spec-an-equal-value-does-not-propagate`](#spec-an-equal-value-does-not-propagate)
+
+This follows because the work that should run again is not always in the first stage. In `computed(() => id(), (id) => fetchUser(id))`, the first stage hands the same id on. An equal value does not propagate, so a refresh of the first stage alone would never reach the fetch. The final value still goes through the equality check, so an answer equal to the last one runs no consumer again.
+
+A derivation that `x` reads is a recipe of its own: refreshing it is a separate call.
+
 #### @spec a-computed-is-a-pipeline-of-stages
 
 > `computed(s0, s1, …)` threads each [stage](#term-stage)'s resolved value into the next. Any stage may read signals, and a change to something a stage read re-runs that stage and passes its new value on.
@@ -732,17 +814,17 @@ Derives from: [`axiom-compose-rather-than-proliferate`](#axiom-compose-rather-th
 
 This follows because a small set of primitives covers the use cases. A composition of `use` and `latest` hangs off `use`, instead of joining the list of verbs.
 
-#### @spec use-latest-returns-the-last-resolved-value-during-a-refresh
+#### @spec use-latest-returns-the-last-resolved-value-during-a-revision
 
-> Once something has resolved for `x`, `use.latest(x)` returns the last resolved value, also while a refresh is pending. At that moment `use(x)` throws, and `use.latest(x)` returns the stale value.
+> Once something has resolved for `x`, `use.latest(x)` returns the last resolved value, also while a revision is pending. At that moment `use(x)` throws, and `use.latest(x)` returns the stale value.
 
 Derives from: [`spec-latest-reports-loading-without-waiting`](#spec-latest-reports-loading-without-waiting)
 
 This follows because `use.latest` is composed from `latest`, which returns the last resolved value without waiting, and `use`'s wait applies only where `latest` has nothing to return.
 
-#### @spec use-latest-reports-a-refresh-to-its-boundary
+#### @spec use-latest-reports-a-revision-to-its-boundary
 
-> A `use.latest(x)` read made while a refresh of `x` is pending reports the refresh to the surrounding loading boundary, so `isLoading()` there is true, while the binding keeps showing the last resolved value.
+> A `use.latest(x)` read made while a revision of `x` is pending reports the revision to the surrounding loading boundary, so `isLoading()` there is true, while the binding keeps showing the last resolved value.
 
 Derives from: [`spec-latest-reports-loading-without-waiting`](#spec-latest-reports-loading-without-waiting)
 
@@ -824,9 +906,9 @@ A generator body is resumed by pulse itself, inside the speculation, which is wh
 
 > In an async body, a write after the first `await` is not a write of the speculation. It lands in committed state at once, where every reader sees it before the action settles. When the action commits, its own earlier writes to the same node replace it; when the action is discarded, it stays.
 
-Derives from: [`fact-only-a-generator-can-be-resumed`](#fact-only-a-generator-can-be-resumed)
+Derives from: [`fact-no-context-survives-an-await`](#fact-no-context-survives-an-await), [`fact-only-a-generator-can-be-resumed`](#fact-only-a-generator-can-be-resumed)
 
-After the first `await`, the async function has returned control to pulse, and the continuation runs later with the speculation no longer ambient. JavaScript offers no way to carry it across. A body that must write after waiting is written as a generator.
+After the first `await`, the async function has returned control to pulse, and the continuation runs later with the speculation no longer ambient. No context survives an `await`, so nothing carries the speculation across. A generator can be resumed by the code that drives it, so a body that must write after waiting is written as a generator, and pulse carries the speculation into every resume.
 
 #### @spec an-event-handler-runs-under-the-owner-it-was-bound-in
 
@@ -888,7 +970,7 @@ This follows because consumers are re-run after each change to what they read: a
 
 This follows because consumers with side effects are re-run in batches: several writes in one batch re-run a consumer once, with the value all of them produced.
 
-#### @spec an-async-computed-refreshes-when-a-source-changes
+#### @spec an-async-computed-is-revised-when-a-source-changes
 
 > An async stage keeps following the sources it read after its promise settles, and runs again when one of them changes. A consumer then receives the new resolved value.
 
@@ -936,7 +1018,7 @@ This follows because a write abandons the paused run, a generator's cleanups run
 
 This follows because consumers are re-run when what they read changes: a suspended binding has read its source, so the subscription must survive the throw, or a later value could never reach it.
 
-Without the read, r3 would drop the dependency edge on the throw, and a source with no subscriber left would be disposed, so a later refresh would never reach the binding.
+Without the read, r3 would drop the dependency edge on the throw, and a source with no subscriber left would be disposed, so a later revision would never reach the binding.
 
 #### @spec a-computed-reading-through-peek-still-follows-its-source
 
@@ -1078,11 +1160,11 @@ Derives from: [`spec-a-construction-default-seeds-only-the-tolerant-read`](#spec
 
 This follows because a read reports what is there, and a construction default fills the tolerant read and the update function's argument: with one given, `undefined` is never there, so their types leave it out.
 
-#### @spec an-async-node-keeps-its-last-value-while-it-refreshes
+#### @spec an-async-node-keeps-its-last-value-during-a-revision
 
-> When an async node's inputs change, its last resolved value stays readable through `peek` until the new one settles, while `isPending` reports the refresh.
+> When an async node's inputs change, its last resolved value stays readable through `peek` until the new one settles, while `isPending` reports the revision.
 
-This follows because a read reports what is there, and whether a newer value is pending is a separate question: during a refresh, what is there is the last resolved value.
+This follows because a read reports what is there, and whether a newer value is pending is a separate question: during a revision, what is there is the last resolved value.
 
 This is stale-while-revalidate. `use` does not return the stale value: [it throws while the node is pending](#spec-use-of-an-accessor-throws-while-it-is-pending).
 
@@ -1094,19 +1176,29 @@ Derives from: [`spec-a-written-promise-is-published-like-a-produced-one`](#spec-
 
 This follows because a written promise is published like a produced one, and a read reports what is there: while it is pending or after it rejects it has no value, so the value from before the write is there.
 
-#### @spec from-yields-the-stale-value-during-a-refresh
+#### @spec from-yields-the-stale-value-during-a-revision
 
-> During a refresh, `yield* from(c)` on a computed yields the stale value its accessor returns, not the promise in flight.
+> During a revision, `yield* from(c)` on a computed yields the stale value its accessor returns, not the promise in flight.
 
-Derives from: [`spec-an-async-node-keeps-its-last-value-while-it-refreshes`](#spec-an-async-node-keeps-its-last-value-while-it-refreshes), [`spec-from-yields-what-it-is-given`](#spec-from-yields-what-it-is-given)
+Derives from: [`spec-an-async-node-keeps-its-last-value-during-a-revision`](#spec-an-async-node-keeps-its-last-value-during-a-revision), [`spec-from-yields-what-it-is-given`](#spec-from-yields-what-it-is-given)
 
-This follows because `from` yields what the accessor returns, and during a refresh a node keeps its last resolved value readable, since a read reports what is there: `from` yields that stale value.
+This follows because `from` yields what the accessor returns, and during a revision a node keeps its last resolved value readable, since a read reports what is there: `from` yields that stale value.
 
 #### @spec pending-is-asked-and-answered-directly
 
 > `isPending(x)` and `promiseOf(x)` answer whether `x` has a promise in flight, and which one, as plain values called fresh at each read site.
 
 This follows because whether a value is pending is a separate question asked through its own verb: `isPending` and `promiseOf` are those verbs, answering it as a plain value.
+
+##### @spec is-refreshing-reports-a-refresh-in-flight
+
+> `isRefreshing(x)` is true while a [refresh](#term-refresh) of `x` is in flight, and false otherwise. A refresh leaves `isPending(x)` false.
+
+Derives from: [`axiom-code-sees-the-present`](#axiom-code-sees-the-present)
+
+This follows because a refresh asks the current question again while its answer stands. The shown value still answers the question, so it is not pending. Whether the question is being asked again is a question of its own, and hiding it would hide part of the present.
+
+So a spinner bound to `isPending` stays still while a source is polled, and a quieter indicator bound to `isRefreshing` shows the re-ask.
 
 ##### @spec pending-is-a-reactive-read
 
@@ -1122,13 +1214,13 @@ This follows because pending is a question about what is there: a signal holding
 
 #### @spec a-read-through-latest-or-use-carries-loading-state-into-its-reader
 
-> A computed that read a pending source through `latest` or `use` reports pending, and hands out that source's promise through `promiseOf`, until the source settles, even though it holds a value of its own. The state composes through a chain of such readers, and survives the reader re-running during a refresh.
+> A computed that read a pending source through `latest` or `use` reports pending, and hands out that source's promise through `promiseOf`, until the source settles, even though it holds a value of its own. The state composes through a chain of such readers, and survives the reader re-running during a revision.
 
 Derives from: [`spec-pending-follows-where-a-value-came-from`](#spec-pending-follows-where-a-value-came-from)
 
 This follows because pending is answered truthfully, and a node is pending when a source its value was read from is: a computed reading a pending source through `latest` or `use` reports pending.
 
-A reader that reports pending is itself a pending source to the next one, which is why the state composes. A reader that re-runs during a refresh reads the source again and records it again, which is why the state survives.
+A reader that reports pending is itself a pending source to the next one, which is why the state composes. A reader that re-runs during a revision reads the source again and records it again, which is why the state survives.
 
 #### @spec a-read-through-peek-carries-no-pending-state-into-its-reader
 
@@ -1276,11 +1368,11 @@ Derives from: [`axiom-plain-reads-are-honest`](#axiom-plain-reads-are-honest)
 
 This follows because a value that has a future says so, and pending is asked through its own verb: a value made from a pending source has a future too, so the pending verbs report it until its sources settle.
 
-The walk follows two chains: the static pipeline, stage by stage, and the sources the node's recipe read through a verb on its last run. The second chain is how an optimistic value reports a background refresh of the node it wraps: its own stage holds a value and is not in flight, but the node it read is.
+The walk follows two chains: the static pipeline, stage by stage, and the sources the node's recipe read through a verb on its last run. The second chain is how an optimistic value reports a background revision of the node it wraps: its own stage holds a value and is not in flight, but the node it read is.
 
 #### @spec is-pending-reports-an-unsettled-pipeline
 
-> `isPending(c)` is true while any stage of the pipeline is waiting on a promise, on the first load and during a refresh, and `promiseOf(c)` returns that promise. Both clear when it settles.
+> `isPending(c)` is true while any stage of the pipeline is waiting on a promise, on the first load and during a revision, and `promiseOf(c)` returns that promise. A [refresh](#term-refresh) is not pending: it leaves `isPending(c)` false. Both clear when it settles.
 
 Derives from: [`axiom-plain-reads-are-honest`](#axiom-plain-reads-are-honest), [`spec-pending-follows-where-a-value-came-from`](#spec-pending-follows-where-a-value-came-from)
 
@@ -1836,11 +1928,11 @@ This follows because `settled` waits only for an input that is not yet fresh, an
 
 This follows because `settled` returns only a combination of real values, and a rejected input has a reason in place of a value.
 
-###### @spec settled-waits-again-when-an-input-refreshes
+###### @spec settled-waits-again-when-an-input-is-revised
 
-> When an input of `settled` refreshes, the stage waits on that input's promise in flight, found through `promiseOf`, not on the stale value its accessor returns, and publishes the new combination only once it has settled.
+> When an input of `settled` is revised, the stage waits on that input's promise in flight, found through `promiseOf`, not on the stale value its accessor returns, and publishes the new combination only once it has settled.
 
-This follows because `settled` returns only a combination in which no input is stale, and during a refresh the value the accessor returns is the stale one.
+This follows because `settled` returns only a combination in which no input is stale, and during a revision the value the accessor returns is the stale one.
 
 ### @spec the-read-verb-decides-what-renders-and-what-waits
 
@@ -1859,6 +1951,12 @@ Reach for `use` when the binding wants two things only a throw buys: a value tha
 Derives from: [`fact-only-a-generator-can-be-resumed`](#fact-only-a-generator-can-be-resumed)
 
 This follows because the verb decides what a binding renders, and `use` is the verb for a binding that renders only what is current, rather than a stale value or none: when there is no current value, a plain synchronous body can stop short of rendering only by throwing.
+
+##### @spec use-returns-the-standing-answer-during-a-refresh
+
+> During a [refresh](#term-refresh) of `x`, `use(x)` returns the standing answer and does not suspend.
+
+This follows because `use` renders only a current value, and the standing answer is current: it still answers the question being asked. A binding that has to wait for the re-ask to land reads `isRefreshing(x)`.
 
 ##### @spec use-is-typed-as-the-awaited-value
 
@@ -1908,9 +2006,9 @@ This follows because the read verb applies to what a binding reads, and an acces
 
 > `use(accessor)` throws `NotReadyYet` whenever `isPending(accessor)` is true, even when the accessor has a stale value to return. The thrown promise is `promiseOf(accessor)`.
 
-This follows because each verb gives one answer about what a binding renders: `use` renders only the current value, so a stale value from before a refresh does not satisfy it, and the binding waits.
+This follows because each verb gives one answer about what a binding renders: `use` renders only the current value, so a stale value from before a revision does not satisfy it, and the binding waits.
 
-So `use` suspends on every pending episode, the refreshes included. A read that wants the stale value during a refresh uses `peek`, `latest` or `use.latest`.
+So `use` suspends on every pending episode, the revisions included. A read that wants the stale value during a revision uses `peek`, `latest` or `use.latest`.
 
 ##### @spec use-throws-a-parked-error
 
@@ -1936,7 +2034,7 @@ This follows because the verb decides what a binding renders, and a suspended bi
 
 #### @spec latest-reports-loading-without-waiting
 
-> `latest(x)` returns the last resolved value, never throws, and never makes the binding wait. While `x` is pending it reports the load to the nearest boundary: a [first load](#term-first-load) drives the boundary's first-load placeholder, and a [refresh](#term-refresh) drives `isLoading()` only.
+> `latest(x)` returns the last resolved value, never throws, and never makes the binding wait. While `x` is pending it reports the load to the nearest boundary: a [first load](#term-first-load) drives the boundary's first-load placeholder, and a [revision](#term-revision) drives `isLoading()` only.
 
 Derives from: [`spec-a-boundary-shows-initial-until-its-first-load`](#spec-a-boundary-shows-initial-until-its-first-load)
 
@@ -1944,7 +2042,7 @@ This follows because only the verb decides whether a binding waits, and everythi
 
 ##### @spec a-latest-report-survives-a-boundary-remount
 
-> What `latest` and `use.latest` report about a source, a first load or a refresh, is the same after the boundary around them is removed and mounted again.
+> What `latest` and `use.latest` report about a source, a first load or a revision, is the same after the boundary around them is removed and mounted again.
 
 This follows because the report comes from the source's own state, kept with the accessor and its promise, and not from anything the boundary remembers.
 
@@ -1956,9 +2054,9 @@ This follows because everything in the loading lifecycle other than rendering an
 
 #### @spec peek-reports-nothing
 
-> `peek(x)` returns the last resolved value and reports nothing to any boundary, neither a first load nor a refresh.
+> `peek(x)` returns the last resolved value and reports nothing to any boundary, neither a first load nor a revision.
 
-This follows because the verb decides what a read takes part in: `peek` is the verb defined to take part in nothing, so it reports neither a first load nor a refresh.
+This follows because the verb decides what a read takes part in: `peek` is the verb defined to take part in nothing, so it reports neither a first load nor a revision.
 
 What `peek` returns is stated in [the spec on peek's value](#spec-peek-returns-the-last-resolved-value).
 
@@ -1983,7 +2081,7 @@ A page label and a list show how this makes a transition:
 </Loading>
 ```
 
-`page` is a plain signal, so `use(page)` never throws, but it enrols the label in the gate. On the next page, `list` refreshes and the list's binding suspends. The label's new commit waits at the gate. Both land in one pass when `list` settles, so the page never shows the new number above the old rows.
+`page` is a plain signal, so `use(page)` never throws, but it enrols the label in the gate. On the next page, `list` is revised and the list's binding suspends. The label's new commit waits at the gate. Both land in one pass when `list` settles, so the page never shows the new number above the old rows.
 
 ##### @spec a-reactive-child-that-called-use-waits-for-the-gate
 
@@ -2067,7 +2165,7 @@ This follows because which bindings land together is decided by where the bounda
 
 #### @spec is-loading-reads-the-nearest-boundary
 
-> `isLoading()` and `useLoading()` report whether the nearest enclosing boundary has anything in flight: a suspended binding, or a first load or refresh reported by `latest`. A commit waiting at the gate is not in flight. `isLoading()` returns the answer at the call site, and `useLoading()` looks the boundary up once and returns an accessor to read later.
+> `isLoading()` and `useLoading()` report whether the nearest enclosing boundary has anything in flight: a suspended binding, or a first load or a revision reported by `latest`. A commit waiting at the gate is not in flight. `isLoading()` returns the answer at the call site, and `useLoading()` looks the boundary up once and returns an accessor to read later.
 
 Derives from: [`axiom-nothing-is-hidden-from-the-code-that-uses-it`](#axiom-nothing-is-hidden-from-the-code-that-uses-it)
 
@@ -3329,11 +3427,17 @@ Closing a scope, on a commit or a discard, removes its links from the sources th
 
 A computed that the speculation only read is not in its write set, so the commit leaves the computed alone, and it recomputes from the promoted values.
 
+## @fact no-context-survives-an-await
+
+> In browsers, no context set around a call reaches the code that runs after an `await` inside it. The proposal [`AsyncContext`](https://github.com/tc39/proposal-async-context) would carry one across, but browsers do not ship it yet.
+
+This is a fact of the platform, not a choice. It holds as long as browsers ship no `AsyncContext`; once they do, a speculation can be carried across an `await`, and the exception it forces can go.
+
 ## @fact only-a-generator-can-be-resumed
 
 > In JavaScript, only a generator can pause and be resumed where it paused by the code that drives it. A function that throws has ended, and an async function resumes after an `await` on its own, later and outside the call that started it.
 
-This is a fact of the language, not a choice. It decides how finely pulse can re-enter paused work, and why a write made after an `await` leaves its speculation.
+This is a fact of the language, not a choice. It decides how finely pulse can re-enter paused work, and why a generator body can keep its speculation across a pause where an async body cannot.
 
 ## @fact javascript-has-no-context-scoped-to-a-call
 

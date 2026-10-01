@@ -29,7 +29,7 @@ test('end-to-end: signal -> sync stage -> async stage -> generator stage', async
 })
 
 /**
- * @canon spec-an-async-node-keeps-its-last-value-while-it-refreshes
+ * @canon spec-an-async-node-keeps-its-last-value-during-a-revision
  */
 test('pipeline re-runs when its signal input changes', async () => {
   const [id, setId] = signal(1)
