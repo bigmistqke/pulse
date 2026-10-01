@@ -625,6 +625,30 @@ function treeOf(
   };
 
   const out: string[] = [];
+
+  /**
+   * The derivation edges nesting cannot show: the unit's further parents, each
+   * after an arrow under its stem. They are part of the derivation graph, so
+   * the tree always draws them; only the statements wait for `--verbose`.
+   * References are reading aids, not part of the graph, so the tree leaves
+   * them out. A parent in another document keeps its file name.
+   */
+  const furtherParents = (id: string, sill: string): void => {
+    const own = links.get(`${rel}#${id}`) ?? [];
+    for (const link of own.filter(l => l.derives)) {
+      const [doc, target] = link.target.split('#');
+      const kind = kindOf(target) ?? 'spec-';
+      // The tag takes its kind's dim colour and the stem the full one, as in a
+      // tree row, so a parent reads the same wherever it is drawn.
+      const [tag, ...stem] = prose(target).split(' ');
+      const label =
+        doc === rel
+          ? `${paint(DIM[kind], tag)} ${paint(HUE[kind], stem.join(' '))}`
+          : paint(HUE[kind], `${doc}#${target}`);
+      out.push(paint('90', `${sill}→ `) + label);
+    }
+  };
+
   const walk = (unit: Element, prefix: string): void => {
     const kids = childrenOf(unit.id).filter(keep);
     const cells = gapsOnly ? [] : (linked.get(unit.id ?? '') ?? []);
@@ -661,25 +685,16 @@ function treeOf(
           `${paint(hue, said.join(' '))}${mark}`
       );
       const under = prefix + (last ? '   ' : '│  ');
+      // Indented past the tag so what follows sits under the stem it belongs
+      // to rather than under the @kind, which is the same word every time.
+      const sill = under + ' '.repeat(tag.length + 1);
       if (verbose) {
         const said = row.el?.statement ?? cellStatements.get(row.id);
-        // Indented past the tag so the claim sits under the stem it belongs
-        // to rather than under the @kind, which is the same word every time.
-        const sill = under + ' '.repeat(tag.length + 1);
         if (said) {
           out.push(paint('90', sill) + paint(SAID, clip(said, sill.length)));
         }
-        // The derivation edges nesting cannot show: the unit's further
-        // parents, each after an arrow. References are reading aids, not part of the
-        // derivation graph, so the tree leaves them out. A parent in another
-        // document keeps its file name.
-        const own = links.get(`${rel}#${row.id}`) ?? [];
-        for (const link of own.filter(l => l.derives)) {
-          const [doc, id] = link.target.split('#');
-          const label = doc === rel ? prose(id) : `${doc}#${id}`;
-          out.push(paint('90', `${sill}→ `) + paint(HUE[kindOf(id) ?? 'spec-'], label));
-        }
       }
+      furtherParents(row.id, sill);
       if (row.el) walk(row.el, under);
     });
   };
@@ -696,10 +711,11 @@ function treeOf(
         ' ' +
         paint(HUE[rootKind], rootLabel.join(' '))
     );
+    const sill = ' '.repeat(rootTag.length + 1);
     if (verbose && root.statement) {
-      const sill = ' '.repeat(rootTag.length + 1);
       out.push(sill + paint(SAID, clip(root.statement, sill.length)));
     }
+    furtherParents(root.id ?? '', sill);
     walk(root, '');
   }
 
@@ -1424,7 +1440,7 @@ Usage:
 
 Options for tree:
   --gaps          only the branches leading to a claim no test pins
-  -v, --verbose   what each unit claims, and its further parents, under its stem
+  -v, --verbose   what each unit claims, under its stem
   --suspect [n]   specs with no nested specs carrying n or more tests (default 4)
 
 The protocol is SKILL.md, beside this file. The scope is the "canon" field of
@@ -1438,6 +1454,7 @@ ${(Object.keys(MEANING) as FindingName[])
 Tree connectors:
   ├─ └─   nesting — the ordinary citation
   ├╌ └╌   a link — a spec in a table, which cannot nest
+  →       a further parent, from the unit's "Derives from:" line
 
 Stems are shown as prose: @spec A write lands at once is the unit
 spec-a-write-lands-at-once. Lower the words and hyphenate to get the id back.
