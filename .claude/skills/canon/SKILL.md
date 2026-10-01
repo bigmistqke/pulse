@@ -246,7 +246,7 @@ Declare the scope in the `canon` field of `package.json`:
 ```bash
 pnpm canon check              # every finding; exits 1 on a finding
 pnpm canon generate           # rewrite the generated regions
-pnpm canon tree               # the derivation tree, with test counts and further parents
+pnpm canon tree               # the terms, then the facts, then the derivation tree of the axioms
 pnpm canon tree -v            # the same, with each unit's statement
 pnpm canon tree --gaps        # only the branches that lead to an untested claim
 pnpm canon tree --suspect 3   # specs with no nested specs and three or more tests

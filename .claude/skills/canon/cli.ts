@@ -705,9 +705,41 @@ function treeOf(
   };
 
   // A term defines a word and derives from nothing, so it is no part of the
-  // derivation tree. The heading line still counts the terms.
+  // derivation tree. The terms are drawn first, as a list of their own, each
+  // with its definition and the number of units that link to it: a term owes
+  // no test, so that count, not a test count, says whether the word is in use.
+  // Facts are drawn next, the same way: a fact holds no units, and units reach
+  // it only through their "Derives from:" lines, so its count is the units
+  // that derive from it, and its statement is what it says about the platform.
+  const listGivens = (kind: Kind, derivesOnly: boolean): void => {
+    const units = headings.filter(u => kindOf(u.id ?? '') === kind);
+    if (units.length > 0) out.push('');
+    for (const unit of units) {
+      const target = `${rel}#${unit.id}`;
+      let users = 0;
+      for (const list of links.values()) {
+        if (list.some(l => l.target === target && (!derivesOnly || l.derives))) users++;
+      }
+      const [tag, ...word] = prose(unit.id ?? '').split(' ');
+      out.push(
+        `${paint(DIM[kind], tag)} ${paint(HUE[kind], word.join(' '))}` +
+          (users > 0 ? paint('90', `  ${users}`) : paint('31', '  — unused'))
+      );
+      // A term is its definition and a fact is its statement, so either is
+      // always drawn.
+      if (unit.statement) {
+        const sill = ' '.repeat(tag.length + 1);
+        out.push(sill + paint(SAID, clip(unit.statement, sill.length)));
+      }
+    }
+  };
+  if (!gapsOnly) {
+    listGivens('term-', false);
+    listGivens('fact-', true);
+  }
+
   for (const root of headings.filter(u => !u.parent || !byId.has(u.parent))) {
-    if (kindOf(root.id ?? '') === 'term-') continue;
+    if (kindOf(root.id ?? '') === 'term-' || kindOf(root.id ?? '') === 'fact-') continue;
     if (!keep(root)) continue;
     const rootKind = kindOf(root.id ?? '') ?? 'axiom-';
     const [rootTag, ...rootLabel] = prose(root.id ?? '').split(' ');
@@ -1458,6 +1490,10 @@ What check reports:
 ${(Object.keys(MEANING) as FindingName[])
   .map(name => `  ${name.padEnd(14)}${MEANING[name]}`)
   .join('\n')}
+
+Terms come first in the tree, each with its definition and the number of units
+that link to it. Facts come next, each with its statement and the number of
+units that derive from it. The derivation tree of the axioms follows.
 
 Tree connectors:
   ├─ └─   nesting — the ordinary citation
