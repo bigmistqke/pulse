@@ -2,7 +2,7 @@
 
 > **Note — the async carrier changed.** The `Awaitable<T>` framing below describes the async read as a `Promise` subclass carrying `status` / `value` / `reason` fields. That carrier was later replaced: an async read is now a plain `Promise<T>` with its state in one WeakMap, read through verbs (`latest` / `use` / `isPending` / `yield* read`) rather than fields on the object. See [ADR 0012](../adr/0012-weakmap-backed-promise-read-model.md) and [`async-reads-and-coordination.md`](./async-reads-and-coordination.md). The framing is kept as the exploration record.
 
-The current understanding of pulse's design: foundational principles ([P1](#p1--speculation-is-one-concept-with-two-faces)–[P5](#p5--compose-dont-proliferate-in-either-direction)), operational framings (current best-guesses for how to honour the principles), falsified hypotheses (dead ends to avoid), and engine - library sketches.
+The current understanding of pulse's design: foundational principles ([P1](#p1--speculation-is-one-concept-with-two-faces)–[P7](#p7--a-failure-reaches-code-that-can-act-on-it)), operational framings (current best-guesses for how to honour the principles), falsified hypotheses (dead ends to avoid), and engine - library sketches.
 
 **Companion documents:**
 
@@ -27,6 +27,7 @@ The current understanding of pulse's design: foundational principles ([P1](#p1--
 - [P4 — Explicit boundaries over implicit pervasiveness](#p4--explicit-boundaries-over-implicit-pervasiveness)
 - [P5 — Compose, don't proliferate (in either direction)](#p5--compose-dont-proliferate-in-either-direction)
 - [P6 — Pull-driven reads, push-driven consumers, no explicit flush](#p6--pull-driven-reads-push-driven-consumers-no-explicit-flush)
+- [P7 — A failure reaches code that can act on it](#p7--a-failure-reaches-code-that-can-act-on-it)
 
 **[Framings (adopted provisionally)](#framings-adopted-provisionally)**
 
@@ -113,6 +114,14 @@ The mechanism: invalidation propagates synchronously through the dep graph (cach
 Rejects: any design where the user has to remember to flush a queue, await a microtask, or close a batch before reading coherent state. Reading is not a discipline.
 
 See [Q3](./questions.md#q3--consumer-patterns) for the consumer implementation and [Q10](./questions.md#q10--commit-semantics-ordering-atomicity-deferred-fires) for how this interacts with commit's deferred-fires region (commit's batching is also invisible to subsequent reads).
+
+### P7 — A failure reaches code that can act on it
+
+A failure, or a call pulse cannot honour, goes to the code or the developer that can act on it, at the place where it can be acted on. The failure of a node is state on the node, so every reader and boundary that depends on it can see it and reset it. A throw from plain code goes back to the call that ran the code. A failure no code handles is logged, and a call that would do nothing fails where it is made.
+
+Rejects: failures that disappear without a word, and failures raised at a writer whose write only caused the re-run that failed.
+
+_Note, 2026-10-01:_ unlike P1–P6, this principle was written after the behaviour it describes, as what the error axioms of `CANON.md` have in common. It is the root `axiom-a-failure-reaches-code-that-can-act-on-it` there.
 
 ---
 

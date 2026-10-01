@@ -152,6 +152,8 @@ The canon was written backwards from the existing tests and documents, and descr
     - [`@rule render-inserts-a-components-return-as-a-child`](#rule-render-inserts-a-components-return-as-a-child) — `render` inserts what the component returns as a child of `target`, in whatever form a child may take: a node, an array, a primitive, or a function, which becomes a reactive child.
   - [`@axiom an-item-is-its-reference`](#axiom-an-item-is-its-reference) — An item is its reference: pulse never compares contents to decide that two values are the same item.
     - [`@rule list-rows-are-keyed-by-reference`](#rule-list-rows-are-keyed-by-reference) — A list row belongs to an item by strict reference. The same reference keeps its row, its mapped output and its DOM nodes in the new order. A different reference gets a new row even when its contents are equal.
+  - [`@axiom a-boundary-shows-its-oldest-failure-first`](#axiom-a-boundary-shows-its-oldest-failure-first) — A boundary presents the failure that has stood longest first.
+    - [`@rule error-and-active-describe-the-first-report`](#rule-error-and-active-describe-the-first-report) — A boundary's `error()` and `active()` describe its first report. A change to a report other than the first does not notify a reader of `error()` or `active()`.
 - [`@axiom every-choice-is-stated-where-the-code-is-written`](#axiom-every-choice-is-stated-where-the-code-is-written) — What pulse does is decided by what the code states, at the place it is written. Pulse infers no choice from a name, a value or a convention, and applies none silently.
   - [`@axiom async-is-acknowledged-not-hidden`](#axiom-async-is-acknowledged-not-hidden) — A value that has a future says so. An async node reads as a promise, and unwrapping it is an explicit act at the read site.
     - [`@rule an-async-node-reads-as-a-plain-promise`](#rule-an-async-node-reads-as-a-plain-promise) — An async signal or computed reads as a plain `Promise`, before it settles and after. It never turns into its bare value on settle.
@@ -335,8 +337,6 @@ The canon was written backwards from the existing tests and documents, and descr
       - [`@case is-errored-retry-performs-the-boundarys-reset`](#case-is-errored-retry-performs-the-boundarys-reset) — `dom/error.ts` `isErrored`.
       - [`@case errored-error-retry-performs-the-boundarys-reset`](#case-errored-error-retry-performs-the-boundarys-reset) — `dom/error.ts` `Errored.Error`.
     - [`@rule a-report-names-only-a-source-its-own-binding-read`](#rule-a-report-names-only-a-source-its-own-binding-read) — A binding's report names a failed node as its source only if that binding read it. A source left behind by an unrelated binding never reaches another boundary's reset.
-  - [`@axiom a-boundary-shows-its-oldest-failure-first`](#axiom-a-boundary-shows-its-oldest-failure-first) — A boundary presents the failure that has stood longest first.
-    - [`@rule error-and-active-describe-the-first-report`](#rule-error-and-active-describe-the-first-report) — A boundary's `error()` and `active()` describe its first report. A change to a report other than the first does not notify a reader of `error()` or `active()`.
 - [`@axiom a-speculation-commits-or-is-discarded-whole`](#axiom-a-speculation-commits-or-is-discarded-whole) — A speculation holds tentative writes over committed state until it either commits or is discarded, and it does either as one unit. Both outcomes are ordinary.
   - [`@rule a-speculative-write-stays-out-of-committed-state`](#rule-a-speculative-write-stays-out-of-committed-state) — A write inside a speculation is invisible to committed state until the speculation commits: a reader outside the speculation, and `committed(x)` called anywhere, inside the speculation included, keep seeing the committed value.
     - [`@exception a-prediction-shows-outside-its-action`](#exception-a-prediction-shows-outside-its-action) — A write through an optimistic setter is shown to readers outside every action while its action is open. While several actions have predictions live, readers outside every action see the most recent one.
@@ -1431,6 +1431,20 @@ This follows because an item is its reference: the same object in a new position
 
 No key function is needed because the item already has an identity.
 
+### @axiom a-boundary-shows-its-oldest-failure-first
+
+> A boundary presents the failure that has stood longest first.
+
+This narrows the axiom above to what a boundary presents: the failure already shown stays shown while it stands, so a failure that arrives later changes nothing a reader of the boundary sees.
+
+The order began as whatever order the boundary's collection happened to iterate in, as [the read-time filtering design](docs/superpowers/specs/2026-08-19-failed-boundary-read-time-filtering-design.md) records. Presenting the oldest failure first is what keeps a failure on screen while it stands.
+
+#### @rule error-and-active-describe-the-first-report
+
+> A boundary's `error()` and `active()` describe its first report. A change to a report other than the first does not notify a reader of `error()` or `active()`.
+
+This follows because a boundary presents its oldest failure first: `error()` and `active()` describe the report of the binding that failed first.
+
 ## @axiom every-choice-is-stated-where-the-code-is-written
 
 > What pulse does is decided by what the code states, at the place it is written. Pulse infers no choice from a name, a value or a convention, and applies none silently.
@@ -2025,7 +2039,7 @@ This follows because the compiler rewrites only JSX: a file that cannot contain 
 
 > A missing value sets nothing: `null`, `undefined` and `false` leave nothing in the DOM.
 
-This narrows the axiom above to a missing value: `null`, `undefined` and `false` state no value, so nothing is set.
+This narrows the axiom above to a missing value: `null`, `undefined` and `false` state that there is no value, and writing them as the strings `"null"`, `"undefined"` or `"false"` would set a value the code did not state. A boolean attribute such as `disabled` is on whenever it is present, so `disabled={false}` written as a string would apply the opposite of what was written.
 
 No design document states this. It was accepted as a principle when the canon was reviewed.
 
@@ -2281,7 +2295,7 @@ A generator is discarded on [a changed input](#rule-a-changed-input-replaces-the
 
 > A failure, or a call pulse cannot honour, reaches the code or the developer that can act on it, at the place where it can be acted on. It is never lost, and never raised where it does not belong.
 
-No design document states this as one principle. It gathers what the error axioms below have in common: where an error is routed, where a throw belongs, what is held, what is logged and what is refused all answer the question who can act on the failure. The design of failure as state is in [the failure boundary design](docs/superpowers/specs/2026-07-14-failure-boundary-design.md).
+The principle is [P7 in the exploration record](docs/pulse/framings.md#p7--a-failure-reaches-code-that-can-act-on-it), written as what the error axioms below have in common: where an error is routed, where a throw belongs, what is held, what is logged and what is refused all answer the question of who can act on the failure. The design of failure as state is in [the failure boundary design](docs/superpowers/specs/2026-07-14-failure-boundary-design.md).
 
 ### @axiom error-boundaries-are-sub-owners
 
@@ -2732,20 +2746,6 @@ Derives from: [`axiom-flows-share-fate-only-where-the-code-says-so`](#axiom-flow
 This follows because a reset re-attempts the work behind the failures its boundary holds, and flows are coupled only where the code couples them: a reset must not recompute a source that an unrelated binding failed on.
 
 An effect with no boundary above it, whose failure was swallowed, or which caught the throw itself, leaves nothing that a later, unrelated reset could recompute.
-
-### @axiom a-boundary-shows-its-oldest-failure-first
-
-> A boundary presents the failure that has stood longest first.
-
-This narrows the axiom above to presentation: of the failures a boundary holds, the one that has waited longest for someone to act is shown first.
-
-No design document states this. It was accepted as a principle when the canon was reviewed.
-
-#### @rule error-and-active-describe-the-first-report
-
-> A boundary's `error()` and `active()` describe its first report. A change to a report other than the first does not notify a reader of `error()` or `active()`.
-
-This follows because a boundary presents its oldest failure first: `error()` and `active()` describe the report of the binding that failed first.
 
 ## @axiom a-speculation-commits-or-is-discarded-whole
 
