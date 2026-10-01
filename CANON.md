@@ -33,6 +33,7 @@ The canon was written backwards from the existing tests and documents, and descr
     - [`@rule an-optimistic-value-is-a-signal-variant`](#rule-an-optimistic-value-is-a-signal-variant) — `optimistic(...stages)` builds the same pipeline `computed` and `signal` build, and returns an ordinary node. Only its setter differs: it writes a prediction in front of the derivation instead of into it.
       - [`@rule an-optimistic-value-is-read-like-any-node`](#rule-an-optimistic-value-is-read-like-any-node) — The accessor of an optimistic value is an ordinary node. Every read verb applies to it, and the pending and failed state of what its recipe reads reaches the read site through it.
       - [`@rule an-optimistic-fallback-seeds-the-tolerant-read`](#rule-an-optimistic-fallback-seeds-the-tolerant-read) — A fallback passed when an optimistic value is created is what `peek` and `latest` return before the source has resolved.
+  - [`@axiom pulse-uses-the-languages-meaning-where-it-has-one`](#axiom-pulse-uses-the-languages-meaning-where-it-has-one) — Where JavaScript or the DOM already gives a construct a meaning, pulse gives its own form of that construct the same meaning.
   - [`@rule ambient-context-is-set-for-a-call-and-restored-after`](#rule-ambient-context-is-set-for-a-call-and-restored-after) — Ambient context, such as the current owner, is set for the duration of one call and restored when that call ends, however it ends.
     - [`@rule there-is-no-ambient-owner-outside-every-root`](#rule-there-is-no-ambient-owner-outside-every-root) — Outside every root, `getOwner()` returns null, also after a root has run and after it has been disposed.
     - [`@rule runwithowner-restores-the-previous-owner`](#rule-runwithowner-restores-the-previous-owner) — `runWithOwner` makes its owner ambient for the call, `null` included, and restores the previous owner when the call returns or throws.
@@ -578,6 +579,14 @@ So `use` on it suspends until the source resolves, and a failed source is report
 Derives from: [`rule-a-construction-default-seeds-only-the-tolerant-read`](#rule-a-construction-default-seeds-only-the-tolerant-read)
 
 This follows because an optimistic value is a signal variant rather than a separate primitive, and a construction default seeds only the tolerant read: its fallback is that same default, with the same effect.
+
+### @axiom pulse-uses-the-languages-meaning-where-it-has-one
+
+> Where JavaScript or the DOM already gives a construct a meaning, pulse gives its own form of that construct the same meaning.
+
+This narrows the axiom above to meaning: a conditional, a list mapping or an element already means something in the language, so pulse's reactive form of it reuses that meaning rather than defining a second one.
+
+This holds where the code states a value. Where it states a condition, such as a boolean in a child position, the condition is not content, as [the rule on static children](#rule-a-static-child-is-inserted-by-its-kind) says.
 
 ### @rule ambient-context-is-set-for-a-call-and-restored-after
 
@@ -1349,7 +1358,9 @@ The function is called as a callback, never read as a reactive value, even when 
 
 > `Show` renders its children while `when` is truthy and its `fallback` while it is falsy. A function child is called with the truthy value.
 
-This follows because `Show` runs once and changes only inside its hole: the hole picks its children or its fallback from `when`, so a change of `when` swaps the hole's content, never re-running `Show`.
+Derives from: [`axiom-pulse-uses-the-languages-meaning-where-it-has-one`](#axiom-pulse-uses-the-languages-meaning-where-it-has-one)
+
+This follows because `Show` is the reactive form of a conditional expression, so it uses the language's meaning of one, truthiness included, and because it runs once and changes only inside its hole: a change of `when` swaps the hole's content, never re-running `Show`.
 
 A non-function child is rendered as it is.
 
@@ -1357,13 +1368,17 @@ A non-function child is rendered as it is.
 
 > `Switch` renders the children of the first `Match`, in written order, whose `when` is truthy, and its `fallback` when none is. A function child is called with the truthy value. Children of a `Switch` that are not `Match` elements are ignored.
 
-This follows because `Switch` runs once and changes only inside its hole: the hole picks the first `Match` whose `when` is truthy, so a change swaps the hole's content, never re-running `Switch`.
+Derives from: [`axiom-pulse-uses-the-languages-meaning-where-it-has-one`](#axiom-pulse-uses-the-languages-meaning-where-it-has-one)
+
+This follows because `Switch` is the reactive form of an `if` and `else if` chain, so the first truthy `when` in written order wins, as it would in the language, and because it runs once and changes only inside its hole: a change swaps the hole's content, never re-running `Switch`.
 
 #### @rule for-renders-its-fallback-when-there-are-no-rows
 
 > `For` renders one row per item, in the list's order, and renders its `fallback` when the list is empty.
 
-This follows because `For` runs once and changes only inside its hole: the hole holds one row per item, or the fallback when there is none, so a changed list changes only the hole.
+Derives from: [`axiom-pulse-uses-the-languages-meaning-where-it-has-one`](#axiom-pulse-uses-the-languages-meaning-where-it-has-one)
+
+This follows because `For` is the reactive form of mapping a list, so it renders one row per item in the list's order, and because it runs once and changes only inside its hole: a changed list changes only the hole, or shows the fallback when there is no row.
 
 #### @rule a-row-index-follows-its-position
 
@@ -1459,15 +1474,17 @@ The [README](README.md) states it as "fine-grained, no VDOM": JSX compiles to di
 
 > `h` with a string tag creates that element with `document.createElement`, and gives it only the attributes and children it was passed.
 
-This follows because JSX produces real DOM through direct DOM operations: `h` with a string tag is that operation, `document.createElement`, with nothing added that it was not given.
+Derives from: [`axiom-pulse-uses-the-languages-meaning-where-it-has-one`](#axiom-pulse-uses-the-languages-meaning-where-it-has-one)
+
+This follows because JSX produces real DOM through direct DOM operations, and an element already has a meaning in the DOM: `h` with a string tag is `document.createElement`, with nothing added that it was not given.
 
 #### @rule a-static-child-is-inserted-by-its-kind
 
 > A static child is inserted according to its kind: a string or number as a text node, a DOM node as itself, an array by inserting each item in order with nested arrays flattened to any depth, and `null`, `undefined` or a boolean as nothing. Children of mixed kinds keep their written order.
 
-Derives from: [`rule-a-missing-value-sets-nothing`](#rule-a-missing-value-sets-nothing)
+Derives from: [`rule-a-missing-value-sets-nothing`](#rule-a-missing-value-sets-nothing), [`axiom-every-choice-is-stated-where-the-code-is-written`](#axiom-every-choice-is-stated-where-the-code-is-written)
 
-This follows because JSX builds DOM directly with no intermediate tree: each kind of child is turned straight into the DOM it stands for, a text node, the node itself, its items, or nothing.
+This follows because JSX builds DOM directly with no intermediate tree: each kind of child is turned straight into the DOM it stands for, a text node, the node itself, its items, or nothing. A boolean in a child position is the result of a condition, such as `cond && <X />` or `cond || <X />`, so it states no content, and is inserted as nothing whether it is `true` or `false`: printing it would show the condition instead of what it guards.
 
 #### @rule a-fragment-is-its-children-as-an-array
 
@@ -2037,7 +2054,9 @@ This follows because a prop says how it reaches the DOM: `prop:` says "set the D
 
 > A `class:name` prop adds the class `name` while its value is truthy and removes it while it is falsy, and a function value keeps the class following it.
 
-This follows because a prop says how it reaches the DOM: `class:name` says "this one class", so only that class is toggled, by the value's truthiness.
+Derives from: [`axiom-pulse-uses-the-languages-meaning-where-it-has-one`](#axiom-pulse-uses-the-languages-meaning-where-it-has-one)
+
+This follows because a prop says how it reaches the DOM: `class:name` says "this one class", so only that class is toggled, and by truthiness, which is the language's meaning of a condition.
 
 #### @rule a-style-prefix-sets-one-style-property
 
