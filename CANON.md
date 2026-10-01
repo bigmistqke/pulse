@@ -207,7 +207,11 @@ The canon was written backwards from the existing tests and documents, and descr
 - [`@axiom a-boundary-shows-its-oldest-failure-first`](#axiom-a-boundary-shows-its-oldest-failure-first) — A boundary presents the failure that has stood longest first.
   - [`@rule error-and-active-describe-the-first-report`](#rule-error-and-active-describe-the-first-report) — A boundary's `error()` and `active()` describe its first report. A change to a report other than the first does not notify a reader of `error()` or `active()`.
 - [`@axiom the-read-verb-decides-what-renders-and-what-waits`](#axiom-the-read-verb-decides-what-renders-and-what-waits) — The verb a binding reads with decides what the binding renders and whether it waits for its neighbours. Everything else in the loading lifecycle is reported ambiently, from the reads the binding makes.
-  - [`@rule use-returns-the-value-or-throws-not-ready-yet`](#rule-use-returns-the-value-or-throws-not-ready-yet) — `use(x)` returns a plain value unchanged, returns a settled promise's value, re-throws a settled promise's rejection, and throws `NotReadyYet` carrying the promise while it is pending. Given an accessor, it calls it and treats the result the same way.
+  - [`@rule use-returns-a-value-that-is-not-a-promise-unchanged`](#rule-use-returns-a-value-that-is-not-a-promise-unchanged) — `use(x)` returns `x` unchanged when `x` is not a promise. A falsy value is a value: `use(0)`, `use(null)`, `use(undefined)`, `use(false)` and `use('')` return it.
+  - [`@rule use-returns-a-settled-promises-value`](#rule-use-returns-a-settled-promises-value) — `use(promise)` returns the value of a promise it has seen fulfil.
+  - [`@rule use-re-throws-a-settled-promises-rejection`](#rule-use-re-throws-a-settled-promises-rejection) — `use(promise)` throws the rejection reason of a promise it has seen reject.
+  - [`@rule use-throws-not-ready-yet-carrying-a-pending-promise`](#rule-use-throws-not-ready-yet-carrying-a-pending-promise) — `use(promise)` throws `NotReadyYet` while the promise is pending, and the thrown `NotReadyYet` carries that promise in its `promise` field.
+  - [`@rule use-of-an-accessor-reads-what-the-accessor-returns`](#rule-use-of-an-accessor-reads-what-the-accessor-returns) — `use(accessor)` calls the accessor and treats its result as `use` treats a value passed directly.
   - [`@rule use-of-an-accessor-throws-while-it-is-pending`](#rule-use-of-an-accessor-throws-while-it-is-pending) — `use(accessor)` throws `NotReadyYet` whenever `isPending(accessor)` is true, even when the accessor has a stale value to return. The thrown promise is `promiseOf(accessor)`.
   - [`@rule use-throws-a-parked-error`](#rule-use-throws-a-parked-error) — `use(x)` on a failed node throws the node's error.
   - [`@rule use-suspends-only-the-binding-that-reads-it`](#rule-use-suspends-only-the-binding-that-reads-it) — A binding whose `use(x)` meets a pending value renders nothing new and keeps what it showed, and the rest of the tree renders around it, with or without a `<Loading>` boundary above it. It recovers when the value settles.
@@ -579,7 +583,7 @@ Also derives from [`rule-a-construction-default-seeds-only-the-tolerant-read`](#
 
 > `use.latest(x)` throws `NotReadyYet` only while nothing has ever resolved for `x`, carrying `promiseOf(x)`, exactly as `use` would. After that it returns the last resolved value during a refetch, reports the refresh ambiently, and still enrols the binding in its boundary's gate.
 
-Also derives from [`rule-latest-reports-loading-without-waiting`](#rule-latest-reports-loading-without-waiting) and [`rule-use-returns-the-value-or-throws-not-ready-yet`](#rule-use-returns-the-value-or-throws-not-ready-yet). This follows because a new form is composed from existing ones: `use.latest` is `latest`'s value and reporting, with `use`'s wait applied only where `latest` has nothing, so it throws exactly before the first value.
+Also derives from [`rule-latest-reports-loading-without-waiting`](#rule-latest-reports-loading-without-waiting) and [`rule-use-throws-not-ready-yet-carrying-a-pending-promise`](#rule-use-throws-not-ready-yet-carrying-a-pending-promise). This follows because a new form is composed from existing ones: `use.latest` is `latest`'s value and reporting, with `use`'s wait applied only where `latest` has nothing, so it throws exactly before the first value.
 
 Once settled it returns the same value `use` does. During a refetch `use(x)` throws and `use.latest(x)` returns the stale value, at the same moment. The decision is [ADR 0014](docs/adr/0014-use-latest-composed-on-latest.md).
 
@@ -1665,13 +1669,35 @@ How pending values reach the screen: the read verb decides what a binding waits 
 
 `use(x)` suspends the binding and enrols it in its boundary's commit gate. `latest(x)` returns the last resolved value and reports loading and error state to the surrounding boundaries without waiting. `peek(x)` returns the same value and reports nothing. The principle is stated in [ADR 0015](docs/adr/0015-peek-latest-split-ambient-loading-participation.md) and restated, with gate membership kept on the verb, in [ADR 0017](docs/adr/0017-decompose-loading-into-placeholder-gate-and-pending-set.md).
 
-### @rule use-returns-the-value-or-throws-not-ready-yet
+### @rule use-returns-a-value-that-is-not-a-promise-unchanged
 
-> `use(x)` returns a plain value unchanged, returns a settled promise's value, re-throws a settled promise's rejection, and throws `NotReadyYet` carrying the promise while it is pending. Given an accessor, it calls it and treats the result the same way.
+> `use(x)` returns `x` unchanged when `x` is not a promise. A falsy value is a value: `use(0)`, `use(null)`, `use(undefined)`, `use(false)` and `use('')` return it.
 
-This follows because the read verb decides what a binding renders: `use` is the verb that renders only a real value, so it returns one when there is one and suspends while there is none.
+This follows because the read verb decides what a binding renders: `use` is the verb that renders only a real value, and a value that is not a promise is already real, so there is nothing to wait for.
 
-Falsy values are values: `use(0)`, `use(null)`, `use(undefined)`, `use(false)` and `use('')` return them.
+### @rule use-returns-a-settled-promises-value
+
+> `use(promise)` returns the value of a promise it has seen fulfil.
+
+This follows because `use` renders only a real value, and a fulfilled promise holds one, so `use` returns it without waiting.
+
+### @rule use-re-throws-a-settled-promises-rejection
+
+> `use(promise)` throws the rejection reason of a promise it has seen reject.
+
+This follows because `use` renders only a real value, and a rejected promise holds a reason in place of a value, so `use` raises the reason instead of returning something it does not have.
+
+### @rule use-throws-not-ready-yet-carrying-a-pending-promise
+
+> `use(promise)` throws `NotReadyYet` while the promise is pending, and the thrown `NotReadyYet` carries that promise in its `promise` field.
+
+This follows because `use` renders only a real value and a pending promise has none yet, so the binding waits. `use` is called inside a plain synchronous body, and such a body can stop short of the value only by throwing. The throw carries the promise so that whoever catches it knows what to wait for.
+
+### @rule use-of-an-accessor-reads-what-the-accessor-returns
+
+> `use(accessor)` calls the accessor and treats its result as `use` treats a value passed directly.
+
+This follows because the read verb applies to what a binding reads, and an accessor is how a binding reads a node: passing the accessor or passing what it returns asks the same question.
 
 ### @rule use-of-an-accessor-throws-while-it-is-pending
 

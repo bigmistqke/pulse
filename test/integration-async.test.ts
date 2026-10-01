@@ -6,7 +6,7 @@ import { isPending } from '../src/pending'
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
 
 /**
- * @canon rule-use-returns-the-value-or-throws-not-ready-yet
+ * @canon rule-use-returns-a-settled-promises-value
  * @canon rule-a-suspended-effect-re-runs-when-its-promise-settles
  */
 test('a promise-holding signal flows through an effect via use', async () => {

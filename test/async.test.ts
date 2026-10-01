@@ -126,7 +126,7 @@ test('resolvedPromise reads as fulfilled synchronously', () => {
 })
 
 /**
- * @canon rule-use-returns-the-value-or-throws-not-ready-yet
+ * @canon rule-use-returns-a-value-that-is-not-a-promise-unchanged
  */
 test('use returns a plain (non-promise) value unchanged', () => {
   expect(use(5)).toBe(5)
@@ -134,42 +134,42 @@ test('use returns a plain (non-promise) value unchanged', () => {
 })
 
 /**
- * @canon rule-use-returns-the-value-or-throws-not-ready-yet
+ * @canon rule-use-returns-a-value-that-is-not-a-promise-unchanged
  */
 test('use(0) returns 0 (falsy value, not pending)', () => {
   expect(use(0)).toBe(0)
 })
 
 /**
- * @canon rule-use-returns-the-value-or-throws-not-ready-yet
+ * @canon rule-use-returns-a-value-that-is-not-a-promise-unchanged
  */
 test('use(null) returns null', () => {
   expect(use(null)).toBe(null)
 })
 
 /**
- * @canon rule-use-returns-the-value-or-throws-not-ready-yet
+ * @canon rule-use-returns-a-value-that-is-not-a-promise-unchanged
  */
 test('use(undefined) returns undefined', () => {
   expect(use(undefined)).toBe(undefined)
 })
 
 /**
- * @canon rule-use-returns-the-value-or-throws-not-ready-yet
+ * @canon rule-use-returns-a-value-that-is-not-a-promise-unchanged
  */
 test('use(false) returns false', () => {
   expect(use(false)).toBe(false)
 })
 
 /**
- * @canon rule-use-returns-the-value-or-throws-not-ready-yet
+ * @canon rule-use-returns-a-value-that-is-not-a-promise-unchanged
  */
 test('use("") returns empty string', () => {
   expect(use('')).toBe('')
 })
 
 /**
- * @canon rule-use-returns-the-value-or-throws-not-ready-yet
+ * @canon rule-use-throws-not-ready-yet-carrying-a-pending-promise
  */
 test('use throws NotReadyYet for a pending promise', () => {
   const pending = new Promise<number>(() => {})
@@ -177,7 +177,7 @@ test('use throws NotReadyYet for a pending promise', () => {
 })
 
 /**
- * @canon rule-use-returns-the-value-or-throws-not-ready-yet
+ * @canon rule-use-throws-not-ready-yet-carrying-a-pending-promise
  */
 test('the thrown NotReadyYet carries the promise', () => {
   const pending = new Promise<number>(() => {})
@@ -201,7 +201,7 @@ test('use resolves a promise synchronously once it has settled', async () => {
 })
 
 /**
- * @canon rule-use-returns-the-value-or-throws-not-ready-yet
+ * @canon rule-use-re-throws-a-settled-promises-rejection
  */
 test('use re-throws the rejection reason of a settled rejected promise', async () => {
   const reason = new Error('boom')
@@ -248,7 +248,7 @@ test('from of a promise yields the promise itself', () => {
 })
 
 /**
- * @canon rule-use-returns-the-value-or-throws-not-ready-yet
+ * @canon rule-use-of-an-accessor-reads-what-the-accessor-returns
  */
 test('use() accepts an accessor (signal getter)', () => {
   const [count] = signal(42)
@@ -256,7 +256,7 @@ test('use() accepts an accessor (signal getter)', () => {
 })
 
 /**
- * @canon rule-use-returns-the-value-or-throws-not-ready-yet
+ * @canon rule-use-of-an-accessor-reads-what-the-accessor-returns
  */
 test('use() accessor form unwraps pending promises (throws NotReadyYet)', () => {
   const [s] = signal<Promise<number>>(new Promise(() => {}))
