@@ -559,16 +559,17 @@ export function action(body: () => unknown): ActionHandle {
   }
 
   /** The nearest candidate that accepts `e`, calling a catchError handler on
-   *  the way. A handler that throws passes its own error on to the candidates
-   *  beyond it, as a handler that throws does for a failed node. */
-  const claim = (e: unknown): ErrorCandidate | null => {
+   *  the way, together with the error that candidate receives. A handler that
+   *  throws passes its own error on to the candidates beyond it, as a handler
+   *  that throws does for a failed node. */
+  const claim = (e: unknown): { candidate: ErrorCandidate; error: unknown } | null => {
     let current = e
     for (const candidate of candidates) {
       if (!accepts(candidate, current)) continue
-      if (candidate.kind === 'boundary') return candidate
+      if (candidate.kind === 'boundary') return { candidate, error: current }
       try {
         candidate.handler.handle(current)
-        return candidate
+        return { candidate, error: current }
       } catch (next) {
         current = next
       }
@@ -608,7 +609,8 @@ export function action(body: () => unknown): ActionHandle {
         // retry back, since the always-accepting root never itself
         // declines. Mirrors findNearestErrorScope's own unconditional,
         // every-error walk in effect.ts.
-        const winner = claim(e)
+        const claimed = claim(e)
+        const winner = claimed?.candidate ?? null
         if (winner !== claimedCandidate) {
           controller?.unregister()
           controller = null
@@ -637,7 +639,7 @@ export function action(body: () => unknown): ActionHandle {
         }
         if (claimedCandidate?.kind === 'boundary') {
           controller ??= claimedCandidate.scope.register()
-          controller.report({ status: 'error', error: e, source: null, retry })
+          controller.report({ status: 'error', error: claimed!.error, source: null, retry })
         }
       },
     )

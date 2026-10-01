@@ -91,7 +91,7 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule use-errored-without-an-errored-reads-the-roots-boundary`](#rule-use-errored-without-an-errored-reads-the-roots-boundary) — Under a root with no explicit `<Errored>`, `useErrored()` reads the root's boundary, which holds every error nothing nearer claimed in that root.
   - [`@rule a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller`](#rule-a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller) — A failed action reports to the nearest boundary that accepts its error, above the owner it was called under: an `<Errored>`, a root's default boundary, or a `catchError`, whose handler is then called with the error. The choice is made again on every failure, so a retry whose error a nearer boundary now accepts moves there. The report still reaches its boundary when the calling owner was disposed before the action failed. When the boundary itself is gone, the report goes to the next boundary up, at the latest the root's.
   - [`@rule an-errored-reset-retries-a-failed-action`](#rule-an-errored-reset-retries-a-failed-action) — An `<Errored>` boundary holding a failed action's report retries that action when it resets: its reset calls the action's own `retry()`.
-  - [`@rule a-throwing-handler-passes-a-failed-action-on-with-its-own-error`](#rule-a-throwing-handler-passes-a-failed-action-on-with-its-own-error) — When a `catchError` handler called for a failed action throws, the search continues to the boundaries beyond it, and the one that claims the failure receives the action's own error, not the handler's.
+  - [`@rule a-throwing-handler-passes-a-failed-action-on-with-the-handlers-error`](#rule-a-throwing-handler-passes-a-failed-action-on-with-the-handlers-error) — When a `catchError` handler called for a failed action throws, the search continues to the boundaries beyond it with the handler's error, and the one that claims it receives the handler's error. The action's handle keeps the action's own error.
   - [`@rule a-real-error-in-an-effect-goes-to-the-nearest-handler`](#rule-a-real-error-in-an-effect-goes-to-the-nearest-handler) — A thrown error that is not a suspension, from an effect's body, a stage or a commit, goes to the nearest error handler above the effect. With no handler, it is thrown out of the run that raised it.
   - [`@rule a-loading-boundary-does-not-catch-a-real-error`](#rule-a-loading-boundary-does-not-catch-a-real-error) — A `<Loading>` boundary between a binding and an error handler lets a real error from that binding pass on to the handler. It takes only suspensions.
   - [`@rule a-hole-that-throws-reports-to-the-nearest-catch-error`](#rule-a-hole-that-throws-reports-to-the-nearest-catch-error) — An error thrown inside a reactive child reaches the handler of the nearest enclosing `catchError`, and does not escape the write that caused it.
@@ -716,11 +716,11 @@ An action called from an event handler runs under the owner that was current whe
 
 > An `<Errored>` boundary holding a failed action's report retries that action when it resets: its reset calls the action's own `retry()`.
 
-### @rule a-throwing-handler-passes-a-failed-action-on-with-its-own-error
+### @rule a-throwing-handler-passes-a-failed-action-on-with-the-handlers-error
 
-> When a `catchError` handler called for a failed action throws, the search continues to the boundaries beyond it, and the one that claims the failure receives the action's own error, not the handler's.
+> When a `catchError` handler called for a failed action throws, the search continues to the boundaries beyond it with the handler's error, and the one that claims it receives the handler's error. The action's handle keeps the action's own error.
 
-This differs from [a handler that throws for a node's error](#rule-a-handler-that-throws-passes-its-error-outward), where the handler's error is what travels on.
+This is the same as [a handler that throws for a node's error](#rule-a-handler-that-throws-passes-its-error-outward): the handler's error is what travels on.
 
 ### @rule a-real-error-in-an-effect-goes-to-the-nearest-handler
 
