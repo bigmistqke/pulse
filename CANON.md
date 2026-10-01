@@ -1037,7 +1037,7 @@ SameValueZero is the equality `Map`, `Set` and `Array.prototype.includes` use.
 
 > `computed.ts` `makeStageNode`.
 
-A stage whose new value is equal to the one it last published does not publish it again, so its consumers do not re-run. This holds wherever the value comes from: a run of the stage, a promise the stage returned, or a promise a `use` in the stage suspended on.
+A stage whose new value is equal to the one it last published does not publish it again, so its consumers do not re-run. This holds wherever the value comes from: a run of the stage, a promise the stage returned, a promise a `use` in the stage suspended on, or a promise written into the stage.
 
 ##### @case an-equal-committed-signal-write-is-dropped
 

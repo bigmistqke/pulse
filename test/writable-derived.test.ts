@@ -6,6 +6,7 @@ import { createRoot, onCleanup } from '../src/owner'
 import { error } from '../src/error'
 import { action } from '../src/scope'
 import { effect } from '../src/effect'
+import { flush, microtaskScheduler, setScheduler, syncScheduler } from '../src/scheduler'
 
 /**
  * @canon rule-a-write-replaces-a-derived-value-without-rerunning-it
@@ -1178,4 +1179,25 @@ test('an update function that throws leaves a queued run intact', async () => {
   await tick()
   expect(requests).toBe(2)
   expect(use(todos)).toEqual(['v2'])
+})
+
+/**
+ * @canon case-a-computed-publishes-only-a-changed-value
+ */
+test('a written promise that settles to -0 over 0 is not published again', async () => {
+  setScheduler(syncScheduler(flush))
+  const [d, setD] = signal(() => Promise.resolve(0))
+  let runs = 0
+  createRoot(() =>
+    effect(() => {
+      d()
+      runs++
+    }),
+  )
+  await new Promise<void>((resolve) => setTimeout(resolve))
+  setD(Promise.resolve(-0))
+  const afterWrite = runs
+  await new Promise<void>((resolve) => setTimeout(resolve))
+  setScheduler(microtaskScheduler(flush))
+  expect(runs).toBe(afterWrite)
 })
