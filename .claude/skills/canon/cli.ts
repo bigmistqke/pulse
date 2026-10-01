@@ -783,7 +783,7 @@ interface Analysis {
   testsPer: Map<string, number>;
   /**
    * Every unit a unit links to, by `<doc>#<id>`, and whether the link is a
-   * further parent (it sits in the unit's "Also derives from" sentence) or a
+   * further parent (it sits on the unit's "Derives from:" line) or a
    * reference. Further parents and nesting together are the derivation graph.
    */
   links: Map<string, Array<{ target: string; derives: boolean }>>;
@@ -850,18 +850,15 @@ function analyse(write: boolean): Analysis {
     into.set(from, set);
   };
   /**
-   * Whether the link at `at` names a further parent: it sits in a sentence
-   * that opens "Also derives from", up to that sentence's end. Every other
-   * link is a reference, which cites but does not derive, so a reference back
-   * to a unit that derives from this one is not a cycle.
+   * Whether the link at `at` names a further parent: it sits on a line that
+   * opens "Derives from:". Every other link is a reference, which cites but
+   * does not derive, so a reference back to a unit that derives from this one
+   * is not a cycle.
    */
-  const DERIVES = /^Also derives from\b/;
+  const DERIVES = /^Derives from:/;
   const namesParent = (src: string, at: number): boolean => {
     const lineStart = src.lastIndexOf('\n', at - 1) + 1;
-    const line = src.slice(lineStart);
-    if (!DERIVES.test(line)) return false;
-    const sentenceEnd = line.search(/\.(\s|$)/);
-    return sentenceEnd === -1 || at - lineStart < sentenceEnd;
+    return DERIVES.test(src.slice(lineStart, at));
   };
 
   const written: string[] = [];
@@ -1395,10 +1392,10 @@ function analyse(write: boolean): Analysis {
 const HELP = `canon — derivation links for a project's canon
 
 Every unit that makes a derived claim carries a machine-checkable link to what
-it derives from — its position under the unit it derives from, a prose link in
-a document, a @canon JSDoc tag in a test — and the documents' index and the
-table of kinds are generated from those links rather than hand-kept. check is
-the gate, generate is the writer, tree is the map.
+it derives from — its position under the unit it derives from, a link on a
+"Derives from:" line in a document, a @canon JSDoc tag in a test — and the
+documents' index and the table of kinds are generated from those links rather
+than hand-kept. check is the gate, generate is the writer, tree is the map.
 
 Usage:
   ${COMMAND} check                 report every finding; exit 1 if there is one

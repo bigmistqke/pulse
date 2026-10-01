@@ -69,11 +69,23 @@ The stem is written by hand, never generated from the statement. The statement c
 
 The canon is a directed acyclic graph. Every claim derives from what forces its answer, and that can be more than one thing: two axioms together, or an axiom together with rules already established. A rule may therefore depend on other rules as well as on axioms. The graph has no cycles: nothing derives, directly or through others, from itself.
 
-Each rule has one primary parent, the axiom it is nested under, and any number of further parents, written as explicit links in a sentence that opens its body: "Also derives from [`axiom-x`](#axiom-x) and [`rule-y`](#rule-y)." Choose as primary the axiom that does most of the forcing.
+Each rule has one primary parent, the axiom it is nested under, and any number of further parents. The further parents are listed on a line of their own that opens the body, right after the statement, as links separated by commas:
 
-Only the links in that sentence are derivation edges. Any other link in a body is a reference, such as "see the rule on…", and may point anywhere, including back at a unit that derives from this one. The checker reads the derivation edges, nesting included, as a graph, and reports any cycle in it as `cycle`: a derivation that depends on itself. `pnpm canon tree -v` shows each unit's further parents under it, each after an arrow. References are left out of the tree, because they are not part of the derivation graph. A rule sits under the axiom that forces its answer, not under the axiom whose topic it resembles: being about the same subject is not a derivation.
+```md
+### @rule a-style-property-is-removed-on-nothing
 
-A rule's body opens with its derivation: one sentence saying which parents it follows from, and why they force this answer and no other. When no such sentence can be written, the rule is a choice the axioms would allow to go another way, and an axiom is missing. That is a design question for whoever owns the design, not a placement problem.
+> A `style:name` prop whose value is `null`, `undefined` or `false` removes the style property.
+
+Derives from: [`rule-a-style-prefix-sets-one-style-property`](#rule-a-style-prefix-sets-one-style-property)
+
+This follows because a missing value sets nothing: …
+```
+
+Choose as primary the axiom that does most of the forcing.
+
+Only the links on the `Derives from:` line are derivation edges. Any other link in a body is a reference, such as "see the rule on…", and may point anywhere, including back at a unit that derives from this one. The checker reads the derivation edges, nesting included, as a graph, and reports any cycle in it as `cycle`: a derivation that depends on itself. `pnpm canon tree -v` shows each unit's further parents under it, each after an arrow. References are left out of the tree, because they are not part of the derivation graph. A rule sits under the axiom that forces its answer, not under the axiom whose topic it resembles: being about the same subject is not a derivation.
+
+A rule's body opens with its derivation: the `Derives from:` line when it has further parents, then one sentence, "This follows because …", saying why its parents force this answer and no other. When no such sentence can be written, the rule is a choice the axioms would allow to go another way, and an axiom is missing. That is a design question for whoever owns the design, not a placement problem.
 
 How large an axiom becomes is a consequence of what it forces, never a reason to move a rule. The parts or sections a document is grouped into are navigation for a reader, and play no part in where a rule sits.
 
