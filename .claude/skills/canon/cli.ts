@@ -635,15 +635,15 @@ function treeOf(
         if (said) {
           out.push(paint('90', sill) + paint(SAID, clip(said, sill.length)));
         }
-        // The edges nesting cannot show: further parents first, as "also",
-        // then references, as "see". A link into another document keeps its
-        // file name.
+        // The derivation edges nesting cannot show: the unit's further
+        // parents, as "also". References are reading aids, not part of the
+        // derivation graph, so the tree leaves them out. A parent in another
+        // document keeps its file name.
         const own = links.get(`${rel}#${row.id}`) ?? [];
-        for (const link of [...own.filter(l => l.derives), ...own.filter(l => !l.derives)]) {
+        for (const link of own.filter(l => l.derives)) {
           const [doc, id] = link.target.split('#');
           const label = doc === rel ? prose(id) : `${doc}#${id}`;
-          const verb = link.derives ? 'also' : 'see';
-          out.push(paint('90', `${sill}╌ ${verb} `) + paint(HUE[kindOf(id) ?? 'case-'], label));
+          out.push(paint('90', `${sill}╌ also `) + paint(HUE[kindOf(id) ?? 'case-'], label));
         }
       }
       if (row.el) walk(row.el, under);
@@ -1405,7 +1405,7 @@ Usage:
 
 Options for tree:
   --gaps          only the branches leading to a claim no test pins
-  -v, --verbose   what each unit claims, and the units it links to, under its stem
+  -v, --verbose   what each unit claims, and its further parents, under its stem
   --suspect [n]   rules with no cases carrying n or more tests (default 4)
 
 The protocol is SKILL.md, beside this file. The scope is the "canon" field of
