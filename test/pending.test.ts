@@ -148,3 +148,27 @@ describe('pending tracker — computed integration', () => {
     expect(isPending(reader)).toBe(true)
   })
 })
+
+/**
+ * @canon spec-pending-is-a-reactive-read
+ */
+test('a consumer of isPending on a pipeline runs again as the answer flips both ways', async () => {
+  const { effect } = await import('../src/effect')
+  const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
+  const [n, setN] = signal(1)
+  const c = computed(async () => {
+    const v = n()
+    await new Promise((resolve) => setTimeout(resolve, 1))
+    return v
+  })
+  const seen: boolean[] = []
+  effect(() => {
+    seen.push(isPending(c))
+  })
+  for (let i = 0; i < 5; i++) await tick()
+  setN(2)
+  c()
+  for (let i = 0; i < 5; i++) await tick()
+  // Pending, settled, pending again on the refetch, settled again.
+  expect(seen).toEqual([true, false, true, false])
+})

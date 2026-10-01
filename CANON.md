@@ -47,6 +47,7 @@ This document is the project. It holds the theory of pulse: why it is the way it
     - [`@spec a-staged-effect-is-a-pipeline-ending-in-a-commit`](#spec-a-staged-effect-is-a-pipeline-ending-in-a-commit) — `effect([stage0, …, stageN], commit)` runs the same pipeline a computed runs, and passes the final stage's resolved value to `commit`, an async stage's included. It commits again whenever the pipeline produces a new value.
     - [`@spec a-construction-default-seeds-only-the-tolerant-read`](#spec-a-construction-default-seeds-only-the-tolerant-read) — `signal(fn, default)` makes `peek` return `default` until the derivation first resolves, and an update function receive `default` in place of `undefined`. Once a real value has resolved, both see it instead of the default.
     - [`@spec use-latest-throws-only-before-the-first-value`](#spec-use-latest-throws-only-before-the-first-value) — `use.latest(x)` throws `NotReadyYet` only while nothing has ever resolved for `x`, carrying `promiseOf(x)`, exactly as `use` would.
+      - [`@spec use-latest-is-a-property-of-use`](#spec-use-latest-is-a-property-of-use) — `use.latest` is a property of `use`, not a separate export: importing `use` brings it.
     - [`@spec use-latest-returns-the-last-resolved-value-during-a-refetch`](#spec-use-latest-returns-the-last-resolved-value-during-a-refetch) — Once something has resolved for `x`, `use.latest(x)` returns the last resolved value, also while a refetch is pending. At that moment `use(x)` throws, and `use.latest(x)` returns the stale value.
     - [`@spec use-latest-reports-a-refresh-to-its-boundary`](#spec-use-latest-reports-a-refresh-to-its-boundary) — A `use.latest(x)` read made while a refetch of `x` is pending reports the refresh to the surrounding loading boundary, so `isLoading()` there is true, while the binding keeps showing the last resolved value.
     - [`@spec use-latest-enrols-the-binding-in-its-boundarys-gate`](#spec-use-latest-enrols-the-binding-in-its-boundarys-gate) — A binding that called `use.latest(x)` commits through its boundary's gate: while a sibling binding of the boundary is suspended, its commit waits, even when `use.latest(x)` returned a value.
@@ -96,6 +97,7 @@ This document is the project. It holds the theory of pulse: why it is the way it
     - [`@spec a-written-promise-leaves-the-prior-value-to-the-tolerant-read`](#spec-a-written-promise-leaves-the-prior-value-to-the-tolerant-read) — While a written promise is pending, and after it rejects, the tolerant read returns the value from before the write.
     - [`@spec from-yields-the-stale-value-during-a-refetch`](#spec-from-yields-the-stale-value-during-a-refetch) — During a refetch, `yield* from(c)` on a computed yields the stale value its accessor returns, not the promise in flight.
     - [`@spec pending-is-asked-and-answered-directly`](#spec-pending-is-asked-and-answered-directly) — `isPending(x)` and `promiseOf(x)` answer whether `x` has a promise in flight, and which one, as plain values called fresh at each read site.
+      - [`@spec pending-is-a-reactive-read`](#spec-pending-is-a-reactive-read) — `isPending(x)` and `promiseOf(x)` are reactive reads: a consumer that read them runs again when their answer changes. That holds for a plain signal holding a promise as for a pipeline.
     - [`@spec a-signals-pending-state-is-the-state-of-the-promise-it-holds`](#spec-a-signals-pending-state-is-the-state-of-the-promise-it-holds) — A signal holding a plain value is never pending, and its `promiseOf` is `null`. A signal holding a promise is pending until that promise settles, and `promiseOf` returns it while it is.
     - [`@spec a-tolerant-read-carries-loading-state-into-its-reader`](#spec-a-tolerant-read-carries-loading-state-into-its-reader) — A computed that read a pending source through `latest` or `use` reports pending, and hands out that source's promise through `promiseOf`, until the source settles, even though it holds a value of its own. The state composes through a chain of such readers, and survives the reader re-running during a refresh.
     - [`@spec a-read-through-peek-carries-no-pending-state-into-its-reader`](#spec-a-read-through-peek-carries-no-pending-state-into-its-reader) — A computed that read a pending source only through `peek` does not report pending because of it.
@@ -189,6 +191,8 @@ This document is the project. It holds the theory of pulse: why it is the way it
     - [`@spec a-signal-stores-a-promise-as-it-is`](#spec-a-signal-stores-a-promise-as-it-is) — A signal holding a promise stores the promise itself, not its result. Writing a new promise re-runs its consumers; the promise settling is not a write.
       - [`@spec a-signals-type-is-the-type-it-stores`](#spec-a-signals-type-is-the-type-it-stores) — A signal holding a `Promise<number>` reads as `Promise<number>`. Its read type is the type it stores, never widened to the awaited value.
     - [`@spec from-yields-what-it-is-given`](#spec-from-yields-what-it-is-given) — `yield* from(x)` yields a plain value or a promise as it is, and calls a signal's accessor so the read is tracked. It does not look at pending state.
+      - [`@spec from-yields-a-plain-function-uncalled`](#spec-from-yields-a-plain-function-uncalled) — `from(f)`, where `f` is a plain function and not a pulse accessor, yields `f` itself without calling it.
+      - [`@spec from-is-typed-as-the-resolved-value`](#spec-from-is-typed-as-the-resolved-value) — `yield* from(x)` is typed as `Resolved<typeof x>`: the value `x` holds, with any promise awaited.
     - [`@spec a-stage-result-is-settled-before-it-is-passed-on`](#spec-a-stage-result-is-settled-before-it-is-passed-on) — Each value a stage returns or a generator yields is settled before it is used. A plain value or a fulfilled promise is used at once, and a pending promise suspends the stage on that promise.
     - [`@spec settled-waits-until-every-input-is-fresh`](#spec-settled-waits-until-every-input-is-fresh) — `yield* settled([…])` suspends until every input's promise in flight has settled, then returns all the fresh values together, so a consumer never sees a frame where one input is new and another is stale.
       - [`@spec settled-does-not-wait-on-an-input-that-has-settled`](#spec-settled-does-not-wait-on-an-input-that-has-settled) — `settled` does not suspend for an input that has already settled, a raw promise included. A run whose inputs have all settled returns at once, so a stage fed an already-settled raw promise converges instead of suspending on every run.
@@ -196,16 +200,19 @@ This document is the project. It holds the theory of pulse: why it is the way it
       - [`@spec settled-waits-again-when-an-input-refetches`](#spec-settled-waits-again-when-an-input-refetches) — When an input of `settled` refetches, the stage waits on that input's promise in flight, found through `promiseOf`, not on the stale value its accessor returns, and publishes the new combination only once it has settled.
   - [`@spec the-read-verb-decides-what-renders-and-what-waits`](#spec-the-read-verb-decides-what-renders-and-what-waits) — The verb a binding reads with decides what the binding renders and whether it waits for its neighbours. Everything else in the loading lifecycle is reported ambiently, from the reads the binding makes.
     - [`@spec use-renders-only-a-current-value`](#spec-use-renders-only-a-current-value) — `use(x)` gives the binding the current value of `x` and nothing else: it returns a value that is there, and throws when there is none to give, whether `x` is pending or failed.
+      - [`@spec use-is-typed-as-the-awaited-value`](#spec-use-is-typed-as-the-awaited-value) — `use(x)` is typed as the value `x` holds with any promise awaited, and never as possibly `undefined`.
       - [`@spec use-returns-a-value-that-is-not-a-promise-unchanged`](#spec-use-returns-a-value-that-is-not-a-promise-unchanged) — `use(x)` returns `x` unchanged when `x` is not a promise. A falsy value is a value: `use(0)`, `use(null)`, `use(undefined)`, `use(false)` and `use('')` return it.
       - [`@spec use-returns-a-settled-promises-value`](#spec-use-returns-a-settled-promises-value) — `use(promise)` returns the value of a promise it has seen fulfil.
       - [`@spec use-re-throws-a-settled-promises-rejection`](#spec-use-re-throws-a-settled-promises-rejection) — `use(promise)` throws the rejection reason of a promise it has seen reject.
       - [`@spec use-throws-not-ready-yet-carrying-a-pending-promise`](#spec-use-throws-not-ready-yet-carrying-a-pending-promise) — `use(promise)` throws `NotReadyYet` while the promise is pending, and the thrown `NotReadyYet` carries that promise in its `promise` field.
+        - [`@spec use-outside-every-consumer-throws-to-its-caller`](#spec-use-outside-every-consumer-throws-to-its-caller) — `use(x)` on a pending `x`, called outside every effect, binding and computed, throws `NotReadyYet` to whoever called it.
       - [`@spec use-of-an-accessor-reads-what-the-accessor-returns`](#spec-use-of-an-accessor-reads-what-the-accessor-returns) — `use(accessor)` calls the accessor and treats its result as `use` treats a value passed directly.
       - [`@spec use-of-an-accessor-throws-while-it-is-pending`](#spec-use-of-an-accessor-throws-while-it-is-pending) — `use(accessor)` throws `NotReadyYet` whenever `isPending(accessor)` is true, even when the accessor has a stale value to return. The thrown promise is `promiseOf(accessor)`.
       - [`@spec use-throws-a-parked-error`](#spec-use-throws-a-parked-error) — `use(x)` on a failed node throws the node's error.
     - [`@spec use-suspends-only-the-binding-that-reads-it`](#spec-use-suspends-only-the-binding-that-reads-it) — A binding whose `use(x)` meets a pending value renders nothing new and keeps what it showed, and the rest of the tree renders around it, with or without a `<Loading>` boundary above it. It recovers when the value settles.
     - [`@spec a-suspended-hole-keeps-what-it-showed`](#spec-a-suspended-hole-keeps-what-it-showed) — A reactive child whose run throws `NotReadyYet` commits nothing, so the DOM it showed before stays in place until a later run succeeds. On its first run it has shown nothing, so it stays empty until its source settles.
     - [`@spec latest-reports-loading-without-waiting`](#spec-latest-reports-loading-without-waiting) — `latest(x)` returns the last resolved value, never throws, and never makes the binding wait. While `x` is pending it reports the load to the nearest boundary: a first load drives the boundary's first-load placeholder, and a refresh drives `isLoading()` only.
+      - [`@spec a-latest-report-survives-a-boundary-remount`](#spec-a-latest-report-survives-a-boundary-remount) — What `latest` and `use.latest` report about a source, a first load or a refresh, is the same after the boundary around them is removed and mounted again.
     - [`@spec a-tolerant-read-reports-a-failure-to-the-boundary`](#spec-a-tolerant-read-reports-a-failure-to-the-boundary) — A binding that reads a failed node through `latest` reports the failure to the nearest accepting error boundary, though nothing throws, and reports its recovery when a later run sees no error.
     - [`@spec peek-reports-nothing`](#spec-peek-reports-nothing) — `peek(x)` returns the last resolved value and reports nothing to any boundary, neither a first load nor a refresh.
     - [`@spec use-enrols-the-binding-in-its-boundarys-gate`](#spec-use-enrols-the-binding-in-its-boundarys-gate) — A binding that called `use(x)` during its run commits through its boundary's gate. While any binding of the boundary is suspended, its commit waits, and it lands in the same pass as the others.
@@ -218,6 +225,7 @@ This document is the project. It holds the theory of pulse: why it is the way it
   - [`@spec a-boundary-wraps-what-it-coordinates`](#spec-a-boundary-wraps-what-it-coordinates) — A [boundary](#term-boundary) coordinates the region placed inside it. Which bindings land together, and which region shows a placeholder, is decided by where a `<Loading>` boundary is placed. The state of every boundary, a `<Loading>` or an `<Errored>`, belongs to the region it wraps, so a reader finds it by position, whatever intercepts errors in between.
     - [`@spec a-boundary-shows-initial-until-its-first-load`](#spec-a-boundary-shows-initial-until-its-first-load) — Until every suspended binding inside it has settled once, a boundary shows `initial`, or `fallback` when there is no `initial`. After that it shows the loaded subtree. A subtree in which nothing suspends is shown at once.
     - [`@spec after-its-first-load-a-boundary-shows-fallback-or-holds`](#spec-after-its-first-load-a-boundary-shows-fallback-or-holds) — When a boundary that has loaded before becomes pending again, it shows `fallback` if one is given, and otherwise keeps showing the subtree it last committed.
+      - [`@spec a-first-load-after-the-boundary-has-loaded-shows-the-fallback`](#spec-a-first-load-after-the-boundary-has-loaded-shows-the-fallback) — Once a boundary has loaded, a first load of a source read later through `latest` shows the boundary's `fallback`, not its `initial`.
     - [`@spec a-boundary-without-placeholders-swaps-nothing`](#spec-a-boundary-without-placeholders-swaps-nothing) — A boundary with neither `initial` nor `fallback` never swaps its subtree out. What does not depend on a pending value stays visible while it waits.
     - [`@spec a-boundary-flushes-ready-commits-together`](#spec-a-boundary-flushes-ready-commits-together) — A boundary holds the commits of its ready bindings until no binding registered with it is suspended, then runs them all in one pass. A binding that reports idle, or unregisters, stops holding the gate.
     - [`@spec is-loading-reads-the-nearest-boundary`](#spec-is-loading-reads-the-nearest-boundary) — `isLoading()` and `useLoading()` report whether the nearest enclosing boundary has anything in flight: a suspended binding, or a first load or refresh reported by `latest`. A commit waiting at the gate is not in flight. `isLoading()` returns the answer at the call site, and `useLoading()` looks the boundary up once and returns an accessor to read later.
@@ -651,6 +659,14 @@ This follows because a new form is composed from existing ones: `use.latest` is 
 
 The decision is [ADR 0014](docs/adr/0014-use-latest-composed-on-latest.md).
 
+##### @spec use-latest-is-a-property-of-use
+
+> `use.latest` is a property of `use`, not a separate export: importing `use` brings it.
+
+Derives from: [`axiom-compose-rather-than-proliferate`](#axiom-compose-rather-than-proliferate)
+
+This follows because a small set of primitives covers the use cases. A composition of `use` and `latest` hangs off `use`, instead of joining the list of verbs.
+
 #### @spec use-latest-returns-the-last-resolved-value-during-a-refetch
 
 > Once something has resolved for `x`, `use.latest(x)` returns the last resolved value, also while a refetch is pending. At that moment `use(x)` throws, and `use.latest(x)` returns the stale value.
@@ -1026,6 +1042,12 @@ This follows because `from` yields what the accessor returns, and during a refet
 > `isPending(x)` and `promiseOf(x)` answer whether `x` has a promise in flight, and which one, as plain values called fresh at each read site.
 
 This follows because whether a value is pending is a separate question asked through its own verb: `isPending` and `promiseOf` are those verbs, answering it as a plain value.
+
+##### @spec pending-is-a-reactive-read
+
+> `isPending(x)` and `promiseOf(x)` are reactive reads: a consumer that read them runs again when their answer changes. That holds for a plain signal holding a promise as for a pipeline.
+
+This follows because code sees the present: an answer that went stale without the reader hearing of it would show a past state.
 
 #### @spec a-signals-pending-state-is-the-state-of-the-promise-it-holds
 
@@ -1703,6 +1725,20 @@ This follows because unwrapping is an explicit act at the read site: `from` only
 
 What happens to the yielded value next is [the driver settling it](#spec-a-stage-result-is-settled-before-it-is-passed-on).
 
+##### @spec from-yields-a-plain-function-uncalled
+
+> `from(f)`, where `f` is a plain function and not a pulse accessor, yields `f` itself without calling it.
+
+This follows because `from` yields its argument as it is. It calls only an accessor, to read it tracked, and a plain function is a value like any other.
+
+So `yield* from(() => x)` hands back the arrow function, not `x`.
+
+##### @spec from-is-typed-as-the-resolved-value
+
+> `yield* from(x)` is typed as `Resolved<typeof x>`: the value `x` holds, with any promise awaited.
+
+This follows because `from` yields its argument as it is, and the driver settles it before resuming the stage. So the stage receives the resolved value.
+
 #### @spec a-stage-result-is-settled-before-it-is-passed-on
 
 > Each value a stage returns or a generator yields is settled before it is used. A plain value or a fulfilled promise is used at once, and a pending promise suspends the stage on that promise.
@@ -1751,6 +1787,12 @@ Derives from: [`fact-only-a-generator-can-be-resumed`](#fact-only-a-generator-ca
 
 This follows because the verb decides what a binding renders, and `use` is the verb for a binding that renders only what is current, rather than a stale value or none: when there is no current value, a plain synchronous body can stop short of rendering only by throwing.
 
+##### @spec use-is-typed-as-the-awaited-value
+
+> `use(x)` is typed as the value `x` holds with any promise awaited, and never as possibly `undefined`.
+
+This follows because `use` returns only a current value or throws. Since it always returns a value, its type has no `undefined` in it.
+
 ##### @spec use-returns-a-value-that-is-not-a-promise-unchanged
 
 > `use(x)` returns `x` unchanged when `x` is not a promise. A falsy value is a value: `use(0)`, `use(null)`, `use(undefined)`, `use(false)` and `use('')` return it.
@@ -1776,6 +1818,12 @@ This follows because `use` renders only a real value, and a rejected promise hol
 Derives from: [`fact-only-a-generator-can-be-resumed`](#fact-only-a-generator-can-be-resumed)
 
 This follows because `use` renders only a real value and a pending promise has none yet, so the binding waits. `use` is called inside a plain synchronous body, and such a body can stop short of the value only by throwing. The throw carries the promise so that whoever catches it knows what to wait for.
+
+###### @spec use-outside-every-consumer-throws-to-its-caller
+
+> `use(x)` on a pending `x`, called outside every effect, binding and computed, throws `NotReadyYet` to whoever called it.
+
+This follows because `use` takes the value out at the read site or suspends: with no consumer around it to suspend, the throw reaches the caller.
 
 ##### @spec use-of-an-accessor-reads-what-the-accessor-returns
 
@@ -1820,6 +1868,12 @@ This follows because the verb decides what a binding renders, and a suspended bi
 Derives from: [`spec-a-boundary-shows-initial-until-its-first-load`](#spec-a-boundary-shows-initial-until-its-first-load)
 
 This follows because only the verb decides whether a binding waits, and everything else is reported ambiently: `latest` is the verb that does not wait, so the load can only be reported.
+
+##### @spec a-latest-report-survives-a-boundary-remount
+
+> What `latest` and `use.latest` report about a source, a first load or a refresh, is the same after the boundary around them is removed and mounted again.
+
+This follows because the report comes from the source's own state, kept with the accessor and its promise, and not from anything the boundary remembers.
 
 #### @spec a-tolerant-read-reports-a-failure-to-the-boundary
 
@@ -1902,6 +1956,12 @@ This follows because a boundary decides which region shows a placeholder: until 
 > When a boundary that has loaded before becomes pending again, it shows `fallback` if one is given, and otherwise keeps showing the subtree it last committed.
 
 This follows because the boundary's placement and props decide what its region shows meanwhile: with a `fallback` it shows that, and without one the only complete content it has is what it last committed.
+
+##### @spec a-first-load-after-the-boundary-has-loaded-shows-the-fallback
+
+> Once a boundary has loaded, a first load of a source read later through `latest` shows the boundary's `fallback`, not its `initial`.
+
+This follows because `initial` is what a boundary shows before it has ever loaded: once it has, what it shows while something loads is `fallback`.
 
 #### @spec a-boundary-without-placeholders-swaps-nothing
 

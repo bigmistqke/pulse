@@ -558,3 +558,82 @@ describe('from — post-Plan-A (no brand suspension)', () => {
     activeResolve('v2')
   })
 })
+
+/**
+ * @canon spec-use-outside-every-consumer-throws-to-its-caller
+ */
+test('use on a pending value inside a root but outside every consumer throws to its caller', async () => {
+  const { createRoot } = await import('../src/owner')
+  const [s] = signal(new Promise<number>(() => {}))
+  let caught: unknown = null
+  createRoot(() => {
+    try {
+      use(s)
+    } catch (e) {
+      caught = e
+    }
+  })
+  // An owner is not a consumer: nothing absorbed the suspension.
+  expect(caught).toBeInstanceOf(NotReadyYet)
+})
+
+/**
+ * @canon spec-use-latest-is-a-property-of-use
+ */
+test('use.latest hangs off use and is not exported on its own', async () => {
+  const pulse = await import('../src/index')
+  expect(typeof pulse.use.latest).toBe('function')
+  expect(Object.values(pulse)).not.toContain(pulse.use.latest)
+})
+
+/**
+ * @canon spec-use-is-typed-as-the-awaited-value
+ */
+test('use is typed as the awaited value, never possibly undefined (compile-time)', () => {
+  type Equal<X, Y> = (<T>() => T extends X ? 1 : 2) extends <T>() => T extends Y ? 1 : 2 ? true : false
+  const [promised] = signal(Promise.resolve(1))
+  const [plain] = signal('text')
+  const readPromised = () => use(promised)
+  const readPlain = () => use(plain)
+  const promisedType: Equal<ReturnType<typeof readPromised>, number> = true
+  const plainType: Equal<ReturnType<typeof readPlain>, string> = true
+  void promisedType
+  void plainType
+})
+
+/**
+ * @canon spec-from-is-typed-as-the-resolved-value
+ */
+test('yield* from(x) is typed as the resolved value of x (compile-time)', () => {
+  type Equal<X, Y> = (<T>() => T extends X ? 1 : 2) extends <T>() => T extends Y ? 1 : 2 ? true : false
+  const [promised] = signal(Promise.resolve(1))
+  const c = computed(function* () {
+    const fromSignal = yield* from(promised)
+    const fromPromise = yield* from(Promise.resolve('a'))
+    const signalType: Equal<typeof fromSignal, number> = true
+    const promiseType: Equal<typeof fromPromise, string> = true
+    void signalType
+    void promiseType
+    return fromSignal
+  })
+  void c
+})
+
+/**
+ * @canon spec-from-yields-a-plain-function-uncalled
+ */
+test('from yields a plain function itself, without calling it', () => {
+  let calls = 0
+  const plainFunction = () => {
+    calls++
+    return 1
+  }
+  let received: unknown = null
+  const c = computed(function* () {
+    received = yield* from(plainFunction)
+    return 0
+  })
+  c()
+  expect(received).toBe(plainFunction)
+  expect(calls).toBe(0)
+})

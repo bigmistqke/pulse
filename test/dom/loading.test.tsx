@@ -793,3 +793,78 @@ test('a binding that calls use and reads isLoading, with nothing in flight, runs
   expect(target.textContent).toBe('ready:false')
   expect(runs).toBe(1)
 })
+
+/**
+ * @canon spec-a-latest-report-survives-a-boundary-remount
+ */
+test('a refresh read through latest stays a refresh after the boundary around it is remounted', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+  let resolveFirst!: (v: string) => void
+  const [source, setSource] = signal<string | Promise<string>>(
+    new Promise<string>((r) => (resolveFirst = r)),
+  )
+  const [shown, setShown] = signal(true)
+  render(
+    () => (
+      <Show when={shown()}>
+        <Loading initial={<p>initial</p>}>
+          <p>{() => latest(source) ?? ''}</p>
+        </Loading>
+      </Show>
+    ),
+    target,
+  )
+  flush()
+  expect(target.textContent).toBe('initial') // a first load
+
+  resolveFirst('one')
+  await tick()
+  flush()
+  expect(target.textContent).toBe('one')
+
+  // A refresh is in flight when the boundary is removed and mounted again.
+  setSource(new Promise<string>(() => {}))
+  flush()
+  setShown(false)
+  flush()
+  setShown(true)
+  flush()
+  await tick()
+  flush()
+  // The new boundary has never loaded, yet the source has: it is a refresh,
+  // which never shows the first-load placeholder.
+  expect(target.textContent).toBe('one')
+})
+
+/**
+ * @canon spec-a-first-load-after-the-boundary-has-loaded-shows-the-fallback
+ */
+test('once a boundary has loaded, a later first load shows its fallback, not its initial', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+  const [first] = signal<string | Promise<string>>('ready')
+  const [second] = signal<string | Promise<string>>(new Promise<string>(() => {}))
+  const [showSecond, setShowSecond] = signal(false)
+  render(
+    () => (
+      <Loading initial={<p>initial</p>} fallback={<p>fallback</p>}>
+        <div>
+          <p>{() => latest(first) ?? ''}</p>
+          {() => (showSecond() ? <p>{() => latest(second) ?? ''}</p> : null)}
+        </div>
+      </Loading>
+    ),
+    target,
+  )
+  flush()
+  await tick()
+  flush()
+  expect(target.textContent).toBe('ready')
+
+  setShowSecond(true)
+  flush()
+  await tick()
+  flush()
+  expect(target.textContent).toBe('fallback')
+})
