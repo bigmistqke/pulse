@@ -12,7 +12,7 @@ test('a file that is not .tsx or .jsx is left alone', async () => {
 })
 
 /**
- * @canon rule-the-vite-plugin-compiles-only-jsx-files
+ * @canon rule-the-getter-transform-runs-before-the-jsx-transform
  */
 test('a .tsx file is compiled through the pulse JSX runtime, with dynamic props as getters', async () => {
   const result = await transform('const el = <div class={name()} />', '/src/a.tsx')

@@ -24,21 +24,22 @@ The canon was written backwards from the existing tests and documents, and descr
     - [`@rule a-computed-has-no-setter`](#rule-a-computed-has-no-setter) — `computed` returns an accessor and nothing to write with. A derivation that can also be written is made with `signal`.
     - [`@rule a-signal-given-stages-is-a-writable-derivation`](#rule-a-signal-given-stages-is-a-writable-derivation) — `signal(s0, s1, …)` builds the same pipeline `computed` builds and adds a setter, whose write lands on the output of the last stage. `signal(value)` given a value that is not a function stays a plain signal.
     - [`@rule a-staged-effect-is-a-pipeline-ending-in-a-commit`](#rule-a-staged-effect-is-a-pipeline-ending-in-a-commit) — `effect([stage0, …, stageN], commit)` runs the same pipeline a computed runs, and passes the final stage's resolved value to `commit`, an async stage's included. It commits again whenever the pipeline produces a new value.
-    - [`@rule an-optimistic-value-is-read-like-any-node`](#rule-an-optimistic-value-is-read-like-any-node) — The accessor of an optimistic value is an ordinary node. Every read verb applies to it, and the pending and failed state of what its recipe reads reaches the read site through it.
     - [`@rule a-construction-default-seeds-only-the-tolerant-read`](#rule-a-construction-default-seeds-only-the-tolerant-read) — `signal(fn, default)` makes `peek` return `default` until the derivation first resolves, and an update function receive `default` in place of `undefined`. Once a real value has resolved, both see it instead of the default.
-    - [`@rule an-optimistic-fallback-seeds-the-tolerant-read`](#rule-an-optimistic-fallback-seeds-the-tolerant-read) — A fallback passed when an optimistic value is created is what `peek` and `latest` return before the source has resolved.
     - [`@rule use-latest-throws-only-before-the-first-value`](#rule-use-latest-throws-only-before-the-first-value) — `use.latest(x)` throws `NotReadyYet` only while nothing has ever resolved for `x`, carrying `promiseOf(x)`, exactly as `use` would.
     - [`@rule use-latest-returns-the-last-resolved-value-during-a-refetch`](#rule-use-latest-returns-the-last-resolved-value-during-a-refetch) — Once something has resolved for `x`, `use.latest(x)` returns the last resolved value, also while a refetch is pending. At that moment `use(x)` throws, and `use.latest(x)` returns the stale value.
     - [`@rule use-latest-reports-a-refresh-to-its-boundary`](#rule-use-latest-reports-a-refresh-to-its-boundary) — A `use.latest(x)` read made while a refetch of `x` is pending reports the refresh to the surrounding loading boundary, so `isLoading()` there is true, while the binding keeps showing the last resolved value.
     - [`@rule use-latest-enrols-the-binding-in-its-boundarys-gate`](#rule-use-latest-enrols-the-binding-in-its-boundarys-gate) — A binding that called `use.latest(x)` commits through its boundary's gate: while a sibling binding of the boundary is suspended, its commit waits, even when `use.latest(x)` returned a value.
     - [`@rule the-jsx-runtime-builds-every-element-with-h`](#rule-the-jsx-runtime-builds-every-element-with-h) — The JSX runtime's `jsx`, `jsxs` and `jsxDEV` build every element with `h`. A component receives its props object as it is, `children` included and getters intact. A DOM tag or a `Fragment` receives its children as separate arguments and the rest of its props with their getters intact.
+    - [`@rule an-optimistic-value-is-a-signal-variant`](#rule-an-optimistic-value-is-a-signal-variant) — `optimistic(...stages)` builds the same pipeline `computed` and `signal` build, and returns an ordinary node. Only its setter differs: it writes a prediction in front of the derivation instead of into it.
+      - [`@rule an-optimistic-value-is-read-like-any-node`](#rule-an-optimistic-value-is-read-like-any-node) — The accessor of an optimistic value is an ordinary node. Every read verb applies to it, and the pending and failed state of what its recipe reads reaches the read site through it.
+      - [`@rule an-optimistic-fallback-seeds-the-tolerant-read`](#rule-an-optimistic-fallback-seeds-the-tolerant-read) — A fallback passed when an optimistic value is created is what `peek` and `latest` return before the source has resolved.
   - [`@rule ambient-context-is-set-for-a-call-and-restored-after`](#rule-ambient-context-is-set-for-a-call-and-restored-after) — Ambient context, such as the current owner, is set for the duration of one call and restored when that call ends, however it ends.
     - [`@rule there-is-no-ambient-owner-outside-every-root`](#rule-there-is-no-ambient-owner-outside-every-root) — Outside every root, `getOwner()` returns null, also after a root has run and after it has been disposed.
     - [`@rule runwithowner-restores-the-previous-owner`](#rule-runwithowner-restores-the-previous-owner) — `runWithOwner` makes its owner ambient for the call, `null` included, and restores the previous owner when the call returns or throws.
     - [`@rule an-action-body-is-speculative-while-pulse-drives-it`](#rule-an-action-body-is-speculative-while-pulse-drives-it) — An action's body writes speculatively for as long as pulse is running it: the whole of a sync body, every resume of a generator body, and the synchronous prefix of an async body. A write after `yield*` in a generator body is still speculative, and so is a derivation read there.
       - [`@exception a-write-after-an-await-escapes-the-speculation`](#exception-a-write-after-an-await-escapes-the-speculation) — In an async body, a write after the first `await` is not a write of the speculation. It lands in committed state at once, where every reader sees it before the action settles. When the action commits, its own earlier writes to the same node replace it; when the action is discarded, it stays.
     - [`@rule an-event-handler-runs-under-the-owner-it-was-bound-in`](#rule-an-event-handler-runs-under-the-owner-it-was-bound-in) — An event handler runs with the owner that was ambient when its element was built, so an `onCleanup` called inside the handler attaches to that owner and runs when it is disposed.
-- [`@axiom reading-is-not-a-discipline`](#axiom-reading-is-not-a-discipline) — A read gives a correct answer without the reader first learning a discipline: no flush to wait for, no state to check before reading, and no promise to unwrap before building on a value.
+- [`@axiom reading-is-not-a-discipline`](#axiom-reading-is-not-a-discipline) — A read gives a correct answer without the reader first learning a discipline: no flush to wait for, no state to check before reading, and code that computes a new value from an earlier one is handed that value, not a promise to unwrap.
   - [`@rule reads-pull-and-consumers-are-pushed`](#rule-reads-pull-and-consumers-are-pushed) — A read always returns the value consistent with every write so far, synchronously. Consumers with side effects are re-run in batches, and the batching is invisible to reads.
     - [`@rule a-read-is-current-without-a-flush`](#rule-a-read-is-current-without-a-flush) — Reading a signal or a computed returns the value consistent with the latest writes, whether or not the scheduler has flushed since. A computed read outside any reactive context recomputes on the spot when a source changed.
     - [`@rule a-signal-reads-back-its-last-write`](#rule-a-signal-reads-back-its-last-write) — A signal returns its initial value until it is written, and afterwards the last value written.
@@ -58,19 +59,6 @@ The canon was written backwards from the existing tests and documents, and descr
       - [`@case a-slot-caches-undefined-like-any-value`](#case-a-slot-caches-undefined-like-any-value) — `scope.ts` `DIRTY`.
       - [`@case a-recompute-replaces-its-links`](#case-a-recompute-replaces-its-links) — `scope.ts` `resetSlotDeps`.
     - [`@rule a-derivation-runs-when-it-is-created`](#rule-a-derivation-runs-when-it-is-created) — A derivation runs when it is created, wherever it is created, inside a running computation included.
-  - [`@axiom the-latest-production-wins`](#axiom-the-latest-production-wins) — A derived value shows whatever produced it last — a dependency change or a direct write — and a production that was started earlier never publishes over a later one.
-    - [`@rule a-write-replaces-a-derived-value-without-rerunning-it`](#rule-a-write-replaces-a-derived-value-without-rerunning-it) — A write to a writable derivation replaces its value at once, and the body does not run again because of it.
-    - [`@rule a-write-abandons-the-run-in-progress`](#rule-a-write-abandons-the-run-in-progress) — A write abandons every stage's run in progress, a fetch in flight or a paused generator, in whichever stage it is, and the abandoned run never publishes.
-    - [`@rule a-write-withdraws-a-recompute-queued-in-the-same-tick`](#rule-a-write-withdraws-a-recompute-queued-in-the-same-tick) — A recompute queued earlier in the same tick as a write is withdrawn before it starts, so it makes no request, also when the write is an update function.
-    - [`@rule a-write-from-inside-the-derivation-abandons-its-own-run-without-raising`](#rule-a-write-from-inside-the-derivation-abandons-its-own-run-without-raising) — A write made from inside the derivation's own body abandons that run without raising, and the cleanups the run registered still run.
-    - [`@rule a-dependency-change-after-a-write-takes-over`](#rule-a-dependency-change-after-a-write-takes-over) — When a source the derivation reads changes after a write, the derivation runs again and its result replaces the written value. This holds when the change comes in the same tick as the write, and when the written value is a promise that has not settled.
-    - [`@rule the-written-value-stays-visible-while-the-derivation-reloads`](#rule-the-written-value-stays-visible-while-the-derivation-reloads) — While the run started by a dependency change is in flight, the derivation keeps showing the written value, and reports the reload as pending.
-    - [`@rule an-older-production-never-publishes-over-a-newer-one`](#rule-an-older-production-never-publishes-over-a-newer-one) — A promise that settles after its stage has started a newer run is ignored, even when it settles before the flush that runs the newer input.
-    - [`@rule a-write-clears-a-parked-failure`](#rule-a-write-clears-a-parked-failure) — A write to a derivation holding a parked failure clears the failure, whichever stage of the pipeline it was parked on.
-    - [`@rule an-update-function-that-throws-cancels-nothing`](#rule-an-update-function-that-throws-cancels-nothing) — If an update function throws, the write does not happen, and a recompute that was queued before it still runs.
-    - [`@rule a-written-promise-is-published-like-a-produced-one`](#rule-a-written-promise-is-published-like-a-produced-one) — A promise written into a derivation is its value: pending until it settles, then the resolved value, or a parked failure if it rejects.
-    - [`@rule the-handle-reports-its-newest-attempt`](#rule-the-handle-reports-its-newest-attempt) — An action's handle reports only its newest attempt: `settled` is a promise for that attempt, and an older attempt that settles after a newer one started changes nothing.
-    - [`@rule retry-runs-the-action-again-as-a-new-speculation`](#rule-retry-runs-the-action-again-as-a-new-speculation) — `retry()` runs the action's body again from the start as a new speculation, and clears `error()` at once, before the new attempt has settled.
   - [`@rule an-update-function-receives-the-last-resolved-value`](#rule-an-update-function-receives-the-last-resolved-value) — An update function on a writable derivation receives the last value that actually resolved, never a promise, and `undefined` when nothing has resolved yet.
   - [`@rule an-update-function-sees-the-value-a-sync-derivation-produced-at-creation`](#rule-an-update-function-sees-the-value-a-sync-derivation-produced-at-creation) — An update function on a sync derivation receives the value the derivation produced when it was created, even before any write, wherever the derivation was created. An async derivation that suspended has produced nothing yet.
 - [`@axiom nothing-is-hidden-from-the-code-that-uses-it`](#axiom-nothing-is-hidden-from-the-code-that-uses-it) — What a value is, including that it is still pending or has failed, is visible to the code that reads it, rather than smoothed over by the framework.
@@ -156,10 +144,14 @@ The canon was written backwards from the existing tests and documents, and descr
     - [`@rule a-dynamic-prop-becomes-a-getter`](#rule-a-dynamic-prop-becomes-a-getter) — The compiler turns a prop whose value is an expression into a getter on the props object, so the expression is evaluated where the prop is read, not where it is written. This holds the same way for a component and for a DOM element, and for every binding kind on an element, `attr:` included.
       - [`@exception a-literal-or-function-prop-stays-as-written`](#exception-a-literal-or-function-prop-stays-as-written) — A prop whose value is a literal, or a function or arrow expression, is not converted to a getter.
       - [`@exception ref-and-on-props-stay-as-written`](#exception-ref-and-on-props-stay-as-written) — A `ref` prop and an `on:`-prefixed prop are never converted to a getter, whatever their value.
+      - [`@rule the-getter-transform-runs-before-the-jsx-transform`](#rule-the-getter-transform-runs-before-the-jsx-transform) — The Vite plugin applies the props-to-getters transform first, and then the automatic JSX runtime imported from `pulse`.
     - [`@rule a-spread-merges-descriptors-not-values`](#rule-a-spread-merges-descriptors-not-values) — A props object that contains a spread is compiled to a `mergeProps` call over its segments, so a getter in a spread source stays a getter. One `mergeProps` import is added per file, however many spreads it has.
     - [`@rule a-dom-child-is-one-thunk-per-dynamic-child`](#rule-a-dom-child-is-one-thunk-per-dynamic-child) — On a DOM element or a Fragment, each dynamic child becomes its own thunk, never a getter.
     - [`@rule a-static-dom-child-is-left-as-written`](#rule-a-static-dom-child-is-left-as-written) — On a DOM element or a Fragment, a literal child, a function expression, and a nested JSX element are left as written, also beside a dynamic sibling that is wrapped.
     - [`@rule component-children-become-one-getter`](#rule-component-children-become-one-getter) — On a component, the children become one getter over the whole value, and are not wrapped child by child. A component is any tag that is neither a string nor `Fragment`, a member expression such as `Foo.Bar` included, and a bare JSX-element child compiles exactly like the braced form.
+    - [`@rule a-branch-is-rebuilt-only-when-the-choice-changes`](#rule-a-branch-is-rebuilt-only-when-the-choice-changes) — A control-flow component keeps the branch it built while the same branch keeps winning, and builds another only when a different one wins.
+      - [`@case show-rebuilds-only-when-truthiness-flips`](#case-show-rebuilds-only-when-truthiness-flips) — `show.ts` `Show`.
+      - [`@case switch-rebuilds-only-when-the-winning-match-changes`](#case-switch-rebuilds-only-when-the-winning-match-changes) — `switch.ts` `Switch`.
   - [`@rule jsx-builds-real-dom-directly`](#rule-jsx-builds-real-dom-directly) — JSX produces real DOM nodes through direct DOM operations. There is no virtual tree and nothing is diffed.
     - [`@rule h-creates-the-element-directly`](#rule-h-creates-the-element-directly) — `h` with a string tag creates that element with `document.createElement`, and gives it only the attributes and children it was passed.
     - [`@rule a-static-child-is-inserted-by-its-kind`](#rule-a-static-child-is-inserted-by-its-kind) — A static child is inserted according to its kind: a string or number as a text node, a DOM node as itself, an array by inserting each item in order with nested arrays flattened to any depth, and `null`, `undefined` or a boolean as nothing. Children of mixed kinds keep their written order.
@@ -215,6 +207,19 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule control-flow-bakes-in-no-async-policy`](#rule-control-flow-bakes-in-no-async-policy) — `Show`, `Switch` and `For` are ordinary components. They coerce a pending input to its empty form, and decide nothing else about async.
     - [`@rule a-pending-condition-reads-as-falsy`](#rule-a-pending-condition-reads-as-falsy) — A `when` that is a pending promise counts as falsy: `Show` renders its fallback, and `Switch` skips that `Match`.
     - [`@rule a-pending-list-reads-as-empty`](#rule-a-pending-list-reads-as-empty) — A list that is a pending promise counts as an empty list: `mapArray` returns no entries, and `For` renders its fallback.
+  - [`@axiom the-latest-production-wins`](#axiom-the-latest-production-wins) — A derived value shows whatever produced it last — a dependency change or a direct write — and a production that was started earlier never publishes over a later one.
+    - [`@rule a-write-replaces-a-derived-value-without-rerunning-it`](#rule-a-write-replaces-a-derived-value-without-rerunning-it) — A write to a writable derivation replaces its value at once, and the body does not run again because of it.
+    - [`@rule a-write-abandons-the-run-in-progress`](#rule-a-write-abandons-the-run-in-progress) — A write abandons every stage's run in progress, a fetch in flight or a paused generator, in whichever stage it is, and the abandoned run never publishes.
+    - [`@rule a-write-withdraws-a-recompute-queued-in-the-same-tick`](#rule-a-write-withdraws-a-recompute-queued-in-the-same-tick) — A recompute queued earlier in the same tick as a write is withdrawn before it starts, so it makes no request, also when the write is an update function.
+    - [`@rule a-write-from-inside-the-derivation-abandons-its-own-run-without-raising`](#rule-a-write-from-inside-the-derivation-abandons-its-own-run-without-raising) — A write made from inside the derivation's own body abandons that run without raising, and the cleanups the run registered still run.
+    - [`@rule a-dependency-change-after-a-write-takes-over`](#rule-a-dependency-change-after-a-write-takes-over) — When a source the derivation reads changes after a write, the derivation runs again and its result replaces the written value. This holds when the change comes in the same tick as the write, and when the written value is a promise that has not settled.
+    - [`@rule the-written-value-stays-visible-while-the-derivation-reloads`](#rule-the-written-value-stays-visible-while-the-derivation-reloads) — While the run started by a dependency change is in flight, the derivation keeps showing the written value, and reports the reload as pending.
+    - [`@rule an-older-production-never-publishes-over-a-newer-one`](#rule-an-older-production-never-publishes-over-a-newer-one) — A promise that settles after its stage has started a newer run is ignored, even when it settles before the flush that runs the newer input.
+    - [`@rule a-write-clears-a-parked-failure`](#rule-a-write-clears-a-parked-failure) — A write to a derivation holding a parked failure clears the failure, whichever stage of the pipeline it was parked on.
+    - [`@rule an-update-function-that-throws-cancels-nothing`](#rule-an-update-function-that-throws-cancels-nothing) — If an update function throws, the write does not happen, and a recompute that was queued before it still runs.
+    - [`@rule a-written-promise-is-published-like-a-produced-one`](#rule-a-written-promise-is-published-like-a-produced-one) — A promise written into a derivation is its value: pending until it settles, then the resolved value, or a parked failure if it rejects.
+    - [`@rule the-handle-reports-its-newest-attempt`](#rule-the-handle-reports-its-newest-attempt) — An action's handle reports only its newest attempt: `settled` is a promise for that attempt, and an older attempt that settles after a newer one started changes nothing.
+    - [`@rule retry-runs-the-action-again-as-a-new-speculation`](#rule-retry-runs-the-action-again-as-a-new-speculation) — `retry()` runs the action's body again from the start as a new speculation, and clears `error()` at once, before the new attempt has settled.
   - [`@axiom speculation-is-opt-in`](#axiom-speculation-is-opt-in) — A speculation exists only inside an explicit scope. Outside one, a write commits at once.
     - [`@rule outside-a-speculation-a-write-commits-at-once`](#rule-outside-a-speculation-a-write-commits-at-once) — A write made outside every action is committed immediately, and committed consumers react to it. Outside a speculation, `committed(x)` is the current value.
   - [`@axiom flows-share-fate-only-where-the-code-says-so`](#axiom-flows-share-fate-only-where-the-code-says-so) — Two flows are coupled only where the code couples them explicitly. Everything else is isolated.
@@ -233,7 +238,7 @@ The canon was written backwards from the existing tests and documents, and descr
     - [`@rule a-class-prefix-toggles-one-class-by-truthiness`](#rule-a-class-prefix-toggles-one-class-by-truthiness) — A `class:name` prop adds the class `name` while its value is truthy and removes it while it is falsy, and a function value keeps the class following it.
     - [`@rule a-style-prefix-sets-one-style-property`](#rule-a-style-prefix-sets-one-style-property) — A `style:name` prop sets the style property `name`, and a function value keeps it following the value.
     - [`@rule a-namespaced-prop-compiles-to-a-string-key`](#rule-a-namespaced-prop-compiles-to-a-string-key) — A namespaced prop name such as `on:click` or `class:active` compiles to a plain string key on the props object, which is what the runtime's prefix dispatch reads.
-  - [`@rule the-vite-plugin-compiles-only-jsx-files`](#rule-the-vite-plugin-compiles-only-jsx-files) — The Vite plugin compiles a `.tsx` or `.jsx` file, ignoring any query string on its id, and leaves every other file alone. It applies the props-to-getters transform, then the automatic JSX runtime imported from `pulse`.
+  - [`@rule the-vite-plugin-compiles-only-jsx-files`](#rule-the-vite-plugin-compiles-only-jsx-files) — The Vite plugin compiles a `.tsx` or `.jsx` file, ignoring any query string on its id, and leaves every other file alone.
   - [`@rule a-missing-value-sets-nothing`](#rule-a-missing-value-sets-nothing) — A missing value sets nothing: `null`, `undefined` and `false` leave nothing in the DOM.
     - [`@rule an-attribute-is-removed-on-nothing`](#rule-an-attribute-is-removed-on-nothing) — An attribute prop whose value is, or becomes, `null`, `undefined` or `false` removes the attribute instead of setting it to a string.
     - [`@rule a-style-property-is-removed-on-nothing`](#rule-a-style-property-is-removed-on-nothing) — A `style:name` prop whose value is, or becomes, `null`, `undefined` or `false` removes the style property `name` instead of setting it.
@@ -256,10 +261,8 @@ The canon was written backwards from the existing tests and documents, and descr
     - [`@rule render-returns-a-dispose-that-removes-what-it-mounted`](#rule-render-returns-a-dispose-that-removes-what-it-mounted) — `render(component, target)` inserts what the component returns into `target` and returns a `dispose`. Disposing removes every node that render added.
     - [`@rule render-dispose-tears-down-everything-the-component-created`](#rule-render-dispose-tears-down-everything-the-component-created) — Disposing what `render` returned stops every binding the component created and disposes every owner created under it, nested `catchError` owners included.
     - [`@rule a-component-that-throws-during-render-leaves-nothing-behind`](#rule-a-component-that-throws-during-render-leaves-nothing-behind) — When the component throws while `render` is running it, `render` disposes the root it opened before the error escapes.
-    - [`@rule what-a-hole-builds-lives-under-its-own-owner-until-it-leaves`](#rule-what-a-hole-builds-lives-under-its-own-owner-until-it-leaves) — Content that a hole, a branch or a list row builds is built once, under a sub-owner of its own. That sub-owner is disposed when the content leaves, or when the surrounding owner is disposed.
+    - [`@rule what-a-hole-builds-lives-under-its-own-owner-until-it-leaves`](#rule-what-a-hole-builds-lives-under-its-own-owner-until-it-leaves) — Content that a hole, a branch or a list row builds is built under a sub-owner of its own. That sub-owner is disposed when the content leaves, or when the surrounding owner is disposed.
       - [`@case each-run-of-a-reactive-child-owns-what-it-creates`](#case-each-run-of-a-reactive-child-owns-what-it-creates) — `bindings.ts` `insertChild`.
-      - [`@case show-rebuilds-only-when-truthiness-flips`](#case-show-rebuilds-only-when-truthiness-flips) — `show.ts` `Show`.
-      - [`@case switch-rebuilds-only-when-the-winning-match-changes`](#case-switch-rebuilds-only-when-the-winning-match-changes) — `switch.ts` `Switch`.
       - [`@case map-array-builds-each-item-once-under-its-own-owner`](#case-map-array-builds-each-item-once-under-its-own-owner) — `map-array.ts` `mapArray`.
     - [`@rule a-fragment-child-belongs-to-the-owner-the-fragment-was-built-in`](#rule-a-fragment-child-belongs-to-the-owner-the-fragment-was-built-in) — A function child of a `Fragment` belongs wholly to the owner that was ambient when the `Fragment` was built, wherever the array is inserted later: the binding itself, each run of it, and everything a run creates. Disposing that owner stops the binding, and disposing the owner where the array was inserted does not.
     - [`@rule a-fragment-child-inserted-after-its-owner-was-disposed-binds-nothing`](#rule-a-fragment-child-inserted-after-its-owner-was-disposed-binds-nothing) — A function child of a `Fragment` that is inserted after the owner the `Fragment` was built in has been disposed binds nothing: it renders nothing and follows no source.
@@ -360,9 +363,10 @@ The canon was written backwards from the existing tests and documents, and descr
     - [`@case a-write-records-its-node-for-promotion`](#case-a-write-records-its-node-for-promotion) — `scope.ts` `writeSlot`.
     - [`@case closing-a-scope-unlinks-it-from-its-sources`](#case-closing-a-scope-unlinks-it-from-its-sources) — `scope.ts` `closeScopeEdges`.
     - [`@case a-node-only-read-is-not-promoted`](#case-a-node-only-read-is-not-promoted) — `scope.ts` `commit`.
-- [`@axiom only-a-generator-can-be-resumed`](#axiom-only-a-generator-can-be-resumed) — In JavaScript, only a generator can pause and later be resumed where it paused. A function that throws has ended, and the code after an `await` runs later, outside the call that started it.
+- [`@axiom only-a-generator-can-be-resumed`](#axiom-only-a-generator-can-be-resumed) — In JavaScript, only a generator can pause and be resumed where it paused by the code that drives it. A function that throws has ended, and an async function resumes after an `await` on its own, later and outside the call that started it.
 - [`@axiom javascript-has-no-context-scoped-to-a-call`](#axiom-javascript-has-no-context-scoped-to-a-call) — JavaScript has no way to hand a value to everything one call runs, other than state shared by every call, set before the call and read during it.
 - [`@axiom an-attribute-holds-a-string-and-is-on-while-present`](#axiom-an-attribute-holds-a-string-and-is-on-while-present) — A DOM attribute holds only a string, and a boolean attribute such as `disabled` is on whenever it is present, whatever its string says.
+- [`@axiom r3-rebuilds-dependencies-each-run-and-ignores-an-equal-write`](#axiom-r3-rebuilds-dependencies-each-run-and-ignores-an-equal-write) — r3 rebuilds a computation's dependencies from the reads of each run, and drops a write `===` to the value a node holds. A computed created inside a running computation that has already read something does not run at once, and is linked as that computation's dependency. A run that throws partway keeps the dependencies it did not read again.
 <!-- toc:end -->
 
 ## Driving principles — the canon's axioms
@@ -423,6 +427,8 @@ r3 is pulse's pinned fork. It exports `unwatched` for disposal ([ADR 0005](docs/
 
 > A run of a computation leaves it depending on exactly the sources that run read. A source it read before but not in its latest run no longer re-runs it.
 
+Derives from: [`axiom-r3-rebuilds-dependencies-each-run-and-ignores-an-equal-write`](#axiom-r3-rebuilds-dependencies-each-run-and-ignores-an-equal-write)
+
 This follows because pulse uses r3 as it is, and r3 rebuilds a node's dependency list on every run: pulse inherits that tracking rather than keeping dependencies a run no longer read.
 
 r3 rebuilds a node's dependency list on every run, so a dependency that is read only under a condition comes and goes with that condition.
@@ -431,11 +437,15 @@ r3 rebuilds a node's dependency list on every run, so a dependency that is read 
 
 > A computed whose run throws partway stays subscribed to sources it read in an earlier run but not in the throwing one. A later change to such a source re-runs it.
 
+Derives from: [`axiom-r3-rebuilds-dependencies-each-run-and-ignores-an-equal-write`](#axiom-r3-rebuilds-dependencies-each-run-and-ignores-an-equal-write)
+
 This is a known defect in r3, not a choice: r3 skips unlinking stale dependencies when a run throws. The test that pins it is written with `test.fails`, so it starts failing once r3 is fixed, and this exception is removed then.
 
 ### @rule one-scheduler-flushes-every-consumer
 
 > Every write asks one injectable scheduler for a flush. The default scheduler batches every request made in one tick into a single flush on a microtask; the synchronous scheduler flushes on each request.
+
+Derives from: [`rule-reads-pull-and-consumers-are-pushed`](#rule-reads-pull-and-consumers-are-pushed)
 
 This follows because bringing a change to a consumer is one job, so one mechanism does it, whatever caused the change. A test or a host can replace that mechanism, and so decide when every consumer runs.
 
@@ -495,14 +505,6 @@ This follows because a small set of primitives covers the use cases: a writable 
 
 This follows because a small set of primitives covers the use cases: a staged effect reuses the computed's pipeline and adds only the commit, instead of a second pipeline mechanism.
 
-#### @rule an-optimistic-value-is-read-like-any-node
-
-> The accessor of an optimistic value is an ordinary node. Every read verb applies to it, and the pending and failed state of what its recipe reads reaches the read site through it.
-
-This follows because a new form is added only where composing is awkward: an optimistic value is a signal variant, so the existing read verbs serve it instead of a read API of its own.
-
-So `use` on it suspends until the source resolves, and a failed source is reported by `error()` on the optimistic node while `peek` still does not throw. The decision is [ADR 0016](docs/adr/0016-optimistic-as-a-signal-variant.md).
-
 #### @rule a-construction-default-seeds-only-the-tolerant-read
 
 > `signal(fn, default)` makes `peek` return `default` until the derivation first resolves, and an update function receive `default` in place of `undefined`. Once a real value has resolved, both see it instead of the default.
@@ -510,14 +512,6 @@ So `use` on it suspends until the source resolves, and a failed source is report
 Derives from: [`rule-peek-returns-a-given-fallback-until-a-value-resolves`](#rule-peek-returns-a-given-fallback-until-a-value-resolves), [`rule-an-update-function-receives-the-last-resolved-value`](#rule-an-update-function-receives-the-last-resolved-value)
 
 This follows because a new form is added only where composing the existing ones is awkward for a common case: passing the same fallback to every `peek` of a node is awkward, so the node takes it once. It then stands in for the last resolved value wherever no value has resolved, which is in the tolerant read and in an update function's argument.
-
-#### @rule an-optimistic-fallback-seeds-the-tolerant-read
-
-> A fallback passed when an optimistic value is created is what `peek` and `latest` return before the source has resolved.
-
-Derives from: [`rule-a-construction-default-seeds-only-the-tolerant-read`](#rule-a-construction-default-seeds-only-the-tolerant-read)
-
-This follows because an optimistic value is a signal variant rather than a separate primitive, and a construction default seeds only the tolerant read: its fallback is that same default, with the same effect.
 
 #### @rule use-latest-throws-only-before-the-first-value
 
@@ -561,6 +555,30 @@ This follows because a small set of primitives covers the use cases: the JSX run
 
 So what holds for `h` holds for JSX.
 
+#### @rule an-optimistic-value-is-a-signal-variant
+
+> `optimistic(...stages)` builds the same pipeline `computed` and `signal` build, and returns an ordinary node. Only its setter differs: it writes a prediction in front of the derivation instead of into it.
+
+This follows because a new form is added only where composing the existing ones is awkward: an optimistic value needs a different write, not a different node, so it reuses the pipeline and changes only the setter.
+
+The decision is [ADR 0016](docs/adr/0016-optimistic-as-a-signal-variant.md).
+
+##### @rule an-optimistic-value-is-read-like-any-node
+
+> The accessor of an optimistic value is an ordinary node. Every read verb applies to it, and the pending and failed state of what its recipe reads reaches the read site through it.
+
+This follows because a new form is added only where composing is awkward: an optimistic value is a signal variant, so the existing read verbs serve it instead of a read API of its own.
+
+So `use` on it suspends until the source resolves, and a failed source is reported by `error()` on the optimistic node while `peek` still does not throw. The decision is [ADR 0016](docs/adr/0016-optimistic-as-a-signal-variant.md).
+
+##### @rule an-optimistic-fallback-seeds-the-tolerant-read
+
+> A fallback passed when an optimistic value is created is what `peek` and `latest` return before the source has resolved.
+
+Derives from: [`rule-a-construction-default-seeds-only-the-tolerant-read`](#rule-a-construction-default-seeds-only-the-tolerant-read)
+
+This follows because an optimistic value is a signal variant rather than a separate primitive, and a construction default seeds only the tolerant read: its fallback is that same default, with the same effect.
+
 ### @rule ambient-context-is-set-for-a-call-and-restored-after
 
 > Ambient context, such as the current owner, is set for the duration of one call and restored when that call ends, however it ends.
@@ -587,7 +605,7 @@ This follows because [`rule-ambient-context-is-set-for-a-call-and-restored-after
 
 > An action's body writes speculatively for as long as pulse is running it: the whole of a sync body, every resume of a generator body, and the synchronous prefix of an async body. A write after `yield*` in a generator body is still speculative, and so is a derivation read there.
 
-Derives from: [`axiom-a-speculation-commits-or-is-discarded-whole`](#axiom-a-speculation-commits-or-is-discarded-whole)
+Derives from: [`axiom-a-speculation-commits-or-is-discarded-whole`](#axiom-a-speculation-commits-or-is-discarded-whole), [`axiom-only-a-generator-can-be-resumed`](#axiom-only-a-generator-can-be-resumed)
 
 This follows because a speculation holds the writes made in it, and ambient context lasts one call: the speculation is ambient only while pulse runs the body, through a sync body, each generator resume, or an async prefix.
 
@@ -613,9 +631,9 @@ A DOM event fires outside any owner, so without this the handler would run with 
 
 ## @axiom reading-is-not-a-discipline
 
-> A read gives a correct answer without the reader first learning a discipline: no flush to wait for, no state to check before reading, and no promise to unwrap before building on a value.
+> A read gives a correct answer without the reader first learning a discipline: no flush to wait for, no state to check before reading, and code that computes a new value from an earlier one is handed that value, not a promise to unwrap.
 
-Two principles of the exploration record end on the same sentence. [P3](docs/pulse/framings.md#p3--plain-reads-are-honest) rejects any design where reading a value is a discipline to learn, and [P6](docs/pulse/framings.md#p6--pull-driven-reads-push-driven-consumers-no-explicit-flush) rejects any design where a reader must flush, await or close a batch first: reading is not a discipline.
+Two principles of the exploration record end on the same sentence. [P3](docs/pulse/framings.md#p3--plain-reads-are-honest) rejects any design where reading a value is a discipline to learn, and [P6](docs/pulse/framings.md#p6--pull-driven-reads-push-driven-consumers-no-explicit-flush) rejects any design where a reader must flush, await or close a batch first: reading is not a discipline. Taking the value out of a promise at a read site is not such a discipline: it is a choice the reader states, as [the rule on the read site](#rule-the-value-of-an-async-node-is-taken-out-at-the-read-site) says.
 
 ### @rule reads-pull-and-consumers-are-pushed
 
@@ -753,107 +771,17 @@ Before a slot is recomputed, its existing links are removed from their sources, 
 
 > A derivation runs when it is created, wherever it is created, inside a running computation included.
 
+Derives from: [`axiom-r3-rebuilds-dependencies-each-run-and-ignores-an-equal-write`](#axiom-r3-rebuilds-dependencies-each-run-and-ignores-an-equal-write)
+
 This follows because a read is current the moment it is made: a derivation that put off its first run would give a read made right after its creation nothing to return.
 
 r3 puts off the first run of a computed created inside a running computation that has already read something. Pulse creates its derivations with no computation running, so they run at once.
-
-### @axiom the-latest-production-wins
-
-> A derived value shows whatever produced it last — a dependency change or a direct write — and a production that was started earlier never publishes over a later one.
-
-This narrows the axiom above to a value with two producers: a writable derivation shows whichever production came last in program order, rather than ranking writes above dependency changes or the reverse, so a reader never has to know which one that was.
-
-A write to a derivation cancels the run in progress exactly as a dependency change does, and a dependency change cancels a pending write the same way. Program order decides. The decision and the alternatives it rejects are in [the writable derived signal design](docs/superpowers/specs/2026-08-18-writable-derived-signals-design.md#a-new-production-cancels-the-previous-one-whoever-started-it).
-
-#### @rule a-write-replaces-a-derived-value-without-rerunning-it
-
-> A write to a writable derivation replaces its value at once, and the body does not run again because of it.
-
-This follows because a derived value shows whatever produced it last, and a direct write is a production: the written value is shown, and nothing re-derives it.
-
-The write leaves the derivation following the same sources; what happens when one of them changes is [the dependency rule](#rule-a-dependency-change-after-a-write-takes-over).
-
-#### @rule a-write-abandons-the-run-in-progress
-
-> A write abandons every stage's run in progress, a fetch in flight or a paused generator, in whichever stage it is, and the abandoned run never publishes.
-
-This follows because a production started earlier never publishes over a later one: a run started before the write is the earlier production, so it is abandoned.
-
-#### @rule a-write-withdraws-a-recompute-queued-in-the-same-tick
-
-> A recompute queued earlier in the same tick as a write is withdrawn before it starts, so it makes no request, also when the write is an update function.
-
-This follows because a production started earlier never publishes over a later one, and a recompute queued before the write would be the earlier production: withdrawing it before it starts is abandoning it at the cheapest point.
-
-#### @rule a-write-from-inside-the-derivation-abandons-its-own-run-without-raising
-
-> A write made from inside the derivation's own body abandons that run without raising, and the cleanups the run registered still run.
-
-This follows because a production started earlier never publishes over a later one: the write is later than the run it is made from, so that run is abandoned like any other.
-
-#### @rule a-dependency-change-after-a-write-takes-over
-
-> When a source the derivation reads changes after a write, the derivation runs again and its result replaces the written value. This holds when the change comes in the same tick as the write, and when the written value is a promise that has not settled.
-
-This follows because a derived value shows whatever produced it last: a dependency change after a write is the later production, so its result replaces the written value.
-
-A write followed by a change in the same tick is still a write followed by a change, so the change is the later production.
-
-#### @rule the-written-value-stays-visible-while-the-derivation-reloads
-
-> While the run started by a dependency change is in flight, the derivation keeps showing the written value, and reports the reload as pending.
-
-This follows because a derived value shows whatever produced it last: the reload has not produced anything yet, so the last production that has published is still the write.
-
-#### @rule an-older-production-never-publishes-over-a-newer-one
-
-> A promise that settles after its stage has started a newer run is ignored, even when it settles before the flush that runs the newer input.
-
-This follows because a production that was started earlier never publishes over a later one: a promise from a run its stage has since moved past is such a production.
-
-#### @rule a-write-clears-a-parked-failure
-
-> A write to a derivation holding a parked failure clears the failure, whichever stage of the pipeline it was parked on.
-
-This follows because a derived value shows whatever produced it last: the write is that production, so a failure from an earlier production cannot stay on the node.
-
-The written value wins over the derivation, and a node holding a written value while reporting a failure would not be coherent.
-
-#### @rule an-update-function-that-throws-cancels-nothing
-
-> If an update function throws, the write does not happen, and a recompute that was queued before it still runs.
-
-This follows because only a production cancels an earlier one: an update function that throws produces no write, so the recompute it would have cancelled still runs.
-
-#### @rule a-written-promise-is-published-like-a-produced-one
-
-> A promise written into a derivation is its value: pending until it settles, then the resolved value, or a parked failure if it rejects.
-
-Derives from: [`axiom-async-is-acknowledged-not-hidden`](#axiom-async-is-acknowledged-not-hidden)
-
-This follows because a direct write and a dependency change are both productions of the derived value, and a value that has a future says so: a written promise is published exactly as a produced promise would be.
-
-#### @rule the-handle-reports-its-newest-attempt
-
-> An action's handle reports only its newest attempt: `settled` is a promise for that attempt, and an older attempt that settles after a newer one started changes nothing.
-
-Derives from: [`axiom-a-speculation-commits-or-is-discarded-whole`](#axiom-a-speculation-commits-or-is-discarded-whole)
-
-This follows because each attempt is a speculation of its own, and a production started earlier never publishes over a later one: an older attempt settling after a newer one started changes nothing.
-
-#### @rule retry-runs-the-action-again-as-a-new-speculation
-
-> `retry()` runs the action's body again from the start as a new speculation, and clears `error()` at once, before the new attempt has settled.
-
-Derives from: [`axiom-a-speculation-commits-or-is-discarded-whole`](#axiom-a-speculation-commits-or-is-discarded-whole)
-
-This follows because the failed attempt was discarded whole and cannot be resumed, so a retry is a new production from the start, and the newest production has not failed.
 
 ### @rule an-update-function-receives-the-last-resolved-value
 
 > An update function on a writable derivation receives the last value that actually resolved, never a promise, and `undefined` when nothing has resolved yet.
 
-This follows because reading is not a discipline, so code that builds on a value never unwraps a promise: an update function builds on the derivation's value, so it is handed the last resolved one, not a promise in flight.
+This follows because code that computes a new value from an earlier one is handed that value, not a promise: an update function computes from the derivation's value, so it is handed the last resolved one, not a promise in flight.
 
 A written promise has not resolved while it is pending, so an update function called then receives the value from before it.
 
@@ -1143,7 +1071,7 @@ Pulse belongs to the incremental-computation lineage the *Theoretical lineage* s
 
 > A value equal to the one a node already holds does not reach the node's consumers: nothing re-runs. Two values are equal when they are SameValueZero-equal: `===`, except that `NaN` equals `NaN`. So `0` and `-0` are equal.
 
-Derives from: [`axiom-build-on-r3-rather-than-change-it`](#axiom-build-on-r3-rather-than-change-it)
+Derives from: [`axiom-build-on-r3-rather-than-change-it`](#axiom-build-on-r3-rather-than-change-it), [`axiom-r3-rebuilds-dependencies-each-run-and-ignores-an-equal-write`](#axiom-r3-rebuilds-dependencies-each-run-and-ignores-an-equal-write)
 
 This follows because a consumer re-runs only for a real change, which must mean the same thing at every place a value enters the graph, and pulse uses r3 as it is: r3 already drops a value `===` to the one it holds, so `0` after `-0` is no change anywhere. `NaN` after `NaN` is no change either, though `===` says otherwise, so pulse drops it in its own code.
 
@@ -1184,6 +1112,8 @@ This follows because a consumer re-runs only for a real change, `commit` is the 
 ### @rule creating-a-derivation-is-not-reading-it
 
 > A computation that creates a derivation does not depend on it unless it reads it, so the derivation's first run does not run the computation again.
+
+Derives from: [`axiom-r3-rebuilds-dependencies-each-run-and-ignores-an-equal-write`](#axiom-r3-rebuilds-dependencies-each-run-and-ignores-an-equal-write)
 
 This follows because a consumer re-runs only when something it read actually changed, and creating a derivation is not reading it.
 
@@ -1227,7 +1157,7 @@ When the promise a generator stage paused on settles, the stage resumes the gene
 
 > Before a paused generator is resumed, the dependencies recorded before its pause are read again, so a change to any of them still re-runs the stage.
 
-Derives from: [`axiom-build-on-r3-rather-than-change-it`](#axiom-build-on-r3-rather-than-change-it)
+Derives from: [`axiom-build-on-r3-rather-than-change-it`](#axiom-build-on-r3-rather-than-change-it), [`axiom-r3-rebuilds-dependencies-each-run-and-ignores-an-equal-write`](#axiom-r3-rebuilds-dependencies-each-run-and-ignores-an-equal-write)
 
 This follows because work before the pause runs again only when an input it read has changed, which is only possible if the inputs read before the pause stay linked across it. r3 rebuilds a node's dependency list from the reads of each run, and a resumed run only executes the code after the pause. Pulse builds on r3 rather than changing it, so it keeps those inputs linked by reading them again before the resume.
 
@@ -1284,6 +1214,8 @@ This follows because a reset recomputes the failed stage even with unchanged inp
 #### @rule oncleanup-in-a-generator-stage-belongs-to-the-generator
 
 > An `onCleanup` called inside a generator stage registers on the generator, not on the run. It fires when the generator ends: by completing, by throwing, or by being discarded.
+
+Derives from: [`rule-a-lifetime-belongs-to-an-owner`](#rule-a-lifetime-belongs-to-an-owner)
 
 This follows because a generator stage's continuation runs forward across its pauses: a resume continues the same run, so a cleanup registered in it lasts until the generator ends.
 
@@ -1459,6 +1391,14 @@ A literal cannot change, and a function is already the lazy form. Wrapping eithe
 
 Their value is a callback that the runtime calls directly, once with the element or once per event. Read through a getter, the callback would be re-evaluated instead of called.
 
+##### @rule the-getter-transform-runs-before-the-jsx-transform
+
+> The Vite plugin applies the props-to-getters transform first, and then the automatic JSX runtime imported from `pulse`.
+
+Derives from: [`rule-the-jsx-runtime-builds-every-element-with-h`](#rule-the-jsx-runtime-builds-every-element-with-h)
+
+This follows because the getter transform rewrites JSX attributes, which exist only until the JSX transform turns each element into a call: it has to run while there are still attributes to rewrite.
+
 #### @rule a-spread-merges-descriptors-not-values
 
 > A props object that contains a spread is compiled to a `mergeProps` call over its segments, so a getter in a spread source stays a getter. One `mergeProps` import is added per file, however many spreads it has.
@@ -1489,6 +1429,24 @@ This follows because a dynamic child is wrapped only so that it becomes a hole, 
 
 This follows because a component runs once and reads its props where it uses them: its children are one prop, so they are deferred as one getter until the component reads them.
 
+#### @rule a-branch-is-rebuilt-only-when-the-choice-changes
+
+> A control-flow component keeps the branch it built while the same branch keeps winning, and builds another only when a different one wins.
+
+This follows because only the work that depends on a change runs again: a branch depends on which side wins, not on the value that decided it, so a re-run that picks the same side changes nothing the branch depends on.
+
+###### @case show-rebuilds-only-when-truthiness-flips
+
+> `show.ts` `Show`.
+
+A re-run that stays on the same side, truthy or falsy, returns the branch already built and does not call the children function again. Only a flip between truthy and falsy disposes the old branch's sub-owner and builds the other side under a new one.
+
+###### @case switch-rebuilds-only-when-the-winning-match-changes
+
+> `switch.ts` `Switch`.
+
+The winning `Match`'s position among the `Switch`'s children is the key, not the `Match` object. The compiler turns component children into a getter, so each re-evaluation reads fresh `Match` objects; their positions stay put. While the same position wins, the built branch is reused. When another position wins, or none does, the old branch's sub-owner is disposed before the new branch is built.
+
 ### @rule jsx-builds-real-dom-directly
 
 > JSX produces real DOM nodes through direct DOM operations. There is no virtual tree and nothing is diffed.
@@ -1506,6 +1464,8 @@ This follows because JSX produces real DOM through direct DOM operations: `h` wi
 #### @rule a-static-child-is-inserted-by-its-kind
 
 > A static child is inserted according to its kind: a string or number as a text node, a DOM node as itself, an array by inserting each item in order with nested arrays flattened to any depth, and `null`, `undefined` or a boolean as nothing. Children of mixed kinds keep their written order.
+
+Derives from: [`rule-a-missing-value-sets-nothing`](#rule-a-missing-value-sets-nothing)
 
 This follows because JSX builds DOM directly with no intermediate tree: each kind of child is turned straight into the DOM it stands for, a text node, the node itself, its items, or nothing.
 
@@ -1610,6 +1570,8 @@ This follows because `use` renders only a real value, and a rejected promise hol
 #### @rule use-throws-not-ready-yet-carrying-a-pending-promise
 
 > `use(promise)` throws `NotReadyYet` while the promise is pending, and the thrown `NotReadyYet` carries that promise in its `promise` field.
+
+Derives from: [`axiom-only-a-generator-can-be-resumed`](#axiom-only-a-generator-can-be-resumed)
 
 This follows because `use` renders only a real value and a pending promise has none yet, so the binding waits. `use` is called inside a plain synchronous body, and such a body can stop short of the value only by throwing. The throw carries the promise so that whoever catches it knows what to wait for.
 
@@ -1871,6 +1833,98 @@ This follows because control flow coerces a pending input to its empty form: the
 
 This follows because control flow coerces a pending input to its empty form: the empty form of a list has no items, so `mapArray` returns none and `For` renders its fallback.
 
+### @axiom the-latest-production-wins
+
+> A derived value shows whatever produced it last — a dependency change or a direct write — and a production that was started earlier never publishes over a later one.
+
+This narrows the axiom above to a value with two producers: the order in which the code produces it decides which production shows, rather than a precedence pulse imposes, such as writes over dependency changes or the reverse.
+
+A write to a derivation cancels the run in progress exactly as a dependency change does, and a dependency change cancels a pending write the same way. Program order decides. The decision and the alternatives it rejects are in [the writable derived signal design](docs/superpowers/specs/2026-08-18-writable-derived-signals-design.md#a-new-production-cancels-the-previous-one-whoever-started-it).
+
+#### @rule a-write-replaces-a-derived-value-without-rerunning-it
+
+> A write to a writable derivation replaces its value at once, and the body does not run again because of it.
+
+This follows because a derived value shows whatever produced it last, and a direct write is a production: the written value is shown, and nothing re-derives it.
+
+The write leaves the derivation following the same sources; what happens when one of them changes is [the dependency rule](#rule-a-dependency-change-after-a-write-takes-over).
+
+#### @rule a-write-abandons-the-run-in-progress
+
+> A write abandons every stage's run in progress, a fetch in flight or a paused generator, in whichever stage it is, and the abandoned run never publishes.
+
+This follows because a production started earlier never publishes over a later one: a run started before the write is the earlier production, so it is abandoned.
+
+#### @rule a-write-withdraws-a-recompute-queued-in-the-same-tick
+
+> A recompute queued earlier in the same tick as a write is withdrawn before it starts, so it makes no request, also when the write is an update function.
+
+This follows because a production started earlier never publishes over a later one, and a recompute queued before the write would be the earlier production: withdrawing it before it starts is abandoning it at the cheapest point.
+
+#### @rule a-write-from-inside-the-derivation-abandons-its-own-run-without-raising
+
+> A write made from inside the derivation's own body abandons that run without raising, and the cleanups the run registered still run.
+
+This follows because a production started earlier never publishes over a later one: the write is later than the run it is made from, so that run is abandoned like any other.
+
+#### @rule a-dependency-change-after-a-write-takes-over
+
+> When a source the derivation reads changes after a write, the derivation runs again and its result replaces the written value. This holds when the change comes in the same tick as the write, and when the written value is a promise that has not settled.
+
+This follows because a derived value shows whatever produced it last: a dependency change after a write is the later production, so its result replaces the written value.
+
+A write followed by a change in the same tick is still a write followed by a change, so the change is the later production.
+
+#### @rule the-written-value-stays-visible-while-the-derivation-reloads
+
+> While the run started by a dependency change is in flight, the derivation keeps showing the written value, and reports the reload as pending.
+
+This follows because a derived value shows whatever produced it last: the reload has not produced anything yet, so the last production that has published is still the write.
+
+#### @rule an-older-production-never-publishes-over-a-newer-one
+
+> A promise that settles after its stage has started a newer run is ignored, even when it settles before the flush that runs the newer input.
+
+This follows because a production that was started earlier never publishes over a later one: a promise from a run its stage has since moved past is such a production.
+
+#### @rule a-write-clears-a-parked-failure
+
+> A write to a derivation holding a parked failure clears the failure, whichever stage of the pipeline it was parked on.
+
+This follows because a derived value shows whatever produced it last: the write is that production, so a failure from an earlier production cannot stay on the node.
+
+The written value wins over the derivation, and a node holding a written value while reporting a failure would not be coherent.
+
+#### @rule an-update-function-that-throws-cancels-nothing
+
+> If an update function throws, the write does not happen, and a recompute that was queued before it still runs.
+
+This follows because only a production cancels an earlier one: an update function that throws produces no write, so the recompute it would have cancelled still runs.
+
+#### @rule a-written-promise-is-published-like-a-produced-one
+
+> A promise written into a derivation is its value: pending until it settles, then the resolved value, or a parked failure if it rejects.
+
+Derives from: [`axiom-async-is-acknowledged-not-hidden`](#axiom-async-is-acknowledged-not-hidden)
+
+This follows because a direct write and a dependency change are both productions of the derived value, and a value that has a future says so: a written promise is published exactly as a produced promise would be.
+
+#### @rule the-handle-reports-its-newest-attempt
+
+> An action's handle reports only its newest attempt: `settled` is a promise for that attempt, and an older attempt that settles after a newer one started changes nothing.
+
+Derives from: [`axiom-a-speculation-commits-or-is-discarded-whole`](#axiom-a-speculation-commits-or-is-discarded-whole)
+
+This follows because each attempt is a speculation of its own, and a production started earlier never publishes over a later one: an older attempt settling after a newer one started changes nothing.
+
+#### @rule retry-runs-the-action-again-as-a-new-speculation
+
+> `retry()` runs the action's body again from the start as a new speculation, and clears `error()` at once, before the new attempt has settled.
+
+Derives from: [`axiom-a-speculation-commits-or-is-discarded-whole`](#axiom-a-speculation-commits-or-is-discarded-whole)
+
+This follows because the failed attempt was discarded whole and cannot be resumed, so a retry is a new production from the start, and the newest production has not failed.
+
 ### @axiom speculation-is-opt-in
 
 > A speculation exists only inside an explicit scope. Outside one, a write commits at once.
@@ -1999,7 +2053,7 @@ This follows because a prop says how it reaches the DOM by its prefix: the compi
 
 ### @rule the-vite-plugin-compiles-only-jsx-files
 
-> The Vite plugin compiles a `.tsx` or `.jsx` file, ignoring any query string on its id, and leaves every other file alone. It applies the props-to-getters transform, then the automatic JSX runtime imported from `pulse`.
+> The Vite plugin compiles a `.tsx` or `.jsx` file, ignoring any query string on its id, and leaves every other file alone.
 
 This follows because no choice is applied silently: a file that cannot contain JSX states nothing for the compiler to act on, so it is left exactly as written.
 
@@ -2171,7 +2225,7 @@ Cleanups the component registered before throwing therefore run, and the error s
 
 #### @rule what-a-hole-builds-lives-under-its-own-owner-until-it-leaves
 
-> Content that a hole, a branch or a list row builds is built once, under a sub-owner of its own. That sub-owner is disposed when the content leaves, or when the surrounding owner is disposed.
+> Content that a hole, a branch or a list row builds is built under a sub-owner of its own. That sub-owner is disposed when the content leaves, or when the surrounding owner is disposed.
 
 This follows because every reactive node lives as long as the owner it was created under: content built under its own sub-owner ends, with everything it created, when that sub-owner is disposed as the content leaves.
 
@@ -2182,18 +2236,6 @@ Everything the content created — effects, nested bindings, `onCleanup` callbac
 > `bindings.ts` `insertChild`.
 
 Every run of a reactive child builds its result under a fresh sub-owner. When the new result is committed, the previous run's sub-owner is disposed, so a nested binding from an earlier run never stays subscribed.
-
-##### @case show-rebuilds-only-when-truthiness-flips
-
-> `show.ts` `Show`.
-
-A re-run that stays on the same side, truthy or falsy, returns the branch already built and does not call the children function again. Only a flip between truthy and falsy disposes the old branch's sub-owner and builds the other side under a new one.
-
-##### @case switch-rebuilds-only-when-the-winning-match-changes
-
-> `switch.ts` `Switch`.
-
-The winning `Match`'s position among the `Switch`'s children is the key, not the `Match` object. The compiler turns component children into a getter, so each re-evaluation reads fresh `Match` objects; their positions stay put. While the same position wins, the built branch is reused. When another position wins, or none does, the old branch's sub-owner is disposed before the new branch is built.
 
 ##### @case map-array-builds-each-item-once-under-its-own-owner
 
@@ -2412,6 +2454,8 @@ This narrows the axiom above to a throw: it goes to the call that ran the code r
 #### @rule a-throw-from-a-catch-error-body-reaches-only-catch-error-handlers
 
 > A synchronous throw from a `catchError` body is routed only to `catchError` handlers, never to an `<Errored>` or a root's boundary. When none accepts it, it is thrown to the caller.
+
+Derives from: [`rule-an-error-is-graph-state-not-an-event`](#rule-an-error-is-graph-state-not-an-event)
 
 This follows because a `catchError` body is run by the call to `catchError`, so a throw from it belongs to that call: only the `catchError` handlers on its stack take it, and otherwise its caller receives it. An `<Errored>` or a root's boundary holds the error state of nodes, and a throw from plain code is not a node's state.
 
@@ -2843,7 +2887,7 @@ Abandoning a run cannot be undone, because it runs cleanups and drops a suspende
 
 > When an action that wrote to a derivation commits, the written value replaces anything the derivation published while the action was open.
 
-Derives from: [`rule-a-write-to-a-derivation-cancels-only-once-committed`](#rule-a-write-to-a-derivation-cancels-only-once-committed)
+Derives from: [`rule-a-write-to-a-derivation-cancels-only-once-committed`](#rule-a-write-to-a-derivation-cancels-only-once-committed), [`axiom-the-latest-production-wins`](#axiom-the-latest-production-wins)
 
 This follows because the latest production wins, and the write takes effect at commit: a value the derivation published while the action was open came before it.
 
@@ -2925,7 +2969,7 @@ A computed that the speculation only read is not in its write set, so the commit
 
 ## @axiom only-a-generator-can-be-resumed
 
-> In JavaScript, only a generator can pause and later be resumed where it paused. A function that throws has ended, and the code after an `await` runs later, outside the call that started it.
+> In JavaScript, only a generator can pause and be resumed where it paused by the code that drives it. A function that throws has ended, and an async function resumes after an `await` on its own, later and outside the call that started it.
 
 This is a fact of the language, not a choice. It decides how finely pulse can re-enter paused work, and why a write made after an `await` leaves its speculation.
 
@@ -2940,3 +2984,9 @@ This is a fact of the language, not a choice. It decides how pulse passes the cu
 > A DOM attribute holds only a string, and a boolean attribute such as `disabled` is on whenever it is present, whatever its string says.
 
 This is a fact of the DOM, not a choice. It decides what pulse does with a value that is missing.
+
+## @axiom r3-rebuilds-dependencies-each-run-and-ignores-an-equal-write
+
+> r3 rebuilds a computation's dependencies from the reads of each run, and drops a write `===` to the value a node holds. A computed created inside a running computation that has already read something does not run at once, and is linked as that computation's dependency. A run that throws partway keeps the dependencies it did not read again.
+
+This is a fact of r3 as pulse uses it, not a choice: [building on r3 rather than changing it](#axiom-build-on-r3-rather-than-change-it) makes r3's behaviour part of the world pulse runs in. The last sentence is a known defect in r3, and changes when r3 is fixed.
