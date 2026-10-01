@@ -1410,12 +1410,14 @@ Every unit that makes a derived claim carries a machine-checkable link to what
 it derives from — its position under the unit it derives from, a link on a
 "Derives from:" line in a document, a @canon JSDoc tag in a test — and the
 documents' index and the table of kinds are generated from those links rather
-than hand-kept. check is the gate, generate is the writer, tree is the map.
+than hand-kept. check is the gate, generate is the writer, tree is the map,
+and lint reads the prose.
 
 Usage:
   ${COMMAND} check                 report every finding; exit 1 if there is one
   ${COMMAND} generate              rewrite the generated regions
   ${COMMAND} tree [options]        print the derivation tree with test counts
+  ${COMMAND} lint [file …]         check the language of the documents' prose; exit 1 on a finding
 
 Options for tree:
   --gaps          only the branches leading to a claim no test pins
@@ -1493,7 +1495,7 @@ function tree(options: {
   }
 }
 
-function main(argv: string[]): void {
+async function main(argv: string[]): Promise<void> {
   let parsed: ReturnType<typeof parseArgs>;
   try {
     parsed = parseArgs({
@@ -1511,7 +1513,7 @@ function main(argv: string[]): void {
     // cannot express for a string option, so it is retried as `--suspect 4`.
     const at = argv.indexOf('--suspect');
     if (at !== -1 && !/^\d+$/.test(argv[at + 1] ?? '')) {
-      main([...argv.slice(0, at + 1), '4', ...argv.slice(at + 1)]);
+      await main([...argv.slice(0, at + 1), '4', ...argv.slice(at + 1)]);
       return;
     }
     console.error(`canon: ${(error as Error).message}\n\n${HELP}`);
@@ -1523,6 +1525,12 @@ function main(argv: string[]): void {
   if (values.help || command === undefined || command === 'help') {
     console.log(HELP);
     return;
+  }
+  if (command === 'lint') {
+    // Loaded only here: the language checks need the retext packages, and every
+    // other command depends on nothing outside Node.
+    const { lint } = await import('./lint.ts');
+    process.exit((await lint(rest)) === 0 ? 0 : 1);
   }
   if (rest.length > 0) {
     console.error(`canon: unexpected argument "${rest[0]}"\n\n${HELP}`);
@@ -1556,4 +1564,4 @@ function main(argv: string[]): void {
   }
 }
 
-main(process.argv.slice(2));
+await main(process.argv.slice(2));

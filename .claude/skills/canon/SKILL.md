@@ -1,49 +1,17 @@
 ---
 name: canon
-description: Work through a project's canon — the CANON.md document of axioms, facts, specs and exceptions that tests cite and a checker holds closed. Use when adding or changing behaviour (derive it down from an axiom before writing code), when fixing a bug (climb up to the missing spec, axiom or fact before touching code), when writing a test that pins a claim, when editing CANON.md, or when running the canon checker.
+description: Work through a project's canon — the CANON.md document of axioms, facts, specs and exceptions that tests cite and a checker holds closed. Use before changing an area of the code (read the theory that covers it first), when adding or changing behaviour (place it against the specs it resembles, then derive it down from an axiom before writing code), when fixing a bug (climb up to the missing spec, axiom or fact before touching code), when writing a test that pins a claim, when editing CANON.md, or when running the canon checker.
 ---
 
 # Canon
 
-A canon states how a system behaves now, and why, as a graph of claims that tests cite. It is a way of working, not a document written once and forgotten. It is the guideline for every choice made in the system, internal ones included. An internal choice is where the canon matters most, because nothing outside the system will ever check it. The document is `CANON.md` at the project root. The checker beside this file holds the links between the document and the tests closed.
+`CANON.md` states what the system does and why, as claims that tests cite. The canon is the project. The code and the tests express it.
 
-Working through a canon is slower than editing code alone, and that is the point. Every choice is written down as a claim, derived from what forces it, and checked by a test, before the code changes. The canon spends effort to find out whether a choice is a good one: it is the reasoning behind the system, written out where it can be read and checked, instead of left implicit in the code.
+Every session starts without knowing why the code is the way it is. Peter Naur calls that knowledge the theory of a program, and says the program text alone cannot carry it ([Programming as Theory Building](https://gwern.net/doc/cs/algorithm/1985-naur.pdf)). The canon writes the theory down, so each session rebuilds it from the canon instead of guessing it from the code.
 
-The canon holds the present tense only. What someone believed on a date belongs in a decision record, where the date is the point. An axiom that stops being true is revised or retired, and the decision record says why.
+The canon is a tool for judging choices. It does not make them. The checker beside this file checks links between claims and tests, never judgement.
 
-## The layers
-
-    axiom ─┐
-           ├→  spec  →  test  →  implementation
-    fact  ─┘
-    └──────── linked and checked ───┘   └─ prose ─┘
-
-- An axiom is a value: how the project wants the world of the people using it to be. A root axiom derives from nothing in the canon. A nested axiom narrows the more general axiom it sits in.
-- A fact is how the platform the project is built on is, whatever the project does: the language, the host environment, the libraries it uses.
-- A spec is what the system does, stated so that a test could contradict it. It derives from an axiom, relies on the facts it names, and may be refined by specs nested inside it.
-- An exception is where a fact keeps a spec from holding fully.
-- A test pins the narrowest spec or exception it could contradict. Several tests may pin one spec.
-- The implementation follows the tests.
-
-## Work points down, defects point up
-
-New behaviour is derived downward. Name the axiom it follows from and the facts it relies on, state the spec, refine it into nested specs where it has parts worth pinning apart, write the tests, then write the code. If no axiom yields the spec, the spec does not get to decide for itself. Stop and find the missing axiom first.
-
-A defect is read upward. A bug in the implementation is not something to patch. It shows that a test is missing, which shows that a spec is missing or stated too broadly. That may show a missing axiom, or a fact nobody wrote down. Climb until you reach the first layer that already covers the situation, and write down what was missing below it. Then come back down: spec, test, and only then the fix.
-
-At each layer the question is the same: does the layer above already answer this? If a spec already answers it, only a nested spec and its test were missing. If no spec answers it, the spec is missing, and the axioms must say which spec is right. If the axioms cannot say, an axiom is missing. Look first for a root that the missing axiom would narrow. Either way the outcome is a design question, and it goes to whoever owns the design.
-
-The canon's structure changes for the same reasons its content does: a defect that points up to it, or a claim found that no unit states. A new way of organising the canon is not a reason on its own. Every reorganisation rewrites derivations in bulk, and nothing pushes back on it, because no test cites an axiom or a fact. Once every claim is stated and placed, the structure is held still.
-
-## Every claim is a unit
-
-The canon carves behaviour into stone: each claim is a unit under an axiom, and a test cites it. A claim that exists only in a unit's body text, a code comment, or a commit message is not encoded. The checker never sees it, no test is held to it, and a later change can undo it without anything noticing.
-
-So when a change introduces a behaviour, or relies on one, that behaviour gets a unit of its own and a test that cites it: a spec when it states what the system does, an exception when a fact keeps a spec from holding fully. Body text under a unit explains the claim. It never carries a claim that no unit states.
-
-A useful check after writing a change: read the unit bodies and the comments the change added, and ask of each sentence whether it states something the system does. Every such sentence needs a unit.
-
-## The kinds
+## 1. Kinds
 
 <!-- kinds:begin — generated by `canon generate`; edits are overwritten -->
 | tag | what it is | cites |
@@ -54,27 +22,75 @@ A useful check after writing a change: read the unit bodies and the comments the
 | `@exception` | where a fact keeps a spec from holding fully | `@spec` and `@fact` |
 <!-- kinds:end -->
 
-## How a unit is written
+Tell the kinds apart with two questions:
 
-A unit is a heading whose text is `@<kind> <stem>` and nothing else. Its id is `<kind>-<stem>`, which is also the anchor a renderer gives the heading. The claim opens the body as a blockquote.
+1. Does the claim still hold if someone rebuilt the system with different internals? Then it is an axiom.
+2. Does the claim still hold if nobody had built the system? Then it is a fact.
+3. A claim that fails both questions is a decision or a behaviour: a spec.
+
+Axioms state how the world should be. Facts state how the platform is. A spec, together with the facts it cites, must make its axiom hold. The split follows [Zave and Jackson](http://www.pamelazave.com/4dc.pdf).
+
+## 2. Before you change code
+
+1. Read the units that cover the area you will change.
+2. Answer three questions from them:
+   1. What does this code match in the world of the people using the system?
+   2. Why is each part the way it is? The derivation lines answer this.
+   3. How does the requested change fit what is already there?
+3. If the canon lacks a claim you need, write the unit.
+4. If an answer needs a judgement the canon cannot give, ask the owner of the design.
+5. Do all this before you edit code.
+
+## 3. Adding or changing behaviour
+
+1. Name the existing specs that the new behaviour most resembles.
+2. Say whether the change extends or refines them.
+3. If it does neither, the change is a patch. Ask the owner of the design before you continue.
+4. Name the axiom the behaviour follows from and the facts it relies on.
+5. If no axiom yields the behaviour, stop. An axiom is missing. Ask the owner of the design.
+6. Write the spec. Nest specs under it for parts worth pinning apart.
+7. Write the tests, and see them fail.
+8. Write the code.
+
+Tests cannot tell an extension from a patch, because many implementations pass the same tests. Only the canon can.
+
+## 4. Fixing a defect
+
+1. Do not change the code first.
+2. Write the test that the defect breaks, and see it fail.
+3. Find the spec that covers the situation. If none does, a spec is missing or states too much.
+4. Find the axiom or fact that decides the spec. If none does, one is missing. Ask the owner of the design.
+5. Write what is missing from the top down: axiom or fact, then spec, then test.
+6. Fix the code.
+
+## 5. Units
+
+1. A unit is a heading with the text `@<kind> <stem>` and nothing after the stem. Its id is `<kind>-<stem>`. Text after the stem breaks the anchor (`unreachable`).
+2. Write the stem by hand. You may reword the statement at any time, because citations name the stem.
+3. Open the body with the statement as a blockquote.
+4. Make every claim about the system a unit. Body text explains its unit's claim and adds no new claim.
+5. After a change, read each sentence you added to unit bodies and code comments. A sentence that states something the system does needs a unit.
+6. Write in the present tense. History belongs in a decision record under `docs/adr/`.
 
 ```md
 ### @spec a-write-is-visible-before-its-flush
 
 > A read after a write returns the written value, before any flush has run.
 
-The scheduler batches effects only. It never gates what a read returns…
+This follows because …
 ```
 
-The heading carries no prose because a renderer slugs the whole heading. Prose after the stem would land in the anchor and break every citation. The checker reports that as `unreachable`.
+## 6. Derivation
 
-The stem is written by hand, never generated from the statement. The statement can be reworded freely, because a citation names the stem.
-
-## The canon is a graph of derivations
-
-The canon is a directed acyclic graph. Every claim derives from what forces its answer, and that can be more than one thing: two axioms together, an axiom together with a fact, or an axiom together with specs already established. A spec may therefore depend on other specs as well as on axioms and facts. The graph has no cycles: nothing derives, directly or through others, from itself.
-
-Each spec has one primary parent, the axiom or spec it is nested under, and any number of further parents. The further parents are listed on a line of their own that opens the body, right after the statement, as links separated by commas:
+1. The canon is a directed acyclic graph. A derivation must not depend on itself (`cycle`).
+2. Nesting is a citation. A unit inside another unit derives from it. Write no link to the unit you sit in.
+3. List further parents on one `Derives from:` line, right after the statement. Only links on that line are derivation edges. Every other link is a reference.
+4. Make the primary parent the axiom that does most of the forcing. Never make a fact a primary parent.
+5. Open a spec's body with its `Derives from:` line, if it has one, then one sentence: "This follows because …".
+6. If you cannot write that sentence, an axiom is missing. Ask the owner of the design.
+7. Place a spec under the axiom that forces it, not under an axiom on the same topic.
+8. Never move a spec because an axiom grew large or because of document sections.
+9. If the givens allow two designs, a value is missing. Do not promote the decision to an axiom.
 
 ```md
 ### @spec a-style-property-is-removed-on-nothing
@@ -86,89 +102,41 @@ Derives from: [`spec-a-style-prefix-sets-one-style-property`](#spec-a-style-pref
 This follows because a missing value sets nothing: …
 ```
 
-Choose as primary the axiom that does most of the forcing. A fact is never a primary parent: it says what the platform allows, not what the system wants, so a spec names it on its `Derives from:` line.
+## 7. Nesting
 
-Only the links on the `Derives from:` line are derivation edges. Any other link in a body is a reference, such as "see the spec on…", and may point anywhere, including back at a unit that derives from this one. The checker reads the derivation edges, nesting included, as a graph, and reports any cycle in it as `cycle`: a derivation that depends on itself. `pnpm canon tree -v` shows each unit's further parents under it, each after an arrow. References are left out of the tree, because they are not part of the derivation graph. A spec sits under the axiom that forces its answer, not under the axiom whose topic it resembles: being about the same subject is not a derivation.
+1. A nested axiom narrows its parent. Open its body with "This narrows … to …".
+2. If a nested axiom can only say "this follows because", its parent forces it. Make it a spec.
+3. A root axiom must decide at least one real choice between two designs that both work.
+4. A nested spec refines its parent: it states one part of the parent more concretely.
+5. A spec that follows from another spec without refining it sits under its axiom. It names the other spec on its `Derives from:` line.
+6. A parent spec owes a test of its own. Its nested specs do not cover it.
+7. Use these heading levels: a root `##`, a nested axiom `###`, a spec `####`, its refinements and exceptions `#####`, one level more `######`.
+8. A unit that would sit deeper than six levels names its parent on its `Derives from:` line instead.
 
-A spec's body opens with its derivation: the `Derives from:` line when it has further parents, then one sentence, "This follows because …", saying why its parents force this answer and no other. When no such sentence can be written, the spec is a choice the axioms would allow to go another way, and an axiom is missing. That is a design question for whoever owns the design, not a placement problem.
+## 8. Facts and exceptions
 
-How large an axiom becomes is a consequence of what it forces, never a reason to move a spec. The parts or sections a document is grouped into are navigation for a reader, and play no part in where a spec sits.
+1. A fact is a root and holds no units.
+2. A spec or exception names each fact it relies on, on its `Derives from:` line.
+3. An exception sits inside the spec it narrows and names the fact that forces it. An exception without a fact fails the check (`freelancing`).
+4. A carve-out that no fact forces is a choice. Write it as a spec nested in the spec it refines.
+5. An exception lasts as long as its fact. Pin an exception that a library defect forces with `test.fails`. Remove the exception when that test starts failing.
+6. A spec that keeps collecting exceptions asks more than the platform gives. Restate the spec.
 
-## Nesting is the citation
+## 9. Places in the code
 
-A unit written inside another unit has cited it. A spec under an axiom's heading derives from that axiom by sitting there, and writes no link saying so.
+1. A spec that answers for one place opens its statement with the place: `` `queue.ts` `drain`. `` The checker confirms the place exists (`stale-site`).
+2. Where two modules share a name, give a path that ends in the file, such as `dom/error.ts`.
+3. A place that answers for several specs gets one spec under each. The stem states the claim, not the place.
+4. Run `tree --suspect`. A spec with many tests and no nested specs probably states several claims. Split it into nested specs.
 
-Position is stronger than a link. A link is a second statement of what the position already says, and two statements can disagree. Position cannot contradict itself. Folding the document shows each unit's primary parent.
+## 10. Tests
 
-An explicit link therefore means one thing: an edge of the graph that nesting cannot hold. Examples are a further parent, a fact a spec relies on, or a citation into another document.
-
-## Axioms and facts are the givens
-
-The givens are of two kinds, and a derivation needs both. An axiom is a value the project chooses, such as "reading is not a discipline". A fact is imposed by the platform, such as "in JavaScript, only a generator can be resumed where it paused". Neither is derived, and neither the code nor the tests refer to them. A test cites a spec, a spec derives from the givens, and so the givens reach the code only through the specs.
-
-The axioms are the ideal world the software answers to: its mathematics. The facts are the material it is built from. A spec is the bridge between them: what the system does so that, on this platform, its values hold. The split follows the requirements-engineering model of [Zave and Jackson](http://www.pamelazave.com/4dc.pdf), where requirements are optative, statements of how the world should be, and domain knowledge is indicative, statements of how it is. There, a specification together with the domain knowledge must guarantee the requirements.
-
-Neither kind of given is a decision about how to build the system. "A component runs once" and "JSX builds real DOM" are decisions: given the values and the facts, they are the designs that follow. A decision is a spec, and its "This follows because …" names the givens that pick it over its alternatives. Two tests tell the three apart. An axiom still holds if the system were rebuilt from scratch with different internals. A fact still holds if the system were never built. A decision survives neither.
-
-When the givens allow two designs and do not say which, a value is missing. The tie is a design question for whoever owns the design. It is not settled by promoting the decision to an axiom, and a fact cannot settle it, because a fact only says what is possible.
-
-A fact is a root of its own and holds no units. The specs that rely on it name it on their `Derives from:` line, and so do the exceptions it forces. A fact that stops being true, such as a defect fixed in a library, is retired along with the exceptions that derive from it.
-
-## Axioms narrow axioms, and specs refine specs
-
-A few strong values sit at the root of the canon, and narrower values sit inside them. A nested axiom narrows the axiom it sits in: it commits, for one part of the system, to something its parent leaves open. Read from the top, the canon goes from its base values down to the specs that follow from them.
-
-```md
-## @axiom every-choice-is-stated-where-the-code-is-written
-
-> What the system does is decided by what the code states, at the place it is written.
-
-### @axiom speculation-is-opt-in
-
-> A speculation exists only inside an explicit scope.
-
-This narrows the axiom above to writes: whether a write is speculative is stated by the scope it is written in, rather than applied to every write that might need it.
-
-#### @spec outside-a-speculation-a-write-commits-at-once
-```
-
-A nested axiom's body opens with one sentence, "This narrows … to …", saying which part of its parent it settles and what it commits to rather than the alternative. When that sentence can only be written as "this follows because", the axiom is forced by its parent, and it is a spec. An axiom sits under the axiom it narrows, not under one whose topic it resembles.
-
-A root value earns its place by deciding at least one real choice between two designs that both work. A root broad enough to sit above anything decides nothing.
-
-A nested spec refines the spec it sits in: it states one part of its parent more concretely, down to one place in the code where that is worth pinning. Nesting means that and nothing else. A spec that follows from another spec without refining it sits under its axiom and names the other spec on its `Derives from:` line. A parent spec is still a claim of its own, and owes a test of its own: its nested specs each refine one part, and together they need not cover it.
-
-Headings stop at six levels, so the depth is spent carefully. A root is `##`, a nested axiom `###`, the specs under it `####`, the specs and exceptions refining those `#####`, and one level more `######`. A unit that would sit deeper names its parent on its `Derives from:` line instead.
-
-## A spec may name its place
-
-A spec that answers for one place in the code opens its statement by naming that place, and the checker verifies that the place exists:
-
-```md
-#### @spec drain-runs-each-listener-in-its-own-guard
-
-> `queue.ts` `drain`.
-
-Each listener runs inside its own guard, so one that throws costs the others nothing.
-```
-
-Where two modules share a name, the spec names the file by a path that ends in it, such as `dom/error.ts`. A place the checker cannot find is reported as `stale-site`.
-
-One place often answers to several specs, and it gets one spec under each. That is why the stem states the claim instead of naming the place: `drain` might hold three specs.
-
-Most specs name no place, and their tests cite them directly. The tree command's `--suspect` option lists specs that carry many tests and hold no nested specs. Such a spec usually says several things with no way to tell them apart, and splitting it into nested specs is often the fix.
-
-## Exceptions
-
-An exception marks where the platform does not fit what a spec wants: a fact keeps the spec from holding fully. It sits inside the spec it narrows, so reading the spec shows where it falls short. It names the fact that forces it on its `Derives from:` line, and the checker reports an exception with no fact as `freelancing`.
-
-A carve-out that no fact forces is not an exception. It is a choice, and a choice is a spec nested in the spec it refines. Keeping the kind for forced carve-outs makes every exception a record of a cost the platform imposes, and the list of exceptions the list of places where the design would change if the platform did.
-
-An exception lasts as long as its fact. Where the fact is a defect in a library, the test that pins the exception is written with `test.fails`, so it starts failing once the defect is fixed, and the exception is removed then. A spec that keeps collecting exceptions asks more of the platform than it gives, and is stated wrong.
-
-## What a test cites
-
-A test cites the narrowest spec or exception its assertion could contradict. The citation is a `@canon` tag in the test's JSDoc, naming the unit by its id alone. The file is left out: ids are unique across every canon document, and the checker reports a duplicate. Moving a unit between documents therefore breaks no test.
+1. Cite the narrowest spec or exception that the assertion could contradict.
+2. Cite with a `@canon <id>` tag in the JSDoc of a leaf test. A `describe` block never cites.
+3. Cite the id alone, without the file. Ids are unique across all canon documents.
+4. Never cite an axiom or a fact (`missing-spec`). Write the missing spec instead.
+5. The checker cannot see when a test cites a parent spec where a nested spec states the claim. Catch that in review.
+6. A unit leaves the coverage backlog only when a test cites it directly.
 
 ```ts
 /**
@@ -177,21 +145,20 @@ A test cites the narrowest spec or exception its assertion could contradict. The
 test('a throwing listener does not stop the next one', () => {
 ```
 
-The checker cannot judge narrowness, so citing a parent spec where a nested spec states the claim is a review question. Citing the parent as well as the nested spec adds nothing, because the nested spec's position already names its parent. The list of untested specs and exceptions is the coverage backlog, and a unit leaves it only when a test cites it directly.
+## 11. Implementation
 
-A test that cites an axiom or a fact is reported as `missing-spec`. It means the canon has no addressable spec for what the test asserts. The gap is in the canon, not in the test.
+1. Source code carries no citations.
+2. Open each source file with a block comment: what the file is, how its parts fit, and which axiom it serves.
+3. Do not add links from code to the canon. Per-symbol tags were tried and dropped as too messy, and only a test credits a unit.
 
-Only leaf tests cite. A `describe` block groups tests; it does not make a claim.
+## 12. Structure
 
-## What the implementation carries
+1. Change the canon's structure only for a defect that points to it, or for a claim that no unit states.
+2. Never reorganise the canon for its own sake. Nothing pushes back on a reorganisation, because no test cites an axiom or a fact.
 
-Prose, and no citations. A block comment at the top of each source file says what the file is, how its pieces fit, and which axiom it serves.
+## 13. Scope
 
-Per-symbol `@canon` tags in source code were tried and dropped. A tag plus a sentence is a snapshot of one consequence. A reader who does not already hold the model cannot assemble dozens of snapshots into it. Coverage never depended on those tags, because only a test credits a unit.
-
-## Scope
-
-Scope is declared, never inferred. The `canon` field of the project's `package.json` declares it:
+Declare the scope in the `canon` field of `package.json`:
 
 ```json
 {
@@ -206,28 +173,25 @@ Scope is declared, never inferred. The `canon` field of the project's `package.j
 }
 ```
 
-- `documents` are the canon documents. The default is `["CANON.md"]`.
-- `suites` is the declared suite directory. Every test in it must cite a unit. A suite joins by moving in and withdraws by moving out. The default is `test/canon`.
-- `sources` are the trees swept for voluntary citations. A test outside the declared directory may still cite a unit, and that citation counts. The checker also looks here for the code a spec names. The default is `["src", "test"]`.
-- `references` are prose documents whose links must resolve but credit nothing. The default is none.
-- `command` is how the project runs the checker, used in the advice a finding prints.
+- `documents`: the canon documents. Default `["CANON.md"]`.
+- `suites`: the declared suite directory. Every test in it must cite a unit. Default `test/canon`. Keep it flat: a suite answers to a claim, not to a module.
+- `sources`: the trees the checker reads for other citations and for the places specs name. Default `["src", "test"]`.
+- `references`: prose documents whose links must resolve but credit no unit. Default none.
+- `command`: how the project runs the checker, for the advice in findings.
 
-The suite directory is flat on purpose. A suite answers to a claim, not to a module. One spec can bind several modules, and filing its suites by the module they drive would split the spec.
-
-## The checker
+## 14. Commands
 
 ```bash
-pnpm canon check              # every finding; exits 1 if there is one
+pnpm canon check              # every finding; exits 1 on a finding
 pnpm canon generate           # rewrite the generated regions
 pnpm canon tree -v            # the derivation tree, with test counts and statements
 pnpm canon tree --gaps        # only the branches that lead to an untested claim
-pnpm canon tree --suspect 3   # specs with no nested specs carrying three or more tests
+pnpm canon tree --suspect 3   # specs with no nested specs and three or more tests
+pnpm canon lint               # language checks on the prose of the documents
 ```
 
-`pnpm canon --help` lists every finding the check reports and what it means. The checker needs Node 22.18 or later and nothing else.
-
-## Generated regions
-
-`generate` rewrites two regions, and `check` fails when either is stale. The first is each canon document's index, between `<!-- toc:begin -->` and `<!-- toc:end -->`. The second is the table of kinds in this file, which comes from the checker's own ruleset. Both are generated because a hand-kept copy of a hierarchy is a second place for it to be wrong.
-
-A new canon document needs the two markers once. Every `generate` after that rewrites the region between them.
+1. `pnpm canon --help` lists every finding `check` reports.
+2. `check` fails when a generated region is stale. Run `generate`. The generated regions are each document's index and the kinds table in this file.
+3. A new canon document needs the `toc:begin` and `toc:end` markers once.
+4. `lint` reports passive voice, wordy phrases, repeated words, wrong articles, sentences over 25 words and paragraphs over 5 sentences. Its sentence limit follows ASD-STE100, Simplified Technical English.
+5. `check`, `generate` and `tree` need Node 22.18 or later and nothing else. `lint` also needs the project's dev dependencies.
