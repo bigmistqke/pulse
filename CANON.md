@@ -38,11 +38,11 @@ The canon was written backwards from the existing tests and documents, and descr
 - [`@axiom one-mechanism-carries-every-change-to-a-consumer`](#axiom-one-mechanism-carries-every-change-to-a-consumer) — Every change reaches a consumer through one scheduler, and the host can replace it.
   - [`@rule one-scheduler-flushes-every-consumer`](#rule-one-scheduler-flushes-every-consumer) — Every write asks one injectable scheduler for a flush. The default scheduler batches every request made in one tick into a single flush on a microtask; the synchronous scheduler flushes on each request.
 - [`@axiom a-consumer-re-runs-only-for-a-real-change`](#axiom-a-consumer-re-runs-only-for-a-real-change) — A consumer re-runs only when something it read actually changed.
-  - [`@rule an-equal-value-does-not-propagate`](#rule-an-equal-value-does-not-propagate) — A value equal to the one a node already holds does not reach the node's consumers: nothing re-runs.
+  - [`@rule an-equal-value-does-not-propagate`](#rule-an-equal-value-does-not-propagate) — A value equal to the one a node already holds does not reach the node's consumers: nothing re-runs. Two values are equal when they are SameValueZero-equal: `===`, except that `NaN` equals `NaN`. So `0` and `-0` are equal.
     - [`@case a-computed-publishes-only-a-changed-value`](#case-a-computed-publishes-only-a-changed-value) — `computed.ts` `makeStageNode`.
     - [`@case an-equal-committed-signal-write-is-dropped`](#case-an-equal-committed-signal-write-is-dropped) — `scope.ts` `writeValue`.
   - [`@rule reading-a-computed-again-without-a-change-re-runs-nothing`](#rule-reading-a-computed-again-without-a-change-re-runs-nothing) — Reading a computed a second time, when nothing it read has changed since the first read, returns the same value and runs no stage.
-  - [`@rule a-staged-effect-skips-a-commit-equal-to-its-last`](#rule-a-staged-effect-skips-a-commit-equal-to-its-last) — A staged effect does not call `commit` with a value `Object.is`-equal to the one it last committed.
+  - [`@rule a-staged-effect-skips-a-commit-equal-to-its-last`](#rule-a-staged-effect-skips-a-commit-equal-to-its-last) — A staged effect does not call `commit` with a value equal to the one it last committed, equal in the SameValueZero sense that [the rule on equal values](#rule-an-equal-value-does-not-propagate) states.
 - [`@axiom compose-rather-than-proliferate`](#axiom-compose-rather-than-proliferate) — A small set of primitives covers the use cases. A new form is added only where composing the existing ones is awkward for a common case.
   - [`@rule a-computed-is-a-pipeline-of-stages`](#rule-a-computed-is-a-pipeline-of-stages) — `computed(s0, s1, …)` threads each stage's resolved value into the next. Any stage may read signals, and a change to something a stage read re-runs that stage and passes its new value on.
   - [`@rule a-computed-has-no-setter`](#rule-a-computed-has-no-setter) — `computed` returns an accessor and nothing to write with. A derivation that can also be written is made with `signal`.
@@ -588,21 +588,25 @@ A write or a settle that leaves a value as it was is not a change, and costs its
 
 ### @rule an-equal-value-does-not-propagate
 
-> A value equal to the one a node already holds does not reach the node's consumers: nothing re-runs.
+> A value equal to the one a node already holds does not reach the node's consumers: nothing re-runs. Two values are equal when they are SameValueZero-equal: `===`, except that `NaN` equals `NaN`. So `0` and `-0` are equal.
 
-This follows because a consumer re-runs only for a real change: a value equal to the one a node holds changes nothing, so it is not passed on, at either place a value enters the graph.
+Derives from: [`axiom-build-on-r3-rather-than-change-it`](#axiom-build-on-r3-rather-than-change-it)
+
+This follows because a consumer re-runs only for a real change, which must mean the same thing at every place a value enters the graph, and pulse uses r3 as it is: r3 already drops a value `===` to the one it holds, so `0` after `-0` is no change anywhere. `NaN` after `NaN` is no change either, though `===` says otherwise, so pulse drops it in its own code.
+
+SameValueZero is the equality `Map`, `Set` and `Array.prototype.includes` use.
 
 #### @case a-computed-publishes-only-a-changed-value
 
 > `computed.ts` `makeStageNode`.
 
-A stage that settles to a value `Object.is`-equal to the one it last published does not publish it again, so its consumers do not re-run.
+A stage whose new value is equal to the one it last published does not publish it again, so its consumers do not re-run. This holds wherever the value comes from: a run of the stage, a promise the stage returned, or a promise a `use` in the stage suspended on.
 
 #### @case an-equal-committed-signal-write-is-dropped
 
 > `scope.ts` `writeValue`.
 
-A committed write to a signal that equals its current value is dropped. The equality is SameValueZero: `NaN` equals `NaN`, and `0` equals `-0`. ADR 0008 chose `Object.is`. r3 compares with `===`, which already makes `0` and `-0` equal, and pulse builds on r3 rather than changing it, so pulse adds the `NaN` case in its own write path. SameValueZero is the equality `Map`, `Set` and `Array.prototype.includes` use.
+A committed write to a signal that equals its current value is dropped. r3 drops a write `===` to the current value, and pulse drops `NaN` over `NaN` before the write reaches r3.
 
 ### @rule reading-a-computed-again-without-a-change-re-runs-nothing
 
@@ -612,11 +616,11 @@ This follows because a consumer re-runs only for a real change, and a second rea
 
 ### @rule a-staged-effect-skips-a-commit-equal-to-its-last
 
-> A staged effect does not call `commit` with a value `Object.is`-equal to the one it last committed.
+> A staged effect does not call `commit` with a value equal to the one it last committed, equal in the SameValueZero sense that [the rule on equal values](#rule-an-equal-value-does-not-propagate) states.
 
-Derives from: [`rule-a-staged-effect-is-a-pipeline-ending-in-a-commit`](#rule-a-staged-effect-is-a-pipeline-ending-in-a-commit)
+Derives from: [`rule-a-staged-effect-is-a-pipeline-ending-in-a-commit`](#rule-a-staged-effect-is-a-pipeline-ending-in-a-commit), [`rule-an-equal-value-does-not-propagate`](#rule-an-equal-value-does-not-propagate)
 
-This follows because a consumer re-runs only for a real change, and `commit` is the staged effect's consumer of the pipeline's value.
+This follows because a consumer re-runs only for a real change, `commit` is the staged effect's consumer of the pipeline's value, and an equal value is not a change.
 
 ## @axiom compose-rather-than-proliferate
 

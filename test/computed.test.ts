@@ -562,6 +562,88 @@ test('refetch with same resolved value (Object.is): downstream effect does not r
 })
 
 /**
+ * @canon case-a-computed-publishes-only-a-changed-value
+ */
+test('an async stage that settles to -0 after 0 does not re-run the next stage', async () => {
+  setScheduler(syncScheduler(flush))
+  const [n, setN] = signal(0)
+  let calls = 0
+  createRoot(() => {
+    const c = computed(
+      () => Promise.resolve(n() === 0 ? 0 : -0),
+      (value: number) => {
+        calls++
+        return value
+      },
+    )
+    effect(() => {
+      c()
+    })
+  })
+  await tick()
+  const afterFirstSettle = calls
+  setN(1)
+  await tick()
+  expect(calls).toBe(afterFirstSettle)
+  setScheduler(microtaskScheduler(flush))
+})
+
+/**
+ * @canon case-a-computed-publishes-only-a-changed-value
+ */
+test('a sync stage fed by an async stage that produces -0 after 0 does not re-run the next stage', async () => {
+  setScheduler(syncScheduler(flush))
+  const [n, setN] = signal(0)
+  let calls = 0
+  createRoot(() => {
+    const c = computed(
+      () => Promise.resolve(n()),
+      (value: number) => (value === 0 ? 0 : -0),
+      (value: number) => {
+        calls++
+        return value
+      },
+    )
+    effect(() => {
+      c()
+    })
+  })
+  await tick()
+  const afterFirstSettle = calls
+  setN(1)
+  await tick()
+  expect(calls).toBe(afterFirstSettle)
+  setScheduler(microtaskScheduler(flush))
+})
+
+/**
+ * @canon case-a-computed-publishes-only-a-changed-value
+ */
+test('a stage whose use settles to -0 after 0 does not re-run the next stage', async () => {
+  setScheduler(syncScheduler(flush))
+  const [p, setP] = signal<Promise<number>>(Promise.resolve(0))
+  let calls = 0
+  createRoot(() => {
+    const c = computed(
+      () => use(p()),
+      (value: number) => {
+        calls++
+        return value
+      },
+    )
+    effect(() => {
+      c()
+    })
+  })
+  await tick()
+  const afterFirstSettle = calls
+  setP(Promise.resolve(-0))
+  await tick()
+  expect(calls).toBe(afterFirstSettle)
+  setScheduler(microtaskScheduler(flush))
+})
+
+/**
  * @canon rule-an-async-node-keeps-its-last-value-while-it-refetches
  */
 test('stale-while-revalidate: prior value visible during refetch', async () => {

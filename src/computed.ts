@@ -3,6 +3,7 @@ import { isGeneratorFunction, NotReadyYet, resolvedPromise, track, type PromiseS
 import { runStage, resumeStage, takeGeneratorCleanups, type StageOutcome } from './driver'
 import { replayDeps, snapshotDeps, type DepRecord } from './dep-replay'
 import { isPromise } from './is-promise'
+import { sameValueZero } from './same-value-zero'
 import { getOwner, routeError, registerWithOwner } from './owner'
 import { peekValue, writeValue } from './scope'
 import { makeAccessor, NODE, signal, signalWithNode, type Accessor, type Signal } from './signal'
@@ -140,7 +141,7 @@ type StashedResolution =
  * - The body ALWAYS runs on dep changes (including settle-triggered kicks) so
  *   r3 dep links are never dropped.
  * - Non-generator stages: resolved-value keyed cache. On settle, kick fires and
- *   the body re-runs. The new resolved value is compared with Object.is to the
+ *   the body re-runs. The new resolved value is compared with SameValueZero to the
  *   last resolved value; downstream is only invalidated if changed.
  *   Stale-while-revalidate: the last resolved value is returned during refetch.
  * - Generator stages: the paused generator is retained (`retainedGen`) rather
@@ -364,7 +365,7 @@ function makeStageNode(
     }
     // else: stale-while-revalidate — prior value stays published (no republish
     // during SWR: publishing a fresh promise would fire downstream unnecessarily,
-    // breaking the Object.is change-gate tests)
+    // breaking the change-gate tests)
     const rerun = () => {
       if (suspendedOn !== p) return // superseded
       onSettle(track(p))
@@ -613,7 +614,7 @@ function makeStageNode(
             // unchanged value), which the value-only gate would otherwise suppress.
             if (
               lastResolvedValue === UNRESOLVED ||
-              !Object.is(lastResolvedValue, state.value) ||
+              !sameValueZero(lastResolvedValue, state.value) ||
               !lastPublishedShapeIsPromise
             ) {
               lastResolvedValue = state.value
@@ -659,7 +660,7 @@ function makeStageNode(
       const asPromise = inputWasAsync || resumedFromSuspension
       if (
         lastResolvedValue === UNRESOLVED ||
-        !Object.is(lastResolvedValue, outcome.value) ||
+        !sameValueZero(lastResolvedValue, outcome.value) ||
         asPromise !== lastPublishedShapeIsPromise
       ) {
         lastResolvedValue = outcome.value
@@ -702,7 +703,7 @@ function makeStageNode(
             // the prior value visible while the new promise is in-flight.
             if (
               lastResolvedValue === UNRESOLVED ||
-              !Object.is(lastResolvedValue, state.value)
+              !sameValueZero(lastResolvedValue, state.value)
             ) {
               lastResolvedValue = state.value
               setErrorSig(null)
@@ -821,7 +822,7 @@ function makeStageNode(
       }
       if (
         lastResolvedValue === UNRESOLVED ||
-        !Object.is(lastResolvedValue, state.value)
+        !sameValueZero(lastResolvedValue, state.value)
       ) {
         lastResolvedValue = state.value
         setErrorSig(null)

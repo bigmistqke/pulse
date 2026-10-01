@@ -142,3 +142,21 @@ test('a staged effect skips a commit equal to the one it last made', () => {
   setN(4)
   expect(commits).toEqual(['odd', 'even'])
 })
+
+/**
+ * @canon rule-a-staged-effect-skips-a-commit-equal-to-its-last
+ */
+test('a staged effect whose async stage settles to -0 after 0 does not commit again', async () => {
+  const [n, setN] = signal(0)
+  const commits: number[] = []
+  createRoot(() => {
+    effect([() => Promise.resolve(n() === 0 ? 0 : -0)], (value) => {
+      commits.push(value)
+    })
+  })
+  await new Promise<void>((resolve) => setTimeout(resolve))
+  expect(commits).toEqual([0])
+  setN(1)
+  await new Promise<void>((resolve) => setTimeout(resolve))
+  expect(commits.length).toBe(1)
+})

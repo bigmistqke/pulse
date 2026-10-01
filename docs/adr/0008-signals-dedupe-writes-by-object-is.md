@@ -38,4 +38,4 @@ surprising and cuts against pulse's "everything is the same primitive" framing.
 
 ## Note, 2026-10-01
 
-What shipped differs from this record in two ways. The comparison is SameValueZero rather than `Object.is`: r3 drops a write that is `===` to the current value, which already makes `0` and `-0` equal, and pulse drops `NaN` over `NaN` in its own write path rather than change r3. The `equals` option was never implemented: `signal` takes one argument. The current rule is `rule-a-committed-write-of-an-equal-value-is-a-no-op` in `CANON.md`.
+What shipped differs from this record in two ways. The comparison is SameValueZero rather than `Object.is`: r3 drops a write that is `===` to the current value, which already makes `0` and `-0` equal, and pulse drops `NaN` over `NaN` in its own write path rather than change r3. The `equals` option was never implemented: `signal` takes one argument. The current rule is `rule-an-equal-value-does-not-propagate` in `CANON.md`, which applies SameValueZero at every place a value enters the graph, a stage's publish and a staged effect's commit included.

@@ -12,6 +12,7 @@ import {
   type BindingController,
   type ErrorScope,
 } from './owner'
+import { sameValueZero } from './same-value-zero'
 import { chainFor, getCurrentScope } from './scope'
 import { signal } from './signal'
 import { clearErrorSource, runBindingCompute, takeErrorSource } from './transition-tracker'
@@ -185,7 +186,7 @@ function stagedEffect(
     // Dedupe: if the resolved value is the same as what we last committed,
     // skip — this guards against double-fire from use()'s pendingSig + value
     // signals both triggering re-runs under syncScheduler when a promise settles.
-    if (Object.is(value, lastCommitted)) return
+    if (sameValueZero(value, lastCommitted)) return
     lastCommitted = value
     // Build the commit closure. It runs the user's commit with the resolved value.
     const userCommitFn = (): void => {
