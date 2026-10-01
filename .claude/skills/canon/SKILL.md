@@ -102,9 +102,9 @@ An explicit link therefore means one thing: an edge of the graph that nesting ca
 A few strong principles sit at the root of the canon, and narrower axioms sit inside them. A nested axiom narrows the axiom it sits in: it settles, for one part of the system, a choice its parent leaves open. Read from the top, the canon then goes from its base principles down to the behaviour that follows from them.
 
 ```md
-## @axiom behaviour-is-stated-where-the-code-is-written
+## @axiom every-choice-is-stated-where-the-code-is-written
 
-> What the system does is stated where the code is written, and never inferred.
+> What the system does is decided by what the code states, at the place it is written.
 
 ### @axiom speculation-is-opt-in
 
