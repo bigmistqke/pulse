@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'vitest'
-import { createRoot, effect, flush, getOwner, Loading, microtaskScheduler, render, setScheduler, signal, syncScheduler, use } from '../../src/index'
+import { computed, createRoot, effect, flush, getOwner, Loading, microtaskScheduler, render, setScheduler, signal, syncScheduler, use } from '../../src/index'
 import { Fragment } from '../../src/dom'
 import { h } from '../../src/dom/h'
 import { jsx, jsxs } from '../../src/dom/jsx-runtime'
@@ -167,4 +167,24 @@ test('jsxs builds a DOM tag the way h does, children as separate arguments, othe
   expect(element.outerHTML).toBe((h('div', { id: 'a' }, 'x', 'y') as HTMLElement).outerHTML)
   setId('b')
   expect(element.getAttribute('id')).toBe('b')
+})
+
+/**
+ * @canon rule-a-derivation-runs-when-it-is-created
+ */
+test('a computed created and read inside a reactive child renders its value', () => {
+  const target = document.createElement('div')
+  const dispose = render(
+    () => (
+      <div>
+        {() => {
+          const doubled = computed(() => 21 * 2)
+          return String(doubled())
+        }}
+      </div>
+    ),
+    target,
+  )
+  expect(target.textContent).toBe('42')
+  dispose()
 })

@@ -205,7 +205,7 @@ export function signalNode<T>(initial: T): Node<T> {
   return { subs: new Set(), backing: r3Signal(initial) }
 }
 export function computedNode<T>(recipe: () => T): Node<T> {
-  return { subs: new Set(), defaultRecipe: recipe, backing: r3Computed(recipe) }
+  return { subs: new Set(), defaultRecipe: recipe, backing: r3Untrack(() => r3Computed(recipe)) }
 }
 
 export function readValue<T>(node: Node<T>): T {

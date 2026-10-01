@@ -2,7 +2,7 @@ import { expect, test } from 'vitest'
 import { signal } from '../src/derived-signal'
 import { peek, from, use } from '../src/async'
 import { isPending } from '../src/pending'
-import { onCleanup } from '../src/owner'
+import { createRoot, onCleanup } from '../src/owner'
 import { error } from '../src/error'
 import { action } from '../src/scope'
 import { effect } from '../src/effect'
@@ -46,6 +46,57 @@ test('W3: an update function receives the value an eagerly-run derivation produc
   })
   expect(seen).toEqual(['a']) // it ran at creation, so it has a value
   expect(list()).toEqual(['seeded'])
+})
+
+/**
+ * @canon rule-an-update-function-sees-the-value-a-sync-derivation-produced-at-creation
+ */
+test('an update function sees the created value also for a derivation created inside a running computation', () => {
+  const [source] = signal(1)
+  let seen: unknown = 'not called'
+  createRoot(() =>
+    effect(() => {
+      source() // the running computation has read something before the derivation is created
+      const [, setList] = signal(() => ['a'])
+      setList((prev) => {
+        seen = prev
+        return ['b']
+      })
+    }),
+  )
+  expect(seen).toEqual(['a'])
+})
+
+/**
+ * @canon rule-a-derivation-runs-when-it-is-created
+ */
+test('a derivation created outside every computation runs at once', () => {
+  let runs = 0
+  signal(() => {
+    runs++
+    return 1
+  })
+  expect(runs).toBe(1)
+})
+
+/**
+ * @canon rule-a-derivation-runs-when-it-is-created
+ */
+test('a derivation created inside a running computation that has read something runs at once', () => {
+  const [source] = signal(1)
+  let runsAtCreation = -1
+  createRoot(() =>
+    effect(() => {
+      source()
+      let runs = 0
+      signal(() => {
+        runs++
+        return 1
+      })
+      runsAtCreation = runs
+    }),
+  )
+  expect(runsAtCreation).toBe(1)
 })
 
 /**

@@ -970,3 +970,42 @@ describe('computed — NotReadyYet absorbed as suspension (Plan B)', () => {
   })
 })
 
+
+/**
+ * @canon rule-creating-a-derivation-is-not-reading-it
+ */
+test('an effect that creates a computed it never reads runs once', async () => {
+  const [source] = signal(1)
+  let runs = 0
+  createRoot(() =>
+    effect(() => {
+      source()
+      runs++
+      if (runs > 5) return // stop a loop, so the failure is a count rather than a hang
+      computed(() => 1)
+    }),
+  )
+  await tick()
+  flush()
+  await tick()
+  expect(runs).toBe(1)
+})
+
+/**
+ * @canon rule-creating-a-derivation-is-not-reading-it
+ */
+test('an effect that creates a computed and reads it runs once', async () => {
+  let runs = 0
+  createRoot(() =>
+    effect(() => {
+      runs++
+      if (runs > 5) return
+      const c = computed(() => 1)
+      c()
+    }),
+  )
+  await tick()
+  flush()
+  await tick()
+  expect(runs).toBe(1)
+})

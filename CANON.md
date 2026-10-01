@@ -58,6 +58,7 @@ The canon was written backwards from the existing tests and documents, and descr
       - [`@case a-speculative-write-dirties-what-derives-from-it`](#case-a-speculative-write-dirties-what-derives-from-it) — `scope.ts` `invalidateDownstream`.
       - [`@case a-slot-caches-undefined-like-any-value`](#case-a-slot-caches-undefined-like-any-value) — `scope.ts` `DIRTY`.
       - [`@case a-recompute-replaces-its-links`](#case-a-recompute-replaces-its-links) — `scope.ts` `resetSlotDeps`.
+    - [`@rule a-derivation-runs-when-it-is-created`](#rule-a-derivation-runs-when-it-is-created) — A derivation runs when it is created, wherever it is created, inside a running computation included.
   - [`@axiom plain-reads-are-honest`](#axiom-plain-reads-are-honest) — A read reports what is there. Whether a value is still pending, or has failed, is a separate question asked through its own verb.
     - [`@rule peek-returns-the-last-resolved-value`](#rule-peek-returns-the-last-resolved-value) — `peek(x)` returns the most recent value that resolved for `x`. A value that is not a promise counts as resolved, and is returned as it is.
     - [`@rule peek-returns-undefined-before-anything-resolved`](#rule-peek-returns-undefined-before-anything-resolved) — `peek(x)` returns `undefined` while nothing has ever resolved for `x`.
@@ -90,8 +91,7 @@ The canon was written backwards from the existing tests and documents, and descr
     - [`@rule retry-runs-the-action-again-as-a-new-speculation`](#rule-retry-runs-the-action-again-as-a-new-speculation) — `retry()` runs the action's body again from the start as a new speculation, and clears `error()` at once, before the new attempt has settled.
   - [`@axiom code-that-builds-on-a-value-receives-it-resolved`](#axiom-code-that-builds-on-a-value-receives-it-resolved) — Code that computes a new value from an earlier one is handed that value resolved, never as a promise.
     - [`@rule an-update-function-receives-the-last-resolved-value`](#rule-an-update-function-receives-the-last-resolved-value) — An update function on a writable derivation receives the last value that actually resolved, never a promise, and `undefined` when nothing has resolved yet.
-  - [`@axiom a-derivation-runs-when-it-is-created`](#axiom-a-derivation-runs-when-it-is-created) — A derivation produces its value when it is created, not when it is first read.
-    - [`@rule an-update-function-sees-the-value-a-sync-derivation-produced-at-creation`](#rule-an-update-function-sees-the-value-a-sync-derivation-produced-at-creation) — A derivation runs when it is created. An update function on a sync derivation therefore receives the value that first run produced, even before any write. An async derivation that suspended has produced nothing yet.
+    - [`@rule an-update-function-sees-the-value-a-sync-derivation-produced-at-creation`](#rule-an-update-function-sees-the-value-a-sync-derivation-produced-at-creation) — An update function on a sync derivation receives the value the derivation produced when it was created, even before any write, wherever the derivation was created. An async derivation that suspended has produced nothing yet.
 - [`@axiom only-what-changed-runs-again`](#axiom-only-what-changed-runs-again) — When something changes, only the work that depends on the change runs again, and only from the point where it depends on it.
   - [`@axiom a-consumer-re-runs-only-for-a-real-change`](#axiom-a-consumer-re-runs-only-for-a-real-change) — A consumer re-runs only when something it read actually changed.
     - [`@rule an-equal-value-does-not-propagate`](#rule-an-equal-value-does-not-propagate) — A value equal to the one a node already holds does not reach the node's consumers: nothing re-runs. Two values are equal when they are SameValueZero-equal: `===`, except that `NaN` equals `NaN`. So `0` and `-0` are equal.
@@ -100,6 +100,7 @@ The canon was written backwards from the existing tests and documents, and descr
       - [`@case an-equal-speculative-write-dirties-nothing`](#case-an-equal-speculative-write-dirties-nothing) — `scope.ts` `writeSpeculative`.
     - [`@rule reading-a-computed-again-without-a-change-re-runs-nothing`](#rule-reading-a-computed-again-without-a-change-re-runs-nothing) — Reading a computed a second time, when nothing it read has changed since the first read, returns the same value and runs no stage.
     - [`@rule a-staged-effect-skips-a-commit-equal-to-its-last`](#rule-a-staged-effect-skips-a-commit-equal-to-its-last) — A staged effect does not call `commit` with a value equal to the one it last committed, equal in the SameValueZero sense that [the rule on equal values](#rule-an-equal-value-does-not-propagate) states.
+    - [`@rule creating-a-derivation-is-not-reading-it`](#rule-creating-a-derivation-is-not-reading-it) — A computation that creates a derivation does not depend on it unless it reads it, so the derivation's first run does not run the computation again.
   - [`@axiom a-paused-computation-is-re-entered-at-its-pause`](#axiom-a-paused-computation-is-re-entered-at-its-pause) — Pulse re-enters a paused computation at the finest point it can: a stage boundary with a new input, a generator stage at its pause, and anything else from the top of its body. Work done before that point runs again only when an input it read has changed.
     - [`@rule a-resumed-generator-does-not-rerun-code-before-its-pause`](#rule-a-resumed-generator-does-not-rerun-code-before-its-pause) — A generator stage that paused on a pending value is resumed with that value when it settles. The code before the pause does not run again.
       - [`@case a-paused-generator-is-handed-back-to-its-caller`](#case-a-paused-generator-is-handed-back-to-its-caller) — `driver.ts` `runStage`.
@@ -752,6 +753,14 @@ A dirty slot is marked with its own symbol, not with `undefined`, so a recipe th
 
 Before a slot is recomputed, its existing links are removed from their sources, so links do not pile up across recomputes.
 
+#### @rule a-derivation-runs-when-it-is-created
+
+> A derivation runs when it is created, wherever it is created, inside a running computation included.
+
+This follows because a read is current the moment it is made: a derivation that put off its first run would give a read made right after its creation nothing to return.
+
+r3 puts off the first run of a computed created inside a running computation that has already read something. Pulse creates its derivations with no computation running, so they run at once.
+
 ### @axiom plain-reads-are-honest
 
 > A read reports what is there. Whether a value is still pending, or has failed, is a separate question asked through its own verb.
@@ -992,19 +1001,13 @@ This follows because code that builds on a value receives it resolved: an update
 
 A written promise has not resolved while it is pending, so an update function called then receives the value from before it.
 
-### @axiom a-derivation-runs-when-it-is-created
-
-> A derivation produces its value when it is created, not when it is first read.
-
-This narrows the axiom above to a new derivation: its value is there from the moment it exists, so nothing has to read it first.
-
-No design document states this. It was accepted as a principle when the canon was reviewed.
-
 #### @rule an-update-function-sees-the-value-a-sync-derivation-produced-at-creation
 
-> A derivation runs when it is created. An update function on a sync derivation therefore receives the value that first run produced, even before any write. An async derivation that suspended has produced nothing yet.
+> An update function on a sync derivation receives the value the derivation produced when it was created, even before any write, wherever the derivation was created. An async derivation that suspended has produced nothing yet.
 
-This follows because a derivation runs when it is created: a sync derivation therefore has its value before any write, and the first update function receives it.
+Derives from: [`rule-a-derivation-runs-when-it-is-created`](#rule-a-derivation-runs-when-it-is-created), [`rule-an-update-function-receives-the-last-resolved-value`](#rule-an-update-function-receives-the-last-resolved-value)
+
+This follows because a derivation runs when it is created and an update function receives the last resolved value: a sync derivation has resolved by the time anything can write to it, and an async one that suspended has not.
 
 ## @axiom only-what-changed-runs-again
 
@@ -1061,6 +1064,14 @@ This follows because a consumer re-runs only for a real change, and a second rea
 Derives from: [`rule-a-staged-effect-is-a-pipeline-ending-in-a-commit`](#rule-a-staged-effect-is-a-pipeline-ending-in-a-commit), [`rule-an-equal-value-does-not-propagate`](#rule-an-equal-value-does-not-propagate)
 
 This follows because a consumer re-runs only for a real change, `commit` is the staged effect's consumer of the pipeline's value, and an equal value is not a change.
+
+#### @rule creating-a-derivation-is-not-reading-it
+
+> A computation that creates a derivation does not depend on it unless it reads it, so the derivation's first run does not run the computation again.
+
+This follows because a consumer re-runs only when something it read actually changed, and creating a derivation is not reading it.
+
+r3 links a computed created inside a running computation as a dependency of that computation. Pulse creates its derivations with no computation running, so no such link forms.
 
 ### @axiom a-paused-computation-is-re-entered-at-its-pause
 

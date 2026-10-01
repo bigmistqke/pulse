@@ -130,6 +130,16 @@ type StashedResolution =
   | { kind: 'fulfilled'; value: unknown }
   | { kind: 'rejected'; reason: unknown }
 
+/** An r3 computed created with no computation running, so it runs at once and
+ *  is not linked into whatever computation happens to be creating it. r3 links a
+ *  computed created inside a running computation as that computation's
+ *  dependency and defers its first run; for a stage node that left the creating
+ *  computation reading a stage that had never run, and re-running every time
+ *  one it created settled. */
+function detachedComputed<T>(fn: () => T): R3Computed<T> {
+  return r3Untrack(() => r3Computed(fn))
+}
+
 /**
  * Wrap a single stage in an r3 computed that handles suspension propagation.
  * If `inputAccessor` is null, the stage has no input (it is stage 0). Otherwise
@@ -398,7 +408,7 @@ function makeStageNode(
     setSourceReads(next)
   }
 
-  const depTracker = r3Computed(() =>
+  const depTracker = detachedComputed(() =>
     runNodeCompute(() => {
     try {
       kick() // dep so generator stash-rerun can force body re-run
