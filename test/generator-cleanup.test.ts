@@ -60,12 +60,16 @@ test('onCleanup fires when the generator completes', async () => {
 test('onCleanup fires when the generator is discarded on a dependency change', async () => {
   const [a, setA] = signal(1)
   let cleaned = 0
+  let runs = 0
 
   const c = computed(function* () {
+    runs++
     const av: number = yield* from(a)
     onCleanup(() => cleaned++)
+    // The first run pauses on a promise that never settles, so the change to
+    // `a` below always finds it paused; a timer here would race the ticks.
     const p: number = yield* from(
-      new Promise<number>((resolve) => setTimeout(() => resolve(10), 5)),
+      runs === 1 ? new Promise<number>(() => {}) : Promise.resolve(10),
     )
     return av + p
   })
