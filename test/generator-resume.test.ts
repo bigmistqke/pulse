@@ -172,6 +172,54 @@ test('every dependency read before a pause, however it was read, still re-runs t
 })
 
 /**
+ * @canon spec-dependencies-read-before-a-pause-stay-linked
+ */
+test('a computed read between two pauses still re-runs the stage after the stage has re-run', async () => {
+  // The computed is read after the first pause and before the second, so it is
+  // a dependency read before a pause. The first generator follows it. Every
+  // later generator, started by a change to an input, must follow it too.
+  const [a, setA] = signal(1)
+  const [base, setBase] = signal(100)
+  const derived = computed(() => base() * 2)
+  let runs = 0
+
+  const c = computed(function* () {
+    runs++
+    const av = a()
+    const p: number = yield* from(
+      new Promise<number>((resolve) => setTimeout(() => resolve(0), 1)),
+    )
+    const d = derived()
+    const q: number = yield* from(
+      new Promise<number>((resolve) => setTimeout(() => resolve(0), 1)),
+    )
+    return av + d + p + q
+  })
+
+  c()
+  await ticks(10)
+  expect(peek(c)).toBe(201)
+
+  const observed: Array<[number, number | undefined]> = []
+  const change = async (write: () => void) => {
+    const before = runs
+    write()
+    c()
+    await ticks(10)
+    observed.push([runs - before, peek(c)])
+  }
+  await change(() => setA(2))
+  await change(() => setBase(200))
+  await change(() => setBase(300))
+
+  expect(observed).toEqual([
+    [1, 202],
+    [1, 402],
+    [1, 602],
+  ])
+})
+
+/**
  * @canon spec-a-resumed-stage-replays-its-recorded-dependencies
  */
 test('a signal read before a pause stays a dependency across a resume', async () => {

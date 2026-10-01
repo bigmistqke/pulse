@@ -42,7 +42,7 @@
     "command": "pnpm canon"
   },
   "dependencies": {
-    "r3": "github:bigmistqke/r3#411cd5d451ed00c419d00f9f26b15c6a4731ab0c"
+    "r3": "github:bigmistqke/r3#46a3a6c779c3acd76af713e23b39101c98ab61d4"
   },
   "devDependencies": {
     "@babel/core": "^8.0.1",
