@@ -368,6 +368,7 @@ This document is the project. It holds the theory of pulse: why it is the way it
   - [`@spec a-speculation-announces-how-it-closed`](#spec-a-speculation-announces-how-it-closed) — A callback registered with `onSettled` fires once when its speculation closes, and is told whether the speculation committed or was discarded.
   - [`@spec a-speculation-refuses-to-create-an-effect`](#spec-a-speculation-refuses-to-create-an-effect) — Creating an effect inside a speculation throws. That includes a JSX binding, which is an effect. The throw fails the action like any other error in its body.
   - [`@spec a-prediction-expires-with-its-action`](#spec-a-prediction-expires-with-its-action) — A prediction is dropped when the action that wrote it closes, whether it commits or is discarded. After a discard the prior value shows again.
+    - [`@spec an-expired-prediction-reveals-the-most-recent-one-still-live`](#spec-an-expired-prediction-reveals-the-most-recent-one-still-live) — When a prediction expires, readers outside every action see the most recent prediction still live, or the derivation's value when none is.
   - [`@spec after-a-commit-only-what-the-action-wrote-to-the-source-remains`](#spec-after-a-commit-only-what-the-action-wrote-to-the-source-remains) — When the action that wrote a prediction commits, the prediction's reader shows the source's value: the action's own committed write when it wrote the source, and the source's earlier value when it did not. The prior value does not show in between.
   - [`@spec a-prediction-sits-in-front-of-its-derivation`](#spec-a-prediction-sits-in-front-of-its-derivation) — A prediction is a layer in front of the derivation, never written into it. The derivation keeps following its sources underneath, and shows through when the last layer drops. The accessor the optimistic value wraps keeps reading the canonical value throughout.
   - [`@spec a-write-to-a-derivation-in-an-action-touches-its-work-only-once-committed`](#spec-a-write-to-a-derivation-in-an-action-touches-its-work-only-once-committed) — A write to a derivation made inside an action touches the derivation's own work, its run in progress, the value it compares its next result against, and what it has published, only once the write reaches committed state.
@@ -2989,6 +2990,14 @@ An effect pushes values out of the reactive graph: into the DOM, a log, the netw
 Derives from: [`spec-an-optimistic-value-is-a-signal-variant`](#spec-an-optimistic-value-is-a-signal-variant)
 
 This follows because a speculation's tentative state lasts until it commits or is discarded: a prediction is tentative state of its action, so it goes when the action closes.
+
+#### @spec an-expired-prediction-reveals-the-most-recent-one-still-live
+
+> When a prediction expires, readers outside every action see the most recent prediction still live, or the derivation's value when none is.
+
+Derives from: [`spec-a-prediction-shows-outside-its-action`](#spec-a-prediction-shows-outside-its-action)
+
+This follows because readers outside every action see the most recent live prediction. When one expires, they see the most recent of the predictions still live.
 
 ### @spec after-a-commit-only-what-the-action-wrote-to-the-source-remains
 

@@ -405,6 +405,38 @@ test('a refused action does not leave its prediction inside a later action layer
 })
 
 /**
+ * @canon spec-an-expired-prediction-reveals-the-most-recent-one-still-live
+ */
+test('when the newest prediction expires, the next most recent one shows, and then the derivation', async () => {
+  const [source] = signal(() => Promise.resolve(['saved'] as string[]), [] as string[])
+  const [view, setView] = optimistic(source, [] as string[])
+  await tick()
+  await tick()
+
+  const older = gate()
+  const newer = gate()
+  const runOlder = action(function* () {
+    setView(['saved', 'A1'])
+    yield* from(older.promise)
+  })
+  const runNewer = action(function* () {
+    setView(['saved', 'B1'])
+    yield* from(newer.promise)
+  })
+  expect(latest(view)).toEqual(['saved', 'B1'])
+
+  // The newer action closes first: the older prediction is still live, so it
+  // shows, not the derivation.
+  newer.resolve()
+  await runNewer.settled
+  expect(latest(view)).toEqual(['saved', 'A1'])
+
+  older.resolve()
+  await runOlder.settled
+  expect(latest(view)).toEqual(['saved'])
+})
+
+/**
  * @canon spec-an-update-function-builds-only-on-predictions-of-its-own-chain
  */
 test('a nested action with no prediction of its own builds on its parent\'s, never on a sibling\'s', async () => {
