@@ -17,13 +17,14 @@ Documentation rots because nothing checks it. The canon cannot rot without the c
 
 1. The canon outranks every other source of intent: the code, the tests, the README, glossaries, decision records, memory, and your own assumptions.
 2. Only the owner of the design decides values. You propose, and the owner judges. Ask whenever the canon does not decide a question.
-3. The owner changes the project through the canon too. When the owner asks for something the canon forbids, do not carry it out. Name the conflict and the units involved.
-4. If the owner confirms, change the canon first. Then change the tests, and then the code.
-5. When the code contradicts the canon, the code has a defect. Follow section 5.
-6. When a test asserts something other than the spec it cites, the spec decides. Correct the test, unless the owner rules that the spec is wrong.
-7. When two units contradict each other, the canon is wrong. Ask the owner which claim holds, and correct the canon.
-8. When the canon is wrong, correct the canon first. Then correct the tests, and then the code.
-9. No change enters the project unless the canon accounts for it.
+3. Ask one question at a time, and give your recommended answer with it. If the code or the canon can answer a question, read them instead of asking.
+4. The owner changes the project through the canon too. When the owner asks for something the canon forbids, do not carry it out. Name the conflict and the units involved.
+5. If the owner confirms, change the canon first. Then change the tests, and then the code.
+6. When the code contradicts the canon, the code has a defect. Follow section 5.
+7. When a test asserts something other than the spec it cites, the spec decides. Correct the test, unless the owner rules that the spec is wrong.
+8. When two units contradict each other, the canon is wrong. Ask the owner which claim holds, and correct the canon.
+9. When the canon is wrong, correct the canon first. Then correct the tests, and then the code.
+10. No change enters the project unless the canon accounts for it.
 
 ## 1. The session
 
@@ -45,6 +46,7 @@ Documentation rots because nothing checks it. The canon cannot rot without the c
 | `@fact` | how the platform the project is built on is, whatever the project does | nothing |
 | `@spec` | what the system does, stated so a test could contradict it, and optionally the place in the code that does it | `@axiom` or `@spec` — may cite `@fact` |
 | `@exception` | where a fact keeps a spec from holding fully | `@spec` and `@fact` |
+| `@term` | a word of the project's language: what the thing it names is, in one sentence — never what it does | nothing |
 <!-- kinds:end -->
 
 Tell the kinds apart with two questions:
@@ -52,6 +54,7 @@ Tell the kinds apart with two questions:
 1. Does the claim still hold if someone rebuilt the system with different internals? Then it is an axiom.
 2. Does the claim still hold if nobody had built the system? Then it is a fact.
 3. A claim that fails both questions is a decision or a behaviour: a spec.
+4. A definition of a word makes no claim. It is a term.
 
 Axioms state how the world should be. Facts state how the platform is. A spec, together with the facts it cites, must make its axiom hold. The split follows [Zave and Jackson](http://www.pamelazave.com/4dc.pdf).
 
@@ -109,6 +112,7 @@ Tests cannot tell an extension from a patch, because many implementations pass t
 4. Make every claim about the system a unit. Body text explains its unit's claim and adds no new claim.
 5. After a change, read each sentence you added to unit bodies and code comments. A sentence that states something the system does needs a unit.
 6. Write in the present tense. History belongs in a decision record.
+7. Write a decision record only for a choice that is hard to reverse, surprising without its context, and the result of a real trade-off.
 
 ```md
 ### @spec a-write-is-visible-before-its-flush
@@ -160,14 +164,34 @@ This follows because a missing value sets nothing: …
 5. An exception lasts as long as its fact. Pin an exception that a library defect forces with `test.fails`. Remove the exception when that test starts failing.
 6. A spec that keeps collecting exceptions asks more than the platform gives. Restate the spec.
 
-## 12. Places in the code
+## 12. Terms
+
+1. A term defines one word of the project's language. Its statement says what the thing is, in one sentence. Never say what it does: behaviour is a spec.
+2. Write terms in the `## Terms` section of a canon document, as `### @term <word>`. No unit sits in a term, and a term sits in no unit (`misnested`).
+3. Choose one word for each concept. List the words to avoid on an `_Avoid_:` line under the statement.
+4. Define only words specific to the project. General programming concepts get no term.
+5. Link a term from the units whose meaning depends on it. A term that no unit links fails the check (`dead`).
+6. Write a term the moment a word's meaning is settled. Do not collect terms for later.
+7. When the owner or a unit uses a word against its term, name the conflict at once.
+8. When a word is vague or carries two meanings, propose one precise term, and ask the owner of the design.
+9. Test a term against concrete scenarios that probe its edges. Check that the code agrees with it.
+
+```md
+### @term present
+
+> The state of the system after every write so far, with nothing still on its way.
+
+_Avoid_: current state, now
+```
+
+## 13. Places in the code
 
 1. A spec that answers for one place opens its statement with the place: `` `queue.ts` `drain`. `` The checker confirms the place exists (`stale-site`).
 2. Where two modules share a name, give a path that ends in the file, such as `dom/error.ts`.
 3. A place that answers for several specs gets one spec under each. The stem states the claim, not the place.
 4. Run `tree --suspect`. A spec with many tests and no nested specs probably states several claims. Split it into nested specs.
 
-## 13. Tests
+## 14. Tests
 
 1. Cite the narrowest spec or exception that the assertion could contradict.
 2. Cite with a `@canon <id>` tag in the JSDoc of a leaf test. A `describe` block never cites.
@@ -183,18 +207,18 @@ This follows because a missing value sets nothing: …
 test('a throwing listener does not stop the next one', () => {
 ```
 
-## 14. Implementation
+## 15. Implementation
 
 1. Source code carries no citations.
 2. Open each source file with a block comment: what the file is, how its parts fit, and which axiom it serves.
 3. Do not add links from code to the canon. Per-symbol tags were tried and dropped as too messy, and only a test credits a unit.
 
-## 15. Structure
+## 16. Structure
 
 1. Change the canon's structure only for a defect that points to it, or for a claim that no unit states.
 2. Never reorganise the canon for its own sake. Nothing pushes back on a reorganisation, because no test cites an axiom or a fact.
 
-## 16. Scope
+## 17. Scope
 
 Declare the scope in the `canon` field of `package.json`:
 
@@ -217,7 +241,7 @@ Declare the scope in the `canon` field of `package.json`:
 - `references`: prose documents whose links must resolve but credit no unit. Default none.
 - `command`: how the project runs the checker, for the advice in findings.
 
-## 17. Commands
+## 18. Commands
 
 ```bash
 pnpm canon check              # every finding; exits 1 on a finding

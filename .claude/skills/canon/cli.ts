@@ -106,7 +106,7 @@ const PROTOCOL = join(dirname(fileURLToPath(import.meta.url)), 'SKILL.md');
  * to `OWES` without a matching entry here, or cited by a name that is not one of
  * these, stops compiling instead of silently matching nothing.
  */
-type Kind = 'axiom-' | 'fact-' | 'spec-' | 'exception-';
+type Kind = 'axiom-' | 'fact-' | 'spec-' | 'exception-' | 'term-';
 
 /**
  * kind → what a reader reaches for it for. Generated into `SKILL.md` beside
@@ -119,7 +119,9 @@ const MEANS: Record<Kind, string> = {
     'how the platform the project is built on is, whatever the project does',
   'spec-':
     'what the system does, stated so a test could contradict it, and optionally the place in the code that does it',
-  'exception-': 'where a fact keeps a spec from holding fully'
+  'exception-': 'where a fact keeps a spec from holding fully',
+  'term-':
+    'a word of the project\'s language: what the thing it names is, in one sentence — never what it does'
 };
 
 /**
@@ -132,7 +134,8 @@ const OWES: Record<Kind, Kind[][] | null> = {
   'axiom-': null, // primitive by kind — owes nothing
   'fact-': null, // imposed by the platform — owes nothing
   'spec-': [['axiom-', 'spec-']],
-  'exception-': [['spec-'], ['fact-']]
+  'exception-': [['spec-'], ['fact-']],
+  'term-': null // a definition, outside the derivation graph — owes nothing
 };
 
 /**
@@ -507,7 +510,8 @@ const HUE: Record<Kind, string> = {
   'axiom-': '1;35', // bold magenta
   'fact-': '1;34', // bold blue — a given, but not a chosen one
   'spec-': '36', // cyan
-  'exception-': '33' // yellow — where the shoe does not fit should catch the eye
+  'exception-': '33', // yellow — where the shoe does not fit should catch the eye
+  'term-': '1;32' // bold green
 };
 
 /**
@@ -523,7 +527,8 @@ const DIM: Record<Kind, string> = {
   'axiom-': '2;35',
   'fact-': '2;34',
   'spec-': '2;36',
-  'exception-': '2;33'
+  'exception-': '2;33',
+  'term-': '2;32'
 };
 
 /**
@@ -699,7 +704,10 @@ function treeOf(
     });
   };
 
+  // A term defines a word and derives from nothing, so it is no part of the
+  // derivation tree. The heading line still counts the terms.
   for (const root of headings.filter(u => !u.parent || !byId.has(u.parent))) {
+    if (kindOf(root.id ?? '') === 'term-') continue;
     if (!keep(root)) continue;
     const rootKind = kindOf(root.id ?? '') ?? 'axiom-';
     const [rootTag, ...rootLabel] = prose(root.id ?? '').split(' ');
