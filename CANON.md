@@ -20,6 +20,8 @@ This document is the project. It holds the theory of pulse: why it is the way it
 - [`@term prediction`](#term-prediction) — A value that an action writes through an optimistic setter, shown in front of the derivation's own value.
 - [`@term first-load`](#term-first-load) — A pending episode of a source that has never resolved a real value.
 - [`@term refresh`](#term-refresh) — A pending episode of a source that has resolved a real value before.
+- [`@term ambient-context`](#term-ambient-context) — A value set for the duration of one call and visible to everything the call runs: the current owner, speculation or binding.
+- [`@term report`](#term-report) — What a binding's read tells the boundaries above it about a source, loading, refreshing or failed, without the binding waiting.
 - [`@term owner`](#term-owner) — A node in the tree of lifetimes, to which reactive nodes, cleanups and other owners belong.
 - [`@term boundary`](#term-boundary) — A loading boundary or an error boundary.
 - [`@term loading-boundary`](#term-loading-boundary) — The owner a `<Loading>` component creates to gather the pending state of the bindings beneath it.
@@ -57,7 +59,7 @@ This document is the project. It holds the theory of pulse: why it is the way it
     - [`@spec an-optimistic-value-is-a-signal-variant`](#spec-an-optimistic-value-is-a-signal-variant) — `optimistic(...stages)` builds the same pipeline `computed` and `signal` build, and returns an ordinary node. Only its setter differs: it writes a prediction rather than a value.
       - [`@spec an-optimistic-value-is-read-like-any-node`](#spec-an-optimistic-value-is-read-like-any-node) — The accessor of an [optimistic value](#term-optimistic-value) is an ordinary node. Every read verb applies to it, and the pending and failed state of what its recipe reads reaches the read site through it.
       - [`@spec an-optimistic-fallback-seeds-the-tolerant-read`](#spec-an-optimistic-fallback-seeds-the-tolerant-read) — A fallback passed when an optimistic value is created is what `peek` and `latest` return before the source has resolved.
-  - [`@spec ambient-context-is-set-for-a-call-and-restored-after`](#spec-ambient-context-is-set-for-a-call-and-restored-after) — Ambient context, such as the current owner, is set for the duration of one call and restored when that call ends, however it ends.
+  - [`@spec ambient-context-is-set-for-a-call-and-restored-after`](#spec-ambient-context-is-set-for-a-call-and-restored-after) — [Ambient context](#term-ambient-context), such as the current owner, is set for the duration of one call and restored when that call ends, however it ends.
     - [`@spec there-is-no-ambient-owner-outside-every-root`](#spec-there-is-no-ambient-owner-outside-every-root) — Outside every root, `getOwner()` returns null, also after a root has run and after it has been disposed.
     - [`@spec runwithowner-restores-the-previous-owner`](#spec-runwithowner-restores-the-previous-owner) — `runWithOwner` makes its owner ambient for the call, `null` included, and restores the previous owner when the call returns or throws.
     - [`@spec an-action-body-is-speculative-while-pulse-drives-it`](#spec-an-action-body-is-speculative-while-pulse-drives-it) — An action's body writes speculatively for as long as pulse is running it: the whole of a sync body, every resume of a generator body, and the synchronous prefix of an async body. A write after `yield*` in a generator body is still speculative, and so is a derivation read there.
@@ -200,7 +202,7 @@ This document is the project. It holds the theory of pulse: why it is the way it
       - [`@spec settled-does-not-wait-on-an-input-that-has-settled`](#spec-settled-does-not-wait-on-an-input-that-has-settled) — `settled` does not suspend for an input that has already settled, a raw promise included. A run whose inputs have all settled returns at once, so a stage fed an already-settled raw promise converges instead of suspending on every run.
       - [`@spec settled-throws-a-rejected-input`](#spec-settled-throws-a-rejected-input) — When an input of `settled` has rejected, `yield* settled([…])` throws its reason instead of returning a value for it.
       - [`@spec settled-waits-again-when-an-input-refreshes`](#spec-settled-waits-again-when-an-input-refreshes) — When an input of `settled` refreshes, the stage waits on that input's promise in flight, found through `promiseOf`, not on the stale value its accessor returns, and publishes the new combination only once it has settled.
-  - [`@spec the-read-verb-decides-what-renders-and-what-waits`](#spec-the-read-verb-decides-what-renders-and-what-waits) — The verb a binding reads with decides what the binding renders and whether it waits for its neighbours. Everything else in the loading lifecycle is reported ambiently, from the reads the binding makes.
+  - [`@spec the-read-verb-decides-what-renders-and-what-waits`](#spec-the-read-verb-decides-what-renders-and-what-waits) — The verb a binding reads with decides what the binding renders and whether it waits for its neighbours. Everything else in the loading lifecycle is [reported](#term-report), from the reads the binding makes.
     - [`@spec use-renders-only-a-current-value`](#spec-use-renders-only-a-current-value) — `use(x)` gives the binding the current value of `x` and nothing else: it returns a value that is there, and throws when there is none to give, whether `x` is pending or failed.
       - [`@spec use-is-typed-as-the-awaited-value`](#spec-use-is-typed-as-the-awaited-value) — `use(x)` is typed as the value `x` holds with any promise awaited, and never as possibly `undefined`.
       - [`@spec use-returns-a-value-that-is-not-a-promise-unchanged`](#spec-use-returns-a-value-that-is-not-a-promise-unchanged) — `use(x)` returns `x` unchanged when `x` is not a promise. A falsy value is a value: `use(0)`, `use(null)`, `use(undefined)`, `use(false)` and `use('')` return it.
@@ -364,7 +366,7 @@ This document is the project. It holds the theory of pulse: why it is the way it
       - [`@spec errored-error-renders-only-while-the-boundary-is-failed`](#spec-errored-error-renders-only-while-the-boundary-is-failed) — `dom/error.ts` `Errored.Error`.
   - [`@axiom a-reset-re-attempts-the-work-where-it-failed`](#axiom-a-reset-re-attempts-the-work-where-it-failed) — Resetting a boundary re-attempts the work behind each failure it holds, at the point where that failure started.
     - [`@spec reset-uses-the-latest-retry-a-binding-reported`](#spec-reset-uses-the-latest-retry-a-binding-reported) — A boundary's reset calls the retry from each binding's most recent report, even when that report did not change the published collection.
-    - [`@spec reset-recomputes-the-failed-source-at-the-root-of-its-chain`](#spec-reset-recomputes-the-failed-source-at-the-root-of-its-chain) — When a failed binding read a failed node, reset clears the error at the deepest failed stage of that node's chain and recomputes it, even with unchanged inputs. This holds whether the binding read the node with `use`, which threw, or through a tolerant read, which reported the failure ambiently.
+    - [`@spec reset-recomputes-the-failed-source-at-the-root-of-its-chain`](#spec-reset-recomputes-the-failed-source-at-the-root-of-its-chain) — When a failed binding read a failed node, reset clears the error at the deepest failed stage of that node's chain and recomputes it, even with unchanged inputs. This holds whether the binding read the node with `use`, which threw, or through a tolerant read, which reported the failure.
     - [`@spec resetting-an-optimistic-error-retries-its-source`](#spec-resetting-an-optimistic-error-retries-its-source) — Resetting the error of an optimistic value, as an error boundary's retry does, recomputes the failed source it wraps.
     - [`@spec reset-reruns-a-binding-that-threw-a-plain-error`](#spec-reset-reruns-a-binding-that-threw-a-plain-error) — When a binding threw an error that no failed node stands behind, reset re-runs that binding.
     - [`@spec an-errored-reset-retries-a-failed-action`](#spec-an-errored-reset-retries-a-failed-action) — An `<Errored>` boundary holding a failed action's report retries that action when it resets: its reset calls the action's own `retry()`.
@@ -470,6 +472,14 @@ _Avoid_: layer, guess
 > A pending episode of a source that has resolved a real value before.
 
 _Avoid_: refetch, reload
+
+### @term ambient-context
+
+> A value set for the duration of one call and visible to everything the call runs: the current owner, speculation or binding.
+
+### @term report
+
+> What a binding's read tells the boundaries above it about a source, loading, refreshing or failed, without the binding waiting.
 
 ### @term owner
 
@@ -737,7 +747,7 @@ This follows because an optimistic value is a signal variant rather than a separ
 
 ### @spec ambient-context-is-set-for-a-call-and-restored-after
 
-> Ambient context, such as the current owner, is set for the duration of one call and restored when that call ends, however it ends.
+> [Ambient context](#term-ambient-context), such as the current owner, is set for the duration of one call and restored when that call ends, however it ends.
 
 Derives from: [`fact-javascript-has-no-context-scoped-to-a-call`](#fact-javascript-has-no-context-scoped-to-a-call)
 
@@ -1785,7 +1795,7 @@ This follows because `settled` returns only a combination in which no input is s
 
 ### @spec the-read-verb-decides-what-renders-and-what-waits
 
-> The verb a binding reads with decides what the binding renders and whether it waits for its neighbours. Everything else in the loading lifecycle is reported ambiently, from the reads the binding makes.
+> The verb a binding reads with decides what the binding renders and whether it waits for its neighbours. Everything else in the loading lifecycle is [reported](#term-report), from the reads the binding makes.
 
 This follows because every choice is stated where the code is written: whether a binding waits is decided at the binding, by the verb it reads with, rather than by the write that happened to cause the change.
 
@@ -1879,7 +1889,7 @@ This follows because the verb decides what a binding renders, and a suspended bi
 
 Derives from: [`spec-a-boundary-shows-initial-until-its-first-load`](#spec-a-boundary-shows-initial-until-its-first-load)
 
-This follows because only the verb decides whether a binding waits, and everything else is reported ambiently: `latest` is the verb that does not wait, so the load can only be reported.
+This follows because only the verb decides whether a binding waits, and everything else is reported: `latest` is the verb that does not wait, so the load can only be reported.
 
 ##### @spec a-latest-report-survives-a-boundary-remount
 
@@ -1891,7 +1901,7 @@ This follows because the report comes from the source's own state, kept with the
 
 > A binding that reads a failed node through `latest` reports the failure to the nearest accepting error boundary, though nothing throws, and reports its recovery when a later run sees no error.
 
-This follows because everything in the loading lifecycle other than rendering and waiting is reported ambiently from the reads a binding makes: a `latest` read of a failed node does not throw, so the failure is reported instead.
+This follows because everything in the loading lifecycle other than rendering and waiting is reported from the reads a binding makes: a `latest` read of a failed node does not throw, so the failure is reported instead.
 
 #### @spec peek-reports-nothing
 
@@ -2965,7 +2975,7 @@ This follows because a reset re-attempts the work behind each failure: the lates
 
 #### @spec reset-recomputes-the-failed-source-at-the-root-of-its-chain
 
-> When a failed binding read a failed node, reset clears the error at the deepest failed stage of that node's chain and recomputes it, even with unchanged inputs. This holds whether the binding read the node with `use`, which threw, or through a tolerant read, which reported the failure ambiently.
+> When a failed binding read a failed node, reset clears the error at the deepest failed stage of that node's chain and recomputes it, even with unchanged inputs. This holds whether the binding read the node with `use`, which threw, or through a tolerant read, which reported the failure.
 
 This follows because a reset re-attempts the work where the failure started: in a chain, that is the deepest failed stage, not the stage that only passed the error on.
 
