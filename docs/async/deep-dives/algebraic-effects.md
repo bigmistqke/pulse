@@ -318,7 +318,7 @@ React Suspense is an encoded effect handler. `use(promise)` performs a Suspend e
 
 ### In pulse
 
-Three encoded effects, with the table from our [CONTEXT.md Conceptual model section](../../../CONTEXT.md#conceptual-model):
+Three encoded effects, with the table from our [the effects table under `axiom-each-job-is-done-by-one-mechanism` in CANON.md](../../../CANON.md#axiom-each-job-is-done-by-one-mechanism):
 
 | Effect | Performer | Handler |
 |---|---|---|

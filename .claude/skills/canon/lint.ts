@@ -46,14 +46,17 @@ const VOCABULARY = ['component', 'effect', 'function', 'interface', 'option', 'r
 
 /**
  * Blank out what is not prose written by hand, keeping every offset so the
- * positions reported still point into the file: HTML comments and the
- * regions `canon generate` writes.
+ * positions reported still point into the file: HTML comments, the regions
+ * `canon generate` writes, and table rows.
  */
 function blankGenerated(src: string): string {
   const blank = (m: string): string => m.replace(/[^\n]/g, ' ')
   return src
     .replace(/<!--[ \t]*(\w+):begin\b[\s\S]*?<!-- \1:end -->/g, blank)
     .replace(/<!--[\s\S]*?-->/g, blank)
+    // A table's cells are not sentences. Without the GFM extension the parser
+    // reads a table as one long paragraph, so its rows are blanked instead.
+    .replace(/^\|.*$/gm, blank)
 }
 
 /** Drop headings: a unit heading is an identifier, not a sentence. */

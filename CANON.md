@@ -569,7 +569,18 @@ Axioms are named, not numbered, so a spec cites what its axiom says rather than 
 
 > Each job is done by one mechanism, reused wherever the job comes back, rather than a mechanism for each use.
 
-Pulse handles suspension, errors, owner lookup and boundary lookup with the same three patterns: a throw that is caught and resumed on settle, a walk up the owner tree to the nearest handler, and an ambient slot set around one call. The _Conceptual model_ of [`CONTEXT.md`](CONTEXT.md) says its coherence comes from reusing them across every coordination primitive rather than introducing new mechanisms. [P5 in the exploration record](docs/pulse/framings.md#p5--compose-dont-proliferate-in-either-direction) states the same for the public API.
+Pulse handles suspension, errors, owner lookup and boundary lookup with the same three patterns: a throw that is caught and resumed on settle, a walk up the owner tree to the nearest handler, and an ambient slot set around one call. Its coherence comes from reusing them across every coordination primitive rather than introducing new mechanisms.
+
+Each primitive has the shape of an algebraic effect: one piece of code raises an operation, and a handler up the dynamic context decides what to do with it, such as commit, defer, resume, abort or ignore. JavaScript has no first-class delimited continuations, so the three patterns stand in for them.
+
+| Operation | Raised by | Handled by |
+|---|---|---|
+| Suspension | `use(x)` throwing `NotReadyYet` | the binding or computed that ran it, which runs again once the promise settles |
+| Loading coordination | `use(x)` enrolling the binding | the nearest `<Loading>`, which holds the commits and lands them together |
+| Failure | a throw that is not a suspension | the nearest `<Errored>` or `catchError` above that accepts it, in one walk |
+| Owner lookup | `getOwner()` reading the ambient owner | `runWithOwner`, which sets it for one call |
+| Boundary lookup | `useLoading()` or `useErrored()` walking the owner tree | `<Loading>` or `<Errored>`, which attach their state to their owner |
+| Speculation | a write inside an action | the action's scope, which commits or discards it as one unit | [P5 in the exploration record](docs/pulse/framings.md#p5--compose-dont-proliferate-in-either-direction) states the same for the public API.
 
 ### @axiom build-on-r3-rather-than-change-it
 
@@ -785,7 +796,7 @@ Derives from: [`fact-javascript-has-no-context-scoped-to-a-call`](#fact-javascri
 
 This follows because one mechanism passes every kind of ambient context, and JavaScript has no context scoped to a call: the one way left is a slot shared by every call, set before the call and restored after it, however it ends.
 
-Pulse passes context the way a language without first-class continuations can: a module-level slot for the current value, set around a call and restored after it. It is the third structural pattern in the conceptual model of [`CONTEXT.md`](CONTEXT.md).
+Pulse passes context the way a language without first-class continuations can: a module-level slot for the current value, set around a call and restored after it. It is the third of the patterns under [`axiom-each-job-is-done-by-one-mechanism`](#axiom-each-job-is-done-by-one-mechanism).
 
 #### @spec there-is-no-ambient-owner-outside-every-root
 
@@ -1281,7 +1292,9 @@ A stage that reads another node as its input reports that node's pending state a
 
 > When something changes, only the work that depends on the change runs again, and only from the point where it depends on it.
 
-Pulse belongs to the incremental-computation lineage the _Theoretical lineage_ section of [`CONTEXT.md`](CONTEXT.md) traces: a computation graph is described once, and the runtime re-evaluates only the affected portions when its leaves change. The [README](README.md) states the same for the page: fine-grained, with no virtual DOM.
+Pulse belongs to the lineage of incremental, or self-adjusting, computation. Its sources include Umut Acar's research on self-adjusting computation and Jane Street's [`incremental`](https://github.com/janestreet/incremental). Yaron Minsky's talk [Seven Implementations of Incremental](https://www.youtube.com/watch?v=G6a5G5i4gQU) and Milo Mighdoll's [`reactively`](https://github.com/milomg/reactively) and r2 belong to it too. In that lineage, code describes a computation graph once. When its leaves change, the runtime re-evaluates only the affected portions. r3 takes from it the ordering of nodes by topological height.
+
+A stage boundary in a pipeline plays the part of `bind` in an incremental graph. The `bind` operator lets a node's output depend on a sub-graph built at run time. When a stage's input changes, the rest of the pipeline runs again with the new value, as the sub-graph past a `bind` does. The [README](README.md) states the same for the page: fine-grained, with no virtual DOM.
 
 ### @spec an-equal-value-does-not-propagate
 
@@ -1343,7 +1356,11 @@ Derives from: [`fact-only-a-generator-can-be-resumed`](#fact-only-a-generator-ca
 
 This follows because only the work that depends on a change runs again, from the point where it depends on it, and in JavaScript only a generator can be resumed: a stage boundary and a generator's pause are the finest points pulse can re-enter, and a body that stopped by throwing can only run again from the top.
 
-A stage boundary is where work that should not be redone belongs. Within a generator stage, a continuation runs forward once per pause, and a changed input replaces it instead of rewinding it, because a JavaScript generator cannot be re-entered at an earlier point. A body that suspends by throwing, through `use`, cannot be resumed at all and runs again from the top. The three levels are described in the Pipeline entry of [`CONTEXT.md`](CONTEXT.md), and the generator level is decided in [ADR 0013](docs/adr/0013-generator-stages-resume-with-dependency-replay.md).
+A stage boundary is where work that should not be redone belongs. Within a generator stage, a continuation runs forward once per pause, and a changed input replaces it instead of rewinding it, because a JavaScript generator cannot be re-entered at an earlier point. A body that suspends by throwing, through `use`, cannot be resumed at all and runs again from the top. The generator level is decided in [ADR 0013](docs/adr/0013-generator-stages-resume-with-dependency-replay.md).
+
+Pulse re-enters work at three levels. A stage boundary is multi-shot: a stage runs again with each new input, without running the stages before it. That is what an algebraic-effect handler does when it resumes a continuation with different values. Within a generator stage, a continuation runs on once per pause. Everywhere else in a stage, a suspension runs the body again from the top, as React Suspense does.
+
+[Bauer and Pretnar's "Programming with Algebraic Effects and Handlers"](https://arxiv.org/abs/1203.1539) gives the formal theory. [Dan Abramov's "Algebraic Effects for the Rest of Us"](https://overreacted.io/algebraic-effects-for-the-rest-of-us/) is an introduction in JavaScript.
 
 #### @spec a-resumed-generator-does-not-rerun-code-before-its-pause
 
@@ -1747,7 +1764,7 @@ The order began as whatever order the boundary's collection happened to iterate 
 
 > What pulse does is decided by what the code states, at the place it is written. Pulse infers no choice from a name, a value or a convention, and applies none silently.
 
-The introduction of [`CONTEXT.md`](CONTEXT.md) names this as the framework's bet: every coordination choice is visible at the call site and can be found by searching for it, at the price of verbosity. [P4 in the exploration record](docs/pulse/framings.md#p4--explicit-boundaries-over-implicit-pervasiveness) states it for speculation, and [P2](docs/pulse/framings.md#p2--acknowledge-async-dont-hide-it) for async.
+This is pulse's bet. Solid 2.x coordinates per write, by wrapping a mutation in `startTransition`; pulse coordinates per read site. Every coordination choice is then visible at the call site and can be found by searching for it. The price is verbosity, and forgetting `use` opts a binding out without any warning. The comparison is in [`docs/solid-2x-comparison.md`](docs/solid-2x-comparison.md). [P4 in the exploration record](docs/pulse/framings.md#p4--explicit-boundaries-over-implicit-pervasiveness) states it for speculation, and [P2](docs/pulse/framings.md#p2--acknowledge-async-dont-hide-it) for async.
 
 ### @spec the-value-of-an-async-node-is-taken-out-at-the-read-site
 
@@ -1953,6 +1970,21 @@ This follows because the verb decides whether a binding waits for its neighbours
 
 The binding need not suspend itself: `use(plainSignal)` never throws, but still makes the binding wait for a suspended sibling.
 
+A page label and a list show how this makes a transition:
+
+```tsx
+<Loading initial={<Spinner />}>
+  {() => (
+    <>
+      <span>page {() => use(page) + 1}</span>
+      <For each={() => use(list)}>{(item) => <Row item={item} />}</For>
+    </>
+  )}
+</Loading>
+```
+
+`page` is a plain signal, so `use(page)` never throws, but it enrols the label in the gate. On the next page, `list` refreshes and the list's binding suspends. The label's new commit waits at the gate. Both land in one pass when `list` settles, so the page never shows the new number above the old rows.
+
 ##### @spec a-reactive-child-that-called-use-waits-for-the-gate
 
 > `bindings.ts` `insertChild`.
@@ -1997,7 +2029,7 @@ A side effect that has to land together with rendered content belongs in a bindi
 
 This follows because every choice is stated where the code is written: which bindings land together, and what shows meanwhile, is a statement about a region of the page, so it is stated by wrapping that region.
 
-"These bindings land together" and "this area shows a placeholder meanwhile" are statements about a region of the interface, so they are expressed by wrapping that region. Transitions are a property of where a boundary is placed, not a separate primitive. The decision is stated in [ADR 0017](docs/adr/0017-decompose-loading-into-placeholder-gate-and-pending-set.md) and in the Transitions section of [`CONTEXT.md`](CONTEXT.md).
+"These bindings land together" and "this area shows a placeholder meanwhile" are statements about a region of the interface, so they are expressed by wrapping that region. Transitions are a property of where a boundary is placed, not a separate primitive. The decision is stated in [ADR 0017](docs/adr/0017-decompose-loading-into-placeholder-gate-and-pending-set.md).
 
 What a region shows is the region's, not the business of whoever catches an error on the way.
 
