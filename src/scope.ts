@@ -11,6 +11,7 @@ import {
 } from 'r3'
 import { isGeneratorFunction } from './is-generator-function'
 import { isPromise } from './is-promise'
+import { sameValueZero } from './same-value-zero'
 import {
   getOwner,
   onCleanup,
@@ -295,8 +296,20 @@ export function writeValue<T>(node: Node<T>, value: T): void {
  *  speculative slot dirty (drop cached) so the next read recomputes (pull).
  *  Synchronous dirty-marking honors K1 Position C. */
 function writeSpeculative<T>(node: Node<T>, scope: Scope, value: T): void {
+  const unchanged = node.defaultRecipe === undefined && sameValueZero(speculativeLeafValue(node, scope), value)
+  // An equal write is still recorded, so the commit promotes it and it decides
+  // the committed value when this speculation commits last. It changes nothing
+  // the speculation reads, so nothing derived from it is marked dirty.
   writeSlot(node, scope, { recipe: () => value, cached: value, deps: [], node })
-  invalidateDownstream(node, scope)
+  if (!unchanged) invalidateDownstream(node, scope)
+}
+
+/** The value a speculation reads for a node without a recipe: the nearest slot
+ *  up its chain, or the committed value. */
+function speculativeLeafValue<T>(node: Node<T>, scope: Scope): T | typeof DIRTY {
+  const slot = readSlot(node, scope)
+  if (slot !== undefined) return slot.cached as T | typeof DIRTY
+  return (node.backing as R3Signal<T>).value
 }
 
 /** Drop the cached value of every speculative slot reachable downstream of

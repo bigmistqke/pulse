@@ -41,6 +41,7 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule an-equal-value-does-not-propagate`](#rule-an-equal-value-does-not-propagate) — A value equal to the one a node already holds does not reach the node's consumers: nothing re-runs. Two values are equal when they are SameValueZero-equal: `===`, except that `NaN` equals `NaN`. So `0` and `-0` are equal.
     - [`@case a-computed-publishes-only-a-changed-value`](#case-a-computed-publishes-only-a-changed-value) — `computed.ts` `makeStageNode`.
     - [`@case an-equal-committed-signal-write-is-dropped`](#case-an-equal-committed-signal-write-is-dropped) — `scope.ts` `writeValue`.
+    - [`@case an-equal-speculative-write-dirties-nothing`](#case-an-equal-speculative-write-dirties-nothing) — `scope.ts` `writeSpeculative`.
   - [`@rule reading-a-computed-again-without-a-change-re-runs-nothing`](#rule-reading-a-computed-again-without-a-change-re-runs-nothing) — Reading a computed a second time, when nothing it read has changed since the first read, returns the same value and runs no stage.
   - [`@rule a-staged-effect-skips-a-commit-equal-to-its-last`](#rule-a-staged-effect-skips-a-commit-equal-to-its-last) — A staged effect does not call `commit` with a value equal to the one it last committed, equal in the SameValueZero sense that [the rule on equal values](#rule-an-equal-value-does-not-propagate) states.
 - [`@axiom compose-rather-than-proliferate`](#axiom-compose-rather-than-proliferate) — A small set of primitives covers the use cases. A new form is added only where composing the existing ones is awkward for a common case.
@@ -607,6 +608,12 @@ A stage whose new value is equal to the one it last published does not publish i
 > `scope.ts` `writeValue`.
 
 A committed write to a signal that equals its current value is dropped. r3 drops a write `===` to the current value, and pulse drops `NaN` over `NaN` before the write reaches r3.
+
+#### @case an-equal-speculative-write-dirties-nothing
+
+> `scope.ts` `writeSpeculative`.
+
+A write inside a speculation of a value equal to the one the speculation reads for the node marks nothing derived from it dirty, so nothing read inside the speculation recomputes. The write is still recorded for the commit, so it decides the committed value when its speculation commits last, as [the rule on commit order](#rule-overlapping-writes-resolve-by-commit-order) states.
 
 ### @rule reading-a-computed-again-without-a-change-re-runs-nothing
 

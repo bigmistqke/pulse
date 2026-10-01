@@ -142,3 +142,40 @@ test('writing the same object again re-runs nothing, and a different object re-r
   expect(await runsAfterWrite(same, same)).toBe(0)
   expect(await runsAfterWrite({ a: 1 }, { a: 1 })).toBe(1)
 })
+
+/**
+ * @canon case-an-equal-speculative-write-dirties-nothing
+ */
+test('inside an action, writing the value the action already reads recomputes nothing', async () => {
+  const { action } = await import('../src/index')
+  const [n, setN] = signal(1)
+  let runs = 0
+  const doubled = computed(() => {
+    runs++
+    return n() * 2
+  })
+  const recomputes: Record<string, number> = {}
+  const measure = (label: string, write: () => void) => {
+    const before = runs
+    write()
+    doubled()
+    recomputes[label] = runs - before
+  }
+  const handle = action(() => {
+    doubled()
+    measure('equal to the committed value', () => setN(1))
+    measure('a real change', () => setN(3))
+    measure('equal to the action\'s own write', () => setN(3))
+    measure('NaN', () => setN(Number.NaN))
+    measure('NaN over NaN', () => setN(Number.NaN))
+  })
+  await handle.settled
+  expect(handle.error()).toBe(null)
+  expect(recomputes).toEqual({
+    'equal to the committed value': 0,
+    'a real change': 1,
+    "equal to the action's own write": 0,
+    NaN: 1,
+    'NaN over NaN': 0,
+  })
+})

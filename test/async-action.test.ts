@@ -237,6 +237,32 @@ test('two actions writing the same signal: the one that commits last wins', asyn
   expect(committed(x)).toBe('first')
 })
 
+/**
+ * @canon rule-overlapping-writes-resolve-by-commit-order
+ */
+test('an action that writes the value already there still decides it when it commits last', async () => {
+  const [x, setX] = signal('x0')
+  const firstGate = Promise.withResolvers<void>()
+  const secondGate = Promise.withResolvers<void>()
+
+  const first = action(function* () {
+    setX('x0') // equal to the committed value at the time
+    yield* from(firstGate.promise)
+  })
+  const second = action(function* () {
+    setX('second')
+    yield* from(secondGate.promise)
+  })
+
+  secondGate.resolve()
+  await second.settled
+  expect(committed(x)).toBe('second')
+
+  firstGate.resolve() // commits last
+  await first.settled
+  expect(committed(x)).toBe('x0')
+})
+
 // ---- ActionHandle-specific behaviour ----
 
 /**
