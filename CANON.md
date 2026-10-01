@@ -160,7 +160,8 @@ The canon was written backwards from the existing tests and documents, and descr
     - [`@case show-rebuilds-only-when-truthiness-flips`](#case-show-rebuilds-only-when-truthiness-flips) — `show.ts` `Show`.
     - [`@case switch-rebuilds-only-when-the-winning-match-changes`](#case-switch-rebuilds-only-when-the-winning-match-changes) — `switch.ts` `Switch`.
     - [`@case map-array-builds-each-item-once-under-its-own-owner`](#case-map-array-builds-each-item-once-under-its-own-owner) — `map-array.ts` `mapArray`.
-  - [`@rule a-fragment-child-belongs-to-the-owner-the-fragment-was-built-in`](#rule-a-fragment-child-belongs-to-the-owner-the-fragment-was-built-in) — A function child of a `Fragment` belongs wholly to the owner that was ambient when the `Fragment` was built, wherever the array is inserted later: the binding itself, each run of it, and everything a run creates. Disposing that owner stops the binding, and disposing the owner where the array was inserted does not. A child inserted after its owner was disposed binds nothing. A lookup from inside the child, such as `useLoading()`, starts from that owner.
+  - [`@rule a-fragment-child-belongs-to-the-owner-the-fragment-was-built-in`](#rule-a-fragment-child-belongs-to-the-owner-the-fragment-was-built-in) — A function child of a `Fragment` belongs wholly to the owner that was ambient when the `Fragment` was built, wherever the array is inserted later: the binding itself, each run of it, and everything a run creates. Disposing that owner stops the binding, and disposing the owner where the array was inserted does not.
+  - [`@rule a-fragment-child-inserted-after-its-owner-was-disposed-binds-nothing`](#rule-a-fragment-child-inserted-after-its-owner-was-disposed-binds-nothing) — A function child of a `Fragment` that is inserted after the owner the `Fragment` was built in has been disposed binds nothing: it renders nothing and follows no source.
   - [`@rule an-event-prop-adds-a-listener-until-its-owner-is-disposed`](#rule-an-event-prop-adds-a-listener-until-its-owner-is-disposed) — An `on:name` prop adds its function as a listener for the event `name`, and removes it when the owner ambient at binding time is disposed.
 - [`@axiom a-missing-owner-is-reported-where-it-leaks-the-page`](#axiom-a-missing-owner-is-reported-where-it-leaks-the-page) — A missing owner is reported where it keeps part of the page alive, and only there.
   - [`@rule a-dom-binding-without-an-owner-warns`](#rule-a-dom-binding-without-an-owner-warns) — A reactive DOM binding or an event listener created with no owner still works, but warns once that it will never be disposed. Inside an owner, nothing warns.
@@ -267,6 +268,7 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule a-boundary-without-placeholders-swaps-nothing`](#rule-a-boundary-without-placeholders-swaps-nothing) — A boundary with neither `initial` nor `fallback` never swaps its subtree out. What does not depend on a pending value stays visible while it waits.
   - [`@rule a-boundary-flushes-ready-commits-together`](#rule-a-boundary-flushes-ready-commits-together) — A boundary holds the commits of its ready bindings until no binding registered with it is suspended, then runs them all in one pass. A binding that reports idle, or unregisters, stops holding the gate.
   - [`@rule is-loading-reads-the-nearest-boundary`](#rule-is-loading-reads-the-nearest-boundary) — `isLoading()` and `useLoading()` report whether the nearest enclosing boundary has anything in flight: a suspended binding, a queued commit, or a first load or refresh reported by `latest`. `isLoading()` returns the answer at the call site, and `useLoading()` looks the boundary up once and returns an accessor to read later.
+  - [`@rule a-lookup-from-a-fragment-child-starts-where-the-fragment-was-built`](#rule-a-lookup-from-a-fragment-child-starts-where-the-fragment-was-built) — A lookup of the nearest boundary from inside a function child of a `Fragment`, such as `useLoading()`, starts from the owner the `Fragment` was built in, wherever the array is inserted.
   - [`@rule loading-is-false-outside-any-boundary`](#rule-loading-is-false-outside-any-boundary) — Outside any loading boundary, `isLoading()` returns false, and `useLoading()` returns an accessor that always returns false.
   - [`@rule a-suspension-is-reported-to-the-nearest-boundary`](#rule-a-suspension-is-reported-to-the-nearest-boundary) — A binding or effect that suspends reports to the nearest enclosing `<Loading>` boundary and to no other. It reports again when it settles. One that never suspends never reports.
   - [`@rule a-structural-commit-waits-for-the-content-it-brings`](#rule-a-structural-commit-waits-for-the-content-it-brings) — A reactive child whose new content contains a suspended reactive child of the same boundary commits through that boundary's gate. The new structure lands in the same pass as that content, and the structure it replaces stays on screen until then.
@@ -1469,13 +1471,21 @@ The mapper runs once per new item, under a sub-owner for that item. An item stil
 
 ### @rule a-fragment-child-belongs-to-the-owner-the-fragment-was-built-in
 
-> A function child of a `Fragment` belongs wholly to the owner that was ambient when the `Fragment` was built, wherever the array is inserted later: the binding itself, each run of it, and everything a run creates. Disposing that owner stops the binding, and disposing the owner where the array was inserted does not. A child inserted after its owner was disposed binds nothing. A lookup from inside the child, such as `useLoading()`, starts from that owner.
+> A function child of a `Fragment` belongs wholly to the owner that was ambient when the `Fragment` was built, wherever the array is inserted later: the binding itself, each run of it, and everything a run creates. Disposing that owner stops the binding, and disposing the owner where the array was inserted does not.
 
 Derives from: [`rule-a-fragment-is-its-children-as-an-array`](#rule-a-fragment-is-its-children-as-an-array)
 
 This follows because a node lives as long as the owner it was created under, and a Fragment hands its children on unresolved: the child was written under the Fragment's owner, so its binding belongs there.
 
 The `Fragment` returns its children unresolved, so the call that inserts them can run under a different owner, or none. The owner is recorded against the function itself when the `Fragment` is built.
+
+### @rule a-fragment-child-inserted-after-its-owner-was-disposed-binds-nothing
+
+> A function child of a `Fragment` that is inserted after the owner the `Fragment` was built in has been disposed binds nothing: it renders nothing and follows no source.
+
+Derives from: [`rule-a-fragment-child-belongs-to-the-owner-the-fragment-was-built-in`](#rule-a-fragment-child-belongs-to-the-owner-the-fragment-was-built-in)
+
+This follows because the child's binding belongs to the owner the `Fragment` was built in, and a node lives only as long as its owner: that owner has already ended, so a binding created for it would outlive it.
 
 ### @rule an-event-prop-adds-a-listener-until-its-owner-is-disposed
 
@@ -2208,6 +2218,14 @@ This follows because which bindings land together is decided by where the bounda
 > `isLoading()` and `useLoading()` report whether the nearest enclosing boundary has anything in flight: a suspended binding, a queued commit, or a first load or refresh reported by `latest`. `isLoading()` returns the answer at the call site, and `useLoading()` looks the boundary up once and returns an accessor to read later.
 
 This follows because a boundary coordinates the bindings placed inside it: the question whether something is loading is asked of the region the reader sits in, which is the nearest enclosing boundary.
+
+### @rule a-lookup-from-a-fragment-child-starts-where-the-fragment-was-built
+
+> A lookup of the nearest boundary from inside a function child of a `Fragment`, such as `useLoading()`, starts from the owner the `Fragment` was built in, wherever the array is inserted.
+
+Derives from: [`rule-a-fragment-child-belongs-to-the-owner-the-fragment-was-built-in`](#rule-a-fragment-child-belongs-to-the-owner-the-fragment-was-built-in)
+
+This follows because a reader finds a boundary by its position, and the child's position is the owner the `Fragment` was built in, where its binding belongs.
 
 ### @rule loading-is-false-outside-any-boundary
 

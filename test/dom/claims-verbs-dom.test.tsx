@@ -112,7 +112,7 @@ test("disposing a Fragment's owner stops its reactive child, wherever it was ins
 })
 
 /**
- * @canon rule-a-fragment-child-belongs-to-the-owner-the-fragment-was-built-in
+ * @canon rule-a-fragment-child-inserted-after-its-owner-was-disposed-binds-nothing
  */
 test('a Fragment child inserted after its owner was disposed binds nothing', () => {
   setScheduler(syncScheduler(flush))
