@@ -180,14 +180,15 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule a-returned-promise-is-the-result-not-a-pause`](#rule-a-returned-promise-is-the-result-not-a-pause) — A generator stage that returns a promise has finished. The promise is its result: the stage publishes what it fulfils to, and parks the reason if it rejects.
   - [`@rule use-inside-a-generator-stage-restarts-the-stage`](#rule-use-inside-a-generator-stage-restarts-the-stage) — A `use` that throws inside a generator stage suspends the stage like a sync stage: the generator is dropped, and the body runs again from the top when the promise settles.
 - [`@axiom the-read-verb-decides-what-renders-and-what-waits`](#axiom-the-read-verb-decides-what-renders-and-what-waits) — The verb a binding reads with decides what the binding renders and whether it waits for its neighbours. Everything else in the loading lifecycle is reported ambiently, from the reads the binding makes.
-  - [`@rule use-suspends-only-the-binding-that-reads-it`](#rule-use-suspends-only-the-binding-that-reads-it) — A binding whose `use(x)` meets a pending value renders nothing new and keeps what it showed, and the rest of the tree renders around it. It recovers when the value settles.
-  - [`@rule a-suspended-effect-re-runs-when-its-promise-settles`](#rule-a-suspended-effect-re-runs-when-its-promise-settles) — An effect whose body suspends on `use(x)` holds its body, and runs it again from the top once the promise it suspended on settles.
+  - [`@rule use-suspends-only-the-binding-that-reads-it`](#rule-use-suspends-only-the-binding-that-reads-it) — A binding whose `use(x)` meets a pending value renders nothing new and keeps what it showed, and the rest of the tree renders around it, with or without a `<Loading>` boundary above it. It recovers when the value settles.
+  - [`@rule a-suspended-effect-re-runs-when-its-promise-settles`](#rule-a-suspended-effect-re-runs-when-its-promise-settles) — An effect whose body suspends on `use(x)` holds its body, and runs it again from the top once the promise it suspended on settles. When its source is written with a new pending promise, it suspends again and re-runs when that one settles.
   - [`@rule use-keeps-the-binding-subscribed-while-suspended`](#rule-use-keeps-the-binding-subscribed-while-suspended) — `use(x)` reads its source before checking whether it is pending, so a suspended binding stays subscribed and sees every later value, through every stage of a pipeline.
   - [`@rule a-suspension-is-reported-to-the-nearest-boundary`](#rule-a-suspension-is-reported-to-the-nearest-boundary) — A binding or effect that suspends reports to the nearest enclosing `<Loading>` boundary and to no other. It reports again when it settles. One that never suspends never reports.
   - [`@rule use-enrols-the-binding-in-its-boundarys-gate`](#rule-use-enrols-the-binding-in-its-boundarys-gate) — A binding that called `use(x)` during its run commits through its boundary's gate. While any binding of the boundary is suspended, its commit waits, and it lands in the same pass as the others.
     - [`@case a-reactive-child-that-called-use-waits-for-the-gate`](#case-a-reactive-child-that-called-use-waits-for-the-gate) — `bindings.ts` `insertChild`.
     - [`@case a-reactive-prop-that-called-use-waits-for-the-gate`](#case-a-reactive-prop-that-called-use-waits-for-the-gate) — `bindings.ts` `bindProp`.
     - [`@case a-staged-effect-reads-its-pipeline-with-use`](#case-a-staged-effect-reads-its-pipeline-with-use) — `effect.ts` `stagedEffect`.
+    - [`@case a-queued-commit-is-checked-again-at-the-end-of-the-microtask`](#case-a-queued-commit-is-checked-again-at-the-end-of-the-microtask) — `loading.ts` `deferOrCommit`.
   - [`@rule a-structural-commit-waits-for-the-content-it-brings`](#rule-a-structural-commit-waits-for-the-content-it-brings) — A reactive child whose new content contains a suspended reactive child of the same boundary commits through that boundary's gate. The new structure lands in the same pass as that content, and the structure it replaces stays on screen until then.
     - [`@case a-hole-holds-new-content-that-is-not-ready`](#case-a-hole-holds-new-content-that-is-not-ready) — `bindings.ts` `insertChild`.
     - [`@case a-held-commit-places-its-nodes-only-when-it-lands`](#case-a-held-commit-places-its-nodes-only-when-it-lands) — `bindings.ts` `insertChild`.
@@ -196,32 +197,38 @@ The canon was written backwards from the existing tests and documents, and descr
     - [`@case a-suspended-prop-does-not-hold-the-structure`](#case-a-suspended-prop-does-not-hold-the-structure) — `bindings.ts` `holdsSuspendedHole`.
   - [`@rule a-read-without-use-commits-at-once`](#rule-a-read-without-use-commits-at-once) — A binding that did not call `use` commits as soon as it runs, whatever state its boundary is in.
   - [`@rule latest-reports-loading-without-waiting`](#rule-latest-reports-loading-without-waiting) — `latest(x)` returns the last resolved value, never throws, and never makes the binding wait. While `x` is pending it reports the load to the nearest boundary: a first load drives the boundary's first-load placeholder, and a refresh drives `isLoading()` only.
+  - [`@rule a-seeded-source-still-counts-as-a-first-load`](#rule-a-seeded-source-still-counts-as-a-first-load) — A source given a construction default is on its first load until it genuinely resolves. A `latest` read of it during that time drives the boundary's first-load placeholder, although the read has a value to return.
   - [`@rule peek-reports-nothing`](#rule-peek-reports-nothing) — `peek(x)` returns the last resolved value and reports nothing to any boundary, neither a first load nor a refresh.
   - [`@rule use-throws-a-parked-error`](#rule-use-throws-a-parked-error) — `use(x)` on a failed node throws the node's error.
   - [`@rule a-tolerant-read-reports-a-failure-to-the-boundary`](#rule-a-tolerant-read-reports-a-failure-to-the-boundary) — A binding that reads a failed node through `latest` reports the failure to the nearest accepting error boundary, though nothing throws, and reports its recovery when a later run sees no error.
   - [`@rule a-tolerant-read-carries-loading-state-into-its-reader`](#rule-a-tolerant-read-carries-loading-state-into-its-reader) — A computed that read a pending source through `latest` or `use` reports pending, and hands out that source's promise through `promiseOf`, until the source settles — even though it holds a value of its own. A read through `peek` carries nothing.
-  - [`@rule use-returns-the-value-or-throws-not-ready-yet`](#rule-use-returns-the-value-or-throws-not-ready-yet) — `use(x)` returns a plain value unchanged, returns a settled promise's value, re-throws a settled promise's rejection, and throws `NotReadyYet` carrying the promise while it is pending.
+  - [`@rule a-computed-reading-through-peek-still-follows-its-source`](#rule-a-computed-reading-through-peek-still-follows-its-source) — A computed that reads a source through `peek` still re-runs when the source changes or settles, and converges to the source's value. `peek` suppresses only the loading report, not the dependency.
+  - [`@rule use-returns-the-value-or-throws-not-ready-yet`](#rule-use-returns-the-value-or-throws-not-ready-yet) — `use(x)` returns a plain value unchanged, returns a settled promise's value, re-throws a settled promise's rejection, and throws `NotReadyYet` carrying the promise while it is pending. Given an accessor, it calls it and treats the result the same way.
+  - [`@rule use-treats-a-promise-it-has-not-seen-settle-as-pending`](#rule-use-treats-a-promise-it-has-not-seen-settle-as-pending) — A promise whose settle `use` has not yet recorded is pending to it, even when the promise has already settled: the first `use` of `Promise.resolve(7)` throws `NotReadyYet`. Once the settle is recorded, `use` returns the value synchronously.
   - [`@rule use-of-an-accessor-throws-while-it-is-pending`](#rule-use-of-an-accessor-throws-while-it-is-pending) — `use(accessor)` throws `NotReadyYet` whenever `isPending(accessor)` is true, even when the accessor has a stale value to return. The thrown promise is `promiseOf(accessor)`.
-  - [`@rule use-latest-throws-only-before-the-first-value`](#rule-use-latest-throws-only-before-the-first-value) — `use.latest(x)` throws `NotReadyYet` only while nothing has ever resolved for `x`. After that it returns the last resolved value during a refetch, reports the refresh ambiently, and still enrols the binding in its boundary's gate.
-  - [`@rule settled-waits-until-every-input-is-fresh`](#rule-settled-waits-until-every-input-is-fresh) — `yield* settled([…])` suspends until every input's promise in flight has settled, then returns all the fresh values together.
+  - [`@rule use-latest-throws-only-before-the-first-value`](#rule-use-latest-throws-only-before-the-first-value) — `use.latest(x)` throws `NotReadyYet` only while nothing has ever resolved for `x`, carrying `promiseOf(x)`, exactly as `use` would. After that it returns the last resolved value during a refetch, reports the refresh ambiently, and still enrols the binding in its boundary's gate.
+  - [`@rule settled-waits-until-every-input-is-fresh`](#rule-settled-waits-until-every-input-is-fresh) — `yield* settled([…])` suspends until every input's promise in flight has settled, then returns all the fresh values together. An input that has already settled, a raw promise included, is not waited on, and a rejected input throws.
   - [`@rule a-suspended-hole-keeps-what-it-showed`](#rule-a-suspended-hole-keeps-what-it-showed) — A reactive child whose run throws `NotReadyYet` commits nothing, so the DOM it showed before stays in place until a later run succeeds.
 - [`@axiom a-boundary-wraps-what-it-coordinates`](#axiom-a-boundary-wraps-what-it-coordinates) — A `<Loading>` boundary coordinates the bindings placed inside it. Which bindings land together, and which region shows a placeholder, is decided by where the boundary is placed.
   - [`@rule a-boundary-shows-initial-until-its-first-load`](#rule-a-boundary-shows-initial-until-its-first-load) — Until every suspended binding inside it has settled once, a boundary shows `initial`, or `fallback` when there is no `initial`. After that it shows the loaded subtree.
+  - [`@rule a-boundary-builds-its-children-once-up-front`](#rule-a-boundary-builds-its-children-once-up-front) — A boundary builds its children once, when it is created, inside its own owner, whether it then displays them or a placeholder. Settling, and every later swap between the placeholder and the subtree, shows the subtree already built and runs no component again.
   - [`@rule after-its-first-load-a-boundary-shows-fallback-or-holds`](#rule-after-its-first-load-a-boundary-shows-fallback-or-holds) — When a boundary that has loaded before becomes pending again, it shows `fallback` if one is given, and otherwise keeps showing the subtree it last committed.
   - [`@rule a-boundary-without-placeholders-swaps-nothing`](#rule-a-boundary-without-placeholders-swaps-nothing) — A boundary with neither `initial` nor `fallback` never swaps its subtree out. What does not depend on a pending value stays visible while it waits.
   - [`@rule a-boundary-flushes-ready-commits-together`](#rule-a-boundary-flushes-ready-commits-together) — A boundary holds the commits of its ready bindings until no binding registered with it is suspended, then runs them all in one pass. A binding that reports idle, or unregisters, stops holding the gate.
   - [`@rule a-disposed-binding-releases-its-boundary`](#rule-a-disposed-binding-releases-its-boundary) — A binding or effect that is disposed while suspended stops holding its boundary, and a commit it had queued never runs.
-  - [`@rule is-loading-reads-the-nearest-boundary`](#rule-is-loading-reads-the-nearest-boundary) — `isLoading()` and `useLoading()` report whether the nearest enclosing boundary has anything in flight: a suspended binding, a queued commit, or a first load or refresh reported by `latest`. Outside any boundary they report false.
+  - [`@rule is-loading-reads-the-nearest-boundary`](#rule-is-loading-reads-the-nearest-boundary) — `isLoading()` and `useLoading()` report whether the nearest enclosing boundary has anything in flight: a suspended binding, a queued commit, or a first load or refresh reported by `latest`. `isLoading()` returns the answer at the call site, and `useLoading()` looks the boundary up once and returns an accessor to read later. Outside any boundary the answer is false, and `useLoading()` returns an accessor that is always false.
   - [`@rule a-boundary-is-disposed-with-its-owner`](#rule-a-boundary-is-disposed-with-its-owner) — A boundary is owned by the owner it is created in, and disposing that owner disposes the boundary and everything inside it.
 - [`@axiom jsx-builds-real-dom-directly`](#axiom-jsx-builds-real-dom-directly) — JSX produces real DOM nodes through direct DOM operations. There is no virtual tree and nothing is diffed.
   - [`@rule h-creates-the-element-directly`](#rule-h-creates-the-element-directly) — `h` with a string tag creates that element with `document.createElement`, and gives it only the attributes and children it was passed.
+  - [`@rule the-jsx-runtime-builds-every-element-with-h`](#rule-the-jsx-runtime-builds-every-element-with-h) — The JSX runtime's `jsx`, `jsxs` and `jsxDEV` build every element with `h`. A component receives its props object as it is, `children` included and getters intact. A DOM tag or a `Fragment` receives its children as separate arguments and the rest of its props with their getters intact.
   - [`@rule a-static-child-is-inserted-by-its-kind`](#rule-a-static-child-is-inserted-by-its-kind) — A static child is inserted according to its kind: a string or number as a text node, a DOM node as itself, an array by inserting each item in order, and `null`, `undefined` or a boolean as nothing.
   - [`@rule a-fragment-is-its-children-as-an-array`](#rule-a-fragment-is-its-children-as-an-array) — `Fragment` returns its children as an array, and an element that receives that array inserts each item in place.
+  - [`@rule a-fragment-child-runs-under-the-owner-the-fragment-was-built-in`](#rule-a-fragment-child-runs-under-the-owner-the-fragment-was-built-in) — A function child of a `Fragment` runs under a sub-owner of the owner that was ambient when the `Fragment` was built, wherever the array is inserted later. What it creates is disposed with that owner, and a lookup from inside it, such as `useLoading()`, starts from that owner.
   - [`@rule render-returns-a-dispose-that-removes-what-it-mounted`](#rule-render-returns-a-dispose-that-removes-what-it-mounted) — `render(component, target)` inserts what the component returns into `target` and returns a `dispose`. Disposing removes every node that render added and tears down everything created during the component.
   - [`@rule a-component-that-throws-during-render-leaves-nothing-behind`](#rule-a-component-that-throws-during-render-leaves-nothing-behind) — When the component throws while `render` is running it, `render` disposes the root it opened before the error escapes.
 - [`@axiom a-component-runs-once-and-reactivity-lives-in-its-holes`](#axiom-a-component-runs-once-and-reactivity-lives-in-its-holes) — A component function runs once. What changes afterwards changes inside the holes it returned — reactive children and reactive props — never by running the component again.
   - [`@rule a-function-tag-is-called-once-with-its-props`](#rule-a-function-tag-is-called-once-with-its-props) — A function tag is called once, with its props. Children passed to `h` after the props arrive on `props.children`.
-  - [`@rule a-function-child-is-a-reactive-hole`](#rule-a-function-child-is-a-reactive-hole) — A function in a child position is a binding. It runs in its own effect, and its result replaces whatever sits between the binding's two marker comments each time something it read changes.
+  - [`@rule a-function-child-is-a-reactive-hole`](#rule-a-function-child-is-a-reactive-hole) — A function in a child position is a binding. It runs in its own effect, and its result, which may be anything a static child may be, replaces whatever sits between the binding's two marker comments each time something it read changes.
   - [`@rule an-attribute-follows-its-value-and-is-removed-on-nothing`](#rule-an-attribute-follows-its-value-and-is-removed-on-nothing) — A prop with no prefix, or with the `attr:` prefix, sets the attribute of that name. A value of `null`, `undefined` or `false` removes the attribute, and a function value keeps the attribute following it.
   - [`@rule a-prop-prefix-sets-the-dom-property`](#rule-a-prop-prefix-sets-the-dom-property) — A `prop:name` prop assigns the element's DOM property `name` instead of an attribute, and a function value keeps the property following it.
   - [`@rule a-class-prefix-toggles-one-class-by-truthiness`](#rule-a-class-prefix-toggles-one-class-by-truthiness) — A `class:name` prop adds the class `name` while its value is truthy and removes it while it is falsy, and a function value keeps the class following it.
@@ -235,15 +242,17 @@ The canon was written backwards from the existing tests and documents, and descr
     - [`@case switch-rebuilds-only-when-the-winning-match-changes`](#case-switch-rebuilds-only-when-the-winning-match-changes) — `switch.ts` `Switch`.
     - [`@case map-array-builds-each-item-once-under-its-own-owner`](#case-map-array-builds-each-item-once-under-its-own-owner) — `map-array.ts` `mapArray`.
   - [`@rule list-rows-are-keyed-by-reference`](#rule-list-rows-are-keyed-by-reference) — A list row belongs to an item by strict reference. The same reference keeps its row, its mapped output and its DOM nodes in the new order. A different reference gets a new row even when its contents are equal.
+  - [`@rule a-row-index-follows-its-position`](#rule-a-row-index-follows-its-position) — Each row receives an index accessor that returns the row's current position. A reorder updates what the accessor returns, and the row is not rebuilt.
   - [`@rule show-renders-its-children-when-truthy-and-its-fallback-otherwise`](#rule-show-renders-its-children-when-truthy-and-its-fallback-otherwise) — `Show` renders its children while `when` is truthy and its `fallback` while it is falsy. A function child is called with the truthy value.
-  - [`@rule switch-renders-the-first-truthy-match`](#rule-switch-renders-the-first-truthy-match) — `Switch` renders the children of the first `Match`, in written order, whose `when` is truthy, and its `fallback` when none is. A function child is called with the truthy value.
+  - [`@rule switch-renders-the-first-truthy-match`](#rule-switch-renders-the-first-truthy-match) — `Switch` renders the children of the first `Match`, in written order, whose `when` is truthy, and its `fallback` when none is. A function child is called with the truthy value. Children of a `Switch` that are not `Match` elements are ignored.
   - [`@rule for-renders-its-fallback-when-there-are-no-rows`](#rule-for-renders-its-fallback-when-there-are-no-rows) — `For` renders one row per item, in the list's order, and renders its `fallback` when the list is empty.
   - [`@rule a-dynamic-prop-becomes-a-getter`](#rule-a-dynamic-prop-becomes-a-getter) — The compiler turns a prop whose value is an expression into a getter on the props object, so the expression is evaluated where the prop is read, not where it is written.
     - [`@exception a-literal-or-function-prop-stays-as-written`](#exception-a-literal-or-function-prop-stays-as-written) — A prop whose value is a literal, or a function or arrow expression, is not converted to a getter.
     - [`@exception ref-and-on-props-stay-as-written`](#exception-ref-and-on-props-stay-as-written) — A `ref` prop and an `on:`-prefixed prop are never converted to a getter, whatever their value.
-  - [`@rule a-spread-merges-descriptors-not-values`](#rule-a-spread-merges-descriptors-not-values) — A props object that contains a spread is compiled to a `mergeProps` call over its segments, so a getter in a spread source stays a getter.
+  - [`@rule a-namespaced-prop-compiles-to-a-string-key`](#rule-a-namespaced-prop-compiles-to-a-string-key) — A namespaced prop name such as `on:click` or `class:active` compiles to a plain string key on the props object, which is what the runtime's prefix dispatch reads.
+  - [`@rule a-spread-merges-descriptors-not-values`](#rule-a-spread-merges-descriptors-not-values) — A props object that contains a spread is compiled to a `mergeProps` call over its segments, so a getter in a spread source stays a getter. One `mergeProps` import is added per file, however many spreads it has.
   - [`@rule a-dom-child-is-one-thunk-per-dynamic-child`](#rule-a-dom-child-is-one-thunk-per-dynamic-child) — On a DOM element or a Fragment, each dynamic child becomes its own thunk, never a getter. A literal, a function expression, or a nested JSX element stays as written.
-  - [`@rule component-children-become-one-getter`](#rule-component-children-become-one-getter) — On a component, the children become one getter over the whole value, and are not wrapped child by child.
+  - [`@rule component-children-become-one-getter`](#rule-component-children-become-one-getter) — On a component, the children become one getter over the whole value, and are not wrapped child by child. A component is any tag that is neither a string nor `Fragment`, a member expression such as `Foo.Bar` included, and a bare JSX-element child compiles exactly like the braced form.
   - [`@rule the-vite-plugin-compiles-only-jsx-files`](#rule-the-vite-plugin-compiles-only-jsx-files) — The Vite plugin compiles a `.tsx` or `.jsx` file, ignoring any query string on its id, and leaves every other file alone. It applies the props-to-getters transform, then the automatic JSX runtime imported from `pulse`.
 - [`@axiom control-flow-bakes-in-no-async-policy`](#axiom-control-flow-bakes-in-no-async-policy) — `Show`, `Switch` and `For` are ordinary components. They coerce a pending input to its empty form, and decide nothing else about async.
   - [`@rule a-pending-condition-reads-as-falsy`](#rule-a-pending-condition-reads-as-falsy) — A `when` that is a pending promise counts as falsy: `Show` renders its fallback, and `Switch` skips that `Match`.
@@ -1188,15 +1197,13 @@ A body that hits the same pending promise repeatedly attaches no further settle 
 
 ### @rule use-suspends-only-the-binding-that-reads-it
 
-> A binding whose `use(x)` meets a pending value renders nothing new and keeps what it showed, and the rest of the tree renders around it. It recovers when the value settles.
-
-This holds with or without a `<Loading>` boundary above the binding.
+> A binding whose `use(x)` meets a pending value renders nothing new and keeps what it showed, and the rest of the tree renders around it, with or without a `<Loading>` boundary above it. It recovers when the value settles.
 
 ### @rule a-suspended-effect-re-runs-when-its-promise-settles
 
-> An effect whose body suspends on `use(x)` holds its body, and runs it again from the top once the promise it suspended on settles.
+> An effect whose body suspends on `use(x)` holds its body, and runs it again from the top once the promise it suspended on settles. When its source is written with a new pending promise, it suspends again and re-runs when that one settles.
 
-The re-run is keyed on that promise. An effect whose source is written with a new pending promise suspends again and re-runs when the new one settles.
+The re-run is keyed on the promise the effect suspended on.
 
 ### @rule use-keeps-the-binding-subscribed-while-suspended
 
@@ -1214,7 +1221,7 @@ A boundary nested inside another collects the suspensions below it, and the oute
 
 > A binding that called `use(x)` during its run commits through its boundary's gate. While any binding of the boundary is suspended, its commit waits, and it lands in the same pass as the others.
 
-The binding need not suspend itself: `use(plainSignal)` never throws, but still makes the binding wait for a suspended sibling. A commit queued by a binding that did not throw is checked again at the end of the microtask, so a sibling that suspends later in the same flush still holds it.
+The binding need not suspend itself: `use(plainSignal)` never throws, but still makes the binding wait for a suspended sibling.
 
 #### @case a-reactive-child-that-called-use-waits-for-the-gate
 
@@ -1233,6 +1240,12 @@ A reactive property, such as a `class:` binding, routes its commit through the g
 > `effect.ts` `stagedEffect`.
 
 A staged effect reads its whole pipeline with `use`, so its commit always joins the gate, and waits for a suspended sibling even after its own stages have resolved.
+
+#### @case a-queued-commit-is-checked-again-at-the-end-of-the-microtask
+
+> `loading.ts` `deferOrCommit`.
+
+A commit from a binding that called `use` but did not suspend is queued, not applied, even when nothing in the boundary is suspended at that moment. It is checked again at the end of the microtask. A sibling that suspends later in the same flush therefore still holds it, and the two land together.
 
 ### @rule a-structural-commit-waits-for-the-content-it-brings
 
@@ -1278,7 +1291,11 @@ Only the markers of reactive children are looked for. A reactive prop that suspe
 
 > `latest(x)` returns the last resolved value, never throws, and never makes the binding wait. While `x` is pending it reports the load to the nearest boundary: a first load drives the boundary's first-load placeholder, and a refresh drives `isLoading()` only.
 
-Whether `x` has resolved before is tracked separately from whether it has a value to report, so a source seeded with a default value still gets its first-load placeholder.
+### @rule a-seeded-source-still-counts-as-a-first-load
+
+> A source given a construction default is on its first load until it genuinely resolves. A `latest` read of it during that time drives the boundary's first-load placeholder, although the read has a value to return.
+
+Whether a source has resolved is tracked separately from whether it has a value to report. The default says what to display meanwhile, not that the fetch has finished.
 
 ### @rule peek-reports-nothing
 
@@ -1296,13 +1313,23 @@ Whether `x` has resolved before is tracked separately from whether it has a valu
 
 > A computed that read a pending source through `latest` or `use` reports pending, and hands out that source's promise through `promiseOf`, until the source settles — even though it holds a value of its own. A read through `peek` carries nothing.
 
-The state composes through a chain of such readers. It survives the reader re-running during a refresh, because the reader reads the source again and records it again. `peek` suppresses only the report: a reader through `peek` still follows the source and converges when it settles.
+The state composes through a chain of such readers, since a reader that reports pending is itself a pending source to the next one. It survives the reader re-running during a refresh, because the reader reads the source again and records it again.
+
+### @rule a-computed-reading-through-peek-still-follows-its-source
+
+> A computed that reads a source through `peek` still re-runs when the source changes or settles, and converges to the source's value. `peek` suppresses only the loading report, not the dependency.
 
 ### @rule use-returns-the-value-or-throws-not-ready-yet
 
-> `use(x)` returns a plain value unchanged, returns a settled promise's value, re-throws a settled promise's rejection, and throws `NotReadyYet` carrying the promise while it is pending.
+> `use(x)` returns a plain value unchanged, returns a settled promise's value, re-throws a settled promise's rejection, and throws `NotReadyYet` carrying the promise while it is pending. Given an accessor, it calls it and treats the result the same way.
 
-Falsy values are values: `use(0)`, `use(null)`, `use(undefined)`, `use(false)` and `use('')` return them. `use` accepts an accessor as well as a value, and unwraps a promise the accessor returns. A promise `use` sees for the first time is pending to it, even if it has already settled, until the settle has been recorded. An effect that suspends on `NotReadyYet` re-runs when the promise it carries settles.
+Falsy values are values: `use(0)`, `use(null)`, `use(undefined)`, `use(false)` and `use('')` return them.
+
+### @rule use-treats-a-promise-it-has-not-seen-settle-as-pending
+
+> A promise whose settle `use` has not yet recorded is pending to it, even when the promise has already settled: the first `use` of `Promise.resolve(7)` throws `NotReadyYet`. Once the settle is recorded, `use` returns the value synchronously.
+
+A promise carries no readable state of its own. Its state is recorded when its settle callback runs, which is always at least a microtask after the promise is first seen.
 
 ### @rule use-of-an-accessor-throws-while-it-is-pending
 
@@ -1312,15 +1339,15 @@ So `use` suspends on every pending episode, the refetches included. A read that 
 
 ### @rule use-latest-throws-only-before-the-first-value
 
-> `use.latest(x)` throws `NotReadyYet` only while nothing has ever resolved for `x`. After that it returns the last resolved value during a refetch, reports the refresh ambiently, and still enrols the binding in its boundary's gate.
+> `use.latest(x)` throws `NotReadyYet` only while nothing has ever resolved for `x`, carrying `promiseOf(x)`, exactly as `use` would. After that it returns the last resolved value during a refetch, reports the refresh ambiently, and still enrols the binding in its boundary's gate.
 
-Before the first value it behaves exactly like `use`, and the thrown promise is `promiseOf(x)`. Once settled it returns the same value `use` does. During a refetch `use(x)` throws and `use.latest(x)` returns the stale value, at the same moment. The decision is [ADR 0014](docs/adr/0014-use-latest-composed-on-latest.md).
+Once settled it returns the same value `use` does. During a refetch `use(x)` throws and `use.latest(x)` returns the stale value, at the same moment. The decision is [ADR 0014](docs/adr/0014-use-latest-composed-on-latest.md).
 
 ### @rule settled-waits-until-every-input-is-fresh
 
-> `yield* settled([…])` suspends until every input's promise in flight has settled, then returns all the fresh values together.
+> `yield* settled([…])` suspends until every input's promise in flight has settled, then returns all the fresh values together. An input that has already settled, a raw promise included, is not waited on, and a rejected input throws.
 
-A consumer therefore never sees a frame where one input is new and another is stale. For an input that is refetching, `settled` waits on its promise in flight, found through `promiseOf`, not on the stale value its accessor returns. An input that has already settled is not waited on, so a run with every input settled does not suspend, and an already-settled raw promise does not make the stage suspend again on every run. A rejected input throws. When an input refetches later, the stage waits again before publishing the new combination.
+A consumer therefore never sees a frame where one input is new and another is stale. For an input that is refetching, `settled` waits on its promise in flight, found through `promiseOf`, not on the stale value its accessor returns. A run with every input settled does not suspend, so a stage fed an already-settled raw promise converges instead of suspending on every run. When an input refetches later, the stage waits again before publishing the new combination.
 
 ### @rule a-suspended-hole-keeps-what-it-showed
 
@@ -1338,7 +1365,13 @@ On a first run there is nothing to keep, so the hole stays empty until its sourc
 
 > Until every suspended binding inside it has settled once, a boundary shows `initial`, or `fallback` when there is no `initial`. After that it shows the loaded subtree.
 
-A subtree that never suspends is shown at once. The loaded subtree is built once, up front, inside the boundary, whatever is displayed.
+A subtree that never suspends is shown at once.
+
+### @rule a-boundary-builds-its-children-once-up-front
+
+> A boundary builds its children once, when it is created, inside its own owner, whether it then displays them or a placeholder. Settling, and every later swap between the placeholder and the subtree, shows the subtree already built and runs no component again.
+
+Building the children is what starts the work the boundary waits for, so it cannot wait for the display to choose them.
 
 ### @rule after-its-first-load-a-boundary-shows-fallback-or-holds
 
@@ -1362,9 +1395,7 @@ A suspended branch that is unmounted therefore cannot keep its siblings waiting.
 
 ### @rule is-loading-reads-the-nearest-boundary
 
-> `isLoading()` and `useLoading()` report whether the nearest enclosing boundary has anything in flight: a suspended binding, a queued commit, or a first load or refresh reported by `latest`. Outside any boundary they report false.
-
-`isLoading()` answers at the call site. `useLoading()` captures the boundary lookup and returns an accessor to read later. A component at the top level of a boundary's children reaches that boundary.
+> `isLoading()` and `useLoading()` report whether the nearest enclosing boundary has anything in flight: a suspended binding, a queued commit, or a first load or refresh reported by `latest`. `isLoading()` returns the answer at the call site, and `useLoading()` looks the boundary up once and returns an accessor to read later. Outside any boundary the answer is false, and `useLoading()` returns an accessor that is always false.
 
 ### @rule a-boundary-is-disposed-with-its-owner
 
@@ -1374,11 +1405,17 @@ A suspended branch that is unmounted therefore cannot keep its siblings waiting.
 
 > JSX produces real DOM nodes through direct DOM operations. There is no virtual tree and nothing is diffed.
 
-The principle is stated in the [README](README.md) as "fine-grained, no VDOM": JSX compiles to direct DOM operations, and reactive expressions become per-binding holes. The JSX runtime's `jsx` and `jsxs` hand every element to `h`, so what holds for `h` holds for JSX.
+The principle is stated in the [README](README.md) as "fine-grained, no VDOM": JSX compiles to direct DOM operations, and reactive expressions become per-binding holes.
 
 ### @rule h-creates-the-element-directly
 
 > `h` with a string tag creates that element with `document.createElement`, and gives it only the attributes and children it was passed.
+
+### @rule the-jsx-runtime-builds-every-element-with-h
+
+> The JSX runtime's `jsx`, `jsxs` and `jsxDEV` build every element with `h`. A component receives its props object as it is, `children` included and getters intact. A DOM tag or a `Fragment` receives its children as separate arguments and the rest of its props with their getters intact.
+
+So what holds for `h` holds for JSX.
 
 ### @rule a-static-child-is-inserted-by-its-kind
 
@@ -1390,7 +1427,13 @@ Nested arrays flatten to any depth, and mixed children keep their written order.
 
 > `Fragment` returns its children as an array, and an element that receives that array inserts each item in place.
 
-A `Fragment` builds no node of its own. Its function children are tagged with the owner ambient when the `Fragment` was built, so that wherever the array is inserted later, each reactive child binds under that owner.
+A `Fragment` builds no node of its own.
+
+### @rule a-fragment-child-runs-under-the-owner-the-fragment-was-built-in
+
+> A function child of a `Fragment` runs under a sub-owner of the owner that was ambient when the `Fragment` was built, wherever the array is inserted later. What it creates is disposed with that owner, and a lookup from inside it, such as `useLoading()`, starts from that owner.
+
+The `Fragment` returns its children unresolved, so the call that inserts them can run under a different owner, or none. The owner is recorded against the function itself when the `Fragment` is built.
 
 ### @rule render-returns-a-dispose-that-removes-what-it-mounted
 
@@ -1416,9 +1459,9 @@ This is stated in the [README](README.md) and in the *Component* entry of [`CONT
 
 ### @rule a-function-child-is-a-reactive-hole
 
-> A function in a child position is a binding. It runs in its own effect, and its result replaces whatever sits between the binding's two marker comments each time something it read changes.
+> A function in a child position is a binding. It runs in its own effect, and its result, which may be anything a static child may be, replaces whatever sits between the binding's two marker comments each time something it read changes.
 
-The result may be anything a static child may be, including a DOM node. The markers keep the binding's place, so static siblings on either side stay where they are.
+The markers keep the binding's place, so static siblings on either side stay where they are.
 
 ### @rule an-attribute-follows-its-value-and-is-removed-on-nothing
 
@@ -1488,9 +1531,11 @@ The mapper runs once per new item, under a sub-owner for that item. An item stil
 
 > A list row belongs to an item by strict reference. The same reference keeps its row, its mapped output and its DOM nodes in the new order. A different reference gets a new row even when its contents are equal.
 
-Each row receives an index accessor that follows the row's current position, so a reorder updates the index without rebuilding the row.
-
 A row is its item: the same object in a new position is the same row, moved, with its state kept. No key function is needed because the item already has an identity.
+
+### @rule a-row-index-follows-its-position
+
+> Each row receives an index accessor that returns the row's current position. A reorder updates what the accessor returns, and the row is not rebuilt.
 
 ### @rule show-renders-its-children-when-truthy-and-its-fallback-otherwise
 
@@ -1500,9 +1545,7 @@ A non-function child is rendered as it is.
 
 ### @rule switch-renders-the-first-truthy-match
 
-> `Switch` renders the children of the first `Match`, in written order, whose `when` is truthy, and its `fallback` when none is. A function child is called with the truthy value.
-
-Children of a `Switch` that are not `Match` elements are ignored.
+> `Switch` renders the children of the first `Match`, in written order, whose `when` is truthy, and its `fallback` when none is. A function child is called with the truthy value. Children of a `Switch` that are not `Match` elements are ignored.
 
 ### @rule for-renders-its-fallback-when-there-are-no-rows
 
@@ -1524,13 +1567,17 @@ A literal cannot change, and a function is already the lazy form. Wrapping eithe
 
 > A `ref` prop and an `on:`-prefixed prop are never converted to a getter, whatever their value.
 
-Their value is a callback that the runtime calls directly, once with the element or once per event. Read through a getter, the callback would be re-evaluated instead of called. A namespaced attribute reaches the runtime as a plain string-keyed prop, which is what the runtime's prefix dispatch reads.
+Their value is a callback that the runtime calls directly, once with the element or once per event. Read through a getter, the callback would be re-evaluated instead of called.
+
+### @rule a-namespaced-prop-compiles-to-a-string-key
+
+> A namespaced prop name such as `on:click` or `class:active` compiles to a plain string key on the props object, which is what the runtime's prefix dispatch reads.
 
 ### @rule a-spread-merges-descriptors-not-values
 
-> A props object that contains a spread is compiled to a `mergeProps` call over its segments, so a getter in a spread source stays a getter.
+> A props object that contains a spread is compiled to a `mergeProps` call over its segments, so a getter in a spread source stays a getter. One `mergeProps` import is added per file, however many spreads it has.
 
-Native object spread reads each property through its getter once and copies the value, which would freeze a forwarded prop. The compiler groups the properties between spreads into object segments, converts them as usual, and passes segments and spread sources in order to `mergeProps`, which copies property descriptors. One `mergeProps` import is added per file, however many spreads it has.
+Native object spread reads each property through its getter once and copies the value, which would freeze a forwarded prop. The compiler groups the properties between spreads into object segments, converts them as usual, and passes segments and spread sources in order to `mergeProps`, which copies property descriptors.
 
 ### @rule a-dom-child-is-one-thunk-per-dynamic-child
 
@@ -1540,9 +1587,9 @@ The runtime receives a DOM element's children as values and treats a function va
 
 ### @rule component-children-become-one-getter
 
-> On a component, the children become one getter over the whole value, and are not wrapped child by child.
+> On a component, the children become one getter over the whole value, and are not wrapped child by child. A component is any tag that is neither a string nor `Fragment`, a member expression such as `Foo.Bar` included, and a bare JSX-element child compiles exactly like the braced form.
 
-A component reads `props.children` like any other prop, so the children are deferred until the component reads them. A bare JSX-element child compiles exactly like the braced form. A tag written as a member expression, such as `Foo.Bar`, counts as a component.
+A component reads `props.children` like any other prop, so the children are deferred until the component reads them.
 
 ### @rule the-vite-plugin-compiles-only-jsx-files
 
@@ -1561,3 +1608,4 @@ The *Control flow* entry of [`CONTEXT.md`](CONTEXT.md) states this: async behavi
 ### @rule a-pending-list-reads-as-empty
 
 > A list that is a pending promise counts as an empty list: `mapArray` returns no entries, and `For` renders its fallback.
+

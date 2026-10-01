@@ -130,7 +130,7 @@ test('pending Promise<T[]> → fallback rendered', () => {
 })
 
 /**
- * @canon rule-list-rows-are-keyed-by-reference
+ * @canon rule-a-row-index-follows-its-position
  */
 test('index accessor is reactive: rendered DOM updates on reorder', () => {
   const target = document.createElement('section')

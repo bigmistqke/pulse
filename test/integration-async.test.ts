@@ -7,6 +7,7 @@ const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
 
 /**
  * @canon rule-use-returns-the-value-or-throws-not-ready-yet
+ * @canon rule-a-suspended-effect-re-runs-when-its-promise-settles
  */
 test('a promise-holding signal flows through an effect via use', async () => {
   const [user] = signal(Promise.resolve({ name: 'ada' }))

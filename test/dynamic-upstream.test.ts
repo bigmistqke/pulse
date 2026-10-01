@@ -79,6 +79,7 @@ describe('a tolerant read carries loading state into its reader', () => {
 
   /**
    * @canon rule-a-tolerant-read-carries-loading-state-into-its-reader
+   * @canon rule-a-computed-reading-through-peek-still-follows-its-source
    */
   test('peek does not carry it — that is the difference between peek and latest outside a binding', async () => {
     let release!: (v: number) => void

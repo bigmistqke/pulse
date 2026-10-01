@@ -688,7 +688,7 @@ test('a bare latest() read drives initial on first load, then holds prior across
 // finished. Without that distinction a signal(fn, default) would silently lose
 // its placeholder, since latest() would always have a value to hand back.
 /**
- * @canon rule-latest-reports-loading-without-waiting
+ * @canon rule-a-seeded-source-still-counts-as-a-first-load
  */
 test('a seeded source still gets its initial placeholder on first load', async () => {
   const target = document.createElement('section')

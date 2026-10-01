@@ -84,6 +84,7 @@ test('disposes orphan entries when items leave', () => {
 
 /**
  * @canon rule-list-rows-are-keyed-by-reference
+ * @canon rule-a-row-index-follows-its-position
  */
 test('output is in current array order, entries reused across reorder, index updates', () => {
   createRoot(() => {

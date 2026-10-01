@@ -741,7 +741,7 @@ test('deferred non-throwing use() binding: unmount before gate opens does not NP
 })
 
 /**
- * @canon case-a-reactive-child-that-called-use-waits-for-the-gate
+ * @canon case-a-queued-commit-is-checked-again-at-the-end-of-the-microtask
  */
 test('coherent transitions: use(plainSignal) + sibling computed-going-pending in same flush — commit must defer', async () => {
   const target = document.createElement('section')
@@ -922,7 +922,7 @@ test('use(computed) inside binding: two-stage pipeline (async + sync map) propag
 // Fragment branch resolve its children into real nodes immediately, the same
 // way the DOM-tag branch already did - see src/dom/h.ts.
 /**
- * @canon rule-is-loading-reads-the-nearest-boundary
+ * @canon rule-a-fragment-child-runs-under-the-owner-the-fragment-was-built-in
  */
 test('top-level component inside Loading reaches scope via useLoading()', async () => {
   const target = document.createElement('section')

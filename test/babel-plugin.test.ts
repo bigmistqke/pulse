@@ -91,7 +91,7 @@ test('converts a dynamic attr: value to a getter, same as every other binding ki
 })
 
 /**
- * @canon exception-ref-and-on-props-stay-as-written
+ * @canon rule-a-namespaced-prop-compiles-to-a-string-key
  */
 test('a namespaced attribute compiles to a plain string key', () => {
   const code = transform('<div on:click={handler} />;')

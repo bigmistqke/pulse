@@ -191,7 +191,7 @@ test('the thrown NotReadyYet carries the promise', () => {
 })
 
 /**
- * @canon rule-use-returns-the-value-or-throws-not-ready-yet
+ * @canon rule-use-treats-a-promise-it-has-not-seen-settle-as-pending
  */
 test('use resolves a promise synchronously once it has settled', async () => {
   const p = Promise.resolve(7)
