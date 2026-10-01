@@ -171,7 +171,8 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule the-boundary-is-chosen-again-for-every-error`](#rule-the-boundary-is-chosen-again-for-every-error) — The walk runs again for every error, so a node that fails again with a different kind of error moves to the boundary that accepts the new one.
   - [`@rule a-handler-that-throws-passes-its-error-outward`](#rule-a-handler-that-throws-passes-its-error-outward) — When a `catchError` handler throws, the walk continues past it with the handler's error. When nothing further up takes it, it is thrown to the caller.
   - [`@rule use-errored-without-an-errored-reads-the-roots-boundary`](#rule-use-errored-without-an-errored-reads-the-roots-boundary) — Under a root with no explicit `<Errored>`, `useErrored()` reads the root's boundary, which holds every error nothing nearer claimed in that root.
-  - [`@rule a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller`](#rule-a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller) — A failed action reports to the nearest boundary that accepts its error, above the owner it was called under: an `<Errored>`, a root's default boundary, or a `catchError`, whose handler is then called with the error. The choice is made again on every failure, so a retry whose error a nearer boundary now accepts moves there. The report still reaches its boundary when the calling owner was disposed before the action failed. When the boundary itself is gone, the report goes to the next boundary up, at the latest the root's.
+  - [`@rule a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller`](#rule-a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller) — A failed action reports to the nearest boundary that accepts its error, above the owner it was called under: an `<Errored>`, a root's default boundary, or a `catchError`, whose handler is then called with the error.
+  - [`@rule a-failed-action-chooses-its-boundary-again-on-every-failure`](#rule-a-failed-action-chooses-its-boundary-again-on-every-failure) — Each failure of an action chooses its boundary anew, so a retry whose error a different boundary now accepts moves its report there and releases the boundary that held the earlier one.
   - [`@rule a-throwing-handler-passes-a-failed-action-on-with-the-handlers-error`](#rule-a-throwing-handler-passes-a-failed-action-on-with-the-handlers-error) — When a `catchError` handler called for a failed action throws, the search continues to the boundaries beyond it with the handler's error, and the one that claims it receives the handler's error. The action's handle keeps the action's own error.
   - [`@rule a-real-error-in-an-effect-goes-to-the-nearest-handler`](#rule-a-real-error-in-an-effect-goes-to-the-nearest-handler) — A thrown error that is not a suspension, from an effect's body, a stage or a commit, goes to the nearest error handler above the effect. With no handler, it is thrown out of the run that raised it.
   - [`@rule a-loading-boundary-does-not-catch-a-real-error`](#rule-a-loading-boundary-does-not-catch-a-real-error) — A `<Loading>` boundary between a binding and an error handler lets a real error from that binding pass on to the handler. It takes only suspensions.
@@ -183,6 +184,8 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule an-error-nothing-claims-is-thrown-on-a-first-run`](#rule-an-error-nothing-claims-is-thrown-on-a-first-run) — Outside any root, an error from a node that no boundary claims is thrown to the caller when it happens during the node's first run. During a later re-run it is logged to the console instead.
 - [`@axiom every-failure-in-a-root-is-held`](#axiom-every-failure-in-a-root-is-held) — Every failure inside a root is held by some boundary: none is lost, and none is thrown at a writer that did not cause it.
   - [`@rule every-root-has-an-error-boundary`](#rule-every-root-has-an-error-boundary) — `createRoot` installs an error boundary on the root owner. It claims every error no nearer boundary claims, tracks it like any other boundary, and logs each failed report to the console, a repeated one included.
+  - [`@rule a-failed-action-reports-after-its-calling-owner-is-disposed`](#rule-a-failed-action-reports-after-its-calling-owner-is-disposed) — A failed action reports to the boundary above the owner it was called under even when that owner was disposed before the action failed.
+  - [`@rule a-failed-action-whose-boundary-is-gone-reports-to-the-next-one-up`](#rule-a-failed-action-whose-boundary-is-gone-reports-to-the-next-one-up) — When the boundary a failed action would report to has been disposed, the report goes to the next accepting boundary above it, at the latest the root's.
 - [`@axiom an-error-is-graph-state-not-an-event`](#axiom-an-error-is-graph-state-not-an-event) — A failure is state held on the node that failed, beside its last resolved value, and it propagates along the graph the way pending does. A boundary shows that state; it does not count throws.
   - [`@rule error-returns-the-failure-of-a-node-or-anything-upstream`](#rule-error-returns-the-failure-of-a-node-or-anything-upstream) — `error(x)` returns the error of `x`, or of the nearest failed stage upstream of it, and `null` while the chain is healthy.
   - [`@rule a-recovery-clears-the-error`](#rule-a-recovery-clears-the-error) — When a failed node computes successfully again, its error is cleared and its new value is published.
@@ -1425,11 +1428,17 @@ Also derives from [`rule-every-root-has-an-error-boundary`](#rule-every-root-has
 
 ### @rule a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller
 
-> A failed action reports to the nearest boundary that accepts its error, above the owner it was called under: an `<Errored>`, a root's default boundary, or a `catchError`, whose handler is then called with the error. The choice is made again on every failure, so a retry whose error a nearer boundary now accepts moves there. The report still reaches its boundary when the calling owner was disposed before the action failed. When the boundary itself is gone, the report goes to the next boundary up, at the latest the root's.
+> A failed action reports to the nearest boundary that accepts its error, above the owner it was called under: an `<Errored>`, a root's default boundary, or a `catchError`, whose handler is then called with the error.
 
-Also derives from [`rule-the-boundary-is-chosen-again-for-every-error`](#rule-the-boundary-is-chosen-again-for-every-error). This follows because error-boundaries-are-sub-owners sends an error to the nearest accepting boundary above the owner it happened under, the calling owner, and the-boundary-is-chosen-again-for-every-error repeats that choice on each failure.
+This follows because error-boundaries-are-sub-owners sends an error to the nearest accepting boundary above the owner it happened under, and for an action that owner is the one it was called under.
 
-An action called from an event handler runs under the owner that was current when [the handler was bound](#rule-an-event-handler-runs-under-the-owner-it-was-bound-in). The calling owner can be gone before the action fails, for example a list row recreated by the action's own optimistic write. A `catchError` handler receives only the error, so an action it caught is retried through its handle.
+An action called from an event handler runs under the owner that was current when [the handler was bound](#rule-an-event-handler-runs-under-the-owner-it-was-bound-in). A `catchError` handler receives only the error, so an action it caught is retried through its handle.
+
+### @rule a-failed-action-chooses-its-boundary-again-on-every-failure
+
+> Each failure of an action chooses its boundary anew, so a retry whose error a different boundary now accepts moves its report there and releases the boundary that held the earlier one.
+
+Also derives from [`rule-a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller`](#rule-a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller) and [`rule-the-boundary-is-chosen-again-for-every-error`](#rule-the-boundary-is-chosen-again-for-every-error). This follows because an action's error is routed like any error, and the-boundary-is-chosen-again-for-every-error repeats the walk for each new error, so a retry that fails differently is routed by its own walk.
 
 ### @rule a-throwing-handler-passes-a-failed-action-on-with-the-handlers-error
 
@@ -1510,6 +1519,20 @@ No design document states this. It was accepted as a principle when the canon wa
 This follows because every failure inside a root is held by some boundary: the root itself must therefore hold what nothing nearer does.
 
 An explicit boundary below the root is nearer, so it wins over the root's.
+
+### @rule a-failed-action-reports-after-its-calling-owner-is-disposed
+
+> A failed action reports to the boundary above the owner it was called under even when that owner was disposed before the action failed.
+
+Also derives from [`rule-a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller`](#rule-a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller). This follows because every failure inside a root is held by some boundary: the boundary above the calling owner is still mounted, and dropping the report because the owner below it is gone would lose the failure.
+
+The calling owner can be gone before the action fails, for example a list row recreated by the action's own optimistic write.
+
+### @rule a-failed-action-whose-boundary-is-gone-reports-to-the-next-one-up
+
+> When the boundary a failed action would report to has been disposed, the report goes to the next accepting boundary above it, at the latest the root's.
+
+Also derives from [`rule-a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller`](#rule-a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller) and [`rule-every-root-has-an-error-boundary`](#rule-every-root-has-an-error-boundary). This follows because every failure inside a root is held by some boundary: a disposed boundary can no longer hold or show the report, so it must go to a boundary that still can, and the root's boundary is always there.
 
 ## @axiom an-error-is-graph-state-not-an-event
 

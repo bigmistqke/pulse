@@ -459,7 +459,7 @@ test('a catchError whose for declines the error passes a failed action on to the
 })
 
 /**
- * @canon rule-a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller
+ * @canon rule-a-failed-action-chooses-its-boundary-again-on-every-failure
  */
 test('action() moves a claim to a boundary that now accepts a retry, releasing the one that claimed an earlier, differently-typed error', async () => {
   const outerReports: unknown[] = []
@@ -532,7 +532,7 @@ test('action() moves a claim to a boundary that now accepts a retry, releasing t
 })
 
 /**
- * @canon rule-a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller
+ * @canon rule-a-failed-action-chooses-its-boundary-again-on-every-failure
  */
 test('action() moves a claim back to a nearer boundary once a retry fails with an error that boundary accepts, even though a farther boundary already claimed an earlier error', async () => {
   const spy = vi.spyOn(console, 'error').mockImplementation(() => {})

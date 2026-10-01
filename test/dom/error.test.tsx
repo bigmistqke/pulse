@@ -573,7 +573,7 @@ test('a failed action registers with the nearest <Errored> boundary, and its ret
 })
 
 /**
- * @canon rule-a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller
+ * @canon rule-a-failed-action-reports-after-its-calling-owner-is-disposed
  */
 test('a mutation triggered from a reference-keyed row still reaches <Errored>, even though its own write recreates that row', async () => {
   // The row-recycling bug this design was fixed for: the mutation's own
@@ -654,7 +654,7 @@ test('a mutation triggered from a reference-keyed row still reaches <Errored>, e
 })
 
 /**
- * @canon rule-a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller
+ * @canon rule-a-failed-action-reports-after-its-calling-owner-is-disposed
  */
 test('an action that fails after its owning row unmounted (but the boundary is still mounted) still reaches the boundary', async () => {
   // The counterpart to the reference-keyed-row test above, stated directly:
@@ -722,7 +722,7 @@ test('an action that fails after its owning row unmounted (but the boundary is s
 })
 
 /**
- * @canon rule-a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller
+ * @canon rule-a-failed-action-whose-boundary-is-gone-reports-to-the-next-one-up
  */
 test('an action that fails after its <Errored> boundary itself unmounted escalates to the implicit root instead of registering a stale entry', async () => {
   const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -1375,7 +1375,7 @@ test('action() skips a nearer <Errored> whose for declines the error, and regist
 })
 
 /**
- * @canon rule-a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller
+ * @canon rule-a-failed-action-reports-after-its-calling-owner-is-disposed
  */
 test('a mutation triggered from a reference-keyed row still reaches a filtered <Errored>, even though its own write recreates that row', async () => {
   const target = document.createElement('section')
