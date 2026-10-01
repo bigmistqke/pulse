@@ -60,14 +60,21 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule runwithowner-restores-the-previous-owner`](#rule-runwithowner-restores-the-previous-owner) — `runWithOwner` makes its owner ambient for the call, `null` included, and restores the previous owner when the call returns or throws.
 - [`@axiom error-boundaries-are-sub-owners`](#axiom-error-boundaries-are-sub-owners) — An error boundary is an owner in the owner tree. An error goes to the nearest boundary above the owner it happened under that accepts it.
   - [`@rule catch-error-runs-its-body-in-a-sub-owner`](#rule-catch-error-runs-its-body-in-a-sub-owner) — `catchError(fn, handler)` runs `fn` inside a new sub-owner of the current owner and returns what `fn` returns, or `undefined` when `fn` throws and the handler takes the error.
-  - [`@rule the-nearest-accepting-boundary-claims-an-error`](#rule-the-nearest-accepting-boundary-claims-an-error) — `catchError` and `<Errored>` are peers in one walk up the owner chain. The nearest one that accepts the error claims it. One whose `for` predicate declines passes the error on to the next.
+  - [`@rule a-catch-error-sub-owner-is-disposed-with-its-parent`](#rule-a-catch-error-sub-owner-is-disposed-with-its-parent) — Disposing the owner a `catchError` was called under disposes its sub-owner, and stops what was created inside it.
+  - [`@rule catch-error-refuses-a-disposed-owner`](#rule-catch-error-refuses-a-disposed-owner) — Calling `catchError` inside an owner that has been disposed throws.
+  - [`@rule the-nearest-accepting-boundary-claims-an-error`](#rule-the-nearest-accepting-boundary-claims-an-error) — `catchError` and `<Errored>` are peers in one walk up the owner chain. The nearest one that accepts the error claims it. One whose `for` predicate declines passes the error on to the next, and one with no `for` accepts every error.
+  - [`@rule the-boundary-is-chosen-again-for-every-error`](#rule-the-boundary-is-chosen-again-for-every-error) — The walk runs again for every error, so a node that fails again with a different kind of error moves to the boundary that accepts the new one.
   - [`@rule a-handler-that-throws-passes-its-error-outward`](#rule-a-handler-that-throws-passes-its-error-outward) — When a `catchError` handler throws, the walk continues past it with the handler's error. When nothing further up takes it, it is thrown to the caller.
   - [`@rule a-throw-from-a-catch-error-body-reaches-only-catch-error-handlers`](#rule-a-throw-from-a-catch-error-body-reaches-only-catch-error-handlers) — A synchronous throw from a `catchError` body is routed only to `catchError` handlers, never to an `<Errored>` or a root's boundary. When none accepts it, it is thrown to the caller.
   - [`@rule a-catch-error-handler-is-called-for-each-throw-under-it`](#rule-a-catch-error-handler-is-called-for-each-throw-under-it) — A `catchError` handler is called for each throw that reaches it, from its body and from any node created under it, on the first run and on later re-runs.
   - [`@rule an-error-nothing-claims-is-thrown-on-a-first-run`](#rule-an-error-nothing-claims-is-thrown-on-a-first-run) — Outside any root, an error from a node that no boundary claims is thrown to the caller when it happens during the node's first run. During a later re-run it is logged to the console instead.
   - [`@rule every-root-has-an-error-boundary`](#rule-every-root-has-an-error-boundary) — `createRoot` installs an error boundary on the root owner. It claims every error no nearer boundary claims, tracks it like any other boundary, and logs each failed report to the console, a repeated one included.
-  - [`@rule a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller`](#rule-a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller) — A failed action reports to the nearest boundary that accepts its error, above the owner it was called under: an `<Errored>`, a root's default boundary, or a `catchError`, whose handler is then called. The choice is made again on every failure, and the report outlives the calling owner but not the boundary.
+  - [`@rule use-errored-without-an-errored-reads-the-roots-boundary`](#rule-use-errored-without-an-errored-reads-the-roots-boundary) — Under a root with no explicit `<Errored>`, `useErrored()` reads the root's boundary, which holds every error nothing nearer claimed in that root.
+  - [`@rule a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller`](#rule-a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller) — A failed action reports to the nearest boundary that accepts its error, above the owner it was called under: an `<Errored>`, a root's default boundary, or a `catchError`, whose handler is then called with the error. The choice is made again on every failure, so a retry whose error a nearer boundary now accepts moves there. The report still reaches its boundary when the calling owner was disposed before the action failed. When the boundary itself is gone, the report goes to the next boundary up, at the latest the root's.
+  - [`@rule an-errored-reset-retries-a-failed-action`](#rule-an-errored-reset-retries-a-failed-action) — An `<Errored>` boundary holding a failed action's report retries that action when it resets: its reset calls the action's own `retry()`.
+  - [`@rule a-throwing-handler-passes-a-failed-action-on-with-its-own-error`](#rule-a-throwing-handler-passes-a-failed-action-on-with-its-own-error) — When a `catchError` handler called for a failed action throws, the search continues to the boundaries beyond it, and the one that claims the failure receives the action's own error, not the handler's.
   - [`@rule a-real-error-in-an-effect-goes-to-the-nearest-handler`](#rule-a-real-error-in-an-effect-goes-to-the-nearest-handler) — A thrown error that is not a suspension, from an effect's body, a stage or a commit, goes to the nearest error handler above the effect. With no handler, it is thrown out of the run that raised it.
+  - [`@rule a-loading-boundary-does-not-catch-a-real-error`](#rule-a-loading-boundary-does-not-catch-a-real-error) — A `<Loading>` boundary between a binding and an error handler lets a real error from that binding pass on to the handler. It takes only suspensions.
   - [`@rule a-hole-that-throws-reports-to-the-nearest-catch-error`](#rule-a-hole-that-throws-reports-to-the-nearest-catch-error) — An error thrown inside a reactive child reaches the handler of the nearest enclosing `catchError`, and does not escape the write that caused it.
 - [`@axiom an-error-is-graph-state-not-an-event`](#axiom-an-error-is-graph-state-not-an-event) — A failure is state held on the node that failed, beside its last resolved value, and it propagates along the graph the way pending does. A boundary shows that state; it does not count throws.
   - [`@rule error-returns-the-failure-of-a-node-or-anything-upstream`](#rule-error-returns-the-failure-of-a-node-or-anything-upstream) — `error(x)` returns the error of `x`, or of the nearest failed stage upstream of it, and `null` while the chain is healthy.
@@ -80,11 +87,14 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule a-boundary-shows-its-fallback-exactly-while-something-under-it-is-failed`](#rule-a-boundary-shows-its-fallback-exactly-while-something-under-it-is-failed) — An `<Errored>` with a fallback shows it while at least one binding under it is failed, and shows its children again as soon as none is, with no reset.
   - [`@rule a-boundary-without-a-fallback-swaps-nothing`](#rule-a-boundary-without-a-fallback-swaps-nothing) — An `<Errored>` without a fallback keeps its children mounted through an error. Its state is still readable from below.
   - [`@rule a-boundary-holds-one-report-per-failed-binding`](#rule-a-boundary-holds-one-report-per-failed-binding) — An error boundary holds one report per currently failed binding, in the order the bindings first failed. A binding that reports again replaces its own entry, and a binding that recovers or goes away removes it.
+  - [`@rule error-and-active-describe-the-first-report`](#rule-error-and-active-describe-the-first-report) — A boundary's `error()` and `active()` describe its first report. A change to a report other than the first does not notify a reader of `error()` or `active()`.
+  - [`@rule an-identical-report-publishes-nothing-new`](#rule-an-identical-report-publishes-nothing-new) — A binding that reports the identical error again does not make the boundary publish a new collection of reports.
   - [`@rule reset-uses-the-latest-retry-a-binding-reported`](#rule-reset-uses-the-latest-retry-a-binding-reported) — A boundary's reset calls the retry from each binding's most recent report, even when that report did not change the published collection.
-  - [`@rule reset-recomputes-the-failed-source-at-the-root-of-its-chain`](#rule-reset-recomputes-the-failed-source-at-the-root-of-its-chain) — When a failed binding read a failed node, reset clears the error at the deepest failed stage of that node's chain and recomputes it, even with unchanged inputs.
+  - [`@rule reset-recomputes-the-failed-source-at-the-root-of-its-chain`](#rule-reset-recomputes-the-failed-source-at-the-root-of-its-chain) — When a failed binding read a failed node, reset clears the error at the deepest failed stage of that node's chain and recomputes it, even with unchanged inputs. This holds whether the binding read the node with `use`, which threw, or through a tolerant read, which reported the failure ambiently.
   - [`@rule reset-reruns-a-binding-that-threw-a-plain-error`](#rule-reset-reruns-a-binding-that-threw-a-plain-error) — When a binding threw an error that no failed node stands behind, reset re-runs that binding.
   - [`@rule a-report-names-only-a-source-its-own-binding-read`](#rule-a-report-names-only-a-source-its-own-binding-read) — A binding's report names a failed node as its source only if that binding read it. A source left behind by an unrelated binding never reaches another boundary's reset.
   - [`@rule a-boundarys-state-can-be-read-without-swapping`](#rule-a-boundarys-state-can-be-read-without-swapping) — The nearest boundary's state is readable from below without swapping anything: `useErrored()` returns accessors, `isErrored()` returns the current state or `undefined`, and `<Errored.Error>` renders its content only while the boundary is failed.
+  - [`@rule boundary-state-is-looked-up-past-a-catch-error`](#rule-boundary-state-is-looked-up-past-a-catch-error) — `useErrored()`, `isErrored()` and `<Errored.Error>` find the nearest `<Errored>` by its position above them, and a `catchError` between them and it does not stop the lookup.
   - [`@rule every-retry-affordance-performs-the-boundarys-reset`](#rule-every-retry-affordance-performs-the-boundarys-reset) — The `retry` of `useErrored()`, of `isErrored()` and of `<Errored.Error>` performs the same operation as the fallback's `reset`: it retries every failed report the boundary holds.
   - [`@rule with-no-owner-the-boundary-state-is-inert`](#rule-with-no-owner-the-boundary-state-is-inert) — Called with no owner at all, `useErrored()` returns a state that is never active and whose retry does nothing, and `isErrored()` returns `undefined`.
   - [`@rule a-predicate-narrows-what-a-reader-sees-not-which-boundary-it-reads`](#rule-a-predicate-narrows-what-a-reader-sees-not-which-boundary-it-reads) — A predicate given to `useErrored`, `isErrored` or `<Errored.Error for>` narrows the reports a reader sees and retries to those that match. It does not change which boundary is read.
@@ -523,13 +533,23 @@ A boundary is a real node in the runtime, not a closure captured at creation. `c
 
 > `catchError(fn, handler)` runs `fn` inside a new sub-owner of the current owner and returns what `fn` returns, or `undefined` when `fn` throws and the handler takes the error.
 
-The sub-owner is disposed with its parent. Calling `catchError` inside a disposed owner throws.
+### @rule a-catch-error-sub-owner-is-disposed-with-its-parent
+
+> Disposing the owner a `catchError` was called under disposes its sub-owner, and stops what was created inside it.
+
+### @rule catch-error-refuses-a-disposed-owner
+
+> Calling `catchError` inside an owner that has been disposed throws.
+
+Nodes created there would never be disposed, the same reason [a disposed owner cannot be entered](#rule-a-disposed-owner-cannot-be-entered).
 
 ### @rule the-nearest-accepting-boundary-claims-an-error
 
-> `catchError` and `<Errored>` are peers in one walk up the owner chain. The nearest one that accepts the error claims it. One whose `for` predicate declines passes the error on to the next.
+> `catchError` and `<Errored>` are peers in one walk up the owner chain. The nearest one that accepts the error claims it. One whose `for` predicate declines passes the error on to the next, and one with no `for` accepts every error.
 
-A boundary with no `for` accepts everything. The walk is repeated for every error, so a node that fails again with a different kind of error can move to a different boundary.
+### @rule the-boundary-is-chosen-again-for-every-error
+
+> The walk runs again for every error, so a node that fails again with a different kind of error moves to the boundary that accepts the new one.
 
 ### @rule a-handler-that-throws-passes-its-error-outward
 
@@ -559,19 +579,37 @@ Inside a root this never happens, because [the root's own boundary](#rule-every-
 
 > `createRoot` installs an error boundary on the root owner. It claims every error no nearer boundary claims, tracks it like any other boundary, and logs each failed report to the console, a repeated one included.
 
-An explicit boundary below the root wins over it. `useErrored()` under a root with no explicit `<Errored>` therefore reports the root's boundary, which aggregates every unclaimed error in that root.
+An explicit boundary below the root is nearer, so it wins over the root's.
+
+### @rule use-errored-without-an-errored-reads-the-roots-boundary
+
+> Under a root with no explicit `<Errored>`, `useErrored()` reads the root's boundary, which holds every error nothing nearer claimed in that root.
 
 ### @rule a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller
 
-> A failed action reports to the nearest boundary that accepts its error, above the owner it was called under: an `<Errored>`, a root's default boundary, or a `catchError`, whose handler is then called. The choice is made again on every failure, and the report outlives the calling owner but not the boundary.
+> A failed action reports to the nearest boundary that accepts its error, above the owner it was called under: an `<Errored>`, a root's default boundary, or a `catchError`, whose handler is then called with the error. The choice is made again on every failure, so a retry whose error a nearer boundary now accepts moves there. The report still reaches its boundary when the calling owner was disposed before the action failed. When the boundary itself is gone, the report goes to the next boundary up, at the latest the root's.
 
-An action called from an event handler runs under the owner that was current when the handler was bound. When the calling owner is disposed before the action fails, for example a list row recreated by the action's own optimistic write, the report still reaches the boundary. When the boundary itself is gone, the report goes to the next boundary up, which is at the latest the root's. A retry whose error a nearer boundary now accepts moves the report there. An `<Errored>` boundary's reset calls the action's own `retry()`. A `catchError` handler receives only the error; the action is retried through its handle. A handler that throws passes its own error on to the boundaries beyond it.
+An action called from an event handler runs under the owner that was current when [the handler was bound](#rule-an-event-handler-runs-under-the-owner-it-was-bound-in). The calling owner can be gone before the action fails, for example a list row recreated by the action's own optimistic write. A `catchError` handler receives only the error, so an action it caught is retried through its handle.
+
+### @rule an-errored-reset-retries-a-failed-action
+
+> An `<Errored>` boundary holding a failed action's report retries that action when it resets: its reset calls the action's own `retry()`.
+
+### @rule a-throwing-handler-passes-a-failed-action-on-with-its-own-error
+
+> When a `catchError` handler called for a failed action throws, the search continues to the boundaries beyond it, and the one that claims the failure receives the action's own error, not the handler's.
+
+This differs from [a handler that throws for a node's error](#rule-a-handler-that-throws-passes-its-error-outward), where the handler's error is what travels on.
 
 ### @rule a-real-error-in-an-effect-goes-to-the-nearest-handler
 
 > A thrown error that is not a suspension, from an effect's body, a stage or a commit, goes to the nearest error handler above the effect. With no handler, it is thrown out of the run that raised it.
 
-A `<Loading>` boundary does not catch it on the way. An effect that throws again after a later change reports that error too.
+An effect that throws again after a later change reports that error too.
+
+### @rule a-loading-boundary-does-not-catch-a-real-error
+
+> A `<Loading>` boundary between a binding and an error handler lets a real error from that binding pass on to the handler. It takes only suspensions.
 
 ### @rule a-hole-that-throws-reports-to-the-nearest-catch-error
 
@@ -633,7 +671,13 @@ One rejection renders the fallback once, however many times the failing binding 
 
 > An error boundary holds one report per currently failed binding, in the order the bindings first failed. A binding that reports again replaces its own entry, and a binding that recovers or goes away removes it.
 
-`error()` and `active()` describe the first report. Re-reporting the identical error does not publish a new collection, and a change to a report other than the first does not notify a reader of `error()` or `active()`.
+### @rule error-and-active-describe-the-first-report
+
+> A boundary's `error()` and `active()` describe its first report. A change to a report other than the first does not notify a reader of `error()` or `active()`.
+
+### @rule an-identical-report-publishes-nothing-new
+
+> A binding that reports the identical error again does not make the boundary publish a new collection of reports.
 
 ### @rule reset-uses-the-latest-retry-a-binding-reported
 
@@ -641,9 +685,9 @@ One rejection renders the fallback once, however many times the failing binding 
 
 ### @rule reset-recomputes-the-failed-source-at-the-root-of-its-chain
 
-> When a failed binding read a failed node, reset clears the error at the deepest failed stage of that node's chain and recomputes it, even with unchanged inputs.
+> When a failed binding read a failed node, reset clears the error at the deepest failed stage of that node's chain and recomputes it, even with unchanged inputs. This holds whether the binding read the node with `use`, which threw, or through a tolerant read, which reported the failure ambiently.
 
-A downstream stage only propagates its upstream's error, so resetting it alone would fail again the same way. This holds for a failure reported ambiently through a tolerant read as well as for one thrown by `use`.
+A downstream stage only propagates its upstream's error, so resetting it alone would fail again the same way.
 
 ### @rule reset-reruns-a-binding-that-threw-a-plain-error
 
@@ -659,7 +703,11 @@ An effect with no boundary above it, whose failure was swallowed, or which caugh
 
 > The nearest boundary's state is readable from below without swapping anything: `useErrored()` returns accessors, `isErrored()` returns the current state or `undefined`, and `<Errored.Error>` renders its content only while the boundary is failed.
 
-These look up the nearest boundary by position, without stopping at a nearer `catchError`.
+### @rule boundary-state-is-looked-up-past-a-catch-error
+
+> `useErrored()`, `isErrored()` and `<Errored.Error>` find the nearest `<Errored>` by its position above them, and a `catchError` between them and it does not stop the lookup.
+
+A `catchError` intercepts errors thrown below it, but it does not stand in front of the region the `<Errored>` would swap out.
 
 ### @rule every-retry-affordance-performs-the-boundarys-reset
 

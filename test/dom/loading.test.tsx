@@ -292,7 +292,7 @@ test('useLoading() inside subtree reflects pending state', async () => {
 })
 
 /**
- * @canon rule-a-real-error-in-an-effect-goes-to-the-nearest-handler
+ * @canon rule-a-loading-boundary-does-not-catch-a-real-error
  */
 test('non-NotReadyYet error in a binding inside Loading propagates to catchError', () => {
   const target = document.createElement('section')

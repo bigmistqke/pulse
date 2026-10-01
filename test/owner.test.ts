@@ -221,7 +221,7 @@ test('unhandled throw (no boundary) propagates', () => {
 })
 
 /**
- * @canon rule-catch-error-runs-its-body-in-a-sub-owner
+ * @canon rule-a-catch-error-sub-owner-is-disposed-with-its-parent
  */
 test('catchError sub-owner is disposed when its parent root is disposed', () => {
   const log: string[] = []
@@ -237,7 +237,7 @@ test('catchError sub-owner is disposed when its parent root is disposed', () => 
 })
 
 /**
- * @canon rule-catch-error-runs-its-body-in-a-sub-owner
+ * @canon rule-catch-error-refuses-a-disposed-owner
  */
 test('catchError throws when called inside a disposed owner', () => {
   createRoot((dispose) => {
@@ -614,7 +614,7 @@ test('ErrorScope.reports() removes an entry once its controller reports idle or 
 })
 
 /**
- * @canon rule-a-boundary-holds-one-report-per-failed-binding
+ * @canon rule-an-identical-report-publishes-nothing-new
  */
 test('a controller re-reporting the identical error does not publish a new reports array', () => {
   const scope = createErrorScope()
@@ -673,7 +673,7 @@ test('onErrorReport still fires on every failed report, even one that does not c
 })
 
 /**
- * @canon rule-a-boundary-holds-one-report-per-failed-binding
+ * @canon rule-error-and-active-describe-the-first-report
  */
 test('ErrorScope.error()/active() still report the first entry, unaffected by reports() existing', () => {
   const scope = createErrorScope()
@@ -693,7 +693,7 @@ test('ErrorScope.error()/active() still report the first entry, unaffected by re
 })
 
 /**
- * @canon rule-a-boundary-holds-one-report-per-failed-binding
+ * @canon rule-error-and-active-describe-the-first-report
  */
 test('a change to a non-first report does not re-notify a consumer that only reads error()/active()', () => {
   const scope = createErrorScope()

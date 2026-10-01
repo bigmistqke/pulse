@@ -507,6 +507,7 @@ test('a source marked and swallowed by the effect body itself (no throw reaches 
 
 /**
  * @canon rule-a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller
+ * @canon rule-an-errored-reset-retries-a-failed-action
  */
 test('a failed action registers with the nearest <Errored> boundary, and its retry button re-runs it', async () => {
   const target = document.createElement('section')
@@ -1202,7 +1203,7 @@ test('a computed error with no explicit <Errored> anywhere still registers with 
 })
 
 /**
- * @canon rule-every-root-has-an-error-boundary
+ * @canon rule-use-errored-without-an-errored-reads-the-roots-boundary
  */
 test('useErrored() with no explicit <Errored> reports the implicit root boundary, aggregating unrelated errors', async () => {
   const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -1275,7 +1276,7 @@ test('<Errored> with a declining for lets a computed rejection propagate to a fa
 })
 
 /**
- * @canon rule-the-nearest-accepting-boundary-claims-an-error
+ * @canon rule-the-boundary-is-chosen-again-for-every-error
  */
 test('a computed that re-fails with a different error type re-routes to the boundary that accepts it, not the one that claimed its earlier error', async () => {
   const target = document.createElement('section')

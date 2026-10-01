@@ -1,0 +1,30 @@
+import { expect, test, vi } from 'vitest'
+import { action, catchError, createRoot, from } from '../src/index'
+
+/**
+ * @canon rule-a-throwing-handler-passes-a-failed-action-on-with-its-own-error
+ */
+test('a catchError handler that throws passes a failed action on, and the boundary beyond receives the action error', async () => {
+  const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
+  const handled: unknown[] = []
+  let handle!: ReturnType<typeof action>
+  createRoot(() => {
+    catchError(
+      () => {
+        handle = action(function* () {
+          yield* from(Promise.reject(new Error('boom')))
+        })
+      },
+      (e) => {
+        handled.push(e)
+        throw new Error('from handler')
+      },
+    )
+  })
+  await handle.settled
+  const logged = spy.mock.calls.flat().map((arg) => (arg as Error)?.message)
+  expect(handled.map((e) => (e as Error).message)).toEqual(['boom']) // the handler was called
+  expect(logged).toContain('boom') // the root's boundary claimed it next, with the action's error
+  expect(logged).not.toContain('from handler')
+  spy.mockRestore()
+})
