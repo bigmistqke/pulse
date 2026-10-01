@@ -1,6 +1,6 @@
 # Pulse — Canon
 
-How pulse behaves now, and why: the axioms pulse holds, and the rules, exceptions and cases derived from them. It is the guideline for every choice in pulse, internal ones included. Tests cite the units here with a `@spec` tag, and `pnpm canon check` holds those links closed. The method is described in [`.claude/skills/canon/SKILL.md`](.claude/skills/canon/SKILL.md).
+How pulse behaves now, and why: the axioms pulse holds, and the rules, exceptions and cases derived from them. It is the guideline for every choice in pulse, internal ones included. Tests cite the units here with a `@canon` tag, and `pnpm canon check` holds those links closed. The method is described in [`.claude/skills/canon/SKILL.md`](.claude/skills/canon/SKILL.md).
 
 This document states the present tense only. How a decision was reached, and what was believed before it, lives in the decision records under [`docs/adr/`](docs/adr/) and in the exploration record under [`docs/pulse/`](docs/pulse/).
 
@@ -1340,8 +1340,6 @@ This follows because [`axiom-a-lifetime-belongs-to-an-owner`](#axiom-a-lifetime-
 
 This follows because [`axiom-a-lifetime-belongs-to-an-owner`](#axiom-a-lifetime-belongs-to-an-owner) says a node lives as long as its owner: a node created under an owner that has already ended would outlive it, so entering that owner is refused.
 
-Code run under a disposed owner would register nodes and cleanups that nothing will ever dispose, so entering one is refused.
-
 ### @rule an-owner-disposes-its-children-before-its-own-cleanups
 
 > When an owner is disposed, the effects, computeds and sub-owners it owns are disposed first, the most recently created first, and the owner's own `onCleanup` callbacks run after them.
@@ -1391,8 +1389,6 @@ This follows because [`rule-catch-error-runs-its-body-in-a-sub-owner`](#rule-cat
 Derives from: [`rule-a-disposed-owner-cannot-be-entered`](#rule-a-disposed-owner-cannot-be-entered)
 
 This follows because [`axiom-a-lifetime-belongs-to-an-owner`](#axiom-a-lifetime-belongs-to-an-owner) says a node lives as long as its owner, and [`rule-a-disposed-owner-cannot-be-entered`](#rule-a-disposed-owner-cannot-be-entered) refuses an ended owner for that reason: a catchError sub-owner there would outlive it.
-
-Nodes created there would never be disposed, the same reason [a disposed owner cannot be entered](#rule-a-disposed-owner-cannot-be-entered).
 
 ### @rule a-boundary-is-disposed-with-its-owner
 
@@ -2442,8 +2438,6 @@ This follows because a discard leaves no trace, and that record is held outside 
 
 This follows because a speculation's writes are held until it commits: a promise written inside an action is the action's tentative value, so it cannot start work in the committed derivation before the commit.
 
-The written promise is the action's tentative value, not a reason for the derivation to run again.
-
 ### @rule a-scope-reads-through-its-chain
 
 > A read in a scope takes the nearest slot up its chain of scopes, and falls through to committed state when no scope in the chain has one.
@@ -2669,6 +2663,7 @@ Derives from: [`axiom-a-boundary-wraps-what-it-coordinates`](#axiom-a-boundary-w
 This follows because a component runs once, and a boundary only chooses what its region shows: it cannot rebuild its children per display, so it builds them once and swaps what is shown.
 
 Building the children is what starts the work the boundary waits for, so it cannot wait for the display to choose them.
+
 ### @rule errored-error-builds-its-content-once-per-failure
 
 > `<Errored.Error>` builds its content when the boundary becomes failed, keeps it while the boundary stays failed, and disposes it when the boundary recovers.
@@ -2763,8 +2758,6 @@ This follows because a dynamic child is wrapped only so that it becomes a hole, 
 
 This follows because a component runs once and reads its props where it uses them: its children are one prop, so they are deferred as one getter until the component reads them.
 
-A component reads `props.children` like any other prop, so the children are deferred until the component reads them.
-
 ## @axiom a-prop-says-how-it-reaches-the-dom
 
 > How a prop reaches the DOM is written at the prop, by its prefix, and never inferred from its name or its value.
@@ -2814,6 +2807,7 @@ An object already has an identity, so no key function is needed to give it one, 
 This follows because an item is its reference: the same object in a new position is the same row, moved with its state, and a different object is a new row, whatever its contents.
 
 No key function is needed because the item already has an identity.
+
 ## @axiom a-missing-value-sets-nothing
 
 > A missing value sets nothing: `null`, `undefined` and `false` leave nothing in the DOM.
