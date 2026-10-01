@@ -50,8 +50,6 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule a-computed-has-no-setter`](#rule-a-computed-has-no-setter) — `computed` returns an accessor and nothing to write with. A derivation that can also be written is made with `signal`.
   - [`@rule a-signal-given-stages-is-a-writable-derivation`](#rule-a-signal-given-stages-is-a-writable-derivation) — `signal(s0, s1, …)` builds the same pipeline `computed` builds and adds a setter, whose write lands on the output of the last stage. `signal(value)` given a value that is not a function stays a plain signal.
   - [`@rule an-optimistic-value-is-read-like-any-node`](#rule-an-optimistic-value-is-read-like-any-node) — The accessor of an optimistic value is an ordinary node. Every read verb applies to it, and the pending and failed state of what its recipe reads reaches the read site through it.
-  - [`@rule an-optimistic-fallback-seeds-the-tolerant-read`](#rule-an-optimistic-fallback-seeds-the-tolerant-read) — A fallback passed when an optimistic value is created is what `peek` and `latest` return before the source has resolved.
-  - [`@rule resetting-an-optimistic-error-retries-its-source`](#rule-resetting-an-optimistic-error-retries-its-source) — Resetting the error of an optimistic value, as an error boundary's retry does, recomputes the failed source it wraps.
   - [`@rule a-staged-effect-is-a-pipeline-ending-in-a-commit`](#rule-a-staged-effect-is-a-pipeline-ending-in-a-commit) — `effect([stage0, …, stageN], commit)` runs the same pipeline a computed runs, and passes the final stage's resolved value to `commit`. It commits again whenever the pipeline produces a new value, and skips a value `Object.is`-equal to the one it last committed.
 - [`@axiom the-latest-production-wins`](#axiom-the-latest-production-wins) — A derived value shows whatever produced it last — a dependency change or a direct write — and a production that was started earlier never publishes over a later one.
   - [`@rule a-write-replaces-a-derived-value-without-rerunning-it`](#rule-a-write-replaces-a-derived-value-without-rerunning-it) — A write to a writable derivation replaces its value at once, and the body does not run again because of it.
@@ -80,16 +78,15 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule a-pipeline-reads-as-a-promise-while-its-value-came-through-async`](#rule-a-pipeline-reads-as-a-promise-while-its-value-came-through-async) — The raw read of a pipeline is a promise when its current value was produced through an asynchronous stage, and bare otherwise. A write never changes that colour.
   - [`@rule a-generator-stage-is-asynchronous-only-when-it-suspends`](#rule-a-generator-stage-is-asynchronous-only-when-it-suspends) — A generator stage counts as an asynchronous stage only when it actually suspended on a pending promise. One that ran to completion without suspending publishes its value bare.
   - [`@rule a-written-promise-is-published-like-a-produced-one`](#rule-a-written-promise-is-published-like-a-produced-one) — A promise written into a derivation is its value: pending until it settles, then the resolved value, or a parked failure if it rejects.
-  - [`@rule a-written-promise-leaves-the-prior-value-to-the-tolerant-read`](#rule-a-written-promise-leaves-the-prior-value-to-the-tolerant-read) — While a written promise is pending, and after it rejects, the tolerant read returns the value from before the write.
   - [`@rule an-async-computed-refetches-when-a-source-changes`](#rule-an-async-computed-refetches-when-a-source-changes) — An async stage keeps following the sources it read after its promise settles, and runs again when one of them changes. A consumer then receives the new resolved value.
   - [`@rule a-fresh-promise-each-run-settles-once-per-change`](#rule-a-fresh-promise-each-run-settles-once-per-change) — A stage that returns a new promise on every run, such as a `.then`-chained one, settles once per change and does not loop.
-  - [`@rule is-pending-reports-an-unsettled-pipeline`](#rule-is-pending-reports-an-unsettled-pipeline) — `isPending(c)` is true while any stage of the pipeline is waiting on a promise, on the first load and during a refetch, and `promiseOf(c)` returns that promise. Both clear when it settles.
   - [`@rule a-stage-suspended-through-use-is-absorbed`](#rule-a-stage-suspended-through-use-is-absorbed) — A sync stage whose body throws `NotReadyYet` through `use` suspends like an async stage, reports pending, and runs again when the promise settles.
   - [`@rule a-use-suspended-stage-reads-as-its-promise-until-it-settles`](#rule-a-use-suspended-stage-reads-as-its-promise-until-it-settles) — While a sync stage that suspended through `use` waits on a first load, the pipeline reads as the promise in flight. Once that promise settles, the sync stage publishes its bare value.
   - [`@rule an-update-function-receives-the-last-resolved-value`](#rule-an-update-function-receives-the-last-resolved-value) — An update function on a writable derivation receives the last value that actually resolved, never a promise, and `undefined` when nothing has resolved yet.
   - [`@rule an-update-function-sees-the-value-a-sync-derivation-produced-at-creation`](#rule-an-update-function-sees-the-value-a-sync-derivation-produced-at-creation) — A derivation runs when it is created. An update function on a sync derivation therefore receives the value that first run produced, even before any write. An async derivation that suspended has produced nothing yet.
   - [`@rule writes-in-one-tick-chain-their-update-functions`](#rule-writes-in-one-tick-chain-their-update-functions) — Two writes in the same tick chain: the second update function receives the value the first one produced, and the last write is what the derivation holds.
   - [`@rule a-construction-default-seeds-only-the-tolerant-read`](#rule-a-construction-default-seeds-only-the-tolerant-read) — `signal(fn, default)` makes `peek` return `default` until the derivation first resolves, and an update function receive `default` in place of `undefined`. The raw read stays a pending promise.
+  - [`@rule an-optimistic-fallback-seeds-the-tolerant-read`](#rule-an-optimistic-fallback-seeds-the-tolerant-read) — A fallback passed when an optimistic value is created is what `peek` and `latest` return before the source has resolved.
   - [`@rule a-construction-default-removes-undefined-from-the-types`](#rule-a-construction-default-removes-undefined-from-the-types) — With a construction default given, the types of `peek` and of an update function's argument leave out `undefined`, so neither needs a check.
   - [`@rule a-stage-result-is-settled-before-it-is-passed-on`](#rule-a-stage-result-is-settled-before-it-is-passed-on) — Each value a stage returns or a generator yields is settled before it is used. A plain value or a fulfilled promise is used at once, and a pending promise suspends the stage on that promise.
   - [`@rule a-settled-promise-is-used-at-once-the-next-time-a-stage-runs`](#rule-a-settled-promise-is-used-at-once-the-next-time-a-stage-runs) — A promise that a stage saw pending, and that has settled since, is used at once the next time the stage runs. It does not suspend the stage again.
@@ -98,9 +95,11 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule peek-returns-the-last-resolved-value-and-never-throws`](#rule-peek-returns-the-last-resolved-value-and-never-throws) — `peek(x)` returns the most recent resolved value of `x`, or `undefined` when it never resolved. It never throws, not even for a failed node.
   - [`@rule peek-returns-a-given-fallback-until-a-value-resolves`](#rule-peek-returns-a-given-fallback-until-a-value-resolves) — `peek(x, fallback)` returns `fallback` wherever `peek(x)` would return `undefined`: before the first resolution, and after a rejection when nothing resolved before it. Once a value has resolved, it returns that value.
   - [`@rule an-async-node-keeps-its-last-value-while-it-refetches`](#rule-an-async-node-keeps-its-last-value-while-it-refetches) — When an async node's inputs change, its last resolved value stays readable until the new one settles: `peek` returns it, `use` keeps delivering it to a consumer that already has it, and the node reports the refetch as pending.
+  - [`@rule a-written-promise-leaves-the-prior-value-to-the-tolerant-read`](#rule-a-written-promise-leaves-the-prior-value-to-the-tolerant-read) — While a written promise is pending, and after it rejects, the tolerant read returns the value from before the write.
   - [`@rule pending-is-asked-and-answered-directly`](#rule-pending-is-asked-and-answered-directly) — `isPending(x)` and `promiseOf(x)` answer whether `x` has a promise in flight, and which one, as plain values called fresh at each read site.
   - [`@rule a-signals-pending-state-is-the-state-of-the-promise-it-holds`](#rule-a-signals-pending-state-is-the-state-of-the-promise-it-holds) — A signal holding a plain value is never pending, and its `promiseOf` is `null`. A signal holding a promise is pending until that promise settles, and `promiseOf` returns it while it is.
   - [`@rule pending-follows-where-a-value-came-from`](#rule-pending-follows-where-a-value-came-from) — A node is pending when any stage upstream of it is pending, or when a source its value was read from is. `promiseOf` returns the nearest promise in flight along the same path.
+  - [`@rule is-pending-reports-an-unsettled-pipeline`](#rule-is-pending-reports-an-unsettled-pipeline) — `isPending(c)` is true while any stage of the pipeline is waiting on a promise, on the first load and during a refetch, and `promiseOf(c)` returns that promise. Both clear when it settles.
 - [`@axiom a-paused-computation-is-re-entered-at-its-pause`](#axiom-a-paused-computation-is-re-entered-at-its-pause) — Pulse re-enters a paused computation at the finest point it can: a stage boundary with a new input, a generator stage at its pause, and anything else from the top of its body. Work done before that point runs again only when an input it read has changed.
   - [`@rule a-resumed-generator-does-not-rerun-code-before-its-pause`](#rule-a-resumed-generator-does-not-rerun-code-before-its-pause) — A generator stage that paused on a pending value is resumed with that value when it settles. The code before the pause does not run again.
     - [`@case a-paused-generator-is-handed-back-to-its-caller`](#case-a-paused-generator-is-handed-back-to-its-caller) — `driver.ts` `runStage`.
@@ -177,6 +176,7 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule an-identical-report-publishes-nothing-new`](#rule-an-identical-report-publishes-nothing-new) — A binding that reports the identical error again does not make the boundary publish a new collection of reports.
   - [`@rule reset-uses-the-latest-retry-a-binding-reported`](#rule-reset-uses-the-latest-retry-a-binding-reported) — A boundary's reset calls the retry from each binding's most recent report, even when that report did not change the published collection.
   - [`@rule reset-recomputes-the-failed-source-at-the-root-of-its-chain`](#rule-reset-recomputes-the-failed-source-at-the-root-of-its-chain) — When a failed binding read a failed node, reset clears the error at the deepest failed stage of that node's chain and recomputes it, even with unchanged inputs. This holds whether the binding read the node with `use`, which threw, or through a tolerant read, which reported the failure ambiently.
+  - [`@rule resetting-an-optimistic-error-retries-its-source`](#rule-resetting-an-optimistic-error-retries-its-source) — Resetting the error of an optimistic value, as an error boundary's retry does, recomputes the failed source it wraps.
   - [`@rule reset-reruns-a-binding-that-threw-a-plain-error`](#rule-reset-reruns-a-binding-that-threw-a-plain-error) — When a binding threw an error that no failed node stands behind, reset re-runs that binding.
   - [`@rule a-report-names-only-a-source-its-own-binding-read`](#rule-a-report-names-only-a-source-its-own-binding-read) — A binding's report names a failed node as its source only if that binding read it. A source left behind by an unrelated binding never reaches another boundary's reset.
   - [`@rule a-boundarys-state-can-be-read-without-swapping`](#rule-a-boundarys-state-can-be-read-without-swapping) — The nearest boundary's state is readable from below without swapping anything: `useErrored()` returns accessors, `isErrored()` returns the current state or `undefined`, and `<Errored.Error>` renders its content only while the boundary is failed.
@@ -535,16 +535,6 @@ So a stage downstream of a stage whose value did not change is not re-run, and r
 
 So `use` on it suspends until the source resolves, and a failed source is reported by `error()` on the optimistic node while `peek` still does not throw. The decision is [ADR 0016](docs/adr/0016-optimistic-as-a-signal-variant.md).
 
-### @rule an-optimistic-fallback-seeds-the-tolerant-read
-
-> A fallback passed when an optimistic value is created is what `peek` and `latest` return before the source has resolved.
-
-### @rule resetting-an-optimistic-error-retries-its-source
-
-> Resetting the error of an optimistic value, as an error boundary's retry does, recomputes the failed source it wraps.
-
-The failure is parked on the source, not on the optimistic node, so a reset that only cleared the optimistic node would fail again the same way.
-
 ### @rule a-staged-effect-is-a-pipeline-ending-in-a-commit
 
 > `effect([stage0, …, stageN], commit)` runs the same pipeline a computed runs, and passes the final stage's resolved value to `commit`. It commits again whenever the pipeline produces a new value, and skips a value `Object.is`-equal to the one it last committed.
@@ -697,10 +687,6 @@ A sync last stage fed by an async stage therefore still reads as a promise, and 
 
 > A promise written into a derivation is its value: pending until it settles, then the resolved value, or a parked failure if it rejects.
 
-### @rule a-written-promise-leaves-the-prior-value-to-the-tolerant-read
-
-> While a written promise is pending, and after it rejects, the tolerant read returns the value from before the write.
-
 ### @rule an-async-computed-refetches-when-a-source-changes
 
 > An async stage keeps following the sources it read after its promise settles, and runs again when one of them changes. A consumer then receives the new resolved value.
@@ -708,12 +694,6 @@ A sync last stage fed by an async stage therefore still reads as a promise, and 
 ### @rule a-fresh-promise-each-run-settles-once-per-change
 
 > A stage that returns a new promise on every run, such as a `.then`-chained one, settles once per change and does not loop.
-
-### @rule is-pending-reports-an-unsettled-pipeline
-
-> `isPending(c)` is true while any stage of the pipeline is waiting on a promise, on the first load and during a refetch, and `promiseOf(c)` returns that promise. Both clear when it settles.
-
-A stage that reads another node as its input reports that node's pending state as well, as [the pending walk](#rule-pending-follows-where-a-value-came-from) states.
 
 ### @rule a-stage-suspended-through-use-is-absorbed
 
@@ -742,6 +722,10 @@ A written promise has not resolved while it is pending, so an update function ca
 > `signal(fn, default)` makes `peek` return `default` until the derivation first resolves, and an update function receive `default` in place of `undefined`. The raw read stays a pending promise.
 
 Once a real value has resolved, both see it instead of the default.
+
+### @rule an-optimistic-fallback-seeds-the-tolerant-read
+
+> A fallback passed when an optimistic value is created is what `peek` and `latest` return before the source has resolved.
 
 ### @rule a-construction-default-removes-undefined-from-the-types
 
@@ -785,6 +769,10 @@ A fallback given when `x` was constructed works the same way, as [the constructi
 
 This is stale-while-revalidate.
 
+### @rule a-written-promise-leaves-the-prior-value-to-the-tolerant-read
+
+> While a written promise is pending, and after it rejects, the tolerant read returns the value from before the write.
+
 ### @rule pending-is-asked-and-answered-directly
 
 > `isPending(x)` and `promiseOf(x)` answer whether `x` has a promise in flight, and which one, as plain values called fresh at each read site.
@@ -798,6 +786,12 @@ This is stale-while-revalidate.
 > A node is pending when any stage upstream of it is pending, or when a source its value was read from is. `promiseOf` returns the nearest promise in flight along the same path.
 
 The walk follows two chains: the static pipeline, stage by stage, and the sources the node's recipe read through a verb on its last run. The second chain is how an optimistic value reports a background refresh of the node it wraps: its own stage holds a value and is not in flight, but the node it read is.
+
+### @rule is-pending-reports-an-unsettled-pipeline
+
+> `isPending(c)` is true while any stage of the pipeline is waiting on a promise, on the first load and during a refetch, and `promiseOf(c)` returns that promise. Both clear when it settles.
+
+A stage that reads another node as its input reports that node's pending state as well, as [the pending walk](#rule-pending-follows-where-a-value-came-from) states.
 
 ## @axiom a-paused-computation-is-re-entered-at-its-pause
 
@@ -1199,6 +1193,12 @@ One rejection renders the fallback once, however many times the failing binding 
 
 A downstream stage only propagates its upstream's error, so resetting it alone would fail again the same way.
 
+### @rule resetting-an-optimistic-error-retries-its-source
+
+> Resetting the error of an optimistic value, as an error boundary's retry does, recomputes the failed source it wraps.
+
+The failure is parked on the source, not on the optimistic node, so a reset that only cleared the optimistic node would fail again the same way.
+
 ### @rule reset-reruns-a-binding-that-threw-a-plain-error
 
 > When a binding threw an error that no failed node stands behind, reset re-runs that binding.
@@ -1354,6 +1354,8 @@ Whether a source has resolved is tracked separately from whether it has a value 
 ### @rule peek-reports-nothing
 
 > `peek(x)` returns the last resolved value and reports nothing to any boundary, neither a first load nor a refresh.
+
+What `peek` returns is stated in [the rule on peek's value](#rule-peek-returns-the-last-resolved-value-and-never-throws).
 
 ### @rule use-throws-a-parked-error
 
