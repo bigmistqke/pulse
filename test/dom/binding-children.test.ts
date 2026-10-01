@@ -116,3 +116,25 @@ test('nested reactive child does not leak the inner effect on outer re-run', () 
     expect(innerRuns - before).toBe(1)
   })
 })
+
+/**
+ * @canon rule-a-function-child-returns-anything-a-static-child-may-be
+ */
+test('a function child whose result is a function renders that function as a reactive child', () => {
+  const [label, setLabel] = signal('first')
+  const [source] = signal(0)
+  let host!: HTMLElement
+  createRoot(() => {
+    host = h(
+      'p',
+      null,
+      () => {
+        source() // the outer child has read something before its result is built
+        return () => label()
+      },
+    ) as HTMLElement
+  })
+  expect(host.textContent).toBe('first')
+  setLabel('second')
+  expect(host.textContent).toBe('second')
+})

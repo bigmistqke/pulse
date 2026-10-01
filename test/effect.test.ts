@@ -354,3 +354,41 @@ test('an effect created once the action has closed follows its sources normally'
   await settle()
   expect(seen).toEqual([2, 3])
 })
+
+/**
+ * @canon rule-an-effect-runs-at-creation-and-after-each-change
+ */
+test('an effect created inside a running effect that has read something runs at once', () => {
+  const [source] = signal(1)
+  let innerRunsAtCreation = -1
+  createRoot(() =>
+    effect(() => {
+      source()
+      let innerRuns = 0
+      effect(() => {
+        innerRuns++
+      })
+      innerRunsAtCreation = innerRuns
+    }),
+  )
+  expect(innerRunsAtCreation).toBe(1)
+})
+
+/**
+ * @canon rule-creating-a-derivation-is-not-reading-it
+ */
+test('an effect that creates an effect runs once for it', async () => {
+  const [source] = signal(1)
+  let outerRuns = 0
+  createRoot(() =>
+    effect(() => {
+      source()
+      outerRuns++
+      if (outerRuns > 5) return // stop a loop, so the failure is a count rather than a hang
+      effect(() => {})
+    }),
+  )
+  await new Promise<void>((resolve) => setTimeout(resolve))
+  flush()
+  expect(outerRuns).toBe(1)
+})

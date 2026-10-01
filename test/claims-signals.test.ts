@@ -27,6 +27,31 @@ test('three writes in one tick re-run an effect once, after the tick', async () 
 })
 
 /**
+ * @canon exception-a-read-between-writes-runs-the-queued-consumers
+ *
+ * Written with `test.fails`: it asserts what the batching rule promises, and
+ * fails today because a read outside every computation stabilizes the whole
+ * graph. It starts passing, and so fails as a `test.fails`, once a read can pull
+ * one node without running the rest; the exception is removed then.
+ */
+test.fails('a read between two writes in one tick does not re-run the effect early', async () => {
+  const [n, setN] = signal(0)
+  const seen: number[] = []
+  createRoot(() => {
+    effect(() => {
+      seen.push(n())
+    })
+  })
+  await tick()
+  seen.length = 0
+  setN(1)
+  n() // a read outside every computation, between the writes
+  setN(2)
+  await tick()
+  expect(seen).toEqual([2])
+})
+
+/**
  * @canon rule-a-promise-settling-requests-a-flush-from-the-active-scheduler
  */
 test('a promise settling asks the active scheduler for the flush that re-runs its readers', async () => {

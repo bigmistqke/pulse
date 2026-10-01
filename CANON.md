@@ -45,8 +45,9 @@ The canon was written backwards from the existing tests and documents, and descr
     - [`@rule a-read-is-current-without-a-flush`](#rule-a-read-is-current-without-a-flush) — Reading a signal or a computed returns the value consistent with the latest writes, whether or not the scheduler has flushed since. A computed read outside any reactive context recomputes on the spot when a source changed.
     - [`@rule a-signal-reads-back-its-last-write`](#rule-a-signal-reads-back-its-last-write) — A signal returns its initial value until it is written, and afterwards the last value written.
     - [`@rule an-update-function-on-a-signal-receives-its-current-value`](#rule-an-update-function-on-a-signal-receives-its-current-value) — A signal's setter given a function calls it with the signal's current value and writes what it returns.
-    - [`@rule an-effect-runs-at-creation-and-after-each-change`](#rule-an-effect-runs-at-creation-and-after-each-change) — An effect runs once when it is created, and again after each change to a source it read.
+    - [`@rule an-effect-runs-at-creation-and-after-each-change`](#rule-an-effect-runs-at-creation-and-after-each-change) — An effect runs once when it is created, wherever it is created, inside a running computation included, and again after each change to a source it read.
     - [`@rule several-writes-in-one-tick-re-run-an-effect-once`](#rule-several-writes-in-one-tick-re-run-an-effect-once) — Under the default scheduler, an effect does not re-run between a write and the end of the tick. Several writes in one tick re-run it once, with the last value.
+      - [`@exception a-read-between-writes-runs-the-queued-consumers`](#exception-a-read-between-writes-runs-the-queued-consumers) — A read outside every computation, made between two writes in one tick, runs the consumers the first write queued, so an effect can re-run once per write and see the value in between.
     - [`@rule an-async-computed-refetches-when-a-source-changes`](#rule-an-async-computed-refetches-when-a-source-changes) — An async stage keeps following the sources it read after its promise settles, and runs again when one of them changes. A consumer then receives the new resolved value.
     - [`@rule a-settled-promise-is-used-at-once-the-next-time-a-stage-runs`](#rule-a-settled-promise-is-used-at-once-the-next-time-a-stage-runs) — A promise that a stage saw pending, and that has settled since, is used at once the next time the stage runs. It does not suspend the stage again.
     - [`@rule writes-in-one-tick-chain-their-update-functions`](#rule-writes-in-one-tick-chain-their-update-functions) — Two writes in the same tick chain: the second update function receives the value the first one produced, and the last write is what the derivation holds.
@@ -105,7 +106,7 @@ The canon was written backwards from the existing tests and documents, and descr
     - [`@case an-equal-speculative-write-dirties-nothing`](#case-an-equal-speculative-write-dirties-nothing) — `scope.ts` `writeSpeculative`.
   - [`@rule reading-a-computed-again-without-a-change-re-runs-nothing`](#rule-reading-a-computed-again-without-a-change-re-runs-nothing) — Reading a computed a second time, when nothing it read has changed since the first read, returns the same value and runs no stage.
   - [`@rule a-staged-effect-skips-a-commit-equal-to-its-last`](#rule-a-staged-effect-skips-a-commit-equal-to-its-last) — A staged effect does not call `commit` with a value equal to the one it last committed, equal in the SameValueZero sense that [the rule on equal values](#rule-an-equal-value-does-not-propagate) states.
-  - [`@rule creating-a-derivation-is-not-reading-it`](#rule-creating-a-derivation-is-not-reading-it) — A computation that creates a derivation does not depend on it unless it reads it, so the derivation's first run does not run the computation again.
+  - [`@rule creating-a-derivation-is-not-reading-it`](#rule-creating-a-derivation-is-not-reading-it) — A computation that creates a derivation or an effect does not depend on it unless it reads it, so the new node's first run does not run the computation again.
   - [`@rule a-paused-computation-is-re-entered-at-its-pause`](#rule-a-paused-computation-is-re-entered-at-its-pause) — Pulse re-enters a paused computation at the finest point it can: a stage boundary with a new input, a generator stage at its pause, and anything else from the top of its body. Work done before that point runs again only when an input it read has changed.
     - [`@rule a-resumed-generator-does-not-rerun-code-before-its-pause`](#rule-a-resumed-generator-does-not-rerun-code-before-its-pause) — A generator stage that paused on a pending value is resumed with that value when it settles. The code before the pause does not run again.
       - [`@case a-paused-generator-is-handed-back-to-its-caller`](#case-a-paused-generator-is-handed-back-to-its-caller) — `driver.ts` `runStage`.
@@ -133,7 +134,7 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule a-component-runs-once-and-reactivity-lives-in-its-holes`](#rule-a-component-runs-once-and-reactivity-lives-in-its-holes) — A component function runs once. What changes afterwards changes inside the holes it returned — reactive children and reactive props — never by running the component again.
     - [`@rule a-function-tag-is-called-once-with-its-props`](#rule-a-function-tag-is-called-once-with-its-props) — A function tag is called once, with its props. Children passed to `h` after the props arrive on `props.children`.
     - [`@rule a-function-child-is-a-reactive-hole`](#rule-a-function-child-is-a-reactive-hole) — A function in a child position is a binding. It runs in its own effect, and its result replaces whatever sits between the binding's two marker comments each time something it read changes.
-    - [`@rule a-function-child-returns-anything-a-static-child-may-be`](#rule-a-function-child-returns-anything-a-static-child-may-be) — A function child's result is inserted exactly as a static child of the same kind would be in that position, whether it is a string, a number, a DOM node, an array, or nothing.
+    - [`@rule a-function-child-returns-anything-a-static-child-may-be`](#rule-a-function-child-returns-anything-a-static-child-may-be) — A function child's result is inserted exactly as a child of the same kind would be in that position, whether it is a string, a number, a DOM node, an array, nothing, or a function, which becomes a reactive child of its own.
     - [`@rule a-function-childs-static-siblings-keep-their-place`](#rule-a-function-childs-static-siblings-keep-their-place) — When a function child re-runs, the static siblings on either side of it stay where they are, and its new content lands between them.
     - [`@rule a-boundary-builds-its-children-once-up-front`](#rule-a-boundary-builds-its-children-once-up-front) — A boundary builds its children once, when it is created, inside its own owner, whether it then displays them or a placeholder. Settling, and every later swap between the placeholder and the subtree, shows the subtree already built and runs no component again.
     - [`@rule errored-error-builds-its-content-once-per-failure`](#rule-errored-error-builds-its-content-once-per-failure) — `<Errored.Error>` builds its content when the boundary becomes failed, keeps it while the boundary stays failed, and disposes it when the boundary recovers.
@@ -367,7 +368,7 @@ The canon was written backwards from the existing tests and documents, and descr
 - [`@axiom only-a-generator-can-be-resumed`](#axiom-only-a-generator-can-be-resumed) — In JavaScript, only a generator can pause and be resumed where it paused by the code that drives it. A function that throws has ended, and an async function resumes after an `await` on its own, later and outside the call that started it.
 - [`@axiom javascript-has-no-context-scoped-to-a-call`](#axiom-javascript-has-no-context-scoped-to-a-call) — JavaScript has no way to hand a value to everything one call runs, other than state shared by every call, set before the call and read during it.
 - [`@axiom an-attribute-holds-a-string-and-is-on-while-present`](#axiom-an-attribute-holds-a-string-and-is-on-while-present) — A DOM attribute holds only a string, and a boolean attribute such as `disabled` is on whenever it is present, whatever its string says.
-- [`@axiom r3-rebuilds-dependencies-each-run-and-ignores-an-equal-write`](#axiom-r3-rebuilds-dependencies-each-run-and-ignores-an-equal-write) — r3 rebuilds a computation's dependencies from the reads of each run, and drops a write `===` to the value a node holds. A computed created inside a running computation that has already read something does not run at once, and is linked as that computation's dependency. A run that throws partway keeps the dependencies it did not read again.
+- [`@axiom r3-rebuilds-dependencies-each-run-and-ignores-an-equal-write`](#axiom-r3-rebuilds-dependencies-each-run-and-ignores-an-equal-write) — r3 rebuilds a computation's dependencies from the reads of each run, and drops a write `===` to the value a node holds. A computed created inside a running computation that has already read something does not run at once, and is linked as that computation's dependency. A run that throws partway keeps the dependencies it did not read again. A read made outside every computation does not pull a single computed up to date: only a stabilize of the whole graph does.
 <!-- toc:end -->
 
 ## Driving principles — the canon's axioms
@@ -676,15 +677,25 @@ This follows because a read returns the value consistent with every write so far
 
 #### @rule an-effect-runs-at-creation-and-after-each-change
 
-> An effect runs once when it is created, and again after each change to a source it read.
+> An effect runs once when it is created, wherever it is created, inside a running computation included, and again after each change to a source it read.
 
-This follows because consumers are re-run after each change to what they read: an effect learns what it reads only by running, so it runs once at creation.
+Derives from: [`axiom-r3-rebuilds-dependencies-each-run-and-ignores-an-equal-write`](#axiom-r3-rebuilds-dependencies-each-run-and-ignores-an-equal-write)
+
+This follows because consumers are re-run after each change to what they read: an effect learns what it reads only by running, so it runs once at creation. r3 puts off the first run of one created inside a running computation that has read something, so pulse creates every effect with no computation running.
 
 #### @rule several-writes-in-one-tick-re-run-an-effect-once
 
 > Under the default scheduler, an effect does not re-run between a write and the end of the tick. Several writes in one tick re-run it once, with the last value.
 
 This follows because consumers with side effects are re-run in batches: several writes in one batch re-run a consumer once, with the value all of them produced.
+
+##### @exception a-read-between-writes-runs-the-queued-consumers
+
+> A read outside every computation, made between two writes in one tick, runs the consumers the first write queued, so an effect can re-run once per write and see the value in between.
+
+Derives from: [`axiom-r3-rebuilds-dependencies-each-run-and-ignores-an-equal-write`](#axiom-r3-rebuilds-dependencies-each-run-and-ignores-an-equal-write)
+
+This is a defect, not a choice. r3 pulls a single computed up to date only for a read made inside a computation, so a read outside one brings the graph up to date by running everything queued, effects included. The test that pins it is written with `test.fails`, so it starts failing once a read can pull one node without running the rest, and this exception is removed then.
 
 #### @rule an-async-computed-refetches-when-a-source-changes
 
@@ -1120,11 +1131,11 @@ This follows because a consumer re-runs only for a real change, `commit` is the 
 
 ### @rule creating-a-derivation-is-not-reading-it
 
-> A computation that creates a derivation does not depend on it unless it reads it, so the derivation's first run does not run the computation again.
+> A computation that creates a derivation or an effect does not depend on it unless it reads it, so the new node's first run does not run the computation again.
 
 Derives from: [`axiom-r3-rebuilds-dependencies-each-run-and-ignores-an-equal-write`](#axiom-r3-rebuilds-dependencies-each-run-and-ignores-an-equal-write)
 
-This follows because a consumer re-runs only when something it read actually changed, and creating a derivation is not reading it.
+This follows because a consumer re-runs only when something it read actually changed, and creating a derivation or an effect is not reading it.
 
 r3 links a computed created inside a running computation as a dependency of that computation. Pulse creates its derivations with no computation running, so no such link forms.
 
@@ -1314,9 +1325,9 @@ This follows because what changes after a component ran changes inside its holes
 
 #### @rule a-function-child-returns-anything-a-static-child-may-be
 
-> A function child's result is inserted exactly as a static child of the same kind would be in that position, whether it is a string, a number, a DOM node, an array, or nothing.
+> A function child's result is inserted exactly as a child of the same kind would be in that position, whether it is a string, a number, a DOM node, an array, nothing, or a function, which becomes a reactive child of its own.
 
-Derives from: [`rule-a-static-child-is-inserted-by-its-kind`](#rule-a-static-child-is-inserted-by-its-kind)
+Derives from: [`rule-a-static-child-is-inserted-by-its-kind`](#rule-a-static-child-is-inserted-by-its-kind), [`rule-a-function-child-is-a-reactive-hole`](#rule-a-function-child-is-a-reactive-hole)
 
 This follows because a hole changes only when its content is replaced, not what that content may be: each result is a child, and a child is inserted by its kind.
 
@@ -3006,6 +3017,6 @@ This is a fact of the DOM, not a choice. It decides what pulse does with a value
 
 ## @axiom r3-rebuilds-dependencies-each-run-and-ignores-an-equal-write
 
-> r3 rebuilds a computation's dependencies from the reads of each run, and drops a write `===` to the value a node holds. A computed created inside a running computation that has already read something does not run at once, and is linked as that computation's dependency. A run that throws partway keeps the dependencies it did not read again.
+> r3 rebuilds a computation's dependencies from the reads of each run, and drops a write `===` to the value a node holds. A computed created inside a running computation that has already read something does not run at once, and is linked as that computation's dependency. A run that throws partway keeps the dependencies it did not read again. A read made outside every computation does not pull a single computed up to date: only a stabilize of the whole graph does.
 
 This is a fact of r3 as pulse uses it, not a choice: [building on r3 rather than changing it](#axiom-build-on-r3-rather-than-change-it) makes r3's behaviour part of the world pulse runs in. The last sentence is a known defect in r3, and changes when r3 is fixed.

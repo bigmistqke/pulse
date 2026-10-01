@@ -1,4 +1,4 @@
-import { computed as r3Computed, unwatched, type Computed as R3Computed } from 'r3'
+import { computed as r3Computed, untrack as r3Untrack, unwatched, type Computed as R3Computed } from 'r3'
 import { NotReadyYet, use } from './async'
 import type { Resolved } from './async'
 import { computed } from './computed'
@@ -204,7 +204,9 @@ function stagedEffect(
     }
   }
 
-  const node = r3Computed(body)
+  // Created with no computation running, so the effect runs now and the
+  // computation creating it, if any, does not come to depend on it.
+  const node = r3Untrack(() => r3Computed(body))
   isFirstRun = false
   registerWithOwner({
     dispose: () => {
@@ -326,7 +328,9 @@ function singleArgEffect(fn: () => void): void {
     }
   }
 
-  const node = r3Computed(body)
+  // Created with no computation running, so the effect runs now and the
+  // computation creating it, if any, does not come to depend on it.
+  const node = r3Untrack(() => r3Computed(body))
   isFirstRun = false
   registerWithOwner({
     dispose: () => {
