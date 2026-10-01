@@ -186,7 +186,8 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule a-catch-error-handler-is-called-for-each-throw-under-it`](#rule-a-catch-error-handler-is-called-for-each-throw-under-it) — A `catchError` handler is called for each throw that reaches it, from its body and from any node created under it, on the first run and on later re-runs.
   - [`@rule an-error-nothing-claims-is-thrown-on-a-first-run`](#rule-an-error-nothing-claims-is-thrown-on-a-first-run) — Outside any root, an error from a node that no boundary claims is thrown to the caller when it happens during the node's first run. During a later re-run it is logged to the console instead.
 - [`@axiom every-failure-in-a-root-is-held`](#axiom-every-failure-in-a-root-is-held) — Every failure inside a root is held by some boundary: none is lost, and none is thrown at a writer that did not cause it.
-  - [`@rule every-root-has-an-error-boundary`](#rule-every-root-has-an-error-boundary) — `createRoot` installs an error boundary on the root owner. It claims every error no nearer boundary claims, tracks it like any other boundary, and logs each failed report to the console, a repeated one included.
+  - [`@rule every-root-has-an-error-boundary`](#rule-every-root-has-an-error-boundary) — `createRoot` installs an error boundary on the root owner. It claims every error no nearer boundary claims, and tracks it like any other boundary.
+  - [`@rule the-roots-boundary-logs-every-failed-report`](#rule-the-roots-boundary-logs-every-failed-report) — The root's error boundary logs each failed report it receives to the console with `console.error`, a repeated report of the same error included.
   - [`@rule a-failed-action-reports-after-its-calling-owner-is-disposed`](#rule-a-failed-action-reports-after-its-calling-owner-is-disposed) — A failed action reports to the boundary above the owner it was called under even when that owner was disposed before the action failed.
   - [`@rule a-failed-action-whose-boundary-is-gone-reports-to-the-next-one-up`](#rule-a-failed-action-whose-boundary-is-gone-reports-to-the-next-one-up) — When the boundary a failed action would report to has been disposed, the report goes to the next accepting boundary above it, at the latest the root's.
 - [`@axiom an-error-is-graph-state-not-an-event`](#axiom-an-error-is-graph-state-not-an-event) — A failure is state held on the node that failed, beside its last resolved value, and it propagates along the graph the way pending does. A boundary shows that state; it does not count throws.
@@ -1537,11 +1538,17 @@ No design document states this. It was accepted as a principle when the canon wa
 
 ### @rule every-root-has-an-error-boundary
 
-> `createRoot` installs an error boundary on the root owner. It claims every error no nearer boundary claims, tracks it like any other boundary, and logs each failed report to the console, a repeated one included.
+> `createRoot` installs an error boundary on the root owner. It claims every error no nearer boundary claims, and tracks it like any other boundary.
 
 This follows because every failure inside a root is held by some boundary: the root itself must therefore hold what nothing nearer does.
 
-An explicit boundary below the root is nearer, so it wins over the root's.
+An explicit boundary below the root is nearer, so [it wins over the root's](#rule-the-nearest-accepting-boundary-claims-an-error).
+
+### @rule the-roots-boundary-logs-every-failed-report
+
+> The root's error boundary logs each failed report it receives to the console with `console.error`, a repeated report of the same error included.
+
+Also derives from [`rule-every-root-has-an-error-boundary`](#rule-every-root-has-an-error-boundary). This follows because no failure in a root may be lost, and nothing on the page shows what only the root's boundary holds: logging each report is how such a failure still reaches someone.
 
 ### @rule a-failed-action-reports-after-its-calling-owner-is-disposed
 

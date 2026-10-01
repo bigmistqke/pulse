@@ -496,7 +496,7 @@ test('the default ErrorScope tracks active/error like any other ErrorScope', () 
 })
 
 /**
- * @canon rule-every-root-has-an-error-boundary
+ * @canon rule-the-roots-boundary-logs-every-failed-report
  */
 test('the default ErrorScope logs every failed report to console.error', () => {
   const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -511,7 +511,7 @@ test('the default ErrorScope logs every failed report to console.error', () => {
 })
 
 /**
- * @canon rule-every-root-has-an-error-boundary
+ * @canon rule-the-nearest-accepting-boundary-claims-an-error
  */
 test('an explicit ErrorScope nested inside createRoot still wins over the root default', () => {
   createRoot(() => {
@@ -654,7 +654,7 @@ test('a later report of the identical error still refreshes source/retry, even t
 })
 
 /**
- * @canon rule-every-root-has-an-error-boundary
+ * @canon rule-the-roots-boundary-logs-every-failed-report
  */
 test('onErrorReport still fires on every failed report, even one that does not change the published collection', () => {
   const seen: unknown[] = []
