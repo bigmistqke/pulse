@@ -246,6 +246,7 @@ This document is the project. It holds the theory of pulse: why it is the way it
     - [`@spec sibling-speculations-do-not-see-each-other`](#spec-sibling-speculations-do-not-see-each-other) — Two actions that are not nested never read each other's writes or predictions.
     - [`@spec a-reader-in-an-action-sees-the-predictions-of-its-own-chain`](#spec-a-reader-in-an-action-sees-the-predictions-of-its-own-chain) — Inside an action, a reader of an optimistic value sees the nearest prediction up its own chain of actions, its parents' included, and otherwise the derivation.
     - [`@spec an-update-function-builds-only-on-predictions-of-its-own-chain`](#spec-an-update-function-builds-only-on-predictions-of-its-own-chain) — An optimistic setter's update function receives the nearest prediction up its own chain of actions, its parents' included, or else the derivation's value. It never receives the prediction of an action outside that chain.
+      - [`@spec without-a-prediction-an-update-function-builds-on-the-committed-resolved-value`](#spec-without-a-prediction-an-update-function-builds-on-the-committed-resolved-value) — With no prediction in its chain, an optimistic setter's update function receives the derivation's last resolved value as committed state holds it. A canonical write that the action made earlier is not part of that value.
     - [`@spec nesting-makes-actions-share-fate`](#spec-nesting-makes-actions-share-fate) — A nested action commits into its parent, not into committed state. Its writes reach committed state only if the parent commits, and its discard does not discard the parent.
     - [`@spec overlapping-writes-resolve-by-commit-order`](#spec-overlapping-writes-resolve-by-commit-order) — When two sibling actions write the same node, the one that commits last decides its committed value.
     - [`@spec a-speculative-write-reaches-only-consumers-in-its-chain`](#spec-a-speculative-write-reaches-only-consumers-in-its-chain) — A write in a scope invalidates only the consumers whose scope has the writing scope in its chain, and only where no nearer scope has its own slot for the written node.
@@ -2096,6 +2097,14 @@ This follows because nesting is the explicit coupling between actions: a reader 
 > An optimistic setter's update function receives the nearest prediction up its own chain of actions, its parents' included, or else the derivation's value. It never receives the prediction of an action outside that chain.
 
 This follows because uncoupled flows are isolated. Building on the prediction of an action it is not nested in would tie the update function's value to that action's fate. A parent's prediction ties it to nothing new, because a nested action already shares its parent's fate.
+
+##### @spec without-a-prediction-an-update-function-builds-on-the-committed-resolved-value
+
+> With no prediction in its chain, an optimistic setter's update function receives the derivation's last resolved value as committed state holds it. A canonical write that the action made earlier is not part of that value.
+
+Derives from: [`spec-an-update-function-receives-the-last-resolved-value`](#spec-an-update-function-receives-the-last-resolved-value), [`spec-speculative-derivation-is-pulled-on-read`](#spec-speculative-derivation-is-pulled-on-read)
+
+This follows because a read of the derivation inside the action would run its recipe again. An async recipe would then hand back a fresh promise with no resolved value. The last resolved value is what the server has confirmed, and a prediction layers over it.
 
 So an action can always withdraw what it predicted, without its prediction having been baked into another action's.
 

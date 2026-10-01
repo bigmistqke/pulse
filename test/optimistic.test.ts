@@ -437,6 +437,33 @@ test('when the newest prediction expires, the next most recent one shows, and th
 })
 
 /**
+ * @canon spec-without-a-prediction-an-update-function-builds-on-the-committed-resolved-value
+ */
+test('with no prediction yet, an update function builds on the committed resolved value, not on the action\'s own canonical write', async () => {
+  const [source, setSource] = signal(() => Promise.resolve(['saved'] as string[]), [] as string[])
+  const [view, setView] = optimistic(source, [] as string[])
+  await tick()
+  await tick()
+
+  const done = gate()
+  let prevSeen: unknown
+  const run = action(function* () {
+    setSource(['saved', 'written'])
+    setView((prev) => {
+      prevSeen = prev
+      return [...prev, 'predicted']
+    })
+    yield* from(done.promise)
+  })
+  // The canonical write made just before is not in the value the update
+  // function receives: it builds on what committed state has resolved.
+  expect(prevSeen).toEqual(['saved'])
+
+  done.resolve()
+  await run.settled
+})
+
+/**
  * @canon spec-an-update-function-builds-only-on-predictions-of-its-own-chain
  */
 test('a nested action with no prediction of its own builds on its parent\'s, never on a sibling\'s', async () => {
