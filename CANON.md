@@ -46,8 +46,7 @@ The canon was written backwards from the existing tests and documents, and descr
     - [`@rule a-signal-reads-back-its-last-write`](#rule-a-signal-reads-back-its-last-write) — A signal returns its initial value until it is written, and afterwards the last value written.
     - [`@rule an-update-function-on-a-signal-receives-its-current-value`](#rule-an-update-function-on-a-signal-receives-its-current-value) — A signal's setter given a function calls it with the signal's current value and writes what it returns.
     - [`@rule an-effect-runs-at-creation-and-after-each-change`](#rule-an-effect-runs-at-creation-and-after-each-change) — An effect runs once when it is created, wherever it is created, inside a running computation included, and again after each change to a source it read.
-    - [`@rule several-writes-in-one-tick-re-run-an-effect-once`](#rule-several-writes-in-one-tick-re-run-an-effect-once) — Under the default scheduler, an effect does not re-run between a write and the end of the tick. Several writes in one tick re-run it once, with the last value.
-      - [`@exception a-read-between-writes-runs-the-queued-consumers`](#exception-a-read-between-writes-runs-the-queued-consumers) — A read outside every computation, made between two writes in one tick, runs the consumers the first write queued, so an effect can re-run once per write and see the value in between.
+    - [`@rule several-writes-in-one-tick-re-run-an-effect-once`](#rule-several-writes-in-one-tick-re-run-an-effect-once) — Under the default scheduler, an effect does not re-run between a write and the end of the tick. Several writes in one tick re-run it once, with the last value. A read made between the writes does not change that: it brings the value it reads up to date, and runs nothing else.
     - [`@rule an-async-computed-refetches-when-a-source-changes`](#rule-an-async-computed-refetches-when-a-source-changes) — An async stage keeps following the sources it read after its promise settles, and runs again when one of them changes. A consumer then receives the new resolved value.
     - [`@rule a-settled-promise-is-used-at-once-the-next-time-a-stage-runs`](#rule-a-settled-promise-is-used-at-once-the-next-time-a-stage-runs) — A promise that a stage saw pending, and that has settled since, is used at once the next time the stage runs. It does not suspend the stage again.
     - [`@rule writes-in-one-tick-chain-their-update-functions`](#rule-writes-in-one-tick-chain-their-update-functions) — Two writes in the same tick chain: the second update function receives the value the first one produced, and the last write is what the derivation holds.
@@ -370,7 +369,7 @@ The canon was written backwards from the existing tests and documents, and descr
 - [`@axiom only-a-generator-can-be-resumed`](#axiom-only-a-generator-can-be-resumed) — In JavaScript, only a generator can pause and be resumed where it paused by the code that drives it. A function that throws has ended, and an async function resumes after an `await` on its own, later and outside the call that started it.
 - [`@axiom javascript-has-no-context-scoped-to-a-call`](#axiom-javascript-has-no-context-scoped-to-a-call) — JavaScript has no way to hand a value to everything one call runs, other than state shared by every call, set before the call and read during it.
 - [`@axiom an-attribute-holds-a-string-and-is-on-while-present`](#axiom-an-attribute-holds-a-string-and-is-on-while-present) — A DOM attribute holds only a string, and a boolean attribute such as `disabled` is on whenever it is present, whatever its string says.
-- [`@axiom r3-rebuilds-dependencies-each-run-and-ignores-an-equal-write`](#axiom-r3-rebuilds-dependencies-each-run-and-ignores-an-equal-write) — r3 rebuilds a computation's dependencies from the reads of each run, and drops a write `===` to the value a node holds. A computed created inside a running computation that has already read something does not run at once, and is linked as that computation's dependency. A run that throws partway keeps the dependencies it did not read again. A read made outside every computation does not pull a single computed up to date: only a stabilize of the whole graph does.
+- [`@axiom r3-rebuilds-dependencies-each-run-and-ignores-an-equal-write`](#axiom-r3-rebuilds-dependencies-each-run-and-ignores-an-equal-write) — r3 rebuilds a computation's dependencies from the reads of each run, and drops a write `===` to the value a node holds. A computed created inside a running computation that has already read something does not run at once, and is linked as that computation's dependency. A run that throws partway keeps the dependencies it did not read again. A read made outside every computation does not pull a single computed up to date: only a stabilize of the whole graph does. A read made outside every computed brings only the node it reads up to date, through the firewall signals it reads, and leaves a node withdrawn from the queue for a tracked read.
 <!-- toc:end -->
 
 ## Driving principles — the canon's axioms
@@ -687,17 +686,9 @@ This follows because consumers are re-run after each change to what they read: a
 
 #### @rule several-writes-in-one-tick-re-run-an-effect-once
 
-> Under the default scheduler, an effect does not re-run between a write and the end of the tick. Several writes in one tick re-run it once, with the last value.
+> Under the default scheduler, an effect does not re-run between a write and the end of the tick. Several writes in one tick re-run it once, with the last value. A read made between the writes does not change that: it brings the value it reads up to date, and runs nothing else.
 
 This follows because consumers with side effects are re-run in batches: several writes in one batch re-run a consumer once, with the value all of them produced.
-
-##### @exception a-read-between-writes-runs-the-queued-consumers
-
-> A read outside every computation, made between two writes in one tick, runs the consumers the first write queued, so an effect can re-run once per write and see the value in between.
-
-Derives from: [`axiom-r3-rebuilds-dependencies-each-run-and-ignores-an-equal-write`](#axiom-r3-rebuilds-dependencies-each-run-and-ignores-an-equal-write)
-
-This is a defect, not a choice. r3 pulls a single computed up to date only for a read made inside a computation, so a read outside one brings the graph up to date by running everything queued, effects included. The test that pins it is written with `test.fails`, so it starts failing once a read can pull one node without running the rest, and this exception is removed then.
 
 #### @rule an-async-computed-refetches-when-a-source-changes
 
@@ -3043,6 +3034,6 @@ This is a fact of the DOM, not a choice. It decides what pulse does with a value
 
 ## @axiom r3-rebuilds-dependencies-each-run-and-ignores-an-equal-write
 
-> r3 rebuilds a computation's dependencies from the reads of each run, and drops a write `===` to the value a node holds. A computed created inside a running computation that has already read something does not run at once, and is linked as that computation's dependency. A run that throws partway keeps the dependencies it did not read again. A read made outside every computation does not pull a single computed up to date: only a stabilize of the whole graph does.
+> r3 rebuilds a computation's dependencies from the reads of each run, and drops a write `===` to the value a node holds. A computed created inside a running computation that has already read something does not run at once, and is linked as that computation's dependency. A run that throws partway keeps the dependencies it did not read again. A read made outside every computation does not pull a single computed up to date: only a stabilize of the whole graph does. A read made outside every computed brings only the node it reads up to date, through the firewall signals it reads, and leaves a node withdrawn from the queue for a tracked read.
 
 This is a fact of r3 as pulse uses it, not a choice: [building on r3 rather than changing it](#axiom-build-on-r3-rather-than-change-it) makes r3's behaviour part of the world pulse runs in. The last sentence is a known defect in r3, and changes when r3 is fixed.

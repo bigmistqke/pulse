@@ -1,9 +1,9 @@
 import {
   getContext,
+  pull as r3Pull,
   read as r3Read,
   setSignal as r3SetSignal,
   signal as r3Signal,
-  stabilize,
   untrack,
   type Computed as R3Computed,
   type Signal as R3Signal,
@@ -34,13 +34,13 @@ export type Setter<T> = (next: T | ((prev: T) => T)) => void
 /**
  * Wrap an r3 node in a pull-on-read accessor.
  * - Inside an r3 context: delegate to r3's `read` (tracks the dep, pulls computeds).
- * - At top level: `stabilize()` first so the value is never stale, then read.
+ * - At top level: pull just this node up to date, without running the rest of
+ *   the graph, then read.
  */
 export function makeAccessor<T>(node: R3Node<T>): Signal<T> {
   const accessor = (() => {
     if (getContext()) return r3Read(node)
-    stabilize()
-    return node.value
+    return r3Pull(node)
   }) as Signal<T>
   accessor[NODE] = node
   return accessor
@@ -59,8 +59,11 @@ export function signal<T>(initial: T): [Accessor<T>, Setter<T>] {
  *  attach a `defaultRecipe` — which makes the node speculation-aware, since the
  *  overlay then recomputes it into a per-scope slot instead of reading committed
  *  state. `computed` uses this for its published value. Not public API. */
-export function signalWithNode<T>(initial: T): [Accessor<T>, Setter<T>, Node<T>] {
-  const node = signalNode(initial)
+export function signalWithNode<T>(
+  initial: T,
+  owner?: R3Computed<unknown>,
+): [Accessor<T>, Setter<T>, Node<T>] {
+  const node = signalNode(initial, owner)
 
   // Eagerly install the .then listener on Promise values (unchanged behavior).
   if (isPromise(initial)) track(initial)

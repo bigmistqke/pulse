@@ -1,10 +1,10 @@
 import {
   computed as r3Computed,
   getContext,
+  pull as r3Pull,
   read as r3Read,
   setSignal as r3SetSignal,
   signal as r3Signal,
-  stabilize,
   type Disposable,
   onCleanup as r3OnCleanup,
 } from 'r3'
@@ -344,12 +344,11 @@ export function createErrorScope(
   const reportsNode = r3Signal<readonly ErrorReport[]>([])
 
   // Mirrors `makeErrorCell`'s top-level-read behaviour (`src/scope.ts`):
-  // inside an r3 context, read through it directly; outside one, stabilize
-  // first so the value is never stale.
+  // inside an r3 context, read through it directly; outside one, pull it up
+  // to date without running the rest of the graph.
   const readReports = (): readonly ErrorReport[] => {
     if (getContext() !== null) return r3Read(reportsNode)
-    stabilize()
-    return reportsNode.value
+    return r3Pull(reportsNode)
   }
 
   // `error`/`active` derive from `reportsNode` through their own raw r3
@@ -372,13 +371,11 @@ export function createErrorScope(
 
   const readError = (): unknown => {
     if (getContext() !== null) return r3Read(errorNode)
-    stabilize()
-    return errorNode.value
+    return r3Pull(errorNode)
   }
   const readActive = (): boolean => {
     if (getContext() !== null) return r3Read(activeNode)
-    stabilize()
-    return activeNode.value
+    return r3Pull(activeNode)
   }
 
   const recompute = (): void => {

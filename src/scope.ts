@@ -1,6 +1,7 @@
 import {
   computed as r3Computed,
   getContext,
+  pull as r3Pull,
   read as r3Read,
   setSignal as r3SetSignal,
   signal as r3Signal,
@@ -201,8 +202,11 @@ export function runInScope<T>(scope: Scope, tracker: Slot | undefined, fn: () =>
   }
 }
 
-export function signalNode<T>(initial: T): Node<T> {
-  return { subs: new Set(), backing: r3Signal(initial) }
+/** A signal node. Given an `owner`, its r3 signal is a firewall signal of that
+ *  computed: one the owner writes as it runs, so a read of the signal brings
+ *  the owner up to date first. */
+export function signalNode<T>(initial: T, owner?: R3Computed<unknown>): Node<T> {
+  return { subs: new Set(), backing: owner === undefined ? r3Signal(initial) : r3Signal(initial, owner) }
 }
 export function computedNode<T>(recipe: () => T): Node<T> {
   return { subs: new Set(), defaultRecipe: recipe, backing: r3Untrack(() => r3Computed(recipe)) }
@@ -230,13 +234,14 @@ export function readValue<T>(node: Node<T>): T {
     return newSlot.cached as T
   }
   // committed leaf: inside an r3 recompute, read through r3 so the dependency
-  // link forms (committed reactivity); outside, stabilize then read the value.
+  // link forms (committed reactivity); outside, pull just this node up to
+  // date. Stabilizing the whole graph here would run every queued consumer at
+  // the moment of the read, once per write when reads fall between writes.
   trackRead(node, scope)
   if (getContext() !== null) {
     return r3Read(node.backing as R3Signal<T>)
   }
-  stabilize()
-  return (node.backing as R3Signal<T>).value
+  return r3Pull(node.backing as R3Signal<T>)
 }
 
 /** Read a node's value from the current scope WITHOUT running its recipe on a
@@ -247,8 +252,7 @@ export function readValue<T>(node: Node<T>): T {
 export function peekValue<T>(node: Node<T>): T {
   const slot = readSlot(node, getCurrentScope())
   if (slot !== undefined && slot.cached !== DIRTY) return slot.cached as T
-  stabilize()
-  return (node.backing as R3Signal<T>).value
+  return r3Pull(node.backing as R3Signal<T>)
 }
 
 /** Unlink a slot's existing dependency edges before it is recomputed, so edges
@@ -427,13 +431,12 @@ export function onSettled(callback: (outcome: SettleOutcome) => void): void {
  *  `signal()` wrapper — `src/signal.ts` imports from this file, so importing
  *  `signal()` back here would be a cycle. Mirrors `makeAccessor`'s top-level
  *  read behaviour (`src/signal.ts`): inside an r3 context, read through it
- *  directly; outside one, stabilize first so the value is never stale. */
+ *  directly; outside one, pull it up to date without running the rest of the graph. */
 function makeErrorCell(): [Accessor<unknown>, (value: unknown) => void] {
   const node = r3Signal<unknown>(null)
   const accessor = (() => {
     if (getContext()) return r3Read(node)
-    stabilize()
-    return node.value
+    return r3Pull(node)
   }) as Accessor<unknown>
   // The write is paired with a flush request for the same reason
   // `createErrorScope`'s own `recompute` does it (`src/owner.ts`): r3's

@@ -1,4 +1,4 @@
-import { cancelRecompute, computed as r3Computed, getContext as r3GetContext, isRecomputeQueued, read as r3Read, requeueRecompute, setSignal as r3SetSignal, untrack as r3Untrack, unwatched, type Computed as R3Computed, type Signal as R3Signal } from 'r3'
+import { cancelRecompute, computed as r3Computed, getContext as r3GetContext, isRecomputeQueued, pull as r3Pull, read as r3Read, requeueRecompute as r3RequeueRecompute, setSignal as r3SetSignal, untrack as r3Untrack, unwatched, type Computed as R3Computed, type Signal as R3Signal } from 'r3'
 import { isGeneratorFunction, NotReadyYet, resolvedPromise, track, type PromiseState, type PipelineRead, type Resolved } from './async'
 import { runStage, resumeStage, takeGeneratorCleanups, type StageOutcome } from './driver'
 import { replayDeps, snapshotDeps, type DepRecord } from './dep-replay'
@@ -290,18 +290,28 @@ function makeStageNode(
   // so that a generator holding something across its pause releases it.
   registerWithOwner({ dispose: discardGen })
 
+  // The tracker runs the stage. It is created before the signals it writes as
+  // it runs (the error, the published value, pending state and the sources it
+  // read), so that each can be a firewall signal of it: a read of one, from
+  // anywhere, brings the tracker up to date first, without stabilizing the
+  // whole graph. Its body is installed further down, once those signals exist,
+  // and until then a run does nothing.
+  let runTracker: (() => null) | null = null
+  const depTracker = detachedComputed(() => (runTracker === null ? null : runTracker()))
+
   // The parked error, as reactive graph state — the mirror of pendingSig. A
   // consumer subscribes to it through the accessor, so it re-runs when this node
   // fails or recovers. Crucially the error lives HERE and not in publishedValue:
   // the published value keeps holding the last resolved value, so a tolerant read
   // (`latest`) can degrade to it instead of blowing up. Pending already works this
   // way — it holds the prior value and tracks the in-flight promise out of band.
-  const [errorSig, setErrorSig] = signal<unknown>(null)
+  const [errorSig, setErrorSig] = signalWithNode<unknown>(null, depTracker)
 
   // Published view value: settle handler updates this DIRECTLY (out-of-band)
   // so body doesn't re-run on settle. Consumers reading the accessor get this.
   const [publishedValue, setPublishedValue, publishedNode] = signalWithNode<unknown>(
     UNRESOLVED as unknown,
+    depTracker,
   )
 
   // Speculation: give the published node a recipe so the overlay can recompute this
@@ -341,7 +351,7 @@ function makeStageNode(
 
   // Reactive pending state. Exposed to `isPending()` via the external
   // registry entry constructed below.
-  const [pendingSig, setPendingSig] = signal(false)
+  const [pendingSig, setPendingSig] = signalWithNode(false, depTracker)
 
   // Generator-only kick: drives body re-run so a paused generator's retained
   // dependencies get replayed and the generator resumes forward. Non-generator
@@ -394,7 +404,7 @@ function makeStageNode(
   // flight the value it holds is being replaced, and it says so.
   let lastSourceReads: readonly Accessor<unknown>[] = NO_SOURCE_READS
   const [sourceReads, setSourceReads] =
-    signal<readonly Accessor<unknown>[]>(NO_SOURCE_READS)
+    signalWithNode<readonly Accessor<unknown>[]>(NO_SOURCE_READS, depTracker)
   /** Publish a run's reads, skipping the write when the set is unchanged —
    *  a fresh array every run would invalidate every consumer on every run. */
   const recordSourceReads = (next: readonly Accessor<unknown>[]): void => {
@@ -408,7 +418,7 @@ function makeStageNode(
     setSourceReads(next)
   }
 
-  const depTracker = detachedComputed(() =>
+  runTracker = () =>
     runNodeCompute(() => {
     try {
       kick() // dep so generator stash-rerun can force body re-run
@@ -741,7 +751,13 @@ function makeStageNode(
       }
       return null
     }
-  }, recordSourceReads))
+  }, recordSourceReads) as null
+
+  // The body is in place: run it now, so the stage runs when it is created.
+  // The guarded first run read nothing, so the tracker is put back in the
+  // heap and pulled, which runs exactly this node and nothing else queued.
+  r3RequeueRecompute(depTracker)
+  r3Pull(depTracker)
 
   // ---- write path -------------------------------------------------------
 
@@ -906,7 +922,7 @@ function makeStageNode(
   const markNeedsRecomputation = (): void => {
     const self = depTracker as R3Computed<unknown>
     if (r3GetContext() === self) return
-    requeueRecompute(self)
+    r3RequeueRecompute(self)
   }
 
   /**
