@@ -112,7 +112,8 @@ type Kind = 'axiom-' | 'rule-' | 'exception-' | 'case-';
  * `OWES`, so the table there is this table and cannot drift from it.
  */
 const MEANS: Record<Kind, string> = {
-  'axiom-': 'a principle nothing here derives from',
+  'axiom-':
+    'a principle: a root derives from nothing here, and a nested one narrows the axiom it sits in',
   'rule-': 'a consequence of an axiom, stated so it can be contradicted',
   'exception-':
     'a carve-out that cannot be stated without naming the rule it narrows',
@@ -126,6 +127,21 @@ const OWES: Record<Kind, Kind[] | null> = {
   'exception-': ['rule-'],
   'case-': ['rule-', 'exception-']
 };
+
+/**
+ * kind → the kinds it may cite without owing them. An axiom owes nothing, so a
+ * root axiom stands alone, but it may narrow a more general axiom by sitting
+ * inside it or naming it on its "Derives from:" line.
+ */
+const MAY_CITE: Partial<Record<Kind, Kind[]>> = {
+  'axiom-': ['axiom-']
+};
+
+/** kind → every kind it may cite, owed or not. */
+const citable = (kind: Kind): Kind[] => [
+  ...(OWES[kind] ?? []),
+  ...(MAY_CITE[kind] ?? [])
+];
 
 const PREFIXES = Object.keys(OWES) as Kind[];
 const kindOf = (id: string): Kind | undefined =>
@@ -357,9 +373,10 @@ const KINDS_END = '<!-- kinds:end -->';
 function kindsTable(): string {
   const rows = PREFIXES.map(k => {
     const owes = OWES[k];
+    const may = MAY_CITE[k] ?? [];
     const owed =
       owes === null
-        ? 'nothing — primitive by kind'
+        ? `nothing${may.length ? ` — may narrow ${may.map(o => `\`@${noun(o)}\``).join(' · ')}` : ''}`
         : owes.map(o => `\`@${noun(o)}\``).join(' · ');
     return `| \`@${noun(k)}\` | ${MEANS[k]} | ${owed} |`;
   });
@@ -914,7 +931,7 @@ function analyse(write: boolean): Analysis {
       // satisfies the owes-check while the position goes on saying the wrong
       // thing. Position cannot contradict itself, but it can contradict OWES.
       const kind = kindOf(el.id);
-      if (kind && !(OWES[kind] ?? []).includes(parentKind)) {
+      if (kind && !citable(kind).includes(parentKind)) {
         findings.misnested.push(
           `${rel}#${el.id} — a ${noun(kind)} sitting in ${el.parent}, which a ${noun(kind)} may not cite`
         );
