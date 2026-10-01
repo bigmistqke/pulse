@@ -138,7 +138,7 @@ test('mapper runs under per-item sub-owner; nested effect disposes when item lea
 })
 
 /**
- * @canon spec-a-pending-list-reads-as-empty
+ * @canon spec-a-promise-list-reads-as-empty
  */
 test('pending Promise<T[]> coerces to empty', () => {
   createRoot(() => {

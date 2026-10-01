@@ -221,9 +221,9 @@ This document is the project. It holds the theory of pulse: why it is the way it
       - [`@spec a-suspended-prop-does-not-hold-the-structure`](#spec-a-suspended-prop-does-not-hold-the-structure) — `bindings.ts` `holdsSuspendedHole`.
     - [`@spec boundary-state-is-looked-up-past-a-catch-error`](#spec-boundary-state-is-looked-up-past-a-catch-error) — `useErrored()`, `isErrored()` and `<Errored.Error>` find the nearest `<Errored>` by its position above them, and a `catchError` between them and it does not stop the lookup.
     - [`@spec a-predicate-narrows-what-a-reader-sees-not-which-boundary-it-reads`](#spec-a-predicate-narrows-what-a-reader-sees-not-which-boundary-it-reads) — A predicate given to `useErrored`, `isErrored` or `<Errored.Error for>` narrows the reports a reader sees and retries to those that match. It does not change which boundary is read.
-  - [`@spec control-flow-bakes-in-no-async-policy`](#spec-control-flow-bakes-in-no-async-policy) — `Show`, `Switch` and `For` are ordinary components: the [control flow](#term-control-flow). They coerce a pending input to its empty form, and decide nothing else about async.
-    - [`@spec a-pending-condition-reads-as-falsy`](#spec-a-pending-condition-reads-as-falsy) — A `when` that is a pending promise counts as falsy: `Show` renders its fallback, and `Switch` skips that `Match`.
-    - [`@spec a-pending-list-reads-as-empty`](#spec-a-pending-list-reads-as-empty) — A list that is a pending promise counts as an empty list: `mapArray` returns no entries, and `For` renders its fallback.
+  - [`@spec control-flow-bakes-in-no-async-policy`](#spec-control-flow-bakes-in-no-async-policy) — `Show`, `Switch` and `For` are ordinary components: the [control flow](#term-control-flow). They read a promise input, pending or settled, as its empty form, and decide nothing else about async.
+    - [`@spec a-promise-condition-reads-as-falsy`](#spec-a-promise-condition-reads-as-falsy) — A `when` that is a promise counts as falsy, whether the promise is pending or settled: `Show` renders its fallback, and `Switch` skips that `Match`.
+    - [`@spec a-promise-list-reads-as-empty`](#spec-a-promise-list-reads-as-empty) — A list that is a promise counts as an empty list, whether the promise is pending or settled: `mapArray` returns no entries, and `For` renders its fallback.
   - [`@axiom the-latest-production-wins`](#axiom-the-latest-production-wins) — A derived value shows whatever produced it last — a dependency change or a direct write — and a production that was started earlier never publishes over a later one.
     - [`@spec a-write-replaces-a-derived-value-without-rerunning-it`](#spec-a-write-replaces-a-derived-value-without-rerunning-it) — A write to a writable derivation replaces its value at once, and the body does not run again because of it.
     - [`@spec a-write-abandons-the-run-in-progress`](#spec-a-write-abandons-the-run-in-progress) — A write abandons every stage's run in progress, a fetch in flight or a paused generator, in whichever stage it is, and the abandoned run never publishes.
@@ -1921,23 +1921,23 @@ A filtered reader can find a matching report that is not the boundary's first, a
 
 ### @spec control-flow-bakes-in-no-async-policy
 
-> `Show`, `Switch` and `For` are ordinary components: the [control flow](#term-control-flow). They coerce a pending input to its empty form, and decide nothing else about async.
+> `Show`, `Switch` and `For` are ordinary components: the [control flow](#term-control-flow). They read a promise input, pending or settled, as its empty form, and decide nothing else about async.
 
-This follows because every choice is stated where the code is written, so control flow decides nothing about async that its caller did not write. A pending input still has to be read somehow, and a promise is an object, so it is truthy: reading it as its empty form shows nothing for a value that has none, which is the one policy control flow cannot avoid.
+This follows because every choice is stated where the code is written, so control flow decides nothing about async that its caller did not write. A promise input still has to be read somehow, and a promise is an object, so it is truthy: reading it as its empty form shows nothing for a value control flow was not handed, which is the one policy control flow cannot avoid.
 
-Async behaviour is decided by what the caller passes and where it puts `use`, not by the [control flow](#term-control-flow).
+Async behaviour is decided by what the caller passes and where it puts `use`, not by the [control flow](#term-control-flow). To render an async value, the caller passes `use(x)` or `latest(x)`, not the bare accessor, which reads as a promise even after it settles.
 
-#### @spec a-pending-condition-reads-as-falsy
+#### @spec a-promise-condition-reads-as-falsy
 
-> A `when` that is a pending promise counts as falsy: `Show` renders its fallback, and `Switch` skips that `Match`.
+> A `when` that is a promise counts as falsy, whether the promise is pending or settled: `Show` renders its fallback, and `Switch` skips that `Match`.
 
-This follows because control flow coerces a pending input to its empty form: the empty form of a condition is falsy, so `Show` renders its fallback and `Switch` skips the `Match`.
+This follows because control flow reads a promise input as its empty form: the empty form of a condition is falsy, so `Show` renders its fallback and `Switch` skips the `Match`.
 
-#### @spec a-pending-list-reads-as-empty
+#### @spec a-promise-list-reads-as-empty
 
-> A list that is a pending promise counts as an empty list: `mapArray` returns no entries, and `For` renders its fallback.
+> A list that is a promise counts as an empty list, whether the promise is pending or settled: `mapArray` returns no entries, and `For` renders its fallback.
 
-This follows because control flow coerces a pending input to its empty form: the empty form of a list has no items, so `mapArray` returns none and `For` renders its fallback.
+This follows because control flow reads a promise input as its empty form: the empty form of a list has no items, so `mapArray` returns none and `For` renders its fallback.
 
 ### @axiom the-latest-production-wins
 

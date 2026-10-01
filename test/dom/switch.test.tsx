@@ -152,7 +152,7 @@ test('disposing surrounding owner disposes active branch', () => {
 })
 
 /**
- * @canon spec-a-pending-condition-reads-as-falsy
+ * @canon spec-a-promise-condition-reads-as-falsy
  */
 test('a Match whose when is a pending promise is skipped', () => {
   const target = document.createElement('section')

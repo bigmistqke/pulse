@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, test } from 'vitest'
 import { Show } from '../../src/dom/show'
 import { Match, Switch } from '../../src/dom/switch'
 import {
+  computed,
   flush,
   microtaskScheduler,
   onCleanup,
@@ -9,7 +10,11 @@ import {
   setScheduler,
   signal,
   syncScheduler,
+  use,
 } from '../../src/index'
+
+/** Resolve after all microtasks have drained (a macrotask boundary). */
+const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
 
 beforeEach(() => setScheduler(syncScheduler(flush)))
 afterEach(() => {
@@ -52,7 +57,7 @@ test('falsy when mounts fallback', () => {
 })
 
 /**
- * @canon spec-a-pending-condition-reads-as-falsy
+ * @canon spec-a-promise-condition-reads-as-falsy
  */
 test('pending Promise<T> when → fallback', () => {
   const target = document.createElement('section')
@@ -68,6 +73,35 @@ test('pending Promise<T> when → fallback', () => {
     target,
   )
   expect(target.textContent).toBe('loading')
+  dispose()
+})
+
+/**
+ * @canon spec-a-promise-condition-reads-as-falsy
+ */
+test('a bare async accessor still reads as falsy after it settles, while use of it renders the value', async () => {
+  // The second Show proves the promise has settled: it renders through use.
+  // The first, handed the bare accessor, reads a promise and stays on its fallback.
+  const target = document.createElement('section')
+  document.body.append(target)
+  const user = computed(async () => ({ name: 'Ada' }))
+  const dispose = render(
+    () => (
+      <div>
+        <Show when={user()} fallback={<p class="bare">bare</p>}>
+          <span class="bare">shown</span>
+        </Show>
+        <Show when={use(user)} fallback={<p class="used">loading</p>}>
+          {(u) => <span class="used">{u.name}</span>}
+        </Show>
+      </div>
+    ),
+    target,
+  )
+  for (let i = 0; i < 5; i++) await tick()
+  expect(target.querySelector('span.used')?.textContent).toBe('Ada')
+  expect(target.querySelector('.bare')?.textContent).toBe('bare')
+  expect(target.querySelector('span.bare')).toBeNull()
   dispose()
 })
 

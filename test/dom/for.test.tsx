@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, test } from 'vitest'
 import { For } from '../../src/dom/for'
 import { Show } from '../../src/dom/show'
 import {
+  computed,
   effect,
   flush,
   microtaskScheduler,
@@ -10,6 +11,7 @@ import {
   setScheduler,
   signal,
   syncScheduler,
+  use,
 } from '../../src/index'
 
 beforeEach(() => setScheduler(syncScheduler(flush)))
@@ -221,7 +223,7 @@ test('reorder: same DOM node identities, repositioned', () => {
 })
 
 /**
- * @canon spec-a-pending-list-reads-as-empty
+ * @canon spec-a-promise-list-reads-as-empty
  */
 test('pending Promise<T[]> → fallback rendered', () => {
   const target = document.createElement('section')
@@ -233,6 +235,32 @@ test('pending Promise<T[]> → fallback rendered', () => {
     target,
   )
   expect(target.textContent).toBe('loading')
+  dispose()
+})
+
+/**
+ * @canon spec-a-promise-list-reads-as-empty
+ */
+test('a bare async list still reads as empty after it settles, while use of it renders the rows', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+  const items = computed(async () => [1, 2])
+  const dispose = render(
+    () => (
+      <div>
+        <ul class="bare">
+          <For each={items()} fallback={<p>bare</p>}>{(n) => <li>{n}</li>}</For>
+        </ul>
+        <ul class="used">
+          <For each={use(items)} fallback={<p>loading</p>}>{(n) => <li>{n}</li>}</For>
+        </ul>
+      </div>
+    ),
+    target,
+  )
+  for (let i = 0; i < 5; i++) await new Promise<void>((resolve) => setTimeout(resolve))
+  expect(target.querySelector('ul.used')?.textContent).toBe('12')
+  expect(target.querySelector('ul.bare')?.textContent).toBe('bare')
   dispose()
 })
 
