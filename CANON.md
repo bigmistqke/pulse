@@ -49,6 +49,8 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule an-optimistic-fallback-seeds-the-tolerant-read`](#rule-an-optimistic-fallback-seeds-the-tolerant-read) — A fallback passed when an optimistic value is created is what `peek` and `latest` return before the source has resolved.
   - [`@rule use-latest-throws-only-before-the-first-value`](#rule-use-latest-throws-only-before-the-first-value) — `use.latest(x)` throws `NotReadyYet` only while nothing has ever resolved for `x`, carrying `promiseOf(x)`, exactly as `use` would. After that it returns the last resolved value during a refetch, reports the refresh ambiently, and still enrols the binding in its boundary's gate.
   - [`@rule the-jsx-runtime-builds-every-element-with-h`](#rule-the-jsx-runtime-builds-every-element-with-h) — The JSX runtime's `jsx`, `jsxs` and `jsxDEV` build every element with `h`. A component receives its props object as it is, `children` included and getters intact. A DOM tag or a `Fragment` receives its children as separate arguments and the rest of its props with their getters intact.
+- [`@axiom a-derivation-runs-when-it-is-created`](#axiom-a-derivation-runs-when-it-is-created) — A derivation produces its value when it is created, not when it is first read.
+  - [`@rule an-update-function-sees-the-value-a-sync-derivation-produced-at-creation`](#rule-an-update-function-sees-the-value-a-sync-derivation-produced-at-creation) — A derivation runs when it is created. An update function on a sync derivation therefore receives the value that first run produced, even before any write. An async derivation that suspended has produced nothing yet.
 - [`@axiom the-latest-production-wins`](#axiom-the-latest-production-wins) — A derived value shows whatever produced it last — a dependency change or a direct write — and a production that was started earlier never publishes over a later one.
   - [`@rule a-write-replaces-a-derived-value-without-rerunning-it`](#rule-a-write-replaces-a-derived-value-without-rerunning-it) — A write to a writable derivation replaces its value at once, and the body does not run again because of it.
   - [`@rule a-write-abandons-the-run-in-progress`](#rule-a-write-abandons-the-run-in-progress) — A write abandons every stage's run in progress — a fetch in flight, a paused generator, or a recompute queued in the same tick — and the abandoned run never publishes.
@@ -75,13 +77,13 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule a-pipeline-reads-as-a-promise-while-its-value-came-through-async`](#rule-a-pipeline-reads-as-a-promise-while-its-value-came-through-async) — The raw read of a pipeline is a promise when its current value was produced through an asynchronous stage, and bare otherwise. A write never changes that colour.
   - [`@rule a-generator-stage-is-asynchronous-only-when-it-suspends`](#rule-a-generator-stage-is-asynchronous-only-when-it-suspends) — A generator stage counts as an asynchronous stage only when it actually suspended on a pending promise. One that ran to completion without suspending publishes its value bare.
   - [`@rule a-use-suspended-stage-reads-as-its-promise-until-it-settles`](#rule-a-use-suspended-stage-reads-as-its-promise-until-it-settles) — While a sync stage that suspended through `use` waits on a first load, the pipeline reads as the promise in flight. Once that promise settles, the sync stage publishes its bare value.
-  - [`@rule an-update-function-receives-the-last-resolved-value`](#rule-an-update-function-receives-the-last-resolved-value) — An update function on a writable derivation receives the last value that actually resolved, never a promise, and `undefined` when nothing has resolved yet.
-  - [`@rule an-update-function-sees-the-value-a-sync-derivation-produced-at-creation`](#rule-an-update-function-sees-the-value-a-sync-derivation-produced-at-creation) — A derivation runs when it is created. An update function on a sync derivation therefore receives the value that first run produced, even before any write. An async derivation that suspended has produced nothing yet.
   - [`@rule a-construction-default-seeds-only-the-tolerant-read`](#rule-a-construction-default-seeds-only-the-tolerant-read) — `signal(fn, default)` makes `peek` return `default` until the derivation first resolves, and an update function receive `default` in place of `undefined`. The raw read stays a pending promise.
   - [`@rule a-stage-result-is-settled-before-it-is-passed-on`](#rule-a-stage-result-is-settled-before-it-is-passed-on) — Each value a stage returns or a generator yields is settled before it is used. A plain value or a fulfilled promise is used at once, and a pending promise suspends the stage on that promise.
   - [`@rule pending-follows-where-a-value-came-from`](#rule-pending-follows-where-a-value-came-from) — A node is pending when any stage upstream of it is pending, or when a source its value was read from is. `promiseOf` returns the nearest promise in flight along the same path.
   - [`@rule is-pending-reports-an-unsettled-pipeline`](#rule-is-pending-reports-an-unsettled-pipeline) — `isPending(c)` is true while any stage of the pipeline is waiting on a promise, on the first load and during a refetch, and `promiseOf(c)` returns that promise. Both clear when it settles.
   - [`@rule use-treats-a-promise-it-has-not-seen-settle-as-pending`](#rule-use-treats-a-promise-it-has-not-seen-settle-as-pending) — A promise whose settle `use` has not yet recorded is pending to it, even when the promise has already settled: the first `use` of `Promise.resolve(7)` throws `NotReadyYet`. Once the settle is recorded, `use` returns the value synchronously.
+- [`@axiom code-that-builds-on-a-value-receives-it-resolved`](#axiom-code-that-builds-on-a-value-receives-it-resolved) — Code that computes a new value from an earlier one is handed that value resolved, never as a promise.
+  - [`@rule an-update-function-receives-the-last-resolved-value`](#rule-an-update-function-receives-the-last-resolved-value) — An update function on a writable derivation receives the last value that actually resolved, never a promise, and `undefined` when nothing has resolved yet.
 - [`@axiom plain-reads-are-honest`](#axiom-plain-reads-are-honest) — A read reports what is there. Whether a value is still pending, or has failed, is a separate question asked through its own verb.
   - [`@rule peek-returns-the-last-resolved-value-and-never-throws`](#rule-peek-returns-the-last-resolved-value-and-never-throws) — `peek(x)` returns the most recent resolved value of `x`, or `undefined` when it never resolved. It never throws, not even for a failed node.
   - [`@rule peek-returns-a-given-fallback-until-a-value-resolves`](#rule-peek-returns-a-given-fallback-until-a-value-resolves) — `peek(x, fallback)` returns `fallback` wherever `peek(x)` would return `undefined`: before the first resolution, and after a rejection when nothing resolved before it. Once a value has resolved, it returns that value.
@@ -113,22 +115,19 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule a-stage-that-returned-a-promise-stays-reactive`](#rule-a-stage-that-returned-a-promise-stays-reactive) — A generator stage that returned a promise keeps no generator, so a change to a source it read runs it again from the top.
   - [`@rule a-returned-promise-rejection-skips-the-generators-catch`](#rule-a-returned-promise-rejection-skips-the-generators-catch) — When the promise a generator stage returned rejects, the generator's `try`/`catch` does not see it: the body has already ended. The stage parks the rejection as its error.
   - [`@rule use-inside-a-generator-stage-restarts-the-stage`](#rule-use-inside-a-generator-stage-restarts-the-stage) — A `use` that throws inside a generator stage suspends the stage like a sync stage: the generator is dropped, and the body runs again from the top when the promise settles.
-  - [`@rule repeated-use-of-one-pending-promise-adds-no-listener`](#rule-repeated-use-of-one-pending-promise-adds-no-listener) — A stage body that hits `use` on the same still-pending promise on several runs attaches one settle listener to that promise, not one per run.
   - [`@rule a-computed-is-a-pipeline-of-stages`](#rule-a-computed-is-a-pipeline-of-stages) — `computed(s0, s1, …)` threads each stage's resolved value into the next. Any stage may read signals, and a stage re-runs only when its input or one of its own reads changes.
   - [`@rule a-fresh-promise-each-run-settles-once-per-change`](#rule-a-fresh-promise-each-run-settles-once-per-change) — A stage that returns a new promise on every run, such as a `.then`-chained one, settles once per change and does not loop.
   - [`@rule a-stage-suspended-through-use-is-absorbed`](#rule-a-stage-suspended-through-use-is-absorbed) — A sync stage whose body throws `NotReadyYet` through `use` suspends like an async stage, reports pending, and runs again when the promise settles.
   - [`@rule a-rejected-yield-is-thrown-into-the-generator`](#rule-a-rejected-yield-is-thrown-into-the-generator) — A yielded promise that rejects is thrown into the generator at its yield, where a `try`/`catch` can handle it. Uncaught, it leaves the stage as an error.
   - [`@rule a-suspended-effect-re-runs-when-its-promise-settles`](#rule-a-suspended-effect-re-runs-when-its-promise-settles) — An effect whose body suspends on `use(x)` holds its body, and runs it again from the top once the promise it suspended on settles. When its source is written with a new pending promise, it suspends again and re-runs when that one settles.
+- [`@axiom waiting-on-a-promise-twice-is-waiting-once`](#axiom-waiting-on-a-promise-twice-is-waiting-once) — Waiting on the same promise again adds nothing: what waits on a promise is attached to it once.
+  - [`@rule repeated-use-of-one-pending-promise-adds-no-listener`](#rule-repeated-use-of-one-pending-promise-adds-no-listener) — A stage body that hits `use` on the same still-pending promise on several runs attaches one settle listener to that promise, not one per run.
 - [`@axiom a-lifetime-belongs-to-an-owner`](#axiom-a-lifetime-belongs-to-an-owner) — Every reactive node lives as long as the owner it was created under. Disposing an owner ends everything beneath it. Plain data has no owner and no lifetime. Each run of a computation is a lifetime of its own, ended when the next run starts, and a root's lifetime is held by the code that created it.
   - [`@rule createroot-starts-a-new-owner-tree`](#rule-createroot-starts-a-new-owner-tree) — `createRoot` runs its body at once under a new root owner, and returns what the body returns. The body receives the root's `dispose` function.
   - [`@rule disposing-an-owner-ends-what-it-owns`](#rule-disposing-an-owner-ends-what-it-owns) — Disposing an owner stops the effects and computeds created under it and runs its cleanups. Signals created under it keep working.
   - [`@rule dispose-runs-once`](#rule-dispose-runs-once) — Disposing an owner a second time does nothing: its cleanups do not run again, and nothing throws.
   - [`@rule a-disposed-owner-cannot-be-entered`](#rule-a-disposed-owner-cannot-be-entered) — `runWithOwner` with an owner that has been disposed throws.
   - [`@rule oncleanup-without-an-owner-does-nothing`](#rule-oncleanup-without-an-owner-does-nothing) — `onCleanup` called outside every owner, and outside any running computation, registers nothing, does not throw, and returns the callback it was given.
-  - [`@rule a-bare-effect-or-computed-without-an-owner-does-not-warn`](#rule-a-bare-effect-or-computed-without-an-owner-does-not-warn) — An effect or a computed created outside every owner works, lives forever, and warns about nothing.
-  - [`@rule a-dom-binding-without-an-owner-warns`](#rule-a-dom-binding-without-an-owner-warns) — A reactive DOM binding or an event listener created with no owner still works, but warns once that it will never be disposed. Inside an owner, nothing warns.
-    - [`@case a-reactive-child-without-an-owner-warns`](#case-a-reactive-child-without-an-owner-warns) — `bindings.ts` `insertChild`.
-    - [`@case a-prop-binding-or-listener-without-an-owner-warns`](#case-a-prop-binding-or-listener-without-an-owner-warns) — `bindings.ts` `bindProp`.
   - [`@rule an-owner-disposes-its-children-before-its-own-cleanups`](#rule-an-owner-disposes-its-children-before-its-own-cleanups) — When an owner is disposed, the effects, computeds and sub-owners it owns are disposed first, the most recently created first, and the owner's own `onCleanup` callbacks run after them.
   - [`@rule a-catch-error-sub-owner-is-disposed-with-its-parent`](#rule-a-catch-error-sub-owner-is-disposed-with-its-parent) — Disposing the owner a `catchError` was called under disposes its sub-owner, and stops what was created inside it.
   - [`@rule catch-error-refuses-a-disposed-owner`](#rule-catch-error-refuses-a-disposed-owner) — Calling `catchError` inside an owner that has been disposed throws.
@@ -148,6 +147,11 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule an-effects-cleanups-run-before-its-next-run`](#rule-an-effects-cleanups-run-before-its-next-run) — A cleanup registered with `onCleanup` inside an effect's body belongs to that run. It runs before the effect's next run, not when the owner is disposed.
   - [`@rule oncleanup-in-a-sync-stage-runs-before-its-next-run`](#rule-oncleanup-in-a-sync-stage-runs-before-its-next-run) — Inside a sync stage, `onCleanup` keeps its usual meaning: the cleanup runs before the stage's next run.
   - [`@rule a-root-is-never-owned-by-an-enclosing-root`](#rule-a-root-is-never-owned-by-an-enclosing-root) — A root created inside another root has no parent. Disposing the outer root leaves it alive, and only its own `dispose` ends it.
+- [`@axiom a-missing-owner-is-reported-where-it-leaks-the-page`](#axiom-a-missing-owner-is-reported-where-it-leaks-the-page) — A missing owner is reported where it keeps part of the page alive, and only there.
+  - [`@rule a-dom-binding-without-an-owner-warns`](#rule-a-dom-binding-without-an-owner-warns) — A reactive DOM binding or an event listener created with no owner still works, but warns once that it will never be disposed. Inside an owner, nothing warns.
+    - [`@case a-reactive-child-without-an-owner-warns`](#case-a-reactive-child-without-an-owner-warns) — `bindings.ts` `insertChild`.
+    - [`@case a-prop-binding-or-listener-without-an-owner-warns`](#case-a-prop-binding-or-listener-without-an-owner-warns) — `bindings.ts` `bindProp`.
+  - [`@rule a-bare-effect-or-computed-without-an-owner-does-not-warn`](#rule-a-bare-effect-or-computed-without-an-owner-does-not-warn) — An effect or a computed created outside every owner works, lives forever, and warns about nothing.
 - [`@axiom ambient-context-is-set-for-a-call-and-restored-after`](#axiom-ambient-context-is-set-for-a-call-and-restored-after) — Ambient context, such as the current owner, is set for the duration of one call and restored when that call ends, however it ends.
   - [`@rule there-is-no-ambient-owner-outside-every-root`](#rule-there-is-no-ambient-owner-outside-every-root) — Outside every root, `getOwner()` returns null, also after a root has run and after it has been disposed.
   - [`@rule runwithowner-restores-the-previous-owner`](#rule-runwithowner-restores-the-previous-owner) — `runWithOwner` makes its owner ambient for the call, `null` included, and restores the previous owner when the call returns or throws.
@@ -165,10 +169,8 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule the-nearest-accepting-boundary-claims-an-error`](#rule-the-nearest-accepting-boundary-claims-an-error) — `catchError` and `<Errored>` are peers in one walk up the owner chain. The nearest one that accepts the error claims it. One whose `for` predicate declines passes the error on to the next, and one with no `for` accepts every error.
   - [`@rule the-boundary-is-chosen-again-for-every-error`](#rule-the-boundary-is-chosen-again-for-every-error) — The walk runs again for every error, so a node that fails again with a different kind of error moves to the boundary that accepts the new one.
   - [`@rule a-handler-that-throws-passes-its-error-outward`](#rule-a-handler-that-throws-passes-its-error-outward) — When a `catchError` handler throws, the walk continues past it with the handler's error. When nothing further up takes it, it is thrown to the caller.
-  - [`@rule every-root-has-an-error-boundary`](#rule-every-root-has-an-error-boundary) — `createRoot` installs an error boundary on the root owner. It claims every error no nearer boundary claims, tracks it like any other boundary, and logs each failed report to the console, a repeated one included.
   - [`@rule use-errored-without-an-errored-reads-the-roots-boundary`](#rule-use-errored-without-an-errored-reads-the-roots-boundary) — Under a root with no explicit `<Errored>`, `useErrored()` reads the root's boundary, which holds every error nothing nearer claimed in that root.
   - [`@rule a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller`](#rule-a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller) — A failed action reports to the nearest boundary that accepts its error, above the owner it was called under: an `<Errored>`, a root's default boundary, or a `catchError`, whose handler is then called with the error. The choice is made again on every failure, so a retry whose error a nearer boundary now accepts moves there. The report still reaches its boundary when the calling owner was disposed before the action failed. When the boundary itself is gone, the report goes to the next boundary up, at the latest the root's.
-  - [`@rule an-errored-reset-retries-a-failed-action`](#rule-an-errored-reset-retries-a-failed-action) — An `<Errored>` boundary holding a failed action's report retries that action when it resets: its reset calls the action's own `retry()`.
   - [`@rule a-throwing-handler-passes-a-failed-action-on-with-the-handlers-error`](#rule-a-throwing-handler-passes-a-failed-action-on-with-the-handlers-error) — When a `catchError` handler called for a failed action throws, the search continues to the boundaries beyond it with the handler's error, and the one that claims it receives the handler's error. The action's handle keeps the action's own error.
   - [`@rule a-real-error-in-an-effect-goes-to-the-nearest-handler`](#rule-a-real-error-in-an-effect-goes-to-the-nearest-handler) — A thrown error that is not a suspension, from an effect's body, a stage or a commit, goes to the nearest error handler above the effect. With no handler, it is thrown out of the run that raised it.
   - [`@rule a-loading-boundary-does-not-catch-a-real-error`](#rule-a-loading-boundary-does-not-catch-a-real-error) — A `<Loading>` boundary between a binding and an error handler lets a real error from that binding pass on to the handler. It takes only suspensions.
@@ -178,6 +180,8 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule a-throw-from-a-catch-error-body-reaches-only-catch-error-handlers`](#rule-a-throw-from-a-catch-error-body-reaches-only-catch-error-handlers) — A synchronous throw from a `catchError` body is routed only to `catchError` handlers, never to an `<Errored>` or a root's boundary. When none accepts it, it is thrown to the caller.
   - [`@rule a-catch-error-handler-is-called-for-each-throw-under-it`](#rule-a-catch-error-handler-is-called-for-each-throw-under-it) — A `catchError` handler is called for each throw that reaches it, from its body and from any node created under it, on the first run and on later re-runs.
   - [`@rule an-error-nothing-claims-is-thrown-on-a-first-run`](#rule-an-error-nothing-claims-is-thrown-on-a-first-run) — Outside any root, an error from a node that no boundary claims is thrown to the caller when it happens during the node's first run. During a later re-run it is logged to the console instead.
+- [`@axiom every-failure-in-a-root-is-held`](#axiom-every-failure-in-a-root-is-held) — Every failure inside a root is held by some boundary: none is lost, and none is thrown at a writer that did not cause it.
+  - [`@rule every-root-has-an-error-boundary`](#rule-every-root-has-an-error-boundary) — `createRoot` installs an error boundary on the root owner. It claims every error no nearer boundary claims, tracks it like any other boundary, and logs each failed report to the console, a repeated one included.
 - [`@axiom an-error-is-graph-state-not-an-event`](#axiom-an-error-is-graph-state-not-an-event) — A failure is state held on the node that failed, beside its last resolved value, and it propagates along the graph the way pending does. A boundary shows that state; it does not count throws.
   - [`@rule error-returns-the-failure-of-a-node-or-anything-upstream`](#rule-error-returns-the-failure-of-a-node-or-anything-upstream) — `error(x)` returns the error of `x`, or of the nearest failed stage upstream of it, and `null` while the chain is healthy.
   - [`@rule a-recovery-clears-the-error`](#rule-a-recovery-clears-the-error) — When a failed node computes successfully again, its error is cleared and its new value is published.
@@ -189,13 +193,16 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule a-boundary-shows-its-fallback-exactly-while-something-under-it-is-failed`](#rule-a-boundary-shows-its-fallback-exactly-while-something-under-it-is-failed) — An `<Errored>` with a fallback shows it while at least one binding under it is failed, and shows its children again as soon as none is, with no reset.
   - [`@rule a-boundary-without-a-fallback-swaps-nothing`](#rule-a-boundary-without-a-fallback-swaps-nothing) — An `<Errored>` without a fallback keeps its children mounted through an error. Its state is still readable from below.
   - [`@rule a-boundary-holds-one-report-per-failed-binding`](#rule-a-boundary-holds-one-report-per-failed-binding) — An error boundary holds one report per currently failed binding, in the order the bindings first failed. A binding that reports again replaces its own entry, and a binding that recovers or goes away removes it.
-  - [`@rule error-and-active-describe-the-first-report`](#rule-error-and-active-describe-the-first-report) — A boundary's `error()` and `active()` describe its first report. A change to a report other than the first does not notify a reader of `error()` or `active()`.
   - [`@rule an-identical-report-publishes-nothing-new`](#rule-an-identical-report-publishes-nothing-new) — A binding that reports the identical error again does not make the boundary publish a new collection of reports.
+  - [`@rule a-boundarys-state-can-be-read-without-swapping`](#rule-a-boundarys-state-can-be-read-without-swapping) — The nearest boundary's state is readable from below without swapping anything: `useErrored()` returns accessors, `isErrored()` returns the current state or `undefined`, and `<Errored.Error>` renders its content only while the boundary is failed.
+- [`@axiom a-reset-re-attempts-the-work-where-it-failed`](#axiom-a-reset-re-attempts-the-work-where-it-failed) — Resetting a boundary re-attempts the work behind each failure it holds, at the point where that failure started.
   - [`@rule reset-uses-the-latest-retry-a-binding-reported`](#rule-reset-uses-the-latest-retry-a-binding-reported) — A boundary's reset calls the retry from each binding's most recent report, even when that report did not change the published collection.
   - [`@rule reset-recomputes-the-failed-source-at-the-root-of-its-chain`](#rule-reset-recomputes-the-failed-source-at-the-root-of-its-chain) — When a failed binding read a failed node, reset clears the error at the deepest failed stage of that node's chain and recomputes it, even with unchanged inputs. This holds whether the binding read the node with `use`, which threw, or through a tolerant read, which reported the failure ambiently.
   - [`@rule resetting-an-optimistic-error-retries-its-source`](#rule-resetting-an-optimistic-error-retries-its-source) — Resetting the error of an optimistic value, as an error boundary's retry does, recomputes the failed source it wraps.
   - [`@rule reset-reruns-a-binding-that-threw-a-plain-error`](#rule-reset-reruns-a-binding-that-threw-a-plain-error) — When a binding threw an error that no failed node stands behind, reset re-runs that binding.
-  - [`@rule a-boundarys-state-can-be-read-without-swapping`](#rule-a-boundarys-state-can-be-read-without-swapping) — The nearest boundary's state is readable from below without swapping anything: `useErrored()` returns accessors, `isErrored()` returns the current state or `undefined`, and `<Errored.Error>` renders its content only while the boundary is failed.
+  - [`@rule an-errored-reset-retries-a-failed-action`](#rule-an-errored-reset-retries-a-failed-action) — An `<Errored>` boundary holding a failed action's report retries that action when it resets: its reset calls the action's own `retry()`.
+- [`@axiom a-boundary-shows-its-oldest-failure-first`](#axiom-a-boundary-shows-its-oldest-failure-first) — A boundary presents the failure that has stood longest first.
+  - [`@rule error-and-active-describe-the-first-report`](#rule-error-and-active-describe-the-first-report) — A boundary's `error()` and `active()` describe its first report. A change to a report other than the first does not notify a reader of `error()` or `active()`.
 - [`@axiom the-read-verb-decides-what-renders-and-what-waits`](#axiom-the-read-verb-decides-what-renders-and-what-waits) — The verb a binding reads with decides what the binding renders and whether it waits for its neighbours. Everything else in the loading lifecycle is reported ambiently, from the reads the binding makes.
   - [`@rule use-returns-the-value-or-throws-not-ready-yet`](#rule-use-returns-the-value-or-throws-not-ready-yet) — `use(x)` returns a plain value unchanged, returns a settled promise's value, re-throws a settled promise's rejection, and throws `NotReadyYet` carrying the promise while it is pending. Given an accessor, it calls it and treats the result the same way.
   - [`@rule use-of-an-accessor-throws-while-it-is-pending`](#rule-use-of-an-accessor-throws-while-it-is-pending) — `use(accessor)` throws `NotReadyYet` whenever `isPending(accessor)` is true, even when the accessor has a stale value to return. The thrown promise is `promiseOf(accessor)`.
@@ -273,7 +280,6 @@ The canon was written backwards from the existing tests and documents, and descr
 - [`@axiom a-component-runs-once-and-reactivity-lives-in-its-holes`](#axiom-a-component-runs-once-and-reactivity-lives-in-its-holes) — A component function runs once. What changes afterwards changes inside the holes it returned — reactive children and reactive props — never by running the component again.
   - [`@rule a-function-tag-is-called-once-with-its-props`](#rule-a-function-tag-is-called-once-with-its-props) — A function tag is called once, with its props. Children passed to `h` after the props arrive on `props.children`.
   - [`@rule a-function-child-is-a-reactive-hole`](#rule-a-function-child-is-a-reactive-hole) — A function in a child position is a binding. It runs in its own effect, and its result, which may be anything a static child may be, replaces whatever sits between the binding's two marker comments each time something it read changes.
-  - [`@rule an-attribute-follows-its-value-and-is-removed-on-nothing`](#rule-an-attribute-follows-its-value-and-is-removed-on-nothing) — A prop with no prefix, or with the `attr:` prefix, sets the attribute of that name. A value of `null`, `undefined` or `false` removes the attribute, and a function value keeps the attribute following it.
   - [`@rule a-ref-is-called-once-with-its-element`](#rule-a-ref-is-called-once-with-its-element) — A `ref` prop is not a hole. Its function is called once, with the element, when the element is created.
   - [`@rule show-renders-its-children-when-truthy-and-its-fallback-otherwise`](#rule-show-renders-its-children-when-truthy-and-its-fallback-otherwise) — `Show` renders its children while `when` is truthy and its `fallback` while it is falsy. A function child is called with the truthy value.
   - [`@rule switch-renders-the-first-truthy-match`](#rule-switch-renders-the-first-truthy-match) — `Switch` renders the children of the first `Match`, in written order, whose `when` is truthy, and its `fallback` when none is. A function child is called with the truthy value. Children of a `Switch` that are not `Match` elements are ignored.
@@ -285,7 +291,6 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule a-spread-merges-descriptors-not-values`](#rule-a-spread-merges-descriptors-not-values) — A props object that contains a spread is compiled to a `mergeProps` call over its segments, so a getter in a spread source stays a getter. One `mergeProps` import is added per file, however many spreads it has.
   - [`@rule a-dom-child-is-one-thunk-per-dynamic-child`](#rule-a-dom-child-is-one-thunk-per-dynamic-child) — On a DOM element or a Fragment, each dynamic child becomes its own thunk, never a getter. A literal, a function expression, or a nested JSX element stays as written.
   - [`@rule component-children-become-one-getter`](#rule-component-children-become-one-getter) — On a component, the children become one getter over the whole value, and are not wrapped child by child. A component is any tag that is neither a string nor `Fragment`, a member expression such as `Foo.Bar` included, and a bare JSX-element child compiles exactly like the braced form.
-  - [`@rule the-vite-plugin-compiles-only-jsx-files`](#rule-the-vite-plugin-compiles-only-jsx-files) — The Vite plugin compiles a `.tsx` or `.jsx` file, ignoring any query string on its id, and leaves every other file alone. It applies the props-to-getters transform, then the automatic JSX runtime imported from `pulse`.
   - [`@rule errored-error-builds-its-content-once-per-failure`](#rule-errored-error-builds-its-content-once-per-failure) — `<Errored.Error>` builds its content when the boundary becomes failed, keeps it while the boundary stays failed, and disposes it when the boundary recovers.
   - [`@rule a-boundary-builds-its-children-once-up-front`](#rule-a-boundary-builds-its-children-once-up-front) — A boundary builds its children once, when it is created, inside its own owner, whether it then displays them or a placeholder. Settling, and every later swap between the placeholder and the subtree, shows the subtree already built and runs no component again.
 - [`@axiom a-prop-says-how-it-reaches-the-dom`](#axiom-a-prop-says-how-it-reaches-the-dom) — How a prop reaches the DOM is written at the prop, by its prefix, and never inferred from its name or its value.
@@ -295,6 +300,10 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule a-namespaced-prop-compiles-to-a-string-key`](#rule-a-namespaced-prop-compiles-to-a-string-key) — A namespaced prop name such as `on:click` or `class:active` compiles to a plain string key on the props object, which is what the runtime's prefix dispatch reads.
 - [`@axiom an-item-is-its-reference`](#axiom-an-item-is-its-reference) — An item is its reference: pulse never compares contents to decide that two values are the same item.
   - [`@rule list-rows-are-keyed-by-reference`](#rule-list-rows-are-keyed-by-reference) — A list row belongs to an item by strict reference. The same reference keeps its row, its mapped output and its DOM nodes in the new order. A different reference gets a new row even when its contents are equal.
+- [`@axiom a-missing-value-sets-nothing`](#axiom-a-missing-value-sets-nothing) — A missing value sets nothing: `null`, `undefined` and `false` leave nothing in the DOM.
+  - [`@rule an-attribute-follows-its-value-and-is-removed-on-nothing`](#rule-an-attribute-follows-its-value-and-is-removed-on-nothing) — A prop with no prefix, or with the `attr:` prefix, sets the attribute of that name. A value of `null`, `undefined` or `false` removes the attribute, and a function value keeps the attribute following it.
+- [`@axiom the-compiler-touches-only-jsx`](#axiom-the-compiler-touches-only-jsx) — The compiler rewrites only JSX: code without JSX reaches the runtime exactly as written.
+  - [`@rule the-vite-plugin-compiles-only-jsx-files`](#rule-the-vite-plugin-compiles-only-jsx-files) — The Vite plugin compiles a `.tsx` or `.jsx` file, ignoring any query string on its id, and leaves every other file alone. It applies the props-to-getters transform, then the automatic JSX runtime imported from `pulse`.
 <!-- toc:end -->
 
 ## Driving principles — the canon's axioms
@@ -579,6 +588,18 @@ This follows because a small set of primitives covers the use cases: the JSX run
 
 So what holds for `h` holds for JSX.
 
+## @axiom a-derivation-runs-when-it-is-created
+
+> A derivation produces its value when it is created, not when it is first read.
+
+No design document states this. It was accepted as a principle when the canon was reviewed.
+
+### @rule an-update-function-sees-the-value-a-sync-derivation-produced-at-creation
+
+> A derivation runs when it is created. An update function on a sync derivation therefore receives the value that first run produced, even before any write. An async derivation that suspended has produced nothing yet.
+
+This follows because a derivation runs when it is created: a sync derivation therefore has its value before any write, and the first update function receives it.
+
 ## @axiom the-latest-production-wins
 
 > A derived value shows whatever produced it last — a dependency change or a direct write — and a production that was started earlier never publishes over a later one.
@@ -755,16 +776,6 @@ This follows because a value says so only when it has a future: a generator that
 
 Also derives from [`rule-a-stage-suspended-through-use-is-absorbed`](#rule-a-stage-suspended-through-use-is-absorbed). This follows because a sync stage that suspends through `use` waits on a promise, and a value that has a future says so: until that promise settles, the pipeline's value is the promise in flight.
 
-### @rule an-update-function-receives-the-last-resolved-value
-
-> An update function on a writable derivation receives the last value that actually resolved, never a promise, and `undefined` when nothing has resolved yet.
-
-A written promise has not resolved while it is pending, so an update function called then receives the value from before it.
-
-### @rule an-update-function-sees-the-value-a-sync-derivation-produced-at-creation
-
-> A derivation runs when it is created. An update function on a sync derivation therefore receives the value that first run produced, even before any write. An async derivation that suspended has produced nothing yet.
-
 ### @rule a-construction-default-seeds-only-the-tolerant-read
 
 > `signal(fn, default)` makes `peek` return `default` until the derivation first resolves, and an update function receive `default` in place of `undefined`. The raw read stays a pending promise.
@@ -804,6 +815,20 @@ A stage that reads another node as its input reports that node's pending state a
 Also derives from [`rule-a-promise-carries-its-state-in-one-weakmap`](#rule-a-promise-carries-its-state-in-one-weakmap). This follows because an async value is read through its recorded state, and a promise carries its state only in pulse's map, which records it as pending when first seen: until the settle is recorded, `use` sees pending.
 
 A promise carries no readable state of its own. Its state is recorded when its settle callback runs, which is always at least a microtask after the promise is first seen.
+
+## @axiom code-that-builds-on-a-value-receives-it-resolved
+
+> Code that computes a new value from an earlier one is handed that value resolved, never as a promise.
+
+The waiting happens before such code runs, not inside it: a stage receives the previous stage's resolved value, and an update function receives the derivation's. No design document states this as a principle; it was accepted when the canon was reviewed.
+
+### @rule an-update-function-receives-the-last-resolved-value
+
+> An update function on a writable derivation receives the last value that actually resolved, never a promise, and `undefined` when nothing has resolved yet.
+
+This follows because code that builds on a value receives it resolved: an update function builds on the derivation's value, so it is handed the last resolved one, not a promise in flight.
+
+A written promise has not resolved while it is pending, so an update function called then receives the value from before it.
 
 ## @axiom plain-reads-are-honest
 
@@ -1007,10 +1032,6 @@ Also derives from [`rule-a-returned-promise-is-the-result-not-a-pause`](#rule-a-
 
 This follows because a body that suspends by throwing through `use` cannot be resumed at all, and runs again from the top: that holds inside a generator stage too.
 
-### @rule repeated-use-of-one-pending-promise-adds-no-listener
-
-> A stage body that hits `use` on the same still-pending promise on several runs attaches one settle listener to that promise, not one per run.
-
 ### @rule a-computed-is-a-pipeline-of-stages
 
 > `computed(s0, s1, …)` threads each stage's resolved value into the next. Any stage may read signals, and a stage re-runs only when its input or one of its own reads changes.
@@ -1044,6 +1065,18 @@ This follows because a generator stage is re-entered at its pause with the settl
 This follows because a body that suspends by throwing cannot be resumed and runs again from the top: the effect is held, and runs from the top once the promise it suspended on settles.
 
 The re-run is keyed on the promise the effect suspended on.
+
+## @axiom waiting-on-a-promise-twice-is-waiting-once
+
+> Waiting on the same promise again adds nothing: what waits on a promise is attached to it once.
+
+No design document states this. It was accepted as a principle when the canon was reviewed.
+
+### @rule repeated-use-of-one-pending-promise-adds-no-listener
+
+> A stage body that hits `use` on the same still-pending promise on several runs attaches one settle listener to that promise, not one per run.
+
+This follows because waiting on the same promise twice is waiting once: a body that suspends on one pending promise again is already attached to it, so no further listener is added.
 
 ## Part 3 — Lifetimes
 
@@ -1092,28 +1125,6 @@ Code run under a disposed owner would register nodes and cleanups that nothing w
 > `onCleanup` called outside every owner, and outside any running computation, registers nothing, does not throw, and returns the callback it was given.
 
 The callback will never run.
-
-### @rule a-bare-effect-or-computed-without-an-owner-does-not-warn
-
-> An effect or a computed created outside every owner works, lives forever, and warns about nothing.
-
-Only DOM bindings and event listeners warn about a missing owner (see [the DOM warning](#rule-a-dom-binding-without-an-owner-warns)).
-
-### @rule a-dom-binding-without-an-owner-warns
-
-> A reactive DOM binding or an event listener created with no owner still works, but warns once that it will never be disposed. Inside an owner, nothing warns.
-
-#### @case a-reactive-child-without-an-owner-warns
-
-> `bindings.ts` `insertChild`.
-
-A function child with no owner warns as a "reactive child". The owner checked is the one a `Fragment` tagged the child with, when there is one, and otherwise the ambient owner, so a child built inside an owner by a `Fragment` does not warn wherever its array is inserted.
-
-#### @case a-prop-binding-or-listener-without-an-owner-warns
-
-> `bindings.ts` `bindProp`.
-
-Every property kind except `ref` warns: `on:` as an event listener, `attr:` and a bare name as an attribute binding, `prop:`, `class:` and `style:` under their own names. An attribute with a static value warns too, because every one of these kinds is wrapped in an effect whatever its value turns out to be. A `ref` is called once and never wrapped, so it does not warn.
 
 ### @rule an-owner-disposes-its-children-before-its-own-cleanups
 
@@ -1245,6 +1256,38 @@ This follows because a root's lifetime is held by the code that created it: an e
 
 Nesting a `createRoot` does not link the two trees, so nothing walks from the inner root to the outer one.
 
+## @axiom a-missing-owner-is-reported-where-it-leaks-the-page
+
+> A missing owner is reported where it keeps part of the page alive, and only there.
+
+Code that runs without an owner is allowed to: pulse stays permissive, as `CONTEXT.md` says. What outlives the page it belongs to is a leak the developer cannot see, so that case, and only that case, is reported.
+
+### @rule a-dom-binding-without-an-owner-warns
+
+> A reactive DOM binding or an event listener created with no owner still works, but warns once that it will never be disposed. Inside an owner, nothing warns.
+
+This follows because a missing owner is reported where it keeps part of the page alive: a DOM binding or listener without an owner keeps a node of the page updating forever.
+
+#### @case a-reactive-child-without-an-owner-warns
+
+> `bindings.ts` `insertChild`.
+
+A function child with no owner warns as a "reactive child". The owner checked is the one a `Fragment` tagged the child with, when there is one, and otherwise the ambient owner, so a child built inside an owner by a `Fragment` does not warn wherever its array is inserted.
+
+#### @case a-prop-binding-or-listener-without-an-owner-warns
+
+> `bindings.ts` `bindProp`.
+
+Every property kind except `ref` warns: `on:` as an event listener, `attr:` and a bare name as an attribute binding, `prop:`, `class:` and `style:` under their own names. An attribute with a static value warns too, because every one of these kinds is wrapped in an effect whatever its value turns out to be. A `ref` is called once and never wrapped, so it does not warn.
+
+### @rule a-bare-effect-or-computed-without-an-owner-does-not-warn
+
+> An effect or a computed created outside every owner works, lives forever, and warns about nothing.
+
+This follows because a missing owner is reported only where it keeps part of the page alive: a bare effect or computed touches no page, so it is not reported.
+
+Only DOM bindings and event listeners warn about a missing owner (see [the DOM warning](#rule-a-dom-binding-without-an-owner-warns)).
+
 ## @axiom ambient-context-is-set-for-a-call-and-restored-after
 
 > Ambient context, such as the current owner, is set for the duration of one call and restored when that call ends, however it ends.
@@ -1359,12 +1402,6 @@ This follows because error-boundaries-are-sub-owners says an error goes to the n
 
 This follows because error-boundaries-are-sub-owners says an error goes to the nearest accepting boundary above where it happened: a handler's own throw is a new error at that boundary, so the walk continues above it.
 
-### @rule every-root-has-an-error-boundary
-
-> `createRoot` installs an error boundary on the root owner. It claims every error no nearer boundary claims, tracks it like any other boundary, and logs each failed report to the console, a repeated one included.
-
-An explicit boundary below the root is nearer, so it wins over the root's.
-
 ### @rule use-errored-without-an-errored-reads-the-roots-boundary
 
 > Under a root with no explicit `<Errored>`, `useErrored()` reads the root's boundary, which holds every error nothing nearer claimed in that root.
@@ -1378,10 +1415,6 @@ Also derives from [`rule-every-root-has-an-error-boundary`](#rule-every-root-has
 Also derives from [`rule-the-boundary-is-chosen-again-for-every-error`](#rule-the-boundary-is-chosen-again-for-every-error). This follows because error-boundaries-are-sub-owners sends an error to the nearest accepting boundary above the owner it happened under, the calling owner, and the-boundary-is-chosen-again-for-every-error repeats that choice on each failure.
 
 An action called from an event handler runs under the owner that was current when [the handler was bound](#rule-an-event-handler-runs-under-the-owner-it-was-bound-in). The calling owner can be gone before the action fails, for example a list row recreated by the action's own optimistic write. A `catchError` handler receives only the error, so an action it caught is retried through its handle.
-
-### @rule an-errored-reset-retries-a-failed-action
-
-> An `<Errored>` boundary holding a failed action's report retries that action when it resets: its reset calls the action's own `retry()`.
 
 ### @rule a-throwing-handler-passes-a-failed-action-on-with-the-handlers-error
 
@@ -1448,6 +1481,20 @@ A handler is a callback, not a collection. One rejection can re-run the reading 
 This follows because a throw on the caller's stack belongs to the caller: a node's first run happens on the stack of the code that created it, so an error nothing claims is thrown there, while a later re-run happens on a writer's stack the error does not belong to.
 
 Inside a root this never happens, because [the root's own boundary](#rule-every-root-has-an-error-boundary) claims whatever nothing nearer does.
+
+## @axiom every-failure-in-a-root-is-held
+
+> Every failure inside a root is held by some boundary: none is lost, and none is thrown at a writer that did not cause it.
+
+No design document states this. It was accepted as a principle when the canon was reviewed.
+
+### @rule every-root-has-an-error-boundary
+
+> `createRoot` installs an error boundary on the root owner. It claims every error no nearer boundary claims, tracks it like any other boundary, and logs each failed report to the console, a repeated one included.
+
+This follows because every failure inside a root is held by some boundary: the root itself must therefore hold what nothing nearer does.
+
+An explicit boundary below the root is nearer, so it wins over the root's.
 
 ## @axiom an-error-is-graph-state-not-an-event
 
@@ -1519,23 +1566,35 @@ This follows because an-error-is-graph-state-not-an-event says a boundary shows 
 
 This follows because an-error-is-graph-state-not-an-event says a boundary shows state rather than counting throws: it holds the set of bindings failed now, one entry each, removed when a binding recovers or goes away.
 
-### @rule error-and-active-describe-the-first-report
-
-> A boundary's `error()` and `active()` describe its first report. A change to a report other than the first does not notify a reader of `error()` or `active()`.
-
 ### @rule an-identical-report-publishes-nothing-new
 
 > A binding that reports the identical error again does not make the boundary publish a new collection of reports.
 
 Also derives from [`rule-an-equal-value-does-not-propagate`](#rule-an-equal-value-does-not-propagate). This follows because an-error-is-graph-state-not-an-event says a boundary shows state, not throws, and an-equal-value-does-not-propagate says an unchanged value reaches no consumer: an identical report changes nothing.
 
+### @rule a-boundarys-state-can-be-read-without-swapping
+
+> The nearest boundary's state is readable from below without swapping anything: `useErrored()` returns accessors, `isErrored()` returns the current state or `undefined`, and `<Errored.Error>` renders its content only while the boundary is failed.
+
+This follows because an-error-is-graph-state-not-an-event says a boundary shows failure state: that state is a value in its own right, so it can be read from below without the fallback showing it.
+
+## @axiom a-reset-re-attempts-the-work-where-it-failed
+
+> Resetting a boundary re-attempts the work behind each failure it holds, at the point where that failure started.
+
+A reset that cleared only what is shown, or retried a step downstream of the failure, would fail again the same way. No design document states this as a principle; it was accepted when the canon was reviewed.
+
 ### @rule reset-uses-the-latest-retry-a-binding-reported
 
 > A boundary's reset calls the retry from each binding's most recent report, even when that report did not change the published collection.
 
+This follows because a reset re-attempts the work behind each failure: the latest retry a binding reported is the work its current failure stands for.
+
 ### @rule reset-recomputes-the-failed-source-at-the-root-of-its-chain
 
 > When a failed binding read a failed node, reset clears the error at the deepest failed stage of that node's chain and recomputes it, even with unchanged inputs. This holds whether the binding read the node with `use`, which threw, or through a tolerant read, which reported the failure ambiently.
+
+This follows because a reset re-attempts the work where the failure started: in a chain, that is the deepest failed stage, not the stage that only passed the error on.
 
 A downstream stage only propagates its upstream's error, so resetting it alone would fail again the same way.
 
@@ -1543,17 +1602,33 @@ A downstream stage only propagates its upstream's error, so resetting it alone w
 
 > Resetting the error of an optimistic value, as an error boundary's retry does, recomputes the failed source it wraps.
 
+This follows because a reset re-attempts the work where the failure started: an optimistic value's failure started in the source it wraps, so that source is recomputed.
+
 The failure is parked on the source, not on the optimistic node, so a reset that only cleared the optimistic node would fail again the same way.
 
 ### @rule reset-reruns-a-binding-that-threw-a-plain-error
 
 > When a binding threw an error that no failed node stands behind, reset re-runs that binding.
 
-### @rule a-boundarys-state-can-be-read-without-swapping
+This follows because a reset re-attempts the work where the failure started: a plain error with no failed node behind it started in the binding itself, so the binding re-runs.
 
-> The nearest boundary's state is readable from below without swapping anything: `useErrored()` returns accessors, `isErrored()` returns the current state or `undefined`, and `<Errored.Error>` renders its content only while the boundary is failed.
+### @rule an-errored-reset-retries-a-failed-action
 
-This follows because an-error-is-graph-state-not-an-event says a boundary shows failure state: that state is a value in its own right, so it can be read from below without the fallback showing it.
+> An `<Errored>` boundary holding a failed action's report retries that action when it resets: its reset calls the action's own `retry()`.
+
+This follows because a reset re-attempts the work behind each failure: a failed action's work is its body, which its own `retry()` runs again.
+
+## @axiom a-boundary-shows-its-oldest-failure-first
+
+> A boundary presents the failure that has stood longest first.
+
+No design document states this. It was accepted as a principle when the canon was reviewed.
+
+### @rule error-and-active-describe-the-first-report
+
+> A boundary's `error()` and `active()` describe its first report. A change to a report other than the first does not notify a reader of `error()` or `active()`.
+
+This follows because a boundary presents its oldest failure first: `error()` and `active()` describe the report of the binding that failed first.
 
 ## Part 5 — Coordination
 
@@ -2089,10 +2164,6 @@ This follows because what changes after a component ran changes inside its holes
 
 The markers keep the binding's place, so static siblings on either side stay where they are.
 
-### @rule an-attribute-follows-its-value-and-is-removed-on-nothing
-
-> A prop with no prefix, or with the `attr:` prefix, sets the attribute of that name. A value of `null`, `undefined` or `false` removes the attribute, and a function value keeps the attribute following it.
-
 ### @rule a-ref-is-called-once-with-its-element
 
 > A `ref` prop is not a hole. Its function is called once, with the element, when the element is created.
@@ -2171,9 +2242,6 @@ This follows because a component runs once and reads its props where it uses the
 
 A component reads `props.children` like any other prop, so the children are deferred until the component reads them.
 
-### @rule the-vite-plugin-compiles-only-jsx-files
-
-> The Vite plugin compiles a `.tsx` or `.jsx` file, ignoring any query string on its id, and leaves every other file alone. It applies the props-to-getters transform, then the automatic JSX runtime imported from `pulse`.
 ### @rule errored-error-builds-its-content-once-per-failure
 
 > `<Errored.Error>` builds its content when the boundary becomes failed, keeps it while the boundary stays failed, and disposes it when the boundary recovers.
@@ -2232,3 +2300,26 @@ An object already has an identity, so no key function is needed to give it one, 
 This follows because an item is its reference: the same object in a new position is the same row, moved with its state, and a different object is a new row, whatever its contents.
 
 A row is its item: the same object in a new position is the same row, moved, with its state kept. No key function is needed because the item already has an identity.
+## @axiom a-missing-value-sets-nothing
+
+> A missing value sets nothing: `null`, `undefined` and `false` leave nothing in the DOM.
+
+No design document states this. It was accepted as a principle when the canon was reviewed.
+
+### @rule an-attribute-follows-its-value-and-is-removed-on-nothing
+
+> A prop with no prefix, or with the `attr:` prefix, sets the attribute of that name. A value of `null`, `undefined` or `false` removes the attribute, and a function value keeps the attribute following it.
+
+This follows because a missing value sets nothing: an attribute whose value becomes `null`, `undefined` or `false` is removed, not set to a string.
+
+## @axiom the-compiler-touches-only-jsx
+
+> The compiler rewrites only JSX: code without JSX reaches the runtime exactly as written.
+
+No design document states this. It was accepted as a principle when the canon was reviewed.
+
+### @rule the-vite-plugin-compiles-only-jsx-files
+
+> The Vite plugin compiles a `.tsx` or `.jsx` file, ignoring any query string on its id, and leaves every other file alone. It applies the props-to-getters transform, then the automatic JSX runtime imported from `pulse`.
+
+This follows because the compiler rewrites only JSX: a file that cannot contain JSX is left exactly as written.
