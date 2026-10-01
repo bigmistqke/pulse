@@ -167,7 +167,7 @@ This follows because a missing value sets nothing: …
 ## 12. Terms
 
 1. A term defines one word of the project's language. Its statement says what the thing is, in one sentence. Never say what it does: behaviour is a spec.
-2. Write terms in the `## Terms` section of a canon document, as `### @term <word>`. No unit sits in a term, and a term sits in no unit (`misnested`).
+2. Write terms in the `## Terms` section of a canon document, as `### @term <stem>`. Join the words of a stem with hyphens, such as `loading-boundary`. No unit sits in a term, and a term sits in no unit (`misnested`).
 3. Choose one word for each concept. List the words to avoid on an `_Avoid_:` line under the statement.
 4. Define only words specific to the project. General programming concepts get no term.
 5. Link a term from the units whose meaning depends on it. A term that no unit links fails the check (`dead`).

@@ -27,7 +27,7 @@ For the full comparative analysis against Solid 2.x, see
 
 ## Language
 
-Terms are moving into the `## Terms` section of [`CANON.md`](CANON.md#terms), where each one is a definition and its behaviour lives in specs. Moved so far: present, accessor, signal, derivation, computed, pipeline, stage.
+Terms are moving into the `## Terms` section of [`CANON.md`](CANON.md#terms), where each one is a definition and its behaviour lives in specs. Moved so far: present, accessor, signal, derivation, computed, pipeline, stage, owner, boundary, loading boundary, error boundary, scheduler, control flow.
 
 **Optimistic**:
 A Signal with a different write discipline, created as
@@ -261,79 +261,6 @@ level (before creating local state) will re-execute the WHOLE body on
 suspension retry; if it created state in earlier lines, that state is lost.
 The safe pattern is `use(...)` inside a JSX hole, not in the body.
 
-**Control flow**:
-`Show`, `Switch`, `For` are ordinary Components. They apply trivial total
-coercions of pending state at their inputs: `For` treats a pending list as
-`[]` (zero rows); `Show` treats a pending condition as falsy, and `Switch`
-skips a `Match` whose condition is pending. No async policy
-is baked in — async behavior is decided entirely by what the caller passes
-and where they put `use`. Pass a raw accessor → total coercion; pass
-`use(...)` at the call site → throws → caught by the surrounding effect (and
-participates in any enclosing `<Loading>` boundary).
-
-`Show` and `For` take a local `fallback` prop. It is an *empty-state* prop —
-shown when content is empty (`Show`: falsy condition; `For`: zero rows). One
-`fallback` therefore conflates "genuinely empty" with "still pending";
-distinguishing them needs `isPending(x)` checks or wrapping in `<Loading>`.
-
-**Loading boundary** (`src/dom/loading.ts`):
-The atomic-commit boundary. Children's bindings register per-binding
-controllers with this boundary; Loading aggregates and selects:
-
-- All settled → loaded subtree.
-- Pending and never-loaded → `initial ?? fallback`.
-- Pending and previously loaded → `fallback ?? loaded subtree (hold-prior)`.
-
-State machine inside `LoadingScope`:
-
-- `pendingSet: Set<BindingController>` — controllers currently reporting
-  `throwing`.
-- `readySet: Map<BindingController, () => void>` — controllers that
-  recomputed successfully with a commit waiting.
-- `deferredCommits: Array<() => void>` — anonymous commits from
-  `use()`-engaged bindings that didn't throw but need to wait for the gate
-  (so atomic with sibling throwers).
-- `backgroundPromises: Set<Promise<unknown>>` — in-flight promises handed off
-  by a `use.latest()` SWR read (a binding that returned a stale value instead
-  of throwing). Added on hand-off, removed by a single `promise.finally(...)`
-  callback per promise, guarded to no-op if the scope is already disposed by
-  the time it fires. Doesn't participate in the gate (a `use.latest()` binding
-  already committed; nothing is waiting on it) — only in `isLoading()`'s
-  aggregate, so a background refresh still surfaces as "loading" even though
-  nothing is withheld.
-
-Two separate signals, not one: `gatePending` (`pendingSet.size > 0 ||
-readySet.size > 0 || deferredCommits.length > 0`) drives the commit gate below,
-`Loading()`'s own initial-vs-loaded swap check, and `hasEverLoaded`.
-`activeSig` (`gatePending || backgroundPromises.size > 0`) is what `scope.active`
-— and therefore `isLoading()`/`useLoading()` — read. Collapsing these into one
-signal is a real bug, not a simplification: a `use.latest()` binding's
-background refresh would then hold `gatePending`/`hasEverLoaded` true for the
-whole refresh, reopening the exact fallback-flash-on-remount bug `use.latest`
-exists to close, just stretched across the refetch instead of a single
-microtask. See [ADR 0014](docs/adr/0014-use-latest-composed-on-latest.md)'s
-"Implementation correction" section.
-
-When `pendingSet.size === 0 && (readySet.size > 0 || deferredCommits.length > 0)`,
-the gate opens: all commits flush in one pass. A microtask "tail check" handles
-the case where a non-throwing binding queued before any sibling thrower had
-reported in the same flush.
-
-**`initial` vs `fallback`**: `initial` shows only on first load (no committed
-tree yet); `fallback` shows on subsequent transitions if set, otherwise the
-prior committed tree is held.
-
-**useLoading / isLoading**:
-`useLoading(): Accessor<boolean>` — reads the nearest enclosing `<Loading>`
-boundary's pending state. Returns a constant-false accessor when called
-outside any Loading subtree. For the narrower case of reading the boundary
-from one place and handing the resulting accessor to another.
-
-`isLoading(): boolean` — the same read, called fresh at the call site instead
-of returning an accessor to store — the common case, e.g. a getter-converted
-prop (`class:loading={isLoading()}`) that's already re-read on every reactive
-pass, with nothing to gain from an intermediate accessor.
-
 **effect (single-arg form)**:
 `effect(fn: () => void)` runs a side-effecting function reactively. Re-runs on
 dep change. If the body throws `NotReadyYet`, the effect suspends, registers
@@ -350,52 +277,6 @@ commit is the side-effect terminator and participates in `<Loading>`'s atomic
 flush via `scope.deferOrCommit` when the boundary is pending. Object.is
 dedup on the committed value (symmetric with `computed`'s published-value
 dedup) suppresses spurious re-fires from scheduler noise.
-
-**Scheduler**:
-The single injectable mechanism that flushes the effect graph and resumes
-suspended generator computeds. Triggered identically by synchronous writes and
-async promise resolution. Default batches on a microtask; tests inject a
-synchronous-drain scheduler. See [ADR 0001](docs/adr/0001-unified-injected-scheduler.md).
-_Avoid_: `stabilize` (that is r3's internal primitive, never user-facing in
-pulse).
-
-**Owner**:
-A lifecycle scope for reactive nodes (effects and computeds), forming a tree.
-Created by `createRoot((dispose) => …)`. Disposal cascades top-down.
-`getOwner()` returns the current ambient owner. `runWithOwner(owner, fn)` is
-the explicit override. `createRoot` always creates a root (nesting does not
-parent inner to outer). Outside any root, reactive nodes work but live
-forever. Only DOM bindings and event listeners warn about it
-(`warnIfOrphaned`); a bare `effect()` or `computed()` outside every root is
-silent. `onCleanup` there throws, because its callback could never run. **Signals are not owned** —
-plain data with no lifecycle.
-
-`<Loading>` creates its own `boundaryOwner` and attaches a `LoadingScope` to
-it. `useLoading()` and the binding-controller machinery walk owners to find
-the nearest scope.
-
-**Error Boundary**:
-A sub-`Owner` that errors under it are routed to. There are two kinds, peers
-in one walk up the owner chain; the nearest one that accepts an error claims
-it, and either kind can decline an error with a `for` predicate.
-
-- `catchError(fn, handler)` is pulse's `try`/`catch`: its handler is called
-  once per throw that reaches it. A synchronous throw from `fn` itself reaches
-  only `catchError` handlers, and is re-thrown when none accepts it.
-- `<Errored fallback>` shows state rather than counting throws. It holds one
-  report per failed binding under it, shows its fallback while any is failed,
-  and its reset retries them. `useErrored()`, `isErrored()` and
-  `<Errored.Error>` read that state from below without swapping anything.
-
-`createRoot` installs a default `<Errored>`-style boundary on every root,
-which claims what nothing nearer claims and logs it. A failed action reports
-to the nearest accepting boundary of either kind above the owner it was
-called under. A failed node keeps its last good value; the failure is graph
-state, read with `error(x)`.
-_Note_: throwing is reserved for genuine errors AND for `NotReadyYet`
-suspension (which is its own routed-through-effects flow). Pending values
-appear as `Promise<T>` plus pending-tracker entries; the throw is the
-suspension signal, not an error.
 
 **BindingController** (`src/owner.ts`):
 The per-binding object obtained from `LoadingScope.register()`. Has

@@ -16,6 +16,12 @@ This document is the project. It holds the theory of pulse: why it is the way it
 - [`@term computed`](#term-computed) — A derivation without a setter, made with `computed`.
 - [`@term pipeline`](#term-pipeline) — The ordered stages of a derivation, each taking the value the stage before it produced.
 - [`@term stage`](#term-stage) — One function in a pipeline: a sync function, an async function, or a generator function.
+- [`@term owner`](#term-owner) — A node in the tree of lifetimes, to which reactive nodes, cleanups and other owners belong.
+- [`@term boundary`](#term-boundary) — A loading boundary or an error boundary.
+- [`@term loading-boundary`](#term-loading-boundary) — The owner a `<Loading>` component creates to gather the pending state of the bindings beneath it.
+- [`@term error-boundary`](#term-error-boundary) — An owner that failures beneath it are routed to: an `<Errored>` component or a `catchError` call.
+- [`@term scheduler`](#term-scheduler) — The injectable function that decides when consumers run after a write.
+- [`@term control-flow`](#term-control-flow) — The components that choose what to render from a value: `Show`, `Switch` and `For`.
 - [`@axiom each-job-is-done-by-one-mechanism`](#axiom-each-job-is-done-by-one-mechanism) — Each job is done by one mechanism, reused wherever the job comes back, rather than a mechanism for each use.
   - [`@axiom build-on-r3-rather-than-change-it`](#axiom-build-on-r3-rather-than-change-it) — Pulse uses r3 as it is. What r3 does not do is built in a layer above it, not patched into it.
     - [`@spec r3-holds-only-committed-values`](#spec-r3-holds-only-committed-values) — r3 holds one committed value per node. A read or write with no speculation open goes straight through r3.
@@ -25,7 +31,7 @@ This document is the project. It holds the theory of pulse: why it is the way it
     - [`@spec pulse-reaches-r3-only-through-its-exports`](#spec-pulse-reaches-r3-only-through-its-exports) — Pulse uses r3 through the functions r3 exports. Where pulse needs more, the fork gains an export instead of pulse reaching into r3's internals.
     - [`@spec a-run-replaces-its-dependencies-with-what-it-read`](#spec-a-run-replaces-its-dependencies-with-what-it-read) — A run of a computation leaves it depending on exactly the sources that run read. A source it read before but not in its latest run no longer re-runs it.
       - [`@exception a-throwing-run-keeps-dependencies-it-did-not-reread`](#exception-a-throwing-run-keeps-dependencies-it-did-not-reread) — A computed whose run throws partway stays subscribed to sources it read in an earlier run but not in the throwing one. A later change to such a source re-runs it.
-  - [`@spec one-scheduler-flushes-every-consumer`](#spec-one-scheduler-flushes-every-consumer) — Every write asks one injectable scheduler for a flush. The default scheduler batches every request made in one tick into a single flush on a microtask; the synchronous scheduler flushes on each request.
+  - [`@spec one-scheduler-flushes-every-consumer`](#spec-one-scheduler-flushes-every-consumer) — Every write asks one injectable [scheduler](#term-scheduler) for a flush. The default scheduler batches every request made in one tick into a single flush on a microtask; the synchronous scheduler flushes on each request.
     - [`@spec a-promise-settling-requests-a-flush-from-the-active-scheduler`](#spec-a-promise-settling-requests-a-flush-from-the-active-scheduler) — When a promise a node is waiting on settles, pulse asks the active scheduler for a flush, the same way a write does. The readers re-run in that flush.
     - [`@spec an-error-write-schedules-its-own-flush`](#spec-an-error-write-schedules-its-own-flush) — A write to error state — a boundary's report collection, or an action's error — requests a flush itself, so its readers update without any other write happening.
   - [`@axiom compose-rather-than-proliferate`](#axiom-compose-rather-than-proliferate) — A small set of primitives covers the use cases. A new form is added only where composing the existing ones is awkward for a common case.
@@ -198,7 +204,7 @@ This document is the project. It holds the theory of pulse: why it is the way it
       - [`@spec a-staged-effect-reads-its-pipeline-with-use`](#spec-a-staged-effect-reads-its-pipeline-with-use) — `effect.ts` `stagedEffect`.
       - [`@spec a-queued-commit-is-checked-again-at-the-end-of-the-microtask`](#spec-a-queued-commit-is-checked-again-at-the-end-of-the-microtask) — `loading.ts` `deferOrCommit`.
     - [`@spec a-read-without-use-commits-at-once`](#spec-a-read-without-use-commits-at-once) — A binding that did not call `use` commits as soon as it runs, whatever state its boundary is in.
-  - [`@spec a-boundary-wraps-what-it-coordinates`](#spec-a-boundary-wraps-what-it-coordinates) — A boundary coordinates the region placed inside it. Which bindings land together, and which region shows a placeholder, is decided by where a `<Loading>` boundary is placed. The state of every boundary, a `<Loading>` or an `<Errored>`, belongs to the region it wraps, so a reader finds it by position, whatever intercepts errors in between.
+  - [`@spec a-boundary-wraps-what-it-coordinates`](#spec-a-boundary-wraps-what-it-coordinates) — A [boundary](#term-boundary) coordinates the region placed inside it. Which bindings land together, and which region shows a placeholder, is decided by where a `<Loading>` boundary is placed. The state of every boundary, a `<Loading>` or an `<Errored>`, belongs to the region it wraps, so a reader finds it by position, whatever intercepts errors in between.
     - [`@spec a-boundary-shows-initial-until-its-first-load`](#spec-a-boundary-shows-initial-until-its-first-load) — Until every suspended binding inside it has settled once, a boundary shows `initial`, or `fallback` when there is no `initial`. After that it shows the loaded subtree. A subtree in which nothing suspends is shown at once.
     - [`@spec after-its-first-load-a-boundary-shows-fallback-or-holds`](#spec-after-its-first-load-a-boundary-shows-fallback-or-holds) — When a boundary that has loaded before becomes pending again, it shows `fallback` if one is given, and otherwise keeps showing the subtree it last committed.
     - [`@spec a-boundary-without-placeholders-swaps-nothing`](#spec-a-boundary-without-placeholders-swaps-nothing) — A boundary with neither `initial` nor `fallback` never swaps its subtree out. What does not depend on a pending value stays visible while it waits.
@@ -206,7 +212,7 @@ This document is the project. It holds the theory of pulse: why it is the way it
     - [`@spec is-loading-reads-the-nearest-boundary`](#spec-is-loading-reads-the-nearest-boundary) — `isLoading()` and `useLoading()` report whether the nearest enclosing boundary has anything in flight: a suspended binding, or a first load or refresh reported by `latest`. A commit waiting at the gate is not in flight. `isLoading()` returns the answer at the call site, and `useLoading()` looks the boundary up once and returns an accessor to read later.
     - [`@spec a-lookup-from-a-fragment-child-starts-where-the-fragment-was-built`](#spec-a-lookup-from-a-fragment-child-starts-where-the-fragment-was-built) — A lookup of the nearest boundary from inside a function child of a `Fragment`, such as `useLoading()`, starts from the owner the `Fragment` was built in, wherever the array is inserted.
     - [`@spec loading-is-false-outside-any-boundary`](#spec-loading-is-false-outside-any-boundary) — Outside any loading boundary, `isLoading()` returns false, and `useLoading()` returns an accessor that always returns false.
-    - [`@spec a-suspension-is-reported-to-the-nearest-boundary`](#spec-a-suspension-is-reported-to-the-nearest-boundary) — A binding or effect that suspends reports to the nearest enclosing `<Loading>` boundary and to no other. It reports again when it settles. One that never suspends never reports.
+    - [`@spec a-suspension-is-reported-to-the-nearest-boundary`](#spec-a-suspension-is-reported-to-the-nearest-boundary) — A binding or effect that suspends reports to the nearest enclosing [loading boundary](#term-loading-boundary) and to no other. It reports again when it settles. One that never suspends never reports.
     - [`@spec a-structural-commit-waits-for-the-content-it-brings`](#spec-a-structural-commit-waits-for-the-content-it-brings) — A reactive child whose new content contains a suspended reactive child of the same boundary commits through that boundary's gate. The new structure lands in the same pass as that content, and the structure it replaces stays on screen until then.
       - [`@spec a-hole-holds-new-content-that-is-not-ready`](#spec-a-hole-holds-new-content-that-is-not-ready) — `bindings.ts` `insertChild`.
       - [`@spec a-held-commit-places-its-nodes-only-when-it-lands`](#spec-a-held-commit-places-its-nodes-only-when-it-lands) — `bindings.ts` `insertChild`.
@@ -215,7 +221,7 @@ This document is the project. It holds the theory of pulse: why it is the way it
       - [`@spec a-suspended-prop-does-not-hold-the-structure`](#spec-a-suspended-prop-does-not-hold-the-structure) — `bindings.ts` `holdsSuspendedHole`.
     - [`@spec boundary-state-is-looked-up-past-a-catch-error`](#spec-boundary-state-is-looked-up-past-a-catch-error) — `useErrored()`, `isErrored()` and `<Errored.Error>` find the nearest `<Errored>` by its position above them, and a `catchError` between them and it does not stop the lookup.
     - [`@spec a-predicate-narrows-what-a-reader-sees-not-which-boundary-it-reads`](#spec-a-predicate-narrows-what-a-reader-sees-not-which-boundary-it-reads) — A predicate given to `useErrored`, `isErrored` or `<Errored.Error for>` narrows the reports a reader sees and retries to those that match. It does not change which boundary is read.
-  - [`@spec control-flow-bakes-in-no-async-policy`](#spec-control-flow-bakes-in-no-async-policy) — `Show`, `Switch` and `For` are ordinary components. They coerce a pending input to its empty form, and decide nothing else about async.
+  - [`@spec control-flow-bakes-in-no-async-policy`](#spec-control-flow-bakes-in-no-async-policy) — `Show`, `Switch` and `For` are ordinary components: the [control flow](#term-control-flow). They coerce a pending input to its empty form, and decide nothing else about async.
     - [`@spec a-pending-condition-reads-as-falsy`](#spec-a-pending-condition-reads-as-falsy) — A `when` that is a pending promise counts as falsy: `Show` renders its fallback, and `Switch` skips that `Match`.
     - [`@spec a-pending-list-reads-as-empty`](#spec-a-pending-list-reads-as-empty) — A list that is a pending promise counts as an empty list: `mapArray` returns no entries, and `For` renders its fallback.
   - [`@axiom the-latest-production-wins`](#axiom-the-latest-production-wins) — A derived value shows whatever produced it last — a dependency change or a direct write — and a production that was started earlier never publishes over a later one.
@@ -254,7 +260,7 @@ This document is the project. It holds the theory of pulse: why it is the way it
     - [`@spec an-attribute-is-removed-on-nothing`](#spec-an-attribute-is-removed-on-nothing) — An attribute prop whose value is, or becomes, `null`, `undefined` or `false` removes the attribute instead of setting it to a string.
     - [`@spec a-style-property-is-removed-on-nothing`](#spec-a-style-property-is-removed-on-nothing) — A `style:name` prop whose value is, or becomes, `null`, `undefined` or `false` removes the style property `name` instead of setting it.
 - [`@axiom nothing-outlives-the-code-that-created-it`](#axiom-nothing-outlives-the-code-that-created-it) — What a piece of code creates ends when that code's part of the program ends, and the code does not have to keep track of it for that to happen.
-  - [`@spec a-lifetime-belongs-to-an-owner`](#spec-a-lifetime-belongs-to-an-owner) — Every reactive node lives as long as the owner it was created under. Disposing an owner ends everything beneath it. Plain data has no owner and no lifetime. Each run of a computation is a lifetime of its own, ended when the next run starts, and a root's lifetime is held by the code that created it.
+  - [`@spec a-lifetime-belongs-to-an-owner`](#spec-a-lifetime-belongs-to-an-owner) — Every reactive node lives as long as the [owner](#term-owner) it was created under. Disposing an owner ends everything beneath it. Plain data has no owner and no lifetime. Each run of a computation is a lifetime of its own, ended when the next run starts, and a root's lifetime is held by the code that created it.
     - [`@spec createroot-starts-a-new-owner-tree`](#spec-createroot-starts-a-new-owner-tree) — `createRoot` runs its body at once under a new root owner, and returns what the body returns. The body receives the root's `dispose` function.
     - [`@spec a-root-is-never-owned-by-an-enclosing-root`](#spec-a-root-is-never-owned-by-an-enclosing-root) — A root created inside another root has no parent. Disposing the outer root leaves it alive, and only its own `dispose` ends it.
     - [`@spec disposing-an-owner-ends-what-it-owns`](#spec-disposing-an-owner-ends-what-it-owns) — Disposing an owner stops the effects and computeds created under it and runs its cleanups. Signals created under it keep working.
@@ -285,7 +291,7 @@ This document is the project. It holds the theory of pulse: why it is the way it
       - [`@spec generator-cleanups-run-newest-first-after-its-finally-blocks`](#spec-generator-cleanups-run-newest-first-after-its-finally-blocks) — `computed.ts` `endGen`.
     - [`@spec a-discarded-generator-is-closed-with-return`](#spec-a-discarded-generator-is-closed-with-return) — A generator that is discarded is closed with `gen.return()`, so its `finally` blocks run. Reads made in those blocks are not tracked.
 - [`@axiom a-failure-reaches-code-that-can-act-on-it`](#axiom-a-failure-reaches-code-that-can-act-on-it) — A failure, or a call pulse cannot honour, reaches the code or the developer that can act on it, at the place where it can be acted on. It is never lost, and never raised where it does not belong.
-  - [`@spec error-boundaries-are-sub-owners`](#spec-error-boundaries-are-sub-owners) — An error boundary is an owner in the owner tree. An error goes to the nearest boundary above the owner it happened under that accepts it.
+  - [`@spec error-boundaries-are-sub-owners`](#spec-error-boundaries-are-sub-owners) — An [error boundary](#term-error-boundary) is an owner in the owner tree. An error goes to the nearest boundary above the owner it happened under that accepts it.
     - [`@spec catch-error-runs-its-body-in-a-sub-owner`](#spec-catch-error-runs-its-body-in-a-sub-owner) — `catchError(fn, handler)` runs `fn` inside a new sub-owner of the current owner and returns what `fn` returns, or `undefined` when `fn` throws and the handler takes the error.
     - [`@spec the-nearest-accepting-boundary-claims-an-error`](#spec-the-nearest-accepting-boundary-claims-an-error) — An error is claimed by the nearest boundary above its owner that accepts it, and no boundary further up hears of it.
     - [`@spec a-boundary-whose-for-declines-passes-the-error-on`](#spec-a-boundary-whose-for-declines-passes-the-error-on) — A boundary whose `for` predicate returns false for an error does not claim it, and the walk continues to the next boundary up.
@@ -421,6 +427,34 @@ _Avoid_: memo, derived signal
 
 > One function in a pipeline: a sync function, an async function, or a generator function.
 
+### @term owner
+
+> A node in the tree of lifetimes, to which reactive nodes, cleanups and other owners belong.
+
+_Avoid_: context, scope (a scope belongs to a speculation)
+
+### @term boundary
+
+> A loading boundary or an error boundary.
+
+### @term loading-boundary
+
+> The owner a `<Loading>` component creates to gather the pending state of the bindings beneath it.
+
+_Avoid_: suspense, transition
+
+### @term error-boundary
+
+> An owner that failures beneath it are routed to: an `<Errored>` component or a `catchError` call.
+
+### @term scheduler
+
+> The injectable function that decides when consumers run after a write.
+
+### @term control-flow
+
+> The components that choose what to render from a value: `Show`, `Switch` and `For`.
+
 ## Driving principles — the canon's axioms and facts
 
 The canon is derived, not decided. Every spec below is a consequence of an axiom, not an independent choice. When a spec cannot derive its own answer, that is not the spec's place to decide: it means an axiom is missing. The layers nest — axiom and fact, spec, test, implementation — each derived from the one above, and a defect points up: a bug in the implementation is a gap in the canon.
@@ -495,7 +529,7 @@ This is a known defect in r3, not a choice: r3 skips unlinking stale dependencie
 
 ### @spec one-scheduler-flushes-every-consumer
 
-> Every write asks one injectable scheduler for a flush. The default scheduler batches every request made in one tick into a single flush on a microtask; the synchronous scheduler flushes on each request.
+> Every write asks one injectable [scheduler](#term-scheduler) for a flush. The default scheduler batches every request made in one tick into a single flush on a microtask; the synchronous scheduler flushes on each request.
 
 Derives from: [`spec-reads-pull-and-consumers-are-pushed`](#spec-reads-pull-and-consumers-are-pushed)
 
@@ -1765,7 +1799,7 @@ This follows because only the verb decides whether a binding waits for its neigh
 
 ### @spec a-boundary-wraps-what-it-coordinates
 
-> A boundary coordinates the region placed inside it. Which bindings land together, and which region shows a placeholder, is decided by where a `<Loading>` boundary is placed. The state of every boundary, a `<Loading>` or an `<Errored>`, belongs to the region it wraps, so a reader finds it by position, whatever intercepts errors in between.
+> A [boundary](#term-boundary) coordinates the region placed inside it. Which bindings land together, and which region shows a placeholder, is decided by where a `<Loading>` boundary is placed. The state of every boundary, a `<Loading>` or an `<Errored>`, belongs to the region it wraps, so a reader finds it by position, whatever intercepts errors in between.
 
 This follows because every choice is stated where the code is written: which bindings land together, and what shows meanwhile, is a statement about a region of the page, so it is stated by wrapping that region.
 
@@ -1823,7 +1857,7 @@ This follows because a boundary coordinates only the bindings placed inside it: 
 
 #### @spec a-suspension-is-reported-to-the-nearest-boundary
 
-> A binding or effect that suspends reports to the nearest enclosing `<Loading>` boundary and to no other. It reports again when it settles. One that never suspends never reports.
+> A binding or effect that suspends reports to the nearest enclosing [loading boundary](#term-loading-boundary) and to no other. It reports again when it settles. One that never suspends never reports.
 
 This follows because a boundary coordinates the bindings placed inside it: the nearest enclosing boundary is the one whose region contains the binding, so the suspension is reported there and to no other.
 
@@ -1887,11 +1921,11 @@ A filtered reader can find a matching report that is not the boundary's first, a
 
 ### @spec control-flow-bakes-in-no-async-policy
 
-> `Show`, `Switch` and `For` are ordinary components. They coerce a pending input to its empty form, and decide nothing else about async.
+> `Show`, `Switch` and `For` are ordinary components: the [control flow](#term-control-flow). They coerce a pending input to its empty form, and decide nothing else about async.
 
 This follows because every choice is stated where the code is written, so control flow decides nothing about async that its caller did not write. A pending input still has to be read somehow, and a promise is an object, so it is truthy: reading it as its empty form shows nothing for a value that has none, which is the one policy control flow cannot avoid.
 
-The _Control flow_ entry of [`CONTEXT.md`](CONTEXT.md) states this: async behaviour is decided by what the caller passes and where it puts `use`, not by the control-flow component.
+Async behaviour is decided by what the caller passes and where it puts `use`, not by the [control flow](#term-control-flow).
 
 #### @spec a-pending-condition-reads-as-falsy
 
@@ -2157,15 +2191,15 @@ This follows because a missing value sets nothing: a style property whose value 
 
 > What a piece of code creates ends when that code's part of the program ends, and the code does not have to keep track of it for that to happen.
 
-Cleanup is the framework's bookkeeping, not the user's. The _Owner_ entry of [`CONTEXT.md`](CONTEXT.md) describes the tree of lifetimes that follows from this.
+Cleanup is the framework's bookkeeping, not the user's. The tree of [owners](#term-owner) is the tree of lifetimes that follows from this.
 
 ### @spec a-lifetime-belongs-to-an-owner
 
-> Every reactive node lives as long as the owner it was created under. Disposing an owner ends everything beneath it. Plain data has no owner and no lifetime. Each run of a computation is a lifetime of its own, ended when the next run starts, and a root's lifetime is held by the code that created it.
+> Every reactive node lives as long as the [owner](#term-owner) it was created under. Disposing an owner ends everything beneath it. Plain data has no owner and no lifetime. Each run of a computation is a lifetime of its own, ended when the next run starts, and a root's lifetime is held by the code that created it.
 
 This follows because nothing outlives the code that created it, and the code should not have to keep track of what it created: each reactive node is created under an owner, and ending the owner ends what it holds.
 
-Owners form a tree of lifetimes, and disposal cascades down it. Signals are data, not lifetimes, so they are never owned. The model is the Owner entry in [`CONTEXT.md`](CONTEXT.md).
+Owners form a tree of lifetimes, and disposal cascades down it. Signals are data, not lifetimes, so they are never owned.
 
 A run owns what it creates or registers, so a re-run starts clean. A root has no parent to end it, so only the `dispose` its creator received does.
 
@@ -2391,7 +2425,7 @@ The principle is [P7 in the exploration record](docs/pulse/framings.md#p7--a-fai
 
 ### @spec error-boundaries-are-sub-owners
 
-> An error boundary is an owner in the owner tree. An error goes to the nearest boundary above the owner it happened under that accepts it.
+> An [error boundary](#term-error-boundary) is an owner in the owner tree. An error goes to the nearest boundary above the owner it happened under that accepts it.
 
 Derives from: [`spec-a-lifetime-belongs-to-an-owner`](#spec-a-lifetime-belongs-to-an-owner)
 
@@ -2595,7 +2629,7 @@ This follows because a failure that reaches the root's boundary is one nothing n
 
 This narrows the axiom above to a missing owner: it is reported where it keeps part of the page alive, rather than wherever an owner is missing, so code that runs without one on purpose is left alone.
 
-Code that runs without an owner is allowed to: pulse stays permissive, as `CONTEXT.md` says. What outlives the page it belongs to is a leak the developer cannot see, so that case, and only that case, is reported.
+Code that runs without an owner is allowed to: pulse stays permissive. What outlives the page it belongs to is a leak the developer cannot see, so that case, and only that case, is reported.
 
 #### @spec a-dom-binding-without-an-owner-warns
 
