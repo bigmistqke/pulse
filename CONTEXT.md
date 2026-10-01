@@ -401,7 +401,7 @@ the explicit override. `createRoot` always creates a root (nesting does not
 parent inner to outer). Outside any root, reactive nodes work but live
 forever. Only DOM bindings and event listeners warn about it
 (`warnIfOrphaned`); a bare `effect()` or `computed()` outside every root is
-silent, and `onCleanup` there registers nothing. **Signals are not owned** —
+silent. `onCleanup` there throws, because its callback could never run. **Signals are not owned** —
 plain data with no lifecycle.
 
 `<Loading>` creates its own `boundaryOwner` and attaches a `LoadingScope` to

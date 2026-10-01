@@ -608,6 +608,23 @@ export function registerWithOwner(disposable: { dispose: () => void }): void {
  * - Outside both: silently no-op (permissive).
  */
 export function onCleanup(fn: Disposable): Disposable {
+  if (currentGeneratorCleanups() === null && getContext() === null && currentOwner === null) {
+    // A cleanup only runs when its owner ends; with no owner it never would.
+    throw new Error(
+      'onCleanup: called outside every owner, where the callback could never run. ' +
+        'Call it inside createRoot(), render(), a component or a computation.',
+    )
+  }
+  return registerCleanup(fn)
+}
+
+/**
+ * Internal: register `fn` like `onCleanup`, but without refusing when there is
+ * no owner. Pulse's own bindings use this, because a binding created outside
+ * every owner still works and only loses its teardown, which the binding warns
+ * about itself.
+ */
+export function registerCleanup(fn: Disposable): Disposable {
   // Checked before the r3 context, because driving a generator happens inside
   // an r3 context and the generator's lifetime is the more specific answer.
   const generatorCleanups = currentGeneratorCleanups()

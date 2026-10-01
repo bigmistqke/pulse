@@ -127,7 +127,6 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule disposing-an-owner-ends-what-it-owns`](#rule-disposing-an-owner-ends-what-it-owns) — Disposing an owner stops the effects and computeds created under it and runs its cleanups. Signals created under it keep working.
   - [`@rule dispose-runs-once`](#rule-dispose-runs-once) — Disposing an owner a second time does nothing: its cleanups do not run again, and nothing throws.
   - [`@rule a-disposed-owner-cannot-be-entered`](#rule-a-disposed-owner-cannot-be-entered) — `runWithOwner` with an owner that has been disposed throws.
-  - [`@rule oncleanup-without-an-owner-does-nothing`](#rule-oncleanup-without-an-owner-does-nothing) — `onCleanup` called outside every owner, and outside any running computation, registers nothing, does not throw, and returns the callback it was given.
   - [`@rule an-owner-disposes-its-children-before-its-own-cleanups`](#rule-an-owner-disposes-its-children-before-its-own-cleanups) — When an owner is disposed, the effects, computeds and sub-owners it owns are disposed first, the most recently created first, and the owner's own `onCleanup` callbacks run after them.
   - [`@rule a-catch-error-sub-owner-is-disposed-with-its-parent`](#rule-a-catch-error-sub-owner-is-disposed-with-its-parent) — Disposing the owner a `catchError` was called under disposes its sub-owner, and stops what was created inside it.
   - [`@rule catch-error-refuses-a-disposed-owner`](#rule-catch-error-refuses-a-disposed-owner) — Calling `catchError` inside an owner that has been disposed throws.
@@ -152,6 +151,9 @@ The canon was written backwards from the existing tests and documents, and descr
     - [`@case a-reactive-child-without-an-owner-warns`](#case-a-reactive-child-without-an-owner-warns) — `bindings.ts` `insertChild`.
     - [`@case a-prop-binding-or-listener-without-an-owner-warns`](#case-a-prop-binding-or-listener-without-an-owner-warns) — `bindings.ts` `bindProp`.
   - [`@rule a-bare-effect-or-computed-without-an-owner-does-not-warn`](#rule-a-bare-effect-or-computed-without-an-owner-does-not-warn) — An effect or a computed created outside every owner works, lives forever, and warns about nothing.
+- [`@axiom a-call-that-only-means-something-in-a-scope-refuses-to-run-outside-it`](#axiom-a-call-that-only-means-something-in-a-scope-refuses-to-run-outside-it) — A call whose only effect lives in a scope refuses to run outside one, instead of doing nothing.
+  - [`@rule speculation-only-calls-refuse-to-run-outside-one`](#rule-speculation-only-calls-refuse-to-run-outside-one) — `onSettled` and an optimistic setter only have meaning inside a speculation, and each throws when there is none.
+  - [`@rule oncleanup-outside-every-owner-throws`](#rule-oncleanup-outside-every-owner-throws) — `onCleanup` called outside every owner, and outside any running computation or generator stage, throws.
 - [`@axiom ambient-context-is-set-for-a-call-and-restored-after`](#axiom-ambient-context-is-set-for-a-call-and-restored-after) — Ambient context, such as the current owner, is set for the duration of one call and restored when that call ends, however it ends.
   - [`@rule there-is-no-ambient-owner-outside-every-root`](#rule-there-is-no-ambient-owner-outside-every-root) — Outside every root, `getOwner()` returns null, also after a root has run and after it has been disposed.
   - [`@rule runwithowner-restores-the-previous-owner`](#rule-runwithowner-restores-the-previous-owner) — `runWithOwner` makes its owner ambient for the call, `null` included, and restores the previous owner when the call returns or throws.
@@ -261,7 +263,6 @@ The canon was written backwards from the existing tests and documents, and descr
     - [`@case a-node-only-read-is-not-promoted`](#case-a-node-only-read-is-not-promoted) — `scope.ts` `commit`.
 - [`@axiom speculation-is-opt-in`](#axiom-speculation-is-opt-in) — A speculation exists only inside an explicit scope. Outside one, a write commits at once.
   - [`@rule outside-a-speculation-a-write-commits-at-once`](#rule-outside-a-speculation-a-write-commits-at-once) — A write made outside every action is committed immediately, and committed consumers react to it. Outside a speculation, `committed(x)` is the current value.
-  - [`@rule speculation-only-calls-refuse-to-run-outside-one`](#rule-speculation-only-calls-refuse-to-run-outside-one) — `onSettled` and an optimistic setter only have meaning inside a speculation, and each throws when there is none.
 - [`@axiom flows-share-fate-only-where-the-code-says-so`](#axiom-flows-share-fate-only-where-the-code-says-so) — Two flows are coupled only where the code couples them explicitly. Everything else is isolated.
   - [`@rule sibling-speculations-do-not-see-each-other`](#rule-sibling-speculations-do-not-see-each-other) — Two actions that are not nested never read each other's writes or predictions.
   - [`@rule a-reader-in-an-action-sees-the-predictions-of-its-own-chain`](#rule-a-reader-in-an-action-sees-the-predictions-of-its-own-chain) — Inside an action, a reader of an optimistic value sees the nearest prediction up its own chain of actions, its parents' included, and otherwise the derivation.
@@ -1120,12 +1121,6 @@ This follows because a-lifetime-belongs-to-an-owner says a node lives as long as
 
 Code run under a disposed owner would register nodes and cleanups that nothing will ever dispose, so entering one is refused.
 
-### @rule oncleanup-without-an-owner-does-nothing
-
-> `onCleanup` called outside every owner, and outside any running computation, registers nothing, does not throw, and returns the callback it was given.
-
-The callback will never run.
-
 ### @rule an-owner-disposes-its-children-before-its-own-cleanups
 
 > When an owner is disposed, the effects, computeds and sub-owners it owns are disposed first, the most recently created first, and the owner's own `onCleanup` callbacks run after them.
@@ -1287,6 +1282,28 @@ Every property kind except `ref` warns: `on:` as an event listener, `attr:` and 
 This follows because a missing owner is reported only where it keeps part of the page alive: a bare effect or computed touches no page, so it is not reported.
 
 Only DOM bindings and event listeners warn about a missing owner (see [the DOM warning](#rule-a-dom-binding-without-an-owner-warns)).
+
+## @axiom a-call-that-only-means-something-in-a-scope-refuses-to-run-outside-it
+
+> A call whose only effect lives in a scope refuses to run outside one, instead of doing nothing.
+
+Reactive code that merely loses its cleanup outside an owner still runs, as [the axiom on missing owners](#axiom-a-missing-owner-is-reported-where-it-leaks-the-page) allows. A call that would have no effect at all is a mistake, and it is reported where it is made, not discovered later by its absence. No design document states this; it was decided in review, where it resolved a conflict between `onSettled`, which already refused, and `onCleanup`, which silently did nothing.
+
+### @rule speculation-only-calls-refuse-to-run-outside-one
+
+> `onSettled` and an optimistic setter only have meaning inside a speculation, and each throws when there is none.
+
+This follows because a call whose only effect lives in a scope refuses to run outside one: a settle callback and a prediction only mean something inside a speculation.
+
+Outside an action the callback would never fire, and the prediction would have no action to expire with.
+
+### @rule oncleanup-outside-every-owner-throws
+
+> `onCleanup` called outside every owner, and outside any running computation or generator stage, throws.
+
+This follows because a call whose only effect lives in a scope refuses to run outside one: a cleanup's only effect is to run when its owner ends, and with no owner it would never run.
+
+Pulse's own bindings register their teardown without this check, because a binding created without an owner still works, as [the axiom on missing owners](#axiom-a-missing-owner-is-reported-where-it-leaks-the-page) allows.
 
 ## @axiom ambient-context-is-set-for-a-call-and-restored-after
 
@@ -2029,12 +2046,6 @@ There is no ambient speculation that every write has to reckon with. The princip
 > A write made outside every action is committed immediately, and committed consumers react to it. Outside a speculation, `committed(x)` is the current value.
 
 This follows because a speculation exists only inside an explicit scope: a write outside every action has no speculation to belong to, so it commits immediately.
-
-### @rule speculation-only-calls-refuse-to-run-outside-one
-
-> `onSettled` and an optimistic setter only have meaning inside a speculation, and each throws when there is none.
-
-Outside an action the callback would never fire, and the prediction would have no action to expire with.
 
 ## @axiom flows-share-fate-only-where-the-code-says-so
 

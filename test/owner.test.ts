@@ -121,14 +121,10 @@ test('runWithOwner on a disposed owner throws', () => {
 })
 
 /**
- * @canon rule-oncleanup-without-an-owner-does-nothing
+ * @canon rule-oncleanup-outside-every-owner-throws
  */
-test('onCleanup outside any context is a no-op (permissive)', () => {
-  let ran = false
-  expect(() => onCleanup(() => { ran = true })).not.toThrow()
-  // Registered nowhere: disposing an unrelated root does not run it.
-  createRoot((dispose) => dispose())
-  expect(ran).toBe(false)
+test('onCleanup outside every owner throws instead of registering nothing', () => {
+  expect(() => onCleanup(() => {})).toThrow()
 })
 
 /**

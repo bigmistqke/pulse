@@ -6,7 +6,7 @@ import {
   findBoundaryScope,
   findNearestErrorScope,
   getOwner,
-  onCleanup,
+  registerCleanup,
   runWithOwner,
   type BindingController,
   type ErrorScope,
@@ -134,7 +134,7 @@ function reactiveCommit<T>(
     controller = scope.register()
     return controller
   }
-  onCleanup(() => {
+  registerCleanup(() => {
     controller?.unregister()
     controller = null
     ambientErrors.dispose()
@@ -289,7 +289,7 @@ export function insertChild(parent: Node, value: unknown): void {
       return controller
     }
     const ambientErrors = makeAmbientErrorReporter(parentOwner)
-    onCleanup(() => {
+    registerCleanup(() => {
       suspendedHoles.delete(start)
       controller?.unregister()
       controller = null
@@ -478,7 +478,7 @@ export function bindProp(el: Element, name: string, props: Record<string, unknow
     const handler = value as EventListener
     const wrapped = (e: Event) => runWithOwner(capturedOwner, () => handler(e))
     el.addEventListener(event, wrapped)
-    onCleanup(() => el.removeEventListener(event, wrapped))
+    registerCleanup(() => el.removeEventListener(event, wrapped))
     return
   }
   // attr:name — explicit setAttribute, always reactive

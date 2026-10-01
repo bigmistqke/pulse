@@ -49,9 +49,13 @@ test('an effect and a computed created outside every owner do not warn', () => {
 })
 
 /**
- * @canon rule-oncleanup-without-an-owner-does-nothing
+ * @canon rule-oncleanup-outside-every-owner-throws
  */
-test('onCleanup outside every owner returns the callback it was given', () => {
+test('onCleanup inside an owner still registers, and returns the callback it was given', () => {
   const callback = () => {}
-  expect(onCleanup(callback)).toBe(callback)
+  let returned: unknown
+  createRoot(() => {
+    returned = onCleanup(callback)
+  })
+  expect(returned).toBe(callback)
 })
