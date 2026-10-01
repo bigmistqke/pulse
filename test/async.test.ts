@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import { peek, use, NotReadyYet, from, track, resolvedPromise } from '../src/async'
-import { isPending } from '../src/pending'
+import { isPending, promiseOf } from '../src/pending'
 import { effect } from '../src/effect'
 import { flush, microtaskScheduler, setScheduler, syncScheduler } from '../src/scheduler'
 import { computed } from '../src/computed'
@@ -23,6 +23,27 @@ test('isPending is false for a signal holding a plain value', () => {
 test('isPending is true for a signal holding a pending promise', () => {
   const [s] = signal(new Promise<number>(() => {}))
   expect(isPending(s)).toBe(true)
+})
+
+/**
+ * @canon spec-a-signals-pending-state-is-the-state-of-the-promise-it-holds
+ */
+test('an effect reading isPending and promiseOf of a signal holding a promise runs again when the promise settles', async () => {
+  let resolve!: (value: number) => void
+  const p = new Promise<number>((r) => (resolve = r))
+  const [s] = signal(p)
+  const seen: Array<[boolean, boolean]> = []
+  effect(() => {
+    seen.push([isPending(s), promiseOf(s) === p])
+  })
+  expect(seen).toEqual([[true, true]])
+
+  resolve(1)
+  for (let i = 0; i < 3; i++) await tick()
+  expect(seen).toEqual([
+    [true, true],
+    [false, false],
+  ])
 })
 
 /**

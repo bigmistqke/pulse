@@ -1,7 +1,7 @@
 // src/pending.ts
 import { isPromise } from './is-promise'
 import { track } from './async'
-import type { Accessor } from './signal'
+import { signal, type Accessor } from './signal'
 
 /** Internal entry describing the pending state of an async-aware accessor.
  *  Registered by `computed` (and any future async-producing primitive) and
@@ -69,7 +69,9 @@ function sourcePending(
   if (entry !== undefined) return entryPending(entry, seen)
   const value = source()
   if (!isPromise(value)) return false
-  return track(value).status === 'pending'
+  if (track(value).status !== 'pending') return false
+  followSettle(value)
+  return true
 }
 
 /** Walk one entry: this stage, then anything its recipe read, then upstream.
@@ -99,8 +101,8 @@ function entryPending(entry: PendingEntry, seen: Set<PendingEntry> | null): bool
 /** The in-flight Promise for this stage, or anything upstream that is
  *  pending — `null` when nothing is pending. Reactive; call fresh at each
  *  read site, same as `isPending`. */
-export function promiseOf<T>(x: Accessor<T>): Promise<T> | null {
-  return sourcePromise(x as Accessor<unknown>, null) as Promise<T> | null
+export function promiseOf<T>(x: Accessor<T>): Promise<Awaited<T>> | null {
+  return sourcePromise(x as Accessor<unknown>, null) as Promise<Awaited<T>> | null
 }
 
 /** The in-flight Promise behind this source, following the same two chains
@@ -114,7 +116,33 @@ function sourcePromise(
   if (entry !== undefined) return entryPromise(entry, seen)
   const value = source()
   if (!isPromise(value)) return null
-  return track(value).status === 'pending' ? value : null
+  if (track(value).status !== 'pending') return null
+  followSettle(value)
+  return value
+}
+
+/** One signal per promise read here while pending, written when it settles. */
+const settleSignals = new WeakMap<Promise<unknown>, Accessor<boolean>>()
+
+/**
+ * Subscribe the current reader to `promise` settling. A promise's state is not
+ * reactive: a reader that saw it pending through an unregistered accessor
+ * would otherwise never learn that it settled, and would go on reporting it
+ * pending. The signal is written once, on settle, and a re-run then finds the
+ * promise settled.
+ */
+function followSettle(promise: Promise<unknown>): void {
+  let settled = settleSignals.get(promise)
+  if (settled === undefined) {
+    const [read, write] = signal(false)
+    settled = read
+    settleSignals.set(promise, read)
+    const mark = (): void => {
+      write(true)
+    }
+    promise.then(mark, mark)
+  }
+  settled()
 }
 
 function entryPromise(
