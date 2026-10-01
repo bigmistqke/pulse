@@ -361,7 +361,7 @@ describe('use.latest(accessor) — throws only before the first value, tolerant 
   })
 
   /**
-   * @canon rule-use-latest-throws-only-before-the-first-value
+   * @canon rule-use-latest-returns-the-last-resolved-value-during-a-refetch
    */
   test('returns the resolved value once settled, same as use()', async () => {
     const [s] = signal(Promise.resolve(10))
@@ -370,7 +370,7 @@ describe('use.latest(accessor) — throws only before the first value, tolerant 
   })
 
   /**
-   * @canon rule-use-latest-throws-only-before-the-first-value
+   * @canon rule-use-latest-returns-the-last-resolved-value-during-a-refetch
    */
   test('does NOT throw during an SWR refetch — returns the stale value instead of use()\'s throw', async () => {
     const [id, setId] = signal(1)
@@ -395,7 +395,7 @@ describe('use.latest(accessor) — throws only before the first value, tolerant 
   })
 
   /**
-   * @canon rule-use-latest-throws-only-before-the-first-value
+   * @canon rule-use-latest-returns-the-last-resolved-value-during-a-refetch
    */
   test('use(swrComputed) throwing during refetch and use.latest(swrComputed) returning stale are both true at once', async () => {
     const [page, setPage] = signal(1)

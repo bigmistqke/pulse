@@ -518,7 +518,7 @@ test('rapidly swapping a pending source keeps the boundary on initial', async ()
 // read must never reopen a boundary's fallback on remount, even while its
 // background refresh is still in flight — see docs/adr/0014-use-latest-composed-on-latest.md.
 /**
- * @canon rule-use-latest-throws-only-before-the-first-value
+ * @canon rule-use-latest-returns-the-last-resolved-value-during-a-refetch
  */
 test('use.latest() holds prior across a Loading boundary remount, even while a background refresh is in flight', async () => {
   const target = document.createElement('section')
@@ -670,6 +670,51 @@ test('a bare latest() read drives initial on first load, then holds prior across
   // (see ADR 0015) — but never reopens the fallback: the value stays 'v0'
   // the whole time, held by latest()'s own stale-while-revalidate value, not
   // by any atomic-commit gating (latest() never calls markUsedInBinding()).
+  setVersion(1)
+  expect(loading()).toBe(true)
+  expect(target.textContent).toBe('v0')
+
+  release('v1')
+  await tick()
+  flush()
+  expect(loading()).toBe(false)
+  expect(target.textContent).toBe('v1')
+  dispose()
+})
+
+/**
+ * @canon rule-use-latest-reports-a-refresh-to-its-boundary
+ */
+test('a use.latest() read reports a background refresh to its boundary while showing the prior value', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+
+  const [version, setVersion] = signal(0)
+  let release!: (v: string) => void
+  const data = computed<Promise<string>>(() => {
+    const v = version()
+    if (v === 0) return Promise.resolve('v0')
+    return new Promise<string>((r) => { release = r })
+  })
+
+  let loading!: () => boolean
+  const dispose = render(
+    () => (
+      <Loading initial={<p>fallback</p>}>
+        {() => {
+          loading = useLoading()
+          return <span>{() => use.latest(data)}</span>
+        }}
+      </Loading>
+    ),
+    target,
+  )
+
+  await tick()
+  flush()
+  expect(target.textContent).toBe('v0')
+  expect(loading()).toBe(false)
+
   setVersion(1)
   expect(loading()).toBe(true)
   expect(target.textContent).toBe('v0')

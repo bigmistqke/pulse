@@ -381,6 +381,57 @@ test('use(plainSignal) inside <Loading> defers commit when sibling is pending', 
   dispose()
 })
 
+/**
+ * @canon rule-use-latest-enrols-the-binding-in-its-boundarys-gate
+ */
+test('use.latest(plainSignal) inside <Loading> defers its commit while a sibling is pending', async () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+  const [n, setN] = signal(0)
+
+  let resolve1!: (v: string) => void
+  const p1 = new Promise<string>((r) => (resolve1 = r))
+  const [srcP, setSrcP] = signal<string | Promise<string>>(p1)
+
+  const dispose = render(
+    () => (
+      <Loading initial={<p>loading</p>}>
+        {() => (
+          <div>
+            <span class="n">{() => use.latest(n)}</span>
+            <span class="p">{() => use(srcP())}</span>
+          </div>
+        )}
+      </Loading>
+    ),
+    target,
+  )
+
+  resolve1('first')
+  await new Promise((r) => queueMicrotask(() => r(undefined)))
+  flush()
+  expect(target.querySelector('.n')!.textContent).toBe('0')
+  expect(target.querySelector('.p')!.textContent).toBe('first')
+
+  // The sibling suspends again on a new pending promise.
+  let resolve2!: (v: string) => void
+  const p2 = new Promise<string>((r) => (resolve2 = r))
+  setSrcP(p2)
+  await new Promise((r) => queueMicrotask(() => r(undefined)))
+
+  // use.latest(n) has a value and does not throw, but it was called, so the
+  // binding's commit waits for the gate.
+  setN(1)
+  await new Promise((r) => queueMicrotask(() => r(undefined)))
+  expect(target.querySelector('.n')!.textContent).toBe('0')
+
+  resolve2('second')
+  await new Promise((r) => queueMicrotask(() => r(undefined)))
+  expect(target.querySelector('.n')!.textContent).toBe('1')
+  expect(target.querySelector('.p')!.textContent).toBe('second')
+  dispose()
+})
+
 // Task 5.5: bindings that do NOT call use() are unaffected and commit immediately.
 /**
  * @canon rule-a-read-without-use-commits-at-once

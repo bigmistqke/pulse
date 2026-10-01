@@ -47,7 +47,10 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule a-staged-effect-is-a-pipeline-ending-in-a-commit`](#rule-a-staged-effect-is-a-pipeline-ending-in-a-commit) — `effect([stage0, …, stageN], commit)` runs the same pipeline a computed runs, and passes the final stage's resolved value to `commit`. It commits again whenever the pipeline produces a new value, and skips a value `Object.is`-equal to the one it last committed.
   - [`@rule an-optimistic-value-is-read-like-any-node`](#rule-an-optimistic-value-is-read-like-any-node) — The accessor of an optimistic value is an ordinary node. Every read verb applies to it, and the pending and failed state of what its recipe reads reaches the read site through it.
   - [`@rule an-optimistic-fallback-seeds-the-tolerant-read`](#rule-an-optimistic-fallback-seeds-the-tolerant-read) — A fallback passed when an optimistic value is created is what `peek` and `latest` return before the source has resolved.
-  - [`@rule use-latest-throws-only-before-the-first-value`](#rule-use-latest-throws-only-before-the-first-value) — `use.latest(x)` throws `NotReadyYet` only while nothing has ever resolved for `x`, carrying `promiseOf(x)`, exactly as `use` would. After that it returns the last resolved value during a refetch, reports the refresh ambiently, and still enrols the binding in its boundary's gate.
+  - [`@rule use-latest-throws-only-before-the-first-value`](#rule-use-latest-throws-only-before-the-first-value) — `use.latest(x)` throws `NotReadyYet` only while nothing has ever resolved for `x`, carrying `promiseOf(x)`, exactly as `use` would.
+  - [`@rule use-latest-returns-the-last-resolved-value-during-a-refetch`](#rule-use-latest-returns-the-last-resolved-value-during-a-refetch) — Once something has resolved for `x`, `use.latest(x)` returns the last resolved value, also while a refetch is pending. At that moment `use(x)` throws, and `use.latest(x)` returns the stale value.
+  - [`@rule use-latest-reports-a-refresh-to-its-boundary`](#rule-use-latest-reports-a-refresh-to-its-boundary) — A `use.latest(x)` read made while a refetch of `x` is pending reports the refresh to the surrounding loading boundary, so `isLoading()` there is true, while the binding keeps showing the last resolved value.
+  - [`@rule use-latest-enrols-the-binding-in-its-boundarys-gate`](#rule-use-latest-enrols-the-binding-in-its-boundarys-gate) — A binding that called `use.latest(x)` commits through its boundary's gate: while a sibling binding of the boundary is suspended, its commit waits, even when `use.latest(x)` returned a value.
   - [`@rule the-jsx-runtime-builds-every-element-with-h`](#rule-the-jsx-runtime-builds-every-element-with-h) — The JSX runtime's `jsx`, `jsxs` and `jsxDEV` build every element with `h`. A component receives its props object as it is, `children` included and getters intact. A DOM tag or a `Fragment` receives its children as separate arguments and the rest of its props with their getters intact.
 - [`@axiom a-derivation-runs-when-it-is-created`](#axiom-a-derivation-runs-when-it-is-created) — A derivation produces its value when it is created, not when it is first read.
   - [`@rule an-update-function-sees-the-value-a-sync-derivation-produced-at-creation`](#rule-an-update-function-sees-the-value-a-sync-derivation-produced-at-creation) — A derivation runs when it is created. An update function on a sync derivation therefore receives the value that first run produced, even before any write. An async derivation that suspended has produced nothing yet.
@@ -182,7 +185,7 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller`](#rule-a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller) — A failed action reports to the nearest boundary that accepts its error, above the owner it was called under: an `<Errored>`, a root's default boundary, or a `catchError`, whose handler is then called with the error.
   - [`@rule a-failed-action-chooses-its-boundary-again-on-every-failure`](#rule-a-failed-action-chooses-its-boundary-again-on-every-failure) — Each failure of an action chooses its boundary anew, so a retry whose error a different boundary now accepts moves its report there and releases the boundary that held the earlier one.
   - [`@rule a-throwing-handler-passes-a-failed-action-on-with-the-handlers-error`](#rule-a-throwing-handler-passes-a-failed-action-on-with-the-handlers-error) — When a `catchError` handler called for a failed action throws, the search continues to the boundaries beyond it with the handler's error, and the one that claims it receives the handler's error. The action's handle keeps the action's own error.
-  - [`@rule a-real-error-in-an-effect-goes-to-the-nearest-handler`](#rule-a-real-error-in-an-effect-goes-to-the-nearest-handler) — A thrown error that is not a suspension, from an effect's body, a stage or a commit, goes to the nearest error handler above the effect. With no handler, it is thrown out of the run that raised it.
+  - [`@rule a-real-error-in-an-effect-goes-to-the-nearest-handler`](#rule-a-real-error-in-an-effect-goes-to-the-nearest-handler) — A thrown error that is not a suspension, from an effect's body, a stage or a commit, goes to the nearest error handler above the effect, on its first run and on every later run that throws.
   - [`@rule a-loading-boundary-does-not-catch-a-real-error`](#rule-a-loading-boundary-does-not-catch-a-real-error) — A `<Loading>` boundary between a binding and an error handler lets a real error from that binding pass on to the handler. It takes only suspensions.
   - [`@rule a-hole-that-throws-reports-to-the-nearest-catch-error`](#rule-a-hole-that-throws-reports-to-the-nearest-catch-error) — An error thrown inside a reactive child reaches the handler of the nearest enclosing `catchError`, and does not escape the write that caused it.
   - [`@rule with-no-owner-the-boundary-state-is-inert`](#rule-with-no-owner-the-boundary-state-is-inert) — Called with no owner at all, `useErrored()` returns a state that is never active and whose retry does nothing, and `isErrored()` returns `undefined`.
@@ -599,11 +602,29 @@ Also derives from [`rule-a-construction-default-seeds-only-the-tolerant-read`](#
 
 ### @rule use-latest-throws-only-before-the-first-value
 
-> `use.latest(x)` throws `NotReadyYet` only while nothing has ever resolved for `x`, carrying `promiseOf(x)`, exactly as `use` would. After that it returns the last resolved value during a refetch, reports the refresh ambiently, and still enrols the binding in its boundary's gate.
+> `use.latest(x)` throws `NotReadyYet` only while nothing has ever resolved for `x`, carrying `promiseOf(x)`, exactly as `use` would.
 
 Also derives from [`rule-latest-reports-loading-without-waiting`](#rule-latest-reports-loading-without-waiting) and [`rule-use-throws-not-ready-yet-carrying-a-pending-promise`](#rule-use-throws-not-ready-yet-carrying-a-pending-promise). This follows because a new form is composed from existing ones: `use.latest` is `latest`'s value and reporting, with `use`'s wait applied only where `latest` has nothing, so it throws exactly before the first value.
 
-Once settled it returns the same value `use` does. During a refetch `use(x)` throws and `use.latest(x)` returns the stale value, at the same moment. The decision is [ADR 0014](docs/adr/0014-use-latest-composed-on-latest.md).
+The decision is [ADR 0014](docs/adr/0014-use-latest-composed-on-latest.md).
+
+### @rule use-latest-returns-the-last-resolved-value-during-a-refetch
+
+> Once something has resolved for `x`, `use.latest(x)` returns the last resolved value, also while a refetch is pending. At that moment `use(x)` throws, and `use.latest(x)` returns the stale value.
+
+Also derives from [`rule-latest-reports-loading-without-waiting`](#rule-latest-reports-loading-without-waiting). This follows because `use.latest` is composed from `latest`, which returns the last resolved value without waiting, and `use`'s wait applies only where `latest` has nothing to return.
+
+### @rule use-latest-reports-a-refresh-to-its-boundary
+
+> A `use.latest(x)` read made while a refetch of `x` is pending reports the refresh to the surrounding loading boundary, so `isLoading()` there is true, while the binding keeps showing the last resolved value.
+
+Also derives from [`rule-latest-reports-loading-without-waiting`](#rule-latest-reports-loading-without-waiting). This follows because `use.latest` is composed from `latest`, and `latest` reports loading to the surrounding boundaries without waiting.
+
+### @rule use-latest-enrols-the-binding-in-its-boundarys-gate
+
+> A binding that called `use.latest(x)` commits through its boundary's gate: while a sibling binding of the boundary is suspended, its commit waits, even when `use.latest(x)` returned a value.
+
+Also derives from [`rule-use-enrols-the-binding-in-its-boundarys-gate`](#rule-use-enrols-the-binding-in-its-boundarys-gate). This follows because `use.latest` is a form of `use`, and gate membership belongs to the `use` verb, whatever the read returns.
 
 ### @rule the-jsx-runtime-builds-every-element-with-h
 
@@ -1511,11 +1532,11 @@ This is the same as [a handler that throws for a node's error](#rule-a-handler-t
 
 ### @rule a-real-error-in-an-effect-goes-to-the-nearest-handler
 
-> A thrown error that is not a suspension, from an effect's body, a stage or a commit, goes to the nearest error handler above the effect. With no handler, it is thrown out of the run that raised it.
+> A thrown error that is not a suspension, from an effect's body, a stage or a commit, goes to the nearest error handler above the effect, on its first run and on every later run that throws.
 
 This follows because error-boundaries-are-sub-owners says an error goes to the nearest accepting boundary above the owner it happened under: an effect's body, stages and commit all run under the effect's owner.
 
-An effect that throws again after a later change reports that error too.
+What happens to an error with no handler above it is stated in [the rule for an error nothing claims](#rule-an-error-nothing-claims-is-thrown-on-a-first-run).
 
 ### @rule a-loading-boundary-does-not-catch-a-real-error
 
@@ -1552,8 +1573,6 @@ This follows because a throw on the caller's stack belongs to the handlers on th
 ### @rule a-catch-error-handler-is-called-for-each-throw-under-it
 
 > A `catchError` handler is called for each throw that reaches it, from its body and from any node created under it, on the first run and on later re-runs.
-
-`catchError` hears each throw that reaches it: a rejection that re-runs the reading binding several times is several throws, and the handler hears each one.
 
 A handler is a callback, not a collection. One rejection can re-run the reading binding several times, and the handler may be called once per re-run.
 

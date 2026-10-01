@@ -90,7 +90,7 @@ test('an effect re-runs when a signal it uses is set to a new promise', async ()
 })
 
 /**
- * @canon rule-a-real-error-in-an-effect-goes-to-the-nearest-handler
+ * @canon rule-an-error-nothing-claims-is-thrown-on-a-first-run
  */
 test('a genuine (non-NotReadyYet) error thrown in an effect is not swallowed', () => {
   setScheduler(syncScheduler(flush))
@@ -150,7 +150,7 @@ test('an effect created inside catchError routes its throw to the handler', () =
 })
 
 /**
- * @canon rule-a-real-error-in-an-effect-goes-to-the-nearest-handler
+ * @canon rule-an-error-nothing-claims-is-thrown-on-a-first-run
  */
 test('an effect created outside any catchError still propagates uncaught (Plan 2a behaviour preserved)', () => {
   setScheduler(syncScheduler(flush))
