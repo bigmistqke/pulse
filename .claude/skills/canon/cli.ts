@@ -1335,22 +1335,25 @@ function analyse(write: boolean): Analysis {
   // It is the rename it catches. Every citation of a renamed unit is caught by
   // `rot`, and nothing watched the leads: a case would go on naming a symbol
   // that had not existed since the rename that moved everything else.
-  const NAMES_A_SITE = /^`([\w.-]+\.tsx?)`\s+`([^`]+)`/;
-  const srcByName = new Map<string, string>();
+  //
+  // The file may be a bare name, `queue.ts`, or a path that ends in it,
+  // `dom/queue.ts`. Two modules can share a name, so a bare name finds every
+  // module called that, and the symbol has to be in one of them; a path
+  // narrows the search to the modules whose path ends in it.
+  const NAMES_A_SITE = /^`([\w./-]+\.tsx?)`\s+`([^`]+)`/;
+  const modules: string[] = [];
   for (const root of SOURCES) {
     const abs = join(ROOT, root);
     if (!existsSync(abs)) continue;
-    for (const file of allModules(abs)) {
-      srcByName.set(file.split('/').pop() ?? file, file);
-    }
+    modules.push(...allModules(abs));
   }
   for (const [key, unit] of units) {
     if (unit.kind !== 'case-' || !unit.statement) continue;
     const named = NAMES_A_SITE.exec(unit.statement);
     if (!named) continue;
     const [, file, symbol] = named;
-    const path = srcByName.get(file);
-    if (path === undefined) {
+    const paths = modules.filter((m) => m === file || m.endsWith(`/${file}`));
+    if (paths.length === 0) {
       findings['stale-site'].push(
         `${key} names ${file}, which is not in ${SOURCES.join(' or ')}`
       );
@@ -1358,11 +1361,10 @@ function analyse(write: boolean): Analysis {
     }
     // The leaf of a dotted name, and without a call's parentheses.
     const bare = symbol.split('.').pop()?.replace(/\(\)$/, '') ?? symbol;
-    if (
-      !new RegExp(`\\b${bare.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(
-        readFileSync(path, 'utf8')
-      )
-    ) {
+    const pattern = new RegExp(
+      `\\b${bare.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`
+    );
+    if (!paths.some((path) => pattern.test(readFileSync(path, 'utf8')))) {
       findings['stale-site'].push(
         `${key} names \`${symbol}\` in ${file}, which is not there`
       );

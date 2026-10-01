@@ -97,6 +97,8 @@ A case is one rule at one place in the code, with the verdict there. The case st
 Each listener runs inside its own guard, so one that throws costs the others nothing.
 ```
 
+Where two modules share a name, the case names the file by a path that ends in it, such as `dom/error.ts`.
+
 One place often answers to several rules, and it gets one case under each. That is why the stem states the claim instead of naming the place: `drain` might be three cases.
 
 A rule with no named places has no cases, and its tests cite it directly. The tree command's `--suspect` option lists rules that carry many tests and no cases. Such a rule usually says several things with no way to tell them apart, and splitting it into several rules is often the fix.
