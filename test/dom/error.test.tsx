@@ -155,7 +155,7 @@ test('two failed siblings render one fallback, which clears only when both recov
  *  nearest one wins, so a `catchError` INSIDE an `<Errored>` intercepts first and the
  *  boundary never activates. */
 /**
- * @canon rule-the-nearest-accepting-boundary-claims-an-error
+ * @canon rule-catch-error-and-errored-are-peers-in-one-walk
  */
 test('a catchError nested inside <Errored> wins, and the boundary never activates', async () => {
   const target = document.createElement('section')
@@ -1242,7 +1242,7 @@ test('useErrored() with no explicit <Errored> reports the implicit root boundary
 })
 
 /**
- * @canon rule-the-nearest-accepting-boundary-claims-an-error
+ * @canon rule-a-boundary-whose-for-declines-passes-the-error-on
  */
 test('<Errored> with a declining for lets a computed rejection propagate to a farther, accepting <Errored>', async () => {
   const target = document.createElement('section')

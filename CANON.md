@@ -167,7 +167,10 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule a-discarded-generator-is-closed-with-return`](#rule-a-discarded-generator-is-closed-with-return) — A generator that is discarded is closed with `gen.return()`, so its `finally` blocks run. Reads made in those blocks are not tracked.
 - [`@axiom error-boundaries-are-sub-owners`](#axiom-error-boundaries-are-sub-owners) — An error boundary is an owner in the owner tree. An error goes to the nearest boundary above the owner it happened under that accepts it.
   - [`@rule catch-error-runs-its-body-in-a-sub-owner`](#rule-catch-error-runs-its-body-in-a-sub-owner) — `catchError(fn, handler)` runs `fn` inside a new sub-owner of the current owner and returns what `fn` returns, or `undefined` when `fn` throws and the handler takes the error.
-  - [`@rule the-nearest-accepting-boundary-claims-an-error`](#rule-the-nearest-accepting-boundary-claims-an-error) — `catchError` and `<Errored>` are peers in one walk up the owner chain. The nearest one that accepts the error claims it. One whose `for` predicate declines passes the error on to the next, and one with no `for` accepts every error.
+  - [`@rule the-nearest-accepting-boundary-claims-an-error`](#rule-the-nearest-accepting-boundary-claims-an-error) — An error is claimed by the nearest boundary above its owner that accepts it, and no boundary further up hears of it.
+  - [`@rule a-boundary-whose-for-declines-passes-the-error-on`](#rule-a-boundary-whose-for-declines-passes-the-error-on) — A boundary whose `for` predicate returns false for an error does not claim it, and the walk continues to the next boundary up.
+  - [`@rule a-boundary-without-for-accepts-every-error`](#rule-a-boundary-without-for-accepts-every-error) — A `catchError` or `<Errored>` given no `for` predicate accepts every error that reaches it.
+  - [`@rule catch-error-and-errored-are-peers-in-one-walk`](#rule-catch-error-and-errored-are-peers-in-one-walk) — `catchError` and `<Errored>` are found by the same walk up the owner chain, so the nearest accepting one claims the error whichever kind it is, and a nearer one of either kind wins over a farther one of the other.
   - [`@rule the-boundary-is-chosen-again-for-every-error`](#rule-the-boundary-is-chosen-again-for-every-error) — The walk runs again for every error, so a node that fails again with a different kind of error moves to the boundary that accepts the new one.
   - [`@rule a-handler-that-throws-passes-its-error-outward`](#rule-a-handler-that-throws-passes-its-error-outward) — When a `catchError` handler throws, the walk continues past it with the handler's error. When nothing further up takes it, it is thrown to the caller.
   - [`@rule use-errored-without-an-errored-reads-the-roots-boundary`](#rule-use-errored-without-an-errored-reads-the-roots-boundary) — Under a root with no explicit `<Errored>`, `useErrored()` reads the root's boundary, which holds every error nothing nearer claimed in that root.
@@ -1404,9 +1407,27 @@ This follows because error-boundaries-are-sub-owners says an error boundary is a
 
 ### @rule the-nearest-accepting-boundary-claims-an-error
 
-> `catchError` and `<Errored>` are peers in one walk up the owner chain. The nearest one that accepts the error claims it. One whose `for` predicate declines passes the error on to the next, and one with no `for` accepts every error.
+> An error is claimed by the nearest boundary above its owner that accepts it, and no boundary further up hears of it.
 
-This follows because error-boundaries-are-sub-owners says an error goes to the nearest boundary above its owner that accepts it: catchError and Errored are both owners in that one chain, so they are peers in one walk.
+This follows because error-boundaries-are-sub-owners says an error goes to the nearest boundary above its owner that accepts it, and one boundary claiming it is what holds it.
+
+### @rule a-boundary-whose-for-declines-passes-the-error-on
+
+> A boundary whose `for` predicate returns false for an error does not claim it, and the walk continues to the next boundary up.
+
+This follows because error-boundaries-are-sub-owners sends an error to the nearest boundary that accepts it: a boundary that declines is not one that accepts, so the walk does not stop there.
+
+### @rule a-boundary-without-for-accepts-every-error
+
+> A `catchError` or `<Errored>` given no `for` predicate accepts every error that reaches it.
+
+This follows because error-boundaries-are-sub-owners lets a boundary decline only through what it accepts, and a boundary given no predicate has nothing to decline by.
+
+### @rule catch-error-and-errored-are-peers-in-one-walk
+
+> `catchError` and `<Errored>` are found by the same walk up the owner chain, so the nearest accepting one claims the error whichever kind it is, and a nearer one of either kind wins over a farther one of the other.
+
+This follows because error-boundaries-are-sub-owners makes every error boundary an owner in the one owner tree: `catchError` and `<Errored>` are both owners in that chain, so one walk finds them both.
 
 ### @rule the-boundary-is-chosen-again-for-every-error
 

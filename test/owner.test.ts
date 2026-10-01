@@ -243,7 +243,7 @@ test('catchError throws when called inside a disposed owner', () => {
 })
 
 /**
- * @canon rule-the-nearest-accepting-boundary-claims-an-error
+ * @canon rule-a-boundary-whose-for-declines-passes-the-error-on
  */
 test('catchError with a declining for lets the error propagate to an outer catchError', () => {
   const outerCaught: unknown[] = []
@@ -310,7 +310,7 @@ test('catchError with a declining for and no outer handler re-throws, same as no
 })
 
 /**
- * @canon rule-the-nearest-accepting-boundary-claims-an-error
+ * @canon rule-a-boundary-without-for-accepts-every-error
  */
 test('catchError omitting for still accepts everything, exactly as before', () => {
   const caught: unknown[] = []
@@ -326,7 +326,7 @@ test('catchError omitting for still accepts everything, exactly as before', () =
 })
 
 /**
- * @canon rule-the-nearest-accepting-boundary-claims-an-error
+ * @canon rule-a-boundary-whose-for-declines-passes-the-error-on
  */
 test('findNearestErrorScope skips an ErrorScope whose for declines the error, finding a farther one that accepts', () => {
   createRoot(() => {
@@ -399,7 +399,7 @@ test('findNearestErrorScope omitting for still accepts everything, exactly as be
 })
 
 /**
- * @canon rule-the-nearest-accepting-boundary-claims-an-error
+ * @canon rule-catch-error-and-errored-are-peers-in-one-walk
  */
 test('a nearer, accepting catchError still wins over a farther ErrorScope, exactly as before', () => {
   createRoot(() => {
@@ -426,7 +426,7 @@ test('a nearer, accepting catchError still wins over a farther ErrorScope, exact
 })
 
 /**
- * @canon rule-the-nearest-accepting-boundary-claims-an-error
+ * @canon rule-catch-error-and-errored-are-peers-in-one-walk
  */
 test('a nearer catchError that declines the error lets a farther ErrorScope claim it', () => {
   createRoot(() => {
