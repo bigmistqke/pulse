@@ -293,7 +293,9 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule a-fragment-is-its-children-as-an-array`](#rule-a-fragment-is-its-children-as-an-array) — `Fragment` returns its children as an array, and an element that receives that array inserts each item in place.
 - [`@axiom a-component-runs-once-and-reactivity-lives-in-its-holes`](#axiom-a-component-runs-once-and-reactivity-lives-in-its-holes) — A component function runs once. What changes afterwards changes inside the holes it returned — reactive children and reactive props — never by running the component again.
   - [`@rule a-function-tag-is-called-once-with-its-props`](#rule-a-function-tag-is-called-once-with-its-props) — A function tag is called once, with its props. Children passed to `h` after the props arrive on `props.children`.
-  - [`@rule a-function-child-is-a-reactive-hole`](#rule-a-function-child-is-a-reactive-hole) — A function in a child position is a binding. It runs in its own effect, and its result, which may be anything a static child may be, replaces whatever sits between the binding's two marker comments each time something it read changes.
+  - [`@rule a-function-child-is-a-reactive-hole`](#rule-a-function-child-is-a-reactive-hole) — A function in a child position is a binding. It runs in its own effect, and its result replaces whatever sits between the binding's two marker comments each time something it read changes.
+  - [`@rule a-function-child-returns-anything-a-static-child-may-be`](#rule-a-function-child-returns-anything-a-static-child-may-be) — A function child's result is inserted exactly as a static child of the same kind would be in that position, whether it is a string, a number, a DOM node, an array, or nothing.
+  - [`@rule a-function-childs-static-siblings-keep-their-place`](#rule-a-function-childs-static-siblings-keep-their-place) — When a function child re-runs, the static siblings on either side of it stay where they are, and its new content lands between them.
   - [`@rule a-boundary-builds-its-children-once-up-front`](#rule-a-boundary-builds-its-children-once-up-front) — A boundary builds its children once, when it is created, inside its own owner, whether it then displays them or a placeholder. Settling, and every later swap between the placeholder and the subtree, shows the subtree already built and runs no component again.
   - [`@rule errored-error-builds-its-content-once-per-failure`](#rule-errored-error-builds-its-content-once-per-failure) — `<Errored.Error>` builds its content when the boundary becomes failed, keeps it while the boundary stays failed, and disposes it when the boundary recovers.
   - [`@rule a-ref-is-called-once-with-its-element`](#rule-a-ref-is-called-once-with-its-element) — A `ref` prop is not a hole. Its function is called once, with the element, when the element is created.
@@ -2260,11 +2262,21 @@ This follows because a component function runs once: `h` calls a function tag a 
 
 ### @rule a-function-child-is-a-reactive-hole
 
-> A function in a child position is a binding. It runs in its own effect, and its result, which may be anything a static child may be, replaces whatever sits between the binding's two marker comments each time something it read changes.
+> A function in a child position is a binding. It runs in its own effect, and its result replaces whatever sits between the binding's two marker comments each time something it read changes.
 
 This follows because what changes after a component ran changes inside its holes: a function child is such a hole, so it runs in its own effect and replaces only its own content.
 
-The markers keep the binding's place, so static siblings on either side stay where they are.
+### @rule a-function-child-returns-anything-a-static-child-may-be
+
+> A function child's result is inserted exactly as a static child of the same kind would be in that position, whether it is a string, a number, a DOM node, an array, or nothing.
+
+Also derives from [`rule-a-static-child-is-inserted-by-its-kind`](#rule-a-static-child-is-inserted-by-its-kind). This follows because a hole changes only when its content is replaced, not what that content may be: each result is a child, and a child is inserted by its kind.
+
+### @rule a-function-childs-static-siblings-keep-their-place
+
+> When a function child re-runs, the static siblings on either side of it stay where they are, and its new content lands between them.
+
+This follows because what changes after a component ran changes inside its holes: the binding's two marker comments mark where its hole ends, so a re-run replaces only what lies between them and leaves its neighbours alone.
 
 ### @rule a-boundary-builds-its-children-once-up-front
 

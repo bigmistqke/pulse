@@ -55,7 +55,7 @@ test('function child replaces previous DOM each run', () => {
 })
 
 /**
- * @canon rule-a-function-child-is-a-reactive-hole
+ * @canon rule-a-function-child-returns-anything-a-static-child-may-be
  */
 test('function child can return a DOM node', () => {
   createRoot(() => {
@@ -73,7 +73,7 @@ test('function child can return a DOM node', () => {
 })
 
 /**
- * @canon rule-a-function-child-is-a-reactive-hole
+ * @canon rule-a-function-childs-static-siblings-keep-their-place
  */
 test('function child preserves marker order for static siblings', () => {
   createRoot(() => {
