@@ -405,6 +405,42 @@ describe('use.latest(accessor) — throws only before the first value, tolerant 
   })
 
   /**
+   * @canon spec-use-latest-throws-only-before-the-first-value
+   */
+  test('a source that resolved to undefined has resolved: use.latest returns undefined instead of throwing', async () => {
+    const c = computed(async () => undefined)
+    peek(c)
+    for (let i = 0; i < 5; i++) await tick()
+    expect(() => use.latest(c)).not.toThrow()
+    expect(use.latest(c)).toBeUndefined()
+  })
+
+  /**
+   * @canon spec-use-latest-throws-only-before-the-first-value
+   */
+  test('a source that fails before its first value throws its error, exactly like use()', async () => {
+    const c = computed(async () => {
+      throw new Error('boom')
+    })
+    peek(c)
+    for (let i = 0; i < 5; i++) await tick()
+    let fromUse: unknown
+    let fromUseLatest: unknown
+    try {
+      use(c)
+    } catch (e) {
+      fromUse = e
+    }
+    try {
+      use.latest(c)
+    } catch (e) {
+      fromUseLatest = e
+    }
+    expect(fromUse).toBeInstanceOf(Error)
+    expect(fromUseLatest).toBe(fromUse)
+  })
+
+  /**
    * @canon spec-use-latest-returns-the-last-resolved-value-during-a-refetch
    */
   test('returns the resolved value once settled, same as use()', async () => {

@@ -288,9 +288,12 @@ use.latest = function <T>(x: Accessor<T>): Awaited<T> {
   // latest(x) already makes the ambient isLoading() hand-off itself (see
   // ADR 0015) when x is pending — nothing further needed here for that.
   const value = latest(x)
-  if (value !== undefined) return value as Awaited<T>
-  // Genuinely nothing has ever resolved for this accessor.
-  throw new NotReadyYet(promiseOf(x)!)
+  // Keyed on whether a real value has ever arrived, not on whether `value` is
+  // undefined: a source may resolve to undefined, and a construction default
+  // is a display fallback, not a resolution. Before the first value, behave
+  // exactly as use() does, so a source that fails first throws its error.
+  if (everResolved.has(x)) return value as Awaited<T>
+  return use(x)
 }
 
 /**
