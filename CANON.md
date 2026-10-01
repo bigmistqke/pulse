@@ -18,12 +18,8 @@ The canon was written backwards from the existing tests and documents, and descr
 - [`@axiom reads-pull-and-consumers-are-pushed`](#axiom-reads-pull-and-consumers-are-pushed) — A read always returns the value consistent with every write so far, synchronously. Consumers with side effects are re-run in batches, and the batching is invisible to reads.
   - [`@rule a-read-is-current-without-a-flush`](#rule-a-read-is-current-without-a-flush) — Reading a signal or a computed returns the value consistent with the latest writes, whether or not the scheduler has flushed since. A computed read outside any reactive context recomputes on the spot when a source changed.
   - [`@rule a-signal-reads-back-its-last-write`](#rule-a-signal-reads-back-its-last-write) — A signal returns its initial value until it is written, and afterwards the last value written. An update function receives the current value.
-  - [`@rule one-scheduler-flushes-every-consumer`](#rule-one-scheduler-flushes-every-consumer) — Every write asks one injectable scheduler for a flush. The default scheduler batches every request made in one tick into a single flush on a microtask; the synchronous scheduler flushes on each request.
   - [`@rule several-writes-in-one-tick-re-run-an-effect-once`](#rule-several-writes-in-one-tick-re-run-an-effect-once) — Under the default scheduler, an effect does not re-run between a write and the end of the tick. Several writes in one tick re-run it once, with the last value.
   - [`@rule a-promise-settling-requests-a-flush-from-the-active-scheduler`](#rule-a-promise-settling-requests-a-flush-from-the-active-scheduler) — When a promise a node is waiting on settles, pulse asks the active scheduler for a flush, the same way a write does. The readers re-run in that flush.
-  - [`@rule an-equal-value-does-not-propagate`](#rule-an-equal-value-does-not-propagate) — A value equal to the one a node already holds does not reach the node's consumers: nothing re-runs.
-    - [`@case a-computed-publishes-only-a-changed-value`](#case-a-computed-publishes-only-a-changed-value) — `computed.ts` `makeStageNode`.
-    - [`@case an-equal-committed-signal-write-is-dropped`](#case-an-equal-committed-signal-write-is-dropped) — `scope.ts` `writeValue`.
   - [`@rule an-error-write-schedules-its-own-flush`](#rule-an-error-write-schedules-its-own-flush) — A write to error state — a boundary's report collection, or an action's error — requests a flush itself, so its readers update without any other write happening.
   - [`@rule an-effect-runs-at-creation-and-after-each-change`](#rule-an-effect-runs-at-creation-and-after-each-change) — An effect runs once when it is created, and again after each change to a source it read.
   - [`@rule an-effects-cleanups-run-before-its-next-run`](#rule-an-effects-cleanups-run-before-its-next-run) — A cleanup registered with `onCleanup` inside an effect's body belongs to that run. It runs before the effect's next run, not when the owner is disposed.
@@ -39,6 +35,12 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule a-settled-promise-is-used-at-once-the-next-time-a-stage-runs`](#rule-a-settled-promise-is-used-at-once-the-next-time-a-stage-runs) — A promise that a stage saw pending, and that has settled since, is used at once the next time the stage runs. It does not suspend the stage again.
   - [`@rule use-keeps-the-binding-subscribed-while-suspended`](#rule-use-keeps-the-binding-subscribed-while-suspended) — `use(x)` reads its source before checking whether it is pending, so a suspended binding stays subscribed and sees every later value, through every stage of a pipeline.
   - [`@rule a-computed-reading-through-peek-still-follows-its-source`](#rule-a-computed-reading-through-peek-still-follows-its-source) — A computed that reads a source through `peek` still re-runs when the source changes or settles, and converges to the source's value. `peek` suppresses only the loading report, not the dependency.
+- [`@axiom one-mechanism-carries-every-change-to-a-consumer`](#axiom-one-mechanism-carries-every-change-to-a-consumer) — Every change reaches a consumer through one scheduler, and the host can replace it.
+  - [`@rule one-scheduler-flushes-every-consumer`](#rule-one-scheduler-flushes-every-consumer) — Every write asks one injectable scheduler for a flush. The default scheduler batches every request made in one tick into a single flush on a microtask; the synchronous scheduler flushes on each request.
+- [`@axiom a-consumer-re-runs-only-for-a-real-change`](#axiom-a-consumer-re-runs-only-for-a-real-change) — A consumer re-runs only when something it read actually changed.
+  - [`@rule an-equal-value-does-not-propagate`](#rule-an-equal-value-does-not-propagate) — A value equal to the one a node already holds does not reach the node's consumers: nothing re-runs.
+    - [`@case a-computed-publishes-only-a-changed-value`](#case-a-computed-publishes-only-a-changed-value) — `computed.ts` `makeStageNode`.
+    - [`@case an-equal-committed-signal-write-is-dropped`](#case-an-equal-committed-signal-write-is-dropped) — `scope.ts` `writeValue`.
 - [`@axiom compose-rather-than-proliferate`](#axiom-compose-rather-than-proliferate) — A small set of primitives covers the use cases. A new form is added only where composing the existing ones is awkward for a common case.
   - [`@rule a-computed-has-no-setter`](#rule-a-computed-has-no-setter) — `computed` returns an accessor and nothing to write with. A derivation that can also be written is made with `signal`.
   - [`@rule a-signal-given-stages-is-a-writable-derivation`](#rule-a-signal-given-stages-is-a-writable-derivation) — `signal(s0, s1, …)` builds the same pipeline `computed` builds and adds a setter, whose write lands on the output of the last stage. `signal(value)` given a value that is not a function stays a plain signal.
@@ -163,9 +165,6 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule the-nearest-accepting-boundary-claims-an-error`](#rule-the-nearest-accepting-boundary-claims-an-error) — `catchError` and `<Errored>` are peers in one walk up the owner chain. The nearest one that accepts the error claims it. One whose `for` predicate declines passes the error on to the next, and one with no `for` accepts every error.
   - [`@rule the-boundary-is-chosen-again-for-every-error`](#rule-the-boundary-is-chosen-again-for-every-error) — The walk runs again for every error, so a node that fails again with a different kind of error moves to the boundary that accepts the new one.
   - [`@rule a-handler-that-throws-passes-its-error-outward`](#rule-a-handler-that-throws-passes-its-error-outward) — When a `catchError` handler throws, the walk continues past it with the handler's error. When nothing further up takes it, it is thrown to the caller.
-  - [`@rule a-throw-from-a-catch-error-body-reaches-only-catch-error-handlers`](#rule-a-throw-from-a-catch-error-body-reaches-only-catch-error-handlers) — A synchronous throw from a `catchError` body is routed only to `catchError` handlers, never to an `<Errored>` or a root's boundary. When none accepts it, it is thrown to the caller.
-  - [`@rule a-catch-error-handler-is-called-for-each-throw-under-it`](#rule-a-catch-error-handler-is-called-for-each-throw-under-it) — A `catchError` handler is called for each throw that reaches it, from its body and from any node created under it, on the first run and on later re-runs.
-  - [`@rule an-error-nothing-claims-is-thrown-on-a-first-run`](#rule-an-error-nothing-claims-is-thrown-on-a-first-run) — Outside any root, an error from a node that no boundary claims is thrown to the caller when it happens during the node's first run. During a later re-run it is logged to the console instead.
   - [`@rule every-root-has-an-error-boundary`](#rule-every-root-has-an-error-boundary) — `createRoot` installs an error boundary on the root owner. It claims every error no nearer boundary claims, tracks it like any other boundary, and logs each failed report to the console, a repeated one included.
   - [`@rule use-errored-without-an-errored-reads-the-roots-boundary`](#rule-use-errored-without-an-errored-reads-the-roots-boundary) — Under a root with no explicit `<Errored>`, `useErrored()` reads the root's boundary, which holds every error nothing nearer claimed in that root.
   - [`@rule a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller`](#rule-a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller) — A failed action reports to the nearest boundary that accepts its error, above the owner it was called under: an `<Errored>`, a root's default boundary, or a `catchError`, whose handler is then called with the error. The choice is made again on every failure, so a retry whose error a nearer boundary now accepts moves there. The report still reaches its boundary when the calling owner was disposed before the action failed. When the boundary itself is gone, the report goes to the next boundary up, at the latest the root's.
@@ -175,6 +174,10 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule a-loading-boundary-does-not-catch-a-real-error`](#rule-a-loading-boundary-does-not-catch-a-real-error) — A `<Loading>` boundary between a binding and an error handler lets a real error from that binding pass on to the handler. It takes only suspensions.
   - [`@rule a-hole-that-throws-reports-to-the-nearest-catch-error`](#rule-a-hole-that-throws-reports-to-the-nearest-catch-error) — An error thrown inside a reactive child reaches the handler of the nearest enclosing `catchError`, and does not escape the write that caused it.
   - [`@rule with-no-owner-the-boundary-state-is-inert`](#rule-with-no-owner-the-boundary-state-is-inert) — Called with no owner at all, `useErrored()` returns a state that is never active and whose retry does nothing, and `isErrored()` returns `undefined`.
+- [`@axiom catch-error-is-the-callers-try-and-catch`](#axiom-catch-error-is-the-callers-try-and-catch) — `catchError` is the caller's `try` and `catch`: it hears each throw that reaches it, and a throw on the caller's own stack goes no further than the handlers on that stack.
+  - [`@rule a-throw-from-a-catch-error-body-reaches-only-catch-error-handlers`](#rule-a-throw-from-a-catch-error-body-reaches-only-catch-error-handlers) — A synchronous throw from a `catchError` body is routed only to `catchError` handlers, never to an `<Errored>` or a root's boundary. When none accepts it, it is thrown to the caller.
+  - [`@rule a-catch-error-handler-is-called-for-each-throw-under-it`](#rule-a-catch-error-handler-is-called-for-each-throw-under-it) — A `catchError` handler is called for each throw that reaches it, from its body and from any node created under it, on the first run and on later re-runs.
+  - [`@rule an-error-nothing-claims-is-thrown-on-a-first-run`](#rule-an-error-nothing-claims-is-thrown-on-a-first-run) — Outside any root, an error from a node that no boundary claims is thrown to the caller when it happens during the node's first run. During a later re-run it is logged to the console instead.
 - [`@axiom an-error-is-graph-state-not-an-event`](#axiom-an-error-is-graph-state-not-an-event) — A failure is state held on the node that failed, beside its last resolved value, and it propagates along the graph the way pending does. A boundary shows that state; it does not count throws.
   - [`@rule error-returns-the-failure-of-a-node-or-anything-upstream`](#rule-error-returns-the-failure-of-a-node-or-anything-upstream) — `error(x)` returns the error of `x`, or of the nearest failed stage upstream of it, and `null` while the chain is healthy.
   - [`@rule a-recovery-clears-the-error`](#rule-a-recovery-clears-the-error) — When a failed node computes successfully again, its error is cleared and its new value is published.
@@ -271,25 +274,27 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule a-function-tag-is-called-once-with-its-props`](#rule-a-function-tag-is-called-once-with-its-props) — A function tag is called once, with its props. Children passed to `h` after the props arrive on `props.children`.
   - [`@rule a-function-child-is-a-reactive-hole`](#rule-a-function-child-is-a-reactive-hole) — A function in a child position is a binding. It runs in its own effect, and its result, which may be anything a static child may be, replaces whatever sits between the binding's two marker comments each time something it read changes.
   - [`@rule an-attribute-follows-its-value-and-is-removed-on-nothing`](#rule-an-attribute-follows-its-value-and-is-removed-on-nothing) — A prop with no prefix, or with the `attr:` prefix, sets the attribute of that name. A value of `null`, `undefined` or `false` removes the attribute, and a function value keeps the attribute following it.
-  - [`@rule a-prop-prefix-sets-the-dom-property`](#rule-a-prop-prefix-sets-the-dom-property) — A `prop:name` prop assigns the element's DOM property `name` instead of an attribute, and a function value keeps the property following it.
-  - [`@rule a-class-prefix-toggles-one-class-by-truthiness`](#rule-a-class-prefix-toggles-one-class-by-truthiness) — A `class:name` prop adds the class `name` while its value is truthy and removes it while it is falsy, and a function value keeps the class following it.
-  - [`@rule a-style-prefix-sets-one-style-property`](#rule-a-style-prefix-sets-one-style-property) — A `style:name` prop sets the style property `name`. A value of `null`, `undefined` or `false` removes the property, and a function value keeps it following the value.
   - [`@rule a-ref-is-called-once-with-its-element`](#rule-a-ref-is-called-once-with-its-element) — A `ref` prop is not a hole. Its function is called once, with the element, when the element is created.
   - [`@rule show-renders-its-children-when-truthy-and-its-fallback-otherwise`](#rule-show-renders-its-children-when-truthy-and-its-fallback-otherwise) — `Show` renders its children while `when` is truthy and its `fallback` while it is falsy. A function child is called with the truthy value.
   - [`@rule switch-renders-the-first-truthy-match`](#rule-switch-renders-the-first-truthy-match) — `Switch` renders the children of the first `Match`, in written order, whose `when` is truthy, and its `fallback` when none is. A function child is called with the truthy value. Children of a `Switch` that are not `Match` elements are ignored.
   - [`@rule for-renders-its-fallback-when-there-are-no-rows`](#rule-for-renders-its-fallback-when-there-are-no-rows) — `For` renders one row per item, in the list's order, and renders its `fallback` when the list is empty.
-  - [`@rule list-rows-are-keyed-by-reference`](#rule-list-rows-are-keyed-by-reference) — A list row belongs to an item by strict reference. The same reference keeps its row, its mapped output and its DOM nodes in the new order. A different reference gets a new row even when its contents are equal.
   - [`@rule a-row-index-follows-its-position`](#rule-a-row-index-follows-its-position) — Each row receives an index accessor that returns the row's current position. A reorder updates what the accessor returns, and the row is not rebuilt.
   - [`@rule a-dynamic-prop-becomes-a-getter`](#rule-a-dynamic-prop-becomes-a-getter) — The compiler turns a prop whose value is an expression into a getter on the props object, so the expression is evaluated where the prop is read, not where it is written.
     - [`@exception a-literal-or-function-prop-stays-as-written`](#exception-a-literal-or-function-prop-stays-as-written) — A prop whose value is a literal, or a function or arrow expression, is not converted to a getter.
     - [`@exception ref-and-on-props-stay-as-written`](#exception-ref-and-on-props-stay-as-written) — A `ref` prop and an `on:`-prefixed prop are never converted to a getter, whatever their value.
-  - [`@rule a-namespaced-prop-compiles-to-a-string-key`](#rule-a-namespaced-prop-compiles-to-a-string-key) — A namespaced prop name such as `on:click` or `class:active` compiles to a plain string key on the props object, which is what the runtime's prefix dispatch reads.
   - [`@rule a-spread-merges-descriptors-not-values`](#rule-a-spread-merges-descriptors-not-values) — A props object that contains a spread is compiled to a `mergeProps` call over its segments, so a getter in a spread source stays a getter. One `mergeProps` import is added per file, however many spreads it has.
   - [`@rule a-dom-child-is-one-thunk-per-dynamic-child`](#rule-a-dom-child-is-one-thunk-per-dynamic-child) — On a DOM element or a Fragment, each dynamic child becomes its own thunk, never a getter. A literal, a function expression, or a nested JSX element stays as written.
   - [`@rule component-children-become-one-getter`](#rule-component-children-become-one-getter) — On a component, the children become one getter over the whole value, and are not wrapped child by child. A component is any tag that is neither a string nor `Fragment`, a member expression such as `Foo.Bar` included, and a bare JSX-element child compiles exactly like the braced form.
   - [`@rule the-vite-plugin-compiles-only-jsx-files`](#rule-the-vite-plugin-compiles-only-jsx-files) — The Vite plugin compiles a `.tsx` or `.jsx` file, ignoring any query string on its id, and leaves every other file alone. It applies the props-to-getters transform, then the automatic JSX runtime imported from `pulse`.
   - [`@rule errored-error-builds-its-content-once-per-failure`](#rule-errored-error-builds-its-content-once-per-failure) — `<Errored.Error>` builds its content when the boundary becomes failed, keeps it while the boundary stays failed, and disposes it when the boundary recovers.
   - [`@rule a-boundary-builds-its-children-once-up-front`](#rule-a-boundary-builds-its-children-once-up-front) — A boundary builds its children once, when it is created, inside its own owner, whether it then displays them or a placeholder. Settling, and every later swap between the placeholder and the subtree, shows the subtree already built and runs no component again.
+- [`@axiom a-prop-says-how-it-reaches-the-dom`](#axiom-a-prop-says-how-it-reaches-the-dom) — How a prop reaches the DOM is written at the prop, by its prefix, and never inferred from its name or its value.
+  - [`@rule a-prop-prefix-sets-the-dom-property`](#rule-a-prop-prefix-sets-the-dom-property) — A `prop:name` prop assigns the element's DOM property `name` instead of an attribute, and a function value keeps the property following it.
+  - [`@rule a-class-prefix-toggles-one-class-by-truthiness`](#rule-a-class-prefix-toggles-one-class-by-truthiness) — A `class:name` prop adds the class `name` while its value is truthy and removes it while it is falsy, and a function value keeps the class following it.
+  - [`@rule a-style-prefix-sets-one-style-property`](#rule-a-style-prefix-sets-one-style-property) — A `style:name` prop sets the style property `name`. A value of `null`, `undefined` or `false` removes the property, and a function value keeps it following the value.
+  - [`@rule a-namespaced-prop-compiles-to-a-string-key`](#rule-a-namespaced-prop-compiles-to-a-string-key) — A namespaced prop name such as `on:click` or `class:active` compiles to a plain string key on the props object, which is what the runtime's prefix dispatch reads.
+- [`@axiom an-item-is-its-reference`](#axiom-an-item-is-its-reference) — An item is its reference: pulse never compares contents to decide that two values are the same item.
+  - [`@rule list-rows-are-keyed-by-reference`](#rule-list-rows-are-keyed-by-reference) — A list row belongs to an item by strict reference. The same reference keeps its row, its mapped output and its DOM nodes in the new order. A different reference gets a new row even when its contents are equal.
 <!-- toc:end -->
 
 ## Driving principles — the canon's axioms
@@ -372,10 +377,6 @@ This follows because a read always returns the value consistent with every write
 
 This follows because a read returns the value consistent with every write so far: for a signal, that is the last value written, or the initial value before any write.
 
-### @rule one-scheduler-flushes-every-consumer
-
-> Every write asks one injectable scheduler for a flush. The default scheduler batches every request made in one tick into a single flush on a microtask; the synchronous scheduler flushes on each request.
-
 ### @rule several-writes-in-one-tick-re-run-an-effect-once
 
 > Under the default scheduler, an effect does not re-run between a write and the end of the tick. Several writes in one tick re-run it once, with the last value.
@@ -389,22 +390,6 @@ This follows because consumers with side effects are re-run in batches: several 
 Also derives from [`rule-one-scheduler-flushes-every-consumer`](#rule-one-scheduler-flushes-every-consumer). This follows because consumers are re-run in batches through the one scheduler every write uses: a settlement re-runs the readers waiting on it, so it reaches them through that same scheduler.
 
 A settlement is not a write, but it reaches consumers through the same single path, so an injected scheduler governs it too.
-
-### @rule an-equal-value-does-not-propagate
-
-> A value equal to the one a node already holds does not reach the node's consumers: nothing re-runs.
-
-#### @case a-computed-publishes-only-a-changed-value
-
-> `computed.ts` `makeStageNode`.
-
-A stage that settles to a value `Object.is`-equal to the one it last published does not publish it again, so its consumers do not re-run.
-
-#### @case an-equal-committed-signal-write-is-dropped
-
-> `scope.ts` `writeValue`.
-
-A committed write to a signal that equals its current value is dropped. The equality is SameValueZero: `NaN` equals `NaN`, and `0` equals `-0`. ADR 0008 chose `Object.is`. r3 compares with `===`, which already makes `0` and `-0` equal, and pulse builds on r3 rather than changing it, so pulse adds the `NaN` case in its own write path. SameValueZero is the equality `Map`, `Set` and `Array.prototype.includes` use.
 
 ### @rule an-error-write-schedules-its-own-flush
 
@@ -499,6 +484,42 @@ Without the read, r3 would drop the dependency edge on the throw, and a source w
 > A computed that reads a source through `peek` still re-runs when the source changes or settles, and converges to the source's value. `peek` suppresses only the loading report, not the dependency.
 
 This follows because a read always returns the value consistent with every write so far: `peek` is a read, so the computed depends on its source like any reader and converges when it changes or settles.
+
+## @axiom one-mechanism-carries-every-change-to-a-consumer
+
+> Every change reaches a consumer through one scheduler, and the host can replace it.
+
+Writes and promise settlements re-enter the graph the same way, so one place decides when consumers run, and a test or a host can swap it for a synchronous one. The decision is [ADR 0001](docs/adr/0001-unified-injected-scheduler.md).
+
+### @rule one-scheduler-flushes-every-consumer
+
+> Every write asks one injectable scheduler for a flush. The default scheduler batches every request made in one tick into a single flush on a microtask; the synchronous scheduler flushes on each request.
+
+This follows because every change goes through one replaceable scheduler: consumers are flushed by that scheduler, whatever caused the change, and replacing it changes when all of them run.
+
+## @axiom a-consumer-re-runs-only-for-a-real-change
+
+> A consumer re-runs only when something it read actually changed.
+
+A write or a settle that leaves a value as it was is not a change, and costs its consumers nothing. The decision is [ADR 0008](docs/adr/0008-signals-dedupe-writes-by-object-is.md).
+
+### @rule an-equal-value-does-not-propagate
+
+> A value equal to the one a node already holds does not reach the node's consumers: nothing re-runs.
+
+This follows because a consumer re-runs only for a real change: a value equal to the one a node holds changes nothing, so it is not passed on, at either place a value enters the graph.
+
+#### @case a-computed-publishes-only-a-changed-value
+
+> `computed.ts` `makeStageNode`.
+
+A stage that settles to a value `Object.is`-equal to the one it last published does not publish it again, so its consumers do not re-run.
+
+#### @case an-equal-committed-signal-write-is-dropped
+
+> `scope.ts` `writeValue`.
+
+A committed write to a signal that equals its current value is dropped. The equality is SameValueZero: `NaN` equals `NaN`, and `0` equals `-0`. ADR 0008 chose `Object.is`. r3 compares with `===`, which already makes `0` and `-0` equal, and pulse builds on r3 rather than changing it, so pulse adds the `NaN` case in its own write path. SameValueZero is the equality `Map`, `Set` and `Array.prototype.includes` use.
 
 ## @axiom compose-rather-than-proliferate
 
@@ -1326,26 +1347,6 @@ This follows because error-boundaries-are-sub-owners says an error goes to the n
 
 This follows because error-boundaries-are-sub-owners says an error goes to the nearest accepting boundary above where it happened: a handler's own throw is a new error at that boundary, so the walk continues above it.
 
-### @rule a-throw-from-a-catch-error-body-reaches-only-catch-error-handlers
-
-> A synchronous throw from a `catchError` body is routed only to `catchError` handlers, never to an `<Errored>` or a root's boundary. When none accepts it, it is thrown to the caller.
-
-`catchError` is pulse's `try` and `catch`. A synchronous throw from its body belongs to the caller's stack, the way a throw inside `try` belongs to its `catch`, so only `catchError` handlers on that stack take it. An error in a node is graph state, not part of anyone's stack, which is why it reaches every kind of boundary.
-
-### @rule a-catch-error-handler-is-called-for-each-throw-under-it
-
-> A `catchError` handler is called for each throw that reaches it, from its body and from any node created under it, on the first run and on later re-runs.
-
-A handler is a callback, not a collection. One rejection can re-run the reading binding several times, and the handler may be called once per re-run.
-
-`catchError` is the event-shaped part of the error system, kept for code that wants to hear each throw, such as logging. It is deliberately outside [the axiom that an error is graph state](#axiom-an-error-is-graph-state-not-an-event): that axiom describes `<Errored>` and `error(x)`, which show state and do not count throws.
-
-### @rule an-error-nothing-claims-is-thrown-on-a-first-run
-
-> Outside any root, an error from a node that no boundary claims is thrown to the caller when it happens during the node's first run. During a later re-run it is logged to the console instead.
-
-Inside a root this never happens, because [the root's own boundary](#rule-every-root-has-an-error-boundary) claims whatever nothing nearer does.
-
 ### @rule every-root-has-an-error-boundary
 
 > `createRoot` installs an error boundary on the root owner. It claims every error no nearer boundary claims, tracks it like any other boundary, and logs each failed report to the console, a repeated one included.
@@ -1403,6 +1404,38 @@ Also derives from [`axiom-an-error-is-graph-state-not-an-event`](#axiom-an-error
 > Called with no owner at all, `useErrored()` returns a state that is never active and whose retry does nothing, and `isErrored()` returns `undefined`.
 
 This follows because error-boundaries-are-sub-owners says boundaries are owners in the owner tree: with no owner there is no tree above the reader, so no boundary is found and nothing can be active.
+
+## @axiom catch-error-is-the-callers-try-and-catch
+
+> `catchError` is the caller's `try` and `catch`: it hears each throw that reaches it, and a throw on the caller's own stack goes no further than the handlers on that stack.
+
+An error held by the graph is state, and reaches every kind of boundary. A throw on the stack belongs to whoever is running, the way a throw inside `try` belongs to its `catch`. `catchError` is the event-shaped part of the error system, kept for code that wants to hear each throw.
+
+### @rule a-throw-from-a-catch-error-body-reaches-only-catch-error-handlers
+
+> A synchronous throw from a `catchError` body is routed only to `catchError` handlers, never to an `<Errored>` or a root's boundary. When none accepts it, it is thrown to the caller.
+
+This follows because a throw on the caller's stack belongs to the handlers on that stack: a throw from a `catchError` body is such a throw, so only `catchError` handlers take it.
+
+`catchError` is pulse's `try` and `catch`. A synchronous throw from its body belongs to the caller's stack, the way a throw inside `try` belongs to its `catch`, so only `catchError` handlers on that stack take it. An error in a node is graph state, not part of anyone's stack, which is why it reaches every kind of boundary.
+
+### @rule a-catch-error-handler-is-called-for-each-throw-under-it
+
+> A `catchError` handler is called for each throw that reaches it, from its body and from any node created under it, on the first run and on later re-runs.
+
+`catchError` hears each throw that reaches it: a rejection that re-runs the reading binding several times is several throws, and the handler hears each one.
+
+A handler is a callback, not a collection. One rejection can re-run the reading binding several times, and the handler may be called once per re-run.
+
+`catchError` is the event-shaped part of the error system, kept for code that wants to hear each throw, such as logging. It is deliberately outside [the axiom that an error is graph state](#axiom-an-error-is-graph-state-not-an-event): that axiom describes `<Errored>` and `error(x)`, which show state and do not count throws.
+
+### @rule an-error-nothing-claims-is-thrown-on-a-first-run
+
+> Outside any root, an error from a node that no boundary claims is thrown to the caller when it happens during the node's first run. During a later re-run it is logged to the console instead.
+
+This follows because a throw on the caller's stack belongs to the caller: a node's first run happens on the stack of the code that created it, so an error nothing claims is thrown there, while a later re-run happens on a writer's stack the error does not belong to.
+
+Inside a root this never happens, because [the root's own boundary](#rule-every-root-has-an-error-boundary) claims whatever nothing nearer does.
 
 ## @axiom an-error-is-graph-state-not-an-event
 
@@ -2042,18 +2075,6 @@ The markers keep the binding's place, so static siblings on either side stay whe
 
 > A prop with no prefix, or with the `attr:` prefix, sets the attribute of that name. A value of `null`, `undefined` or `false` removes the attribute, and a function value keeps the attribute following it.
 
-### @rule a-prop-prefix-sets-the-dom-property
-
-> A `prop:name` prop assigns the element's DOM property `name` instead of an attribute, and a function value keeps the property following it.
-
-### @rule a-class-prefix-toggles-one-class-by-truthiness
-
-> A `class:name` prop adds the class `name` while its value is truthy and removes it while it is falsy, and a function value keeps the class following it.
-
-### @rule a-style-prefix-sets-one-style-property
-
-> A `style:name` prop sets the style property `name`. A value of `null`, `undefined` or `false` removes the property, and a function value keeps it following the value.
-
 ### @rule a-ref-is-called-once-with-its-element
 
 > A `ref` prop is not a hole. Its function is called once, with the element, when the element is created.
@@ -2082,12 +2103,6 @@ This follows because `Switch` runs once and changes only inside its hole: the ho
 
 This follows because `For` runs once and changes only inside its hole: the hole holds one row per item, or the fallback when there is none, so a changed list changes only the hole.
 
-### @rule list-rows-are-keyed-by-reference
-
-> A list row belongs to an item by strict reference. The same reference keeps its row, its mapped output and its DOM nodes in the new order. A different reference gets a new row even when its contents are equal.
-
-A row is its item: the same object in a new position is the same row, moved, with its state kept. No key function is needed because the item already has an identity.
-
 ### @rule a-row-index-follows-its-position
 
 > Each row receives an index accessor that returns the row's current position. A reorder updates what the accessor returns, and the row is not rebuilt.
@@ -2113,10 +2128,6 @@ A literal cannot change, and a function is already the lazy form. Wrapping eithe
 > A `ref` prop and an `on:`-prefixed prop are never converted to a getter, whatever their value.
 
 Their value is a callback that the runtime calls directly, once with the element or once per event. Read through a getter, the callback would be re-evaluated instead of called.
-
-### @rule a-namespaced-prop-compiles-to-a-string-key
-
-> A namespaced prop name such as `on:click` or `class:active` compiles to a plain string key on the props object, which is what the runtime's prefix dispatch reads.
 
 ### @rule a-spread-merges-descriptors-not-values
 
@@ -2160,3 +2171,46 @@ A change in which error is first, while the boundary stays failed, does not rebu
 Also derives from [`axiom-a-boundary-wraps-what-it-coordinates`](#axiom-a-boundary-wraps-what-it-coordinates). This follows because a component runs once, and a boundary only chooses what its region shows: it cannot rebuild its children per display, so it builds them once and swaps what is shown.
 
 Building the children is what starts the work the boundary waits for, so it cannot wait for the display to choose them.
+## @axiom a-prop-says-how-it-reaches-the-dom
+
+> How a prop reaches the DOM is written at the prop, by its prefix, and never inferred from its name or its value.
+
+The binding model follows Pota: explicit namespaced prefixes (`on:`, `prop:`, `attr:`, `class:`, `style:`) with no heuristics, as the [README](README.md) states.
+
+### @rule a-prop-prefix-sets-the-dom-property
+
+> A `prop:name` prop assigns the element's DOM property `name` instead of an attribute, and a function value keeps the property following it.
+
+This follows because a prop says how it reaches the DOM: `prop:` says "set the DOM property", so the property is set, whatever the value is.
+
+### @rule a-class-prefix-toggles-one-class-by-truthiness
+
+> A `class:name` prop adds the class `name` while its value is truthy and removes it while it is falsy, and a function value keeps the class following it.
+
+This follows because a prop says how it reaches the DOM: `class:name` says "this one class", so only that class is toggled, by the value's truthiness.
+
+### @rule a-style-prefix-sets-one-style-property
+
+> A `style:name` prop sets the style property `name`. A value of `null`, `undefined` or `false` removes the property, and a function value keeps it following the value.
+
+This follows because a prop says how it reaches the DOM: `style:name` says "this one style property", so only that property is set.
+
+### @rule a-namespaced-prop-compiles-to-a-string-key
+
+> A namespaced prop name such as `on:click` or `class:active` compiles to a plain string key on the props object, which is what the runtime's prefix dispatch reads.
+
+This follows because a prop says how it reaches the DOM by its prefix: the compiler must keep the prefix as written, so a namespaced prop becomes a plain string key the runtime can dispatch on.
+
+## @axiom an-item-is-its-reference
+
+> An item is its reference: pulse never compares contents to decide that two values are the same item.
+
+An object already has an identity, so no key function is needed to give it one, and two objects with equal contents are two items.
+
+### @rule list-rows-are-keyed-by-reference
+
+> A list row belongs to an item by strict reference. The same reference keeps its row, its mapped output and its DOM nodes in the new order. A different reference gets a new row even when its contents are equal.
+
+This follows because an item is its reference: the same object in a new position is the same row, moved with its state, and a different object is a new row, whatever its contents.
+
+A row is its item: the same object in a new position is the same row, moved, with its state kept. No key function is needed because the item already has an identity.
