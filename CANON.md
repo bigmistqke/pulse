@@ -1023,7 +1023,7 @@ When an owner is disposed, its `onCleanup` callbacks run in reverse order of reg
 
 > `computed.ts` `endGen`.
 
-When a generator stage's generator ends or is discarded, its `onCleanup` callbacks run most recently registered first, after its `finally` blocks. The `finally` blocks are lexically inside the generator, so `gen.return()` runs them first, and the cleanups registered on the generator follow.
+When a generator stage's generator ends or is discarded, its `onCleanup` callbacks run most recently registered first, after its `finally` blocks. One that throws is isolated: the others still run, and the error goes to the stage's error handling. The `finally` blocks are lexically inside the generator, so `gen.return()` runs them first, and the cleanups registered on the generator follow.
 
 ### @rule an-owner-disposes-its-children-before-its-own-cleanups
 

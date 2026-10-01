@@ -190,3 +190,31 @@ test('onCleanup outside a generator stage is unchanged', async () => {
   expect(c()).toBe(4)
   expect(cleaned).toBe(1) // fired before the re-run
 })
+
+/**
+ * @canon case-generator-cleanups-run-newest-first-after-its-finally-blocks
+ */
+test('a generator cleanup that throws does not stop the cleanups registered before it', async () => {
+  const events: string[] = []
+  const errors: unknown[] = []
+  const { catchError } = await import('../src/owner')
+  createRoot(() => {
+    catchError(
+      () => {
+        const c = computed(function* () {
+          onCleanup(() => events.push('first'))
+          onCleanup(() => {
+            throw new Error('cleanup failed')
+          })
+          onCleanup(() => events.push('third'))
+          return 1
+        })
+        c()
+      },
+      (e) => errors.push(e),
+    )
+  })
+  await ticks(5)
+  expect(events).toEqual(['third', 'first']) // newest first, the throw in between stops nothing
+  expect((errors[0] as Error)?.message).toBe('cleanup failed')
+})

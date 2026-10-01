@@ -227,14 +227,28 @@ function makeStageNode(
     // an argument a later change could invalidate.
     genOwnsSuspension = false
     const cleanups = takeGeneratorCleanups(gen)
-    try {
-      r3Untrack(() => {
-        if (viaReturn) gen.return(undefined)
-        for (let i = cleanups.length - 1; i >= 0; i--) cleanups[i]()
-      })
-    } catch (e) {
+    // Teardown unwinds: each cleanup runs whatever an earlier one threw, and
+    // the first error — from the finally blocks or from a cleanup — is the
+    // one routed.
+    let failed = false
+    let firstError: unknown
+    const attempt = (fn: () => void): void => {
       try {
-        routeError(myOwner, e)
+        fn()
+      } catch (e) {
+        if (!failed) {
+          failed = true
+          firstError = e
+        }
+      }
+    }
+    r3Untrack(() => {
+      if (viaReturn) attempt(() => gen.return(undefined))
+      for (let i = cleanups.length - 1; i >= 0; i--) attempt(cleanups[i])
+    })
+    if (failed) {
+      try {
+        routeError(myOwner, firstError)
       } catch (rethrown) {
         setErrorSig(rethrown)
       }
