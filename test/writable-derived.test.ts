@@ -846,7 +846,7 @@ test('W16: cancelling waits until the value reaches the committed world', async 
 })
 
 /**
- * @canon rule-a-write-to-a-derivation-cancels-only-once-committed
+ * @canon rule-at-commit-a-write-replaces-what-the-derivation-published-meanwhile
  */
 test('W17: a reload that lands while an action is open is replaced at commit', async () => {
   let resolveList: (v: string[]) => void = () => {}

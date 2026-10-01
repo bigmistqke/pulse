@@ -288,7 +288,8 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule a-prediction-expires-with-its-action`](#rule-a-prediction-expires-with-its-action) — A prediction is dropped when the action that wrote it closes, whether it commits or is discarded. After a discard the prior value shows again.
   - [`@rule after-a-commit-only-what-the-action-wrote-to-the-source-remains`](#rule-after-a-commit-only-what-the-action-wrote-to-the-source-remains) — When the action that wrote a prediction commits, the prediction's reader shows the source's value: the action's own committed write when it wrote the source, and the source's earlier value when it did not. The prior value does not show in between.
   - [`@rule a-prediction-sits-in-front-of-its-derivation`](#rule-a-prediction-sits-in-front-of-its-derivation) — A prediction is a layer in front of the derivation, never written into it. The derivation keeps following its sources underneath, and shows through when the last layer drops. The accessor the optimistic value wraps keeps reading the canonical value throughout.
-  - [`@rule a-write-to-a-derivation-cancels-only-once-committed`](#rule-a-write-to-a-derivation-cancels-only-once-committed) — A write to a derivation made inside an action abandons the derivation's run in progress only when the write reaches committed state. At commit, the written value replaces anything the derivation published while the action was open.
+  - [`@rule a-write-to-a-derivation-cancels-only-once-committed`](#rule-a-write-to-a-derivation-cancels-only-once-committed) — A write to a derivation made inside an action abandons the derivation's run in progress only when the write reaches committed state, which for a nested action is the outermost commit. A discarded action leaves the run in progress alive, and a recompute queued before the action still runs.
+  - [`@rule at-commit-a-write-replaces-what-the-derivation-published-meanwhile`](#rule-at-commit-a-write-replaces-what-the-derivation-published-meanwhile) — When an action that wrote to a derivation commits, the written value replaces anything the derivation published while the action was open.
   - [`@rule a-write-to-a-derivation-moves-its-change-detection-only-once-committed`](#rule-a-write-to-a-derivation-moves-its-change-detection-only-once-committed) — A write to a derivation made inside an action updates the record the derivation compares its next result against only when the write reaches committed state. After a discard, the derivation compares against the value it last committed.
   - [`@rule a-promise-written-inside-an-action-starts-no-recompute`](#rule-a-promise-written-inside-an-action-starts-no-recompute) — Writing a promise to a derivation inside an action does not start a fresh recompute of the derivation.
   - [`@rule a-scope-reads-through-its-chain`](#rule-a-scope-reads-through-its-chain) — A read in a scope takes the nearest slot up its chain of scopes, and falls through to committed state when no scope in the chain has one.
@@ -2221,11 +2222,17 @@ Because nothing is overwritten, a source that changes while a prediction is live
 
 ### @rule a-write-to-a-derivation-cancels-only-once-committed
 
-> A write to a derivation made inside an action abandons the derivation's run in progress only when the write reaches committed state. At commit, the written value replaces anything the derivation published while the action was open.
+> A write to a derivation made inside an action abandons the derivation's run in progress only when the write reaches committed state, which for a nested action is the outermost commit. A discarded action leaves the run in progress alive, and a recompute queued before the action still runs.
 
 Also derives from [`rule-a-discard-leaves-no-trace`](#rule-a-discard-leaves-no-trace) and [`axiom-the-latest-production-wins`](#axiom-the-latest-production-wins). This follows because a write abandons the run in progress, and a discard leaves no trace: abandoning a run cannot be undone, so a write inside an action abandons it only once committed.
 
-Abandoning a run cannot be undone, because it runs cleanups and drops a suspended promise. So a discarded action leaves the run in progress alive, and a recompute queued before the action still runs. A nested action's commit reaches only its parent, so cancelling waits for the outermost commit.
+Abandoning a run cannot be undone, because it runs cleanups and drops a suspended promise. A nested action's commit reaches only its parent, which is why cancelling waits for the outermost commit.
+
+### @rule at-commit-a-write-replaces-what-the-derivation-published-meanwhile
+
+> When an action that wrote to a derivation commits, the written value replaces anything the derivation published while the action was open.
+
+Also derives from [`rule-a-write-to-a-derivation-cancels-only-once-committed`](#rule-a-write-to-a-derivation-cancels-only-once-committed). This follows because the latest production wins, and the write takes effect at commit: a value the derivation published while the action was open came before it.
 
 ### @rule a-write-to-a-derivation-moves-its-change-detection-only-once-committed
 
