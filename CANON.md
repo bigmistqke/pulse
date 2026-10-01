@@ -382,7 +382,7 @@ Axioms are named, not numbered, so a rule cites what its axiom says rather than 
 
 > Each job is done by one mechanism, reused wherever the job comes back, rather than a mechanism for each use.
 
-Pulse handles suspension, errors, owner lookup and boundary lookup with the same three patterns: a throw that is caught and resumed on settle, a walk up the owner tree to the nearest handler, and an ambient slot set around one call. The *Conceptual model* of [`CONTEXT.md`](CONTEXT.md) says its coherence comes from reusing them across every coordination primitive rather than introducing new mechanisms. [P5 in the exploration record](docs/pulse/framings.md#p5--compose-dont-proliferate-in-either-direction) states the same for the public API.
+Pulse handles suspension, errors, owner lookup and boundary lookup with the same three patterns: a throw that is caught and resumed on settle, a walk up the owner tree to the nearest handler, and an ambient slot set around one call. The _Conceptual model_ of [`CONTEXT.md`](CONTEXT.md) says its coherence comes from reusing them across every coordination primitive rather than introducing new mechanisms. [P5 in the exploration record](docs/pulse/framings.md#p5--compose-dont-proliferate-in-either-direction) states the same for the public API.
 
 ### @axiom build-on-r3-rather-than-change-it
 
@@ -1078,7 +1078,7 @@ A stage that reads another node as its input reports that node's pending state a
 
 > When something changes, only the work that depends on the change runs again, and only from the point where it depends on it.
 
-Pulse belongs to the incremental-computation lineage the *Theoretical lineage* section of [`CONTEXT.md`](CONTEXT.md) traces: a computation graph is described once, and the runtime re-evaluates only the affected portions when its leaves change. The [README](README.md) states the same for the page: fine-grained, with no virtual DOM.
+Pulse belongs to the incremental-computation lineage the _Theoretical lineage_ section of [`CONTEXT.md`](CONTEXT.md) traces: a computation graph is described once, and the runtime re-evaluates only the affected portions when its leaves change. The [README](README.md) states the same for the page: fine-grained, with no virtual DOM.
 
 ### @rule an-equal-value-does-not-propagate
 
@@ -1302,7 +1302,7 @@ This follows because only what changed runs again: a body that suspends again on
 
 This follows because only the work that depends on a change runs again: a change concerns the holes that read it, so running the whole component again would run work that did not depend on it.
 
-This is stated in the [README](README.md) and in the *Component* entry of [`CONTEXT.md`](CONTEXT.md): reactivity lives in the holes a component returns, not in re-invoking the function, so local state created in its body is created once.
+This is stated in the [README](README.md) and in the _Component_ entry of [`CONTEXT.md`](CONTEXT.md): reactivity lives in the holes a component returns, not in re-invoking the function, so local state created in its body is created once.
 
 #### @rule a-function-tag-is-called-once-with-its-props
 
@@ -1852,7 +1852,7 @@ A filtered reader can find a matching report that is not the boundary's first, a
 
 This follows because every choice is stated where the code is written, so control flow decides nothing about async that its caller did not write. A pending input still has to be read somehow, and a promise is an object, so it is truthy: reading it as its empty form shows nothing for a value that has none, which is the one policy control flow cannot avoid.
 
-The *Control flow* entry of [`CONTEXT.md`](CONTEXT.md) states this: async behaviour is decided by what the caller passes and where it puts `use`, not by the control-flow component.
+The _Control flow_ entry of [`CONTEXT.md`](CONTEXT.md) states this: async behaviour is decided by what the caller passes and where it puts `use`, not by the control-flow component.
 
 #### @rule a-pending-condition-reads-as-falsy
 
@@ -2120,7 +2120,7 @@ This follows because a missing value sets nothing: a style property whose value 
 
 > What a piece of code creates ends when that code's part of the program ends, and the code does not have to keep track of it for that to happen.
 
-Cleanup is the framework's bookkeeping, not the user's. The *Owner* entry of [`CONTEXT.md`](CONTEXT.md) describes the tree of lifetimes that follows from this.
+Cleanup is the framework's bookkeeping, not the user's. The _Owner_ entry of [`CONTEXT.md`](CONTEXT.md) describes the tree of lifetimes that follows from this.
 
 ### @rule a-lifetime-belongs-to-an-owner
 
