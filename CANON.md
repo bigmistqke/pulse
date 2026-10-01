@@ -31,9 +31,10 @@ The canon was written backwards from the existing tests and documents, and descr
     - [`@case closing-a-scope-unlinks-it-from-its-sources`](#case-closing-a-scope-unlinks-it-from-its-sources) — `scope.ts` `closeScopeEdges`.
     - [`@case a-node-only-read-is-not-promoted`](#case-a-node-only-read-is-not-promoted) — `scope.ts` `commit`.
   - [`@rule pulse-reaches-r3-only-through-its-exports`](#rule-pulse-reaches-r3-only-through-its-exports) — Pulse uses r3 through the functions r3 exports. Where pulse needs more, the fork gains an export instead of pulse reaching into r3's internals.
-  - [`@rule a-throwing-run-keeps-dependencies-it-did-not-reread`](#rule-a-throwing-run-keeps-dependencies-it-did-not-reread) — A computed whose run throws partway stays subscribed to sources it read in an earlier run but not in the throwing one. A later change to such a source re-runs it.
 - [`@axiom reads-pull-and-consumers-are-pushed`](#axiom-reads-pull-and-consumers-are-pushed) — A read always returns the value consistent with every write so far, synchronously. Consumers with side effects are re-run in batches, and the batching is invisible to reads.
   - [`@rule a-read-is-current-without-a-flush`](#rule-a-read-is-current-without-a-flush) — Reading a signal or a computed returns the value consistent with the latest writes, whether or not the scheduler has flushed since. A computed read outside any reactive context recomputes on the spot when a source changed.
+  - [`@rule a-run-replaces-its-dependencies-with-what-it-read`](#rule-a-run-replaces-its-dependencies-with-what-it-read) — A run of a computation leaves it depending on exactly the sources that run read. A source it read before but not in its latest run no longer re-runs it.
+    - [`@exception a-throwing-run-keeps-dependencies-it-did-not-reread`](#exception-a-throwing-run-keeps-dependencies-it-did-not-reread) — A computed whose run throws partway stays subscribed to sources it read in an earlier run but not in the throwing one. A later change to such a source re-runs it.
   - [`@rule a-signal-reads-back-its-last-write`](#rule-a-signal-reads-back-its-last-write) — A signal returns its initial value until it is written, and afterwards the last value written. An update function receives the current value.
   - [`@rule one-scheduler-flushes-every-consumer`](#rule-one-scheduler-flushes-every-consumer) — Every write asks one injectable scheduler for a flush. The default scheduler batches every request made in one tick into a single flush on a microtask; the synchronous scheduler flushes on each request.
   - [`@rule several-writes-in-one-tick-re-run-an-effect-once`](#rule-several-writes-in-one-tick-re-run-an-effect-once) — Under the default scheduler, an effect does not re-run between a write and the end of the tick. Several writes in one tick re-run it once, with the last value.
@@ -443,12 +444,6 @@ A computed that the speculation only read is not in its write set, so the commit
 
 r3 is pulse's pinned fork. It exports `unwatched` for disposal ([ADR 0005](docs/adr/0005-r3-exports-unwatched.md)) and a way to withdraw a queued recompute for writable derivations.
 
-### @rule a-throwing-run-keeps-dependencies-it-did-not-reread
-
-> A computed whose run throws partway stays subscribed to sources it read in an earlier run but not in the throwing one. A later change to such a source re-runs it.
-
-This is a known defect in r3, not a choice: r3 skips unlinking stale dependencies when a run throws. The test that pins it is written with `test.fails`, so it starts failing once r3 is fixed, and this rule is removed then.
-
 ## @axiom reads-pull-and-consumers-are-pushed
 
 > A read always returns the value consistent with every write so far, synchronously. Consumers with side effects are re-run in batches, and the batching is invisible to reads.
@@ -458,6 +453,18 @@ Invalidation spreads through the graph when a value is written, and a computed r
 ### @rule a-read-is-current-without-a-flush
 
 > Reading a signal or a computed returns the value consistent with the latest writes, whether or not the scheduler has flushed since. A computed read outside any reactive context recomputes on the spot when a source changed.
+
+### @rule a-run-replaces-its-dependencies-with-what-it-read
+
+> A run of a computation leaves it depending on exactly the sources that run read. A source it read before but not in its latest run no longer re-runs it.
+
+r3 rebuilds a node's dependency list on every run, so a dependency that is read only under a condition comes and goes with that condition.
+
+#### @exception a-throwing-run-keeps-dependencies-it-did-not-reread
+
+> A computed whose run throws partway stays subscribed to sources it read in an earlier run but not in the throwing one. A later change to such a source re-runs it.
+
+This is a known defect in r3, not a choice: r3 skips unlinking stale dependencies when a run throws. The test that pins it is written with `test.fails`, so it starts failing once r3 is fixed, and this exception is removed then.
 
 ### @rule a-signal-reads-back-its-last-write
 

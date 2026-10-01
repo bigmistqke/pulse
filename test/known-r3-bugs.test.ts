@@ -35,7 +35,7 @@ import { computed, signal } from '../src/index'
  * after a throw in `recompute`").
  */
 /**
- * @canon rule-a-throwing-run-keeps-dependencies-it-did-not-reread
+ * @canon exception-a-throwing-run-keeps-dependencies-it-did-not-reread
  */
 test.fails('r3 phantom re-trigger: throwing body retains deps it did not re-read', () => {
   const [a, setA] = signal(0)

@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'vitest'
-import { computed, createRoot, effect, flush, microtaskScheduler, setScheduler, signal } from '../src/index'
+import { computed, createRoot, effect, flush, microtaskScheduler, setScheduler, signal, syncScheduler } from '../src/index'
 
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
 
@@ -55,4 +55,31 @@ test('a promise settling asks the active scheduler for the flush that re-runs it
   await tick()
   expect(requests).toBeGreaterThan(requestsBefore)
   expect(runs).toBeGreaterThan(runsBefore)
+})
+
+/**
+ * @canon rule-a-run-replaces-its-dependencies-with-what-it-read
+ */
+test('a source read only under a condition stops re-running the computed once the condition flips', () => {
+  setScheduler(syncScheduler(flush))
+  const [useA, setUseA] = signal(true)
+  const [a, setA] = signal('a0')
+  const [b] = signal('b0')
+  let runs = 0
+  const c = computed(() => {
+    runs++
+    return useA() ? a() : b()
+  })
+  const seen: string[] = []
+  createRoot(() => {
+    effect(() => {
+      seen.push(c())
+    })
+  })
+  setUseA(false) // the next run reads b, not a
+  const before = runs
+  setA('a1') // a is no longer a dependency
+  expect(runs).toBe(before)
+  expect(seen).toEqual(['a0', 'b0'])
+  setScheduler(microtaskScheduler(flush))
 })
