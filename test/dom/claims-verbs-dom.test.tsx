@@ -35,7 +35,7 @@ test('a boundary runs its children once, while showing initial, and not again wh
 })
 
 /**
- * @canon rule-a-fragment-child-runs-under-the-owner-the-fragment-was-built-in
+ * @canon rule-a-fragment-child-belongs-to-the-owner-the-fragment-was-built-in
  */
 test('a Fragment function child inserted outside every owner runs under the owner the Fragment was built in', () => {
   setScheduler(syncScheduler(flush))
@@ -65,6 +65,70 @@ test('a Fragment function child inserted outside every owner runs under the owne
   dispose() // the Fragment's owner goes, and what the child created goes with it
   setCount(2)
   expect(runs.length).toBe(before)
+})
+
+/**
+ * Builds a Fragment holding one reactive child under root A, inserts its array
+ * under an unrelated root B, and returns what is needed to dispose either.
+ */
+function fragmentAcrossTwoRoots() {
+  setScheduler(syncScheduler(flush))
+  const [count, setCount] = signal(0)
+  let disposeFragmentOwner!: () => void
+  let disposeInsertionOwner!: () => void
+  let children!: unknown
+  createRoot((dispose) => {
+    disposeFragmentOwner = dispose
+    children = h(Fragment, null, () => String(count()))
+  })
+  let host!: HTMLElement
+  createRoot((dispose) => {
+    disposeInsertionOwner = dispose
+    host = h('div', null, children) as HTMLElement
+  })
+  return { host, setCount, disposeFragmentOwner, disposeInsertionOwner }
+}
+
+/**
+ * @canon rule-a-fragment-child-belongs-to-the-owner-the-fragment-was-built-in
+ */
+test('disposing the owner a Fragment was inserted under leaves its reactive child running', () => {
+  const { host, setCount, disposeInsertionOwner } = fragmentAcrossTwoRoots()
+  expect(host.textContent).toBe('0')
+  disposeInsertionOwner()
+  setCount(1)
+  expect(host.textContent).toBe('1') // the binding belongs to the Fragment's owner
+})
+
+/**
+ * @canon rule-a-fragment-child-belongs-to-the-owner-the-fragment-was-built-in
+ */
+test("disposing a Fragment's owner stops its reactive child, wherever it was inserted", () => {
+  const { host, setCount, disposeFragmentOwner } = fragmentAcrossTwoRoots()
+  expect(host.textContent).toBe('0')
+  disposeFragmentOwner()
+  setCount(1)
+  expect(host.textContent).toBe('0')
+})
+
+/**
+ * @canon rule-a-fragment-child-belongs-to-the-owner-the-fragment-was-built-in
+ */
+test('a Fragment child inserted after its owner was disposed binds nothing', () => {
+  setScheduler(syncScheduler(flush))
+  const [count, setCount] = signal(0)
+  let children!: unknown
+  createRoot((dispose) => {
+    children = h(Fragment, null, () => String(count()))
+    dispose()
+  })
+  let host!: HTMLElement
+  createRoot(() => {
+    host = h('div', null, children) as HTMLElement
+  })
+  expect(host.textContent).toBe('')
+  setCount(1)
+  expect(host.textContent).toBe('')
 })
 
 /**

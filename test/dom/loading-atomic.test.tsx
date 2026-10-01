@@ -922,7 +922,7 @@ test('use(computed) inside binding: two-stage pipeline (async + sync map) propag
 // Fragment branch resolve its children into real nodes immediately, the same
 // way the DOM-tag branch already did - see src/dom/h.ts.
 /**
- * @canon rule-a-fragment-child-runs-under-the-owner-the-fragment-was-built-in
+ * @canon rule-a-fragment-child-belongs-to-the-owner-the-fragment-was-built-in
  */
 test('top-level component inside Loading reaches scope via useLoading()', async () => {
   const target = document.createElement('section')

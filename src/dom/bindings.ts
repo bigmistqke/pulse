@@ -259,6 +259,16 @@ export function insertChild(parent: Node, value: unknown): void {
     const parentOwner = taggedChildOwner.has(value as () => unknown)
       ? taggedChildOwner.get(value as () => unknown)!
       : getOwner()
+    // A Fragment child belongs wholly to the Fragment's owner: not only its
+    // runs, but the binding's own effect and cleanup. Inserted under another
+    // owner, the binding is created under the Fragment's owner instead, so
+    // disposing that owner stops it and disposing the insertion site does
+    // not. A Fragment whose owner is already gone leaves nothing to bind.
+    if (parentOwner !== getOwner()) {
+      if (parentOwner?.disposed) return
+      runWithOwner(parentOwner, () => insertChild(parent, value))
+      return
+    }
     warnIfOrphaned('reactive child', parentOwner)
     const start = document.createComment('')
     const end = document.createComment('')
