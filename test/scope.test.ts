@@ -386,6 +386,7 @@ test('commit promotes a speculative signal write to committed (doubleName step 5
 
 /**
  * @canon rule-a-discard-leaves-no-trace
+ * @canon case-settle-callbacks-run-newest-first-and-in-isolation
  */
 test('discard drops speculative writes, fires cleanups, leaves committed intact (step 5b)', () => {
   const name = signalNode('foo')

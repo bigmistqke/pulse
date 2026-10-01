@@ -255,13 +255,15 @@ The canon was written backwards from the existing tests and documents, and descr
     - [`@exception a-prediction-shows-outside-its-action`](#exception-a-prediction-shows-outside-its-action) — A write through an optimistic setter is shown to readers outside every action while its action is open. While several actions have predictions live, readers outside every action see the most recent one.
   - [`@rule a-speculation-reads-its-own-writes`](#rule-a-speculation-reads-its-own-writes) — Inside a speculation, every read sees the speculation's writes, directly and through any number of derivations, chains of computeds and pipeline stages included. An update function's previous value is the speculation's own write once it has written.
   - [`@rule a-commit-promotes-every-write-at-once`](#rule-a-commit-promotes-every-write-at-once) — When a speculation commits, all of its writes reach committed state together, and a committed consumer sees them as one change, not one change per write.
-  - [`@rule a-discard-leaves-no-trace`](#rule-a-discard-leaves-no-trace) — When a speculation is discarded, its writes and everything derived from them vanish, and committed state is as if it never ran.
+  - [`@rule a-discard-leaves-no-trace`](#rule-a-discard-leaves-no-trace) — When a speculation is discarded, its writes vanish, and committed state is as if it never ran.
+  - [`@rule a-discard-drops-what-was-derived-from-its-writes`](#rule-a-discard-drops-what-was-derived-from-its-writes) — When a speculation is discarded, every value derived from its writes vanishes with it, at any depth of derivation, and a read afterwards sees the value derived from committed state.
   - [`@rule a-failed-action-is-reported-not-thrown`](#rule-a-failed-action-is-reported-not-thrown) — An action whose body fails is discarded, and the error is reported through its handle. The caller never receives a throw or a rejection.
   - [`@rule a-speculation-announces-how-it-closed`](#rule-a-speculation-announces-how-it-closed) — A callback registered with `onSettled` fires once when its speculation closes, and is told whether the speculation committed or was discarded.
   - [`@rule a-speculation-refuses-to-create-an-effect`](#rule-a-speculation-refuses-to-create-an-effect) — Creating an effect inside a speculation throws. That includes a JSX binding, which is an effect. The throw fails the action like any other error in its body.
   - [`@rule a-prediction-expires-with-its-action`](#rule-a-prediction-expires-with-its-action) — A prediction is dropped when the action that wrote it closes, whether it commits or is discarded. After a discard the prior value shows again. After a commit the prediction survives only as far as the action also wrote the source it stands in front of: when the action did not, the source's value shows again.
   - [`@rule a-prediction-sits-in-front-of-its-derivation`](#rule-a-prediction-sits-in-front-of-its-derivation) — A prediction is a layer in front of the derivation, never written into it. The derivation keeps following its sources underneath, and shows through when the last layer drops. The accessor the optimistic value wraps keeps reading the canonical value throughout.
   - [`@rule a-write-to-a-derivation-cancels-only-once-committed`](#rule-a-write-to-a-derivation-cancels-only-once-committed) — A write to a derivation made inside an action abandons the derivation's run in progress only when the write reaches committed state. At commit, the written value replaces anything the derivation published while the action was open.
+  - [`@rule a-write-to-a-derivation-moves-its-change-detection-only-once-committed`](#rule-a-write-to-a-derivation-moves-its-change-detection-only-once-committed) — A write to a derivation made inside an action updates the record the derivation compares its next result against only when the write reaches committed state. After a discard, the derivation compares against the value it last committed.
   - [`@rule a-promise-written-inside-an-action-starts-no-recompute`](#rule-a-promise-written-inside-an-action-starts-no-recompute) — Writing a promise to a derivation inside an action does not start a fresh recompute of the derivation.
   - [`@rule a-scope-reads-through-its-chain`](#rule-a-scope-reads-through-its-chain) — A read in a scope takes the nearest slot up its chain of scopes, and falls through to committed state when no scope in the chain has one.
     - [`@case a-new-scope-starts-open-and-empty`](#case-a-new-scope-starts-open-and-empty) — `scope.ts` `createScope`.
@@ -1997,11 +1999,17 @@ This follows because a speculation commits as one unit: its writes reach committ
 
 ### @rule a-discard-leaves-no-trace
 
-> When a speculation is discarded, its writes and everything derived from them vanish, and committed state is as if it never ran.
+> When a speculation is discarded, its writes vanish, and committed state is as if it never ran.
 
 This follows because a speculation is discarded as one unit: everything it holds goes, and since nothing reached committed state, committed state is as if it never ran.
 
 A discard drops what the speculation holds. It never has to undo anything, because nothing reached committed state.
+
+### @rule a-discard-drops-what-was-derived-from-its-writes
+
+> When a speculation is discarded, every value derived from its writes vanishes with it, at any depth of derivation, and a read afterwards sees the value derived from committed state.
+
+This follows because a speculation is discarded as one unit, and a value derived from a speculative write is held by the speculation as much as the write is, so it goes with the rest.
 
 ### @rule a-failed-action-is-reported-not-thrown
 
@@ -2046,6 +2054,12 @@ Because nothing is overwritten, a source that changes while a prediction is live
 Also derives from [`rule-a-discard-leaves-no-trace`](#rule-a-discard-leaves-no-trace) and [`axiom-the-latest-production-wins`](#axiom-the-latest-production-wins). This follows because a write abandons the run in progress, and a discard leaves no trace: abandoning a run cannot be undone, so a write inside an action abandons it only once committed.
 
 Abandoning a run cannot be undone, because it runs cleanups and drops a suspended promise. So a discarded action leaves the run in progress alive, and a recompute queued before the action still runs. A nested action's commit reaches only its parent, so cancelling waits for the outermost commit.
+
+### @rule a-write-to-a-derivation-moves-its-change-detection-only-once-committed
+
+> A write to a derivation made inside an action updates the record the derivation compares its next result against only when the write reaches committed state. After a discard, the derivation compares against the value it last committed.
+
+Also derives from [`rule-a-discard-leaves-no-trace`](#rule-a-discard-leaves-no-trace). This follows because a discard leaves no trace, and that record is held outside the speculation: updated at the write, it would keep describing a value the discard removed, and a later result equal to that value would be taken for no change.
 
 ### @rule a-promise-written-inside-an-action-starts-no-recompute
 

@@ -1058,7 +1058,7 @@ test('a read from inside an effect while an earlier stage is waiting to reload',
 })
 
 /**
- * @canon rule-a-discard-leaves-no-trace
+ * @canon rule-a-write-to-a-derivation-moves-its-change-detection-only-once-committed
  */
 test('a discarded action does not leave the change gate describing a rolled-back value', async () => {
   // The write inside the action (7) has to equal what a LATER, genuine

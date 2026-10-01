@@ -63,7 +63,7 @@ test('a computed derives from the speculative value inside an action', () => {
 })
 
 /**
- * @canon rule-a-discard-leaves-no-trace
+ * @canon rule-a-discard-drops-what-was-derived-from-its-writes
  */
 test('a discarded action leaves derived state untouched', () => {
   const [n, setN] = signal(1)
@@ -117,7 +117,7 @@ test('a speculative write propagates through a chain of separate computeds', () 
 })
 
 /**
- * @canon rule-a-discard-leaves-no-trace
+ * @canon rule-a-discard-drops-what-was-derived-from-its-writes
  */
 test('a discarded action rolls back a transitively-derived value', () => {
   const [a, setA] = signal(1)
