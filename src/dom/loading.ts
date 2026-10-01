@@ -121,14 +121,17 @@ export function Loading(props: LoadingProps): Accessor<unknown> {
   // bookkeeping, it survives a boundary remount (same property that makes
   // use.latest() fix FM2).
   const [firstLoadPending, setFirstLoadPending] = signal(false)
-  // active: what isLoading()/useLoading() report — anything in flight at all,
-  // whether it gates a commit, is a background refresh, or is a first load.
+  // active: what isLoading()/useLoading() report — anything in flight: a
+  // suspended binding, a background refresh, or a first load. A commit waiting
+  // at the gate is not in flight: it waits on a suspended binding, which counts
+  // already, or only on the end-of-microtask check. Counting it would make a
+  // binding that calls use() and reads isLoading() re-run on its own commit.
   const [activeSig, setActiveSig] = signal(false)
   const recomputePending = () => {
     const gate = pendingSet.size > 0 || readySet.size > 0 || deferredCommits.length > 0
     setGatePending(gate)
     setFirstLoadPending(firstLoadPromises.size > 0)
-    setActiveSig(gate || backgroundPromises.size > 0 || firstLoadPromises.size > 0)
+    setActiveSig(pendingSet.size > 0 || backgroundPromises.size > 0 || firstLoadPromises.size > 0)
   }
 
   /** Flush all ready and deferred commits atomically. Call only when gate is open. */

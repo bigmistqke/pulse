@@ -764,3 +764,32 @@ test('a seeded source still gets its initial placeholder on first load', async (
   expect(target.textContent).toBe('2 items')
   dispose()
 })
+
+/**
+ * @canon rule-is-loading-reads-the-nearest-boundary
+ */
+test('a binding that calls use and reads isLoading, with nothing in flight, runs once and is not loading', async () => {
+  const [ready] = signal('ready')
+  let runs = 0
+  const target = document.createElement('div')
+  document.body.append(target)
+  render(
+    () => (
+      <Loading>
+        {() => (
+          <u>
+            {() => {
+              runs++
+              if (runs > 10) return 'loop' // stop a loop, so the failure is a count rather than a hang
+              return `${use(ready())}:${isLoading()}`
+            }}
+          </u>
+        )}
+      </Loading>
+    ),
+    target,
+  )
+  for (let i = 0; i < 5; i++) await tick()
+  expect(target.textContent).toBe('ready:false')
+  expect(runs).toBe(1)
+})

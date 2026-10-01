@@ -195,7 +195,7 @@ The canon was written backwards from the existing tests and documents, and descr
     - [`@rule after-its-first-load-a-boundary-shows-fallback-or-holds`](#rule-after-its-first-load-a-boundary-shows-fallback-or-holds) — When a boundary that has loaded before becomes pending again, it shows `fallback` if one is given, and otherwise keeps showing the subtree it last committed.
     - [`@rule a-boundary-without-placeholders-swaps-nothing`](#rule-a-boundary-without-placeholders-swaps-nothing) — A boundary with neither `initial` nor `fallback` never swaps its subtree out. What does not depend on a pending value stays visible while it waits.
     - [`@rule a-boundary-flushes-ready-commits-together`](#rule-a-boundary-flushes-ready-commits-together) — A boundary holds the commits of its ready bindings until no binding registered with it is suspended, then runs them all in one pass. A binding that reports idle, or unregisters, stops holding the gate.
-    - [`@rule is-loading-reads-the-nearest-boundary`](#rule-is-loading-reads-the-nearest-boundary) — `isLoading()` and `useLoading()` report whether the nearest enclosing boundary has anything in flight: a suspended binding, a queued commit, or a first load or refresh reported by `latest`. `isLoading()` returns the answer at the call site, and `useLoading()` looks the boundary up once and returns an accessor to read later.
+    - [`@rule is-loading-reads-the-nearest-boundary`](#rule-is-loading-reads-the-nearest-boundary) — `isLoading()` and `useLoading()` report whether the nearest enclosing boundary has anything in flight: a suspended binding, or a first load or refresh reported by `latest`. A commit waiting at the gate is not in flight. `isLoading()` returns the answer at the call site, and `useLoading()` looks the boundary up once and returns an accessor to read later.
     - [`@rule a-lookup-from-a-fragment-child-starts-where-the-fragment-was-built`](#rule-a-lookup-from-a-fragment-child-starts-where-the-fragment-was-built) — A lookup of the nearest boundary from inside a function child of a `Fragment`, such as `useLoading()`, starts from the owner the `Fragment` was built in, wherever the array is inserted.
     - [`@rule loading-is-false-outside-any-boundary`](#rule-loading-is-false-outside-any-boundary) — Outside any loading boundary, `isLoading()` returns false, and `useLoading()` returns an accessor that always returns false.
     - [`@rule a-suspension-is-reported-to-the-nearest-boundary`](#rule-a-suspension-is-reported-to-the-nearest-boundary) — A binding or effect that suspends reports to the nearest enclosing `<Loading>` boundary and to no other. It reports again when it settles. One that never suspends never reports.
@@ -1771,9 +1771,11 @@ This follows because which bindings land together is decided by where the bounda
 
 #### @rule is-loading-reads-the-nearest-boundary
 
-> `isLoading()` and `useLoading()` report whether the nearest enclosing boundary has anything in flight: a suspended binding, a queued commit, or a first load or refresh reported by `latest`. `isLoading()` returns the answer at the call site, and `useLoading()` looks the boundary up once and returns an accessor to read later.
+> `isLoading()` and `useLoading()` report whether the nearest enclosing boundary has anything in flight: a suspended binding, or a first load or refresh reported by `latest`. A commit waiting at the gate is not in flight. `isLoading()` returns the answer at the call site, and `useLoading()` looks the boundary up once and returns an accessor to read later.
 
-This follows because a boundary coordinates the bindings placed inside it: the question whether something is loading is asked of the region the reader sits in, which is the nearest enclosing boundary.
+Derives from: [`axiom-nothing-is-hidden-from-the-code-that-uses-it`](#axiom-nothing-is-hidden-from-the-code-that-uses-it)
+
+This follows because a boundary coordinates the bindings placed inside it: the question whether something is loading is asked of the region the reader sits in, which is the nearest enclosing boundary. What it reports is what is there: a value still on its way. A commit waiting at the gate waits either on a suspended binding, which already counts, or on nothing but the end of the current microtask, so counting it would report loading where nothing loads, and would re-run a binding that reads `isLoading()` and calls `use` on its own commit, without end.
 
 #### @rule a-lookup-from-a-fragment-child-starts-where-the-fragment-was-built
 
