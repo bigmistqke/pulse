@@ -1303,7 +1303,7 @@ A run owns what it creates or registers, so a re-run starts clean. A root has no
 
 Derives from: [`axiom-ambient-context-is-set-for-a-call-and-restored-after`](#axiom-ambient-context-is-set-for-a-call-and-restored-after)
 
-This follows because a-lifetime-belongs-to-an-owner says a node lives as long as its owner, so a top-level owner and its dispose must exist, and ambient-context-is-set-for-a-call-and-restored-after makes that root ambient for the body.
+This follows because [`axiom-a-lifetime-belongs-to-an-owner`](#axiom-a-lifetime-belongs-to-an-owner) says a node lives as long as its owner, so a top-level owner and its dispose must exist, and [`axiom-ambient-context-is-set-for-a-call-and-restored-after`](#axiom-ambient-context-is-set-for-a-call-and-restored-after) makes that root ambient for the body.
 
 Inside the body, `getOwner()` is that root.
 
@@ -1319,7 +1319,7 @@ Nesting a `createRoot` does not link the two trees, so nothing walks from the in
 
 > Disposing an owner stops the effects and computeds created under it and runs its cleanups. Signals created under it keep working.
 
-This follows because a-lifetime-belongs-to-an-owner says disposing an owner ends every reactive node beneath it and that plain data has no lifetime: effects and computeds stop, while signals keep working.
+This follows because [`axiom-a-lifetime-belongs-to-an-owner`](#axiom-a-lifetime-belongs-to-an-owner) says disposing an owner ends every reactive node beneath it and that plain data has no lifetime: effects and computeds stop, while signals keep working.
 
 After the dispose, a write to a signal the owner's effects read reaches no effect.
 
@@ -1327,13 +1327,13 @@ After the dispose, a write to a signal the owner's effects read reaches no effec
 
 > Disposing an owner a second time does nothing: its cleanups do not run again, and nothing throws.
 
-This follows because a-lifetime-belongs-to-an-owner says disposing ends everything beneath the owner: after the first dispose nothing remains, so a second one has nothing to end and no cleanup to run.
+This follows because [`axiom-a-lifetime-belongs-to-an-owner`](#axiom-a-lifetime-belongs-to-an-owner) says disposing ends everything beneath the owner: after the first dispose nothing remains, so a second one has nothing to end and no cleanup to run.
 
 ### @rule a-disposed-owner-cannot-be-entered
 
 > `runWithOwner` with an owner that has been disposed throws.
 
-This follows because a-lifetime-belongs-to-an-owner says a node lives as long as its owner: a node created under an owner that has already ended would outlive it, so entering that owner is refused.
+This follows because [`axiom-a-lifetime-belongs-to-an-owner`](#axiom-a-lifetime-belongs-to-an-owner) says a node lives as long as its owner: a node created under an owner that has already ended would outlive it, so entering that owner is refused.
 
 Code run under a disposed owner would register nodes and cleanups that nothing will ever dispose, so entering one is refused.
 
@@ -1343,7 +1343,7 @@ Code run under a disposed owner would register nodes and cleanups that nothing w
 
 Derives from: [`axiom-teardown-unwinds`](#axiom-teardown-unwinds)
 
-This follows because a-lifetime-belongs-to-an-owner says what lives beneath an owner ends inside the owner's lifetime, before its own cleanups, and teardown-unwinds says the children go newest first.
+This follows because [`axiom-a-lifetime-belongs-to-an-owner`](#axiom-a-lifetime-belongs-to-an-owner) says what lives beneath an owner ends inside the owner's lifetime, before its own cleanups, and [`axiom-teardown-unwinds`](#axiom-teardown-unwinds) says the children go newest first.
 
 ### @rule an-effect-is-disposed-with-its-owner
 
@@ -1377,7 +1377,7 @@ This follows because disposing an owner ends everything beneath it, and a discar
 
 Derives from: [`rule-catch-error-runs-its-body-in-a-sub-owner`](#rule-catch-error-runs-its-body-in-a-sub-owner)
 
-This follows because catch-error-runs-its-body-in-a-sub-owner places a sub-owner beneath the calling owner, and a-lifetime-belongs-to-an-owner says disposing an owner ends everything beneath it.
+This follows because [`rule-catch-error-runs-its-body-in-a-sub-owner`](#rule-catch-error-runs-its-body-in-a-sub-owner) places a sub-owner beneath the calling owner, and [`axiom-a-lifetime-belongs-to-an-owner`](#axiom-a-lifetime-belongs-to-an-owner) says disposing an owner ends everything beneath it.
 
 ### @rule catch-error-refuses-a-disposed-owner
 
@@ -1385,7 +1385,7 @@ This follows because catch-error-runs-its-body-in-a-sub-owner places a sub-owner
 
 Derives from: [`rule-a-disposed-owner-cannot-be-entered`](#rule-a-disposed-owner-cannot-be-entered)
 
-This follows because a-lifetime-belongs-to-an-owner says a node lives as long as its owner, and a-disposed-owner-cannot-be-entered refuses an ended owner for that reason: a catchError sub-owner there would outlive it.
+This follows because [`axiom-a-lifetime-belongs-to-an-owner`](#axiom-a-lifetime-belongs-to-an-owner) says a node lives as long as its owner, and [`rule-a-disposed-owner-cannot-be-entered`](#rule-a-disposed-owner-cannot-be-entered) refuses an ended owner for that reason: a catchError sub-owner there would outlive it.
 
 Nodes created there would never be disposed, the same reason [a disposed owner cannot be entered](#rule-a-disposed-owner-cannot-be-entered).
 
@@ -1549,13 +1549,13 @@ Pulse passes context the way a language without first-class continuations can: a
 
 > Outside every root, `getOwner()` returns null, also after a root has run and after it has been disposed.
 
-This follows because ambient-context-is-set-for-a-call-and-restored-after says the current owner is restored when a call ends: a root sets its owner only while its body runs, so afterwards none is ambient.
+This follows because [`axiom-ambient-context-is-set-for-a-call-and-restored-after`](#axiom-ambient-context-is-set-for-a-call-and-restored-after) says the current owner is restored when a call ends: a root sets its owner only while its body runs, so afterwards none is ambient.
 
 ### @rule runwithowner-restores-the-previous-owner
 
 > `runWithOwner` makes its owner ambient for the call, `null` included, and restores the previous owner when the call returns or throws.
 
-This follows because ambient-context-is-set-for-a-call-and-restored-after says ambient context is set for one call and restored however it ends: runWithOwner is that call, returning or throwing.
+This follows because [`axiom-ambient-context-is-set-for-a-call-and-restored-after`](#axiom-ambient-context-is-set-for-a-call-and-restored-after) says ambient context is set for one call and restored however it ends: runWithOwner is that call, returning or throwing.
 
 ### @rule an-action-body-is-speculative-while-pulse-drives-it
 
@@ -1595,7 +1595,7 @@ An ending is an ending however it comes about: completed, failed, discarded or d
 
 > Callbacks registered to run when something closes run in reverse order of registration, at every place where pulse runs them.
 
-This follows because teardown-unwinds says what runs at a close runs in reverse order of registration and that a throw stops nothing: every place that runs close callbacks must do exactly that.
+This follows because [`axiom-teardown-unwinds`](#axiom-teardown-unwinds) says what runs at a close runs in reverse order of registration and that a throw stops nothing: every place that runs close callbacks must do exactly that.
 
 #### @case settle-callbacks-run-newest-first-and-in-isolation
 
@@ -1637,43 +1637,43 @@ A boundary is a real node in the runtime, not a closure captured at creation. `c
 
 > `catchError(fn, handler)` runs `fn` inside a new sub-owner of the current owner and returns what `fn` returns, or `undefined` when `fn` throws and the handler takes the error.
 
-This follows because error-boundaries-are-sub-owners says an error boundary is an owner in the owner tree: catchError must create a sub-owner and run its body inside it for errors there to reach it.
+This follows because [`axiom-error-boundaries-are-sub-owners`](#axiom-error-boundaries-are-sub-owners) says an error boundary is an owner in the owner tree: catchError must create a sub-owner and run its body inside it for errors there to reach it.
 
 ### @rule the-nearest-accepting-boundary-claims-an-error
 
 > An error is claimed by the nearest boundary above its owner that accepts it, and no boundary further up hears of it.
 
-This follows because error-boundaries-are-sub-owners says an error goes to the nearest boundary above its owner that accepts it, and one boundary claiming it is what holds it.
+This follows because [`axiom-error-boundaries-are-sub-owners`](#axiom-error-boundaries-are-sub-owners) says an error goes to the nearest boundary above its owner that accepts it, and one boundary claiming it is what holds it.
 
 ### @rule a-boundary-whose-for-declines-passes-the-error-on
 
 > A boundary whose `for` predicate returns false for an error does not claim it, and the walk continues to the next boundary up.
 
-This follows because error-boundaries-are-sub-owners sends an error to the nearest boundary that accepts it: a boundary that declines is not one that accepts, so the walk does not stop there.
+This follows because [`axiom-error-boundaries-are-sub-owners`](#axiom-error-boundaries-are-sub-owners) sends an error to the nearest boundary that accepts it: a boundary that declines is not one that accepts, so the walk does not stop there.
 
 ### @rule a-boundary-without-for-accepts-every-error
 
 > A `catchError` or `<Errored>` given no `for` predicate accepts every error that reaches it.
 
-This follows because error-boundaries-are-sub-owners lets a boundary decline only through what it accepts, and a boundary given no predicate has nothing to decline by.
+This follows because [`axiom-error-boundaries-are-sub-owners`](#axiom-error-boundaries-are-sub-owners) lets a boundary decline only through what it accepts, and a boundary given no predicate has nothing to decline by.
 
 ### @rule catch-error-and-errored-are-peers-in-one-walk
 
 > `catchError` and `<Errored>` are found by the same walk up the owner chain, so the nearest accepting one claims the error whichever kind it is, and a nearer one of either kind wins over a farther one of the other.
 
-This follows because error-boundaries-are-sub-owners makes every error boundary an owner in the one owner tree: `catchError` and `<Errored>` are both owners in that chain, so one walk finds them both.
+This follows because [`axiom-error-boundaries-are-sub-owners`](#axiom-error-boundaries-are-sub-owners) makes every error boundary an owner in the one owner tree: `catchError` and `<Errored>` are both owners in that chain, so one walk finds them both.
 
 ### @rule the-boundary-is-chosen-again-for-every-error
 
 > The walk runs again for every error, so a node that fails again with a different kind of error moves to the boundary that accepts the new one.
 
-This follows because error-boundaries-are-sub-owners says an error goes to the nearest boundary that accepts it: acceptance depends on the error, so each new error is routed by its own walk.
+This follows because [`axiom-error-boundaries-are-sub-owners`](#axiom-error-boundaries-are-sub-owners) says an error goes to the nearest boundary that accepts it: acceptance depends on the error, so each new error is routed by its own walk.
 
 ### @rule a-handler-that-throws-passes-its-error-outward
 
 > When a `catchError` handler throws, the walk continues past it with the handler's error. When nothing further up takes it, it is thrown to the caller.
 
-This follows because error-boundaries-are-sub-owners says an error goes to the nearest accepting boundary above where it happened: a handler's own throw is a new error at that boundary, so the walk continues above it.
+This follows because [`axiom-error-boundaries-are-sub-owners`](#axiom-error-boundaries-are-sub-owners) says an error goes to the nearest accepting boundary above where it happened: a handler's own throw is a new error at that boundary, so the walk continues above it.
 
 ### @rule use-errored-without-an-errored-reads-the-roots-boundary
 
@@ -1681,13 +1681,13 @@ This follows because error-boundaries-are-sub-owners says an error goes to the n
 
 Derives from: [`rule-every-root-has-an-error-boundary`](#rule-every-root-has-an-error-boundary)
 
-This follows because every-root-has-an-error-boundary puts a boundary on the root owner, and error-boundaries-are-sub-owners makes it the nearest boundary above a reader when no Errored sits between them.
+This follows because [`rule-every-root-has-an-error-boundary`](#rule-every-root-has-an-error-boundary) puts a boundary on the root owner, and [`axiom-error-boundaries-are-sub-owners`](#axiom-error-boundaries-are-sub-owners) makes it the nearest boundary above a reader when no Errored sits between them.
 
 ### @rule a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller
 
 > A failed action reports to the nearest boundary that accepts its error, above the owner it was called under: an `<Errored>`, a root's default boundary, or a `catchError`, whose handler is then called with the error.
 
-This follows because error-boundaries-are-sub-owners sends an error to the nearest accepting boundary above the owner it happened under, and for an action that owner is the one it was called under.
+This follows because [`axiom-error-boundaries-are-sub-owners`](#axiom-error-boundaries-are-sub-owners) sends an error to the nearest accepting boundary above the owner it happened under, and for an action that owner is the one it was called under.
 
 An action called from an event handler runs under the owner that was current when [the handler was bound](#rule-an-event-handler-runs-under-the-owner-it-was-bound-in). A `catchError` handler receives only the error, so an action it caught is retried through its handle.
 
@@ -1697,7 +1697,7 @@ An action called from an event handler runs under the owner that was current whe
 
 Derives from: [`rule-a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller`](#rule-a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller), [`rule-the-boundary-is-chosen-again-for-every-error`](#rule-the-boundary-is-chosen-again-for-every-error)
 
-This follows because an action's error is routed like any error, and the-boundary-is-chosen-again-for-every-error repeats the walk for each new error, so a retry that fails differently is routed by its own walk.
+This follows because an action's error is routed like any error, and [`rule-the-boundary-is-chosen-again-for-every-error`](#rule-the-boundary-is-chosen-again-for-every-error) repeats the walk for each new error, so a retry that fails differently is routed by its own walk.
 
 ### @rule a-throwing-handler-passes-a-failed-action-on-with-the-handlers-error
 
@@ -1705,7 +1705,7 @@ This follows because an action's error is routed like any error, and the-boundar
 
 Derives from: [`rule-a-handler-that-throws-passes-its-error-outward`](#rule-a-handler-that-throws-passes-its-error-outward)
 
-This follows because error-boundaries-are-sub-owners routes a failed action like any error, and a-handler-that-throws-passes-its-error-outward says the handler's own error is what continues the walk.
+This follows because [`axiom-error-boundaries-are-sub-owners`](#axiom-error-boundaries-are-sub-owners) routes a failed action like any error, and [`rule-a-handler-that-throws-passes-its-error-outward`](#rule-a-handler-that-throws-passes-its-error-outward) says the handler's own error is what continues the walk.
 
 This is the same as [a handler that throws for a node's error](#rule-a-handler-that-throws-passes-its-error-outward): the handler's error is what travels on.
 
@@ -1713,7 +1713,7 @@ This is the same as [a handler that throws for a node's error](#rule-a-handler-t
 
 > A thrown error that is not a suspension, from an effect's body, a stage or a commit, goes to the nearest error handler above the effect, on its first run and on every later run that throws.
 
-This follows because error-boundaries-are-sub-owners says an error goes to the nearest accepting boundary above the owner it happened under: an effect's body, stages and commit all run under the effect's owner.
+This follows because [`axiom-error-boundaries-are-sub-owners`](#axiom-error-boundaries-are-sub-owners) says an error goes to the nearest accepting boundary above the owner it happened under: an effect's body, stages and commit all run under the effect's owner.
 
 What happens to an error with no handler above it is stated in [the rule for an error nothing claims](#rule-an-error-nothing-claims-is-thrown-on-a-first-run).
 
@@ -1723,7 +1723,7 @@ What happens to an error with no handler above it is stated in [the rule for an 
 
 Derives from: [`rule-suspension-is-not-a-failure`](#rule-suspension-is-not-a-failure)
 
-This follows because error-boundaries-are-sub-owners sends an error to the nearest error boundary, and suspension-is-not-a-failure keeps Loading to suspensions: a Loading boundary is not an error boundary, so the walk passes it.
+This follows because [`axiom-error-boundaries-are-sub-owners`](#axiom-error-boundaries-are-sub-owners) sends an error to the nearest error boundary, and [`rule-suspension-is-not-a-failure`](#rule-suspension-is-not-a-failure) keeps Loading to suspensions: a Loading boundary is not an error boundary, so the walk passes it.
 
 ### @rule a-hole-that-throws-reports-to-the-nearest-catch-error
 
@@ -1731,13 +1731,13 @@ This follows because error-boundaries-are-sub-owners sends an error to the neare
 
 Derives from: [`axiom-an-error-is-graph-state-not-an-event`](#axiom-an-error-is-graph-state-not-an-event)
 
-This follows because error-boundaries-are-sub-owners sends a reactive child's error to the nearest accepting boundary above its owner, and an-error-is-graph-state-not-an-event keeps it as state rather than a throw at the writer.
+This follows because [`axiom-error-boundaries-are-sub-owners`](#axiom-error-boundaries-are-sub-owners) sends a reactive child's error to the nearest accepting boundary above its owner, and [`axiom-an-error-is-graph-state-not-an-event`](#axiom-an-error-is-graph-state-not-an-event) keeps it as state rather than a throw at the writer.
 
 ### @rule with-no-owner-the-boundary-state-is-inert
 
 > Called with no owner at all, `useErrored()` returns a state that is never active and whose retry does nothing, and `isErrored()` returns `undefined`.
 
-This follows because error-boundaries-are-sub-owners says boundaries are owners in the owner tree: with no owner there is no tree above the reader, so no boundary is found and nothing can be active.
+This follows because [`axiom-error-boundaries-are-sub-owners`](#axiom-error-boundaries-are-sub-owners) says boundaries are owners in the owner tree: with no owner there is no tree above the reader, so no boundary is found and nothing can be active.
 
 ## @axiom catch-error-is-the-callers-try-and-catch
 
@@ -1825,13 +1825,13 @@ A single rejection can re-run the reading binding several times. A boundary that
 
 > `error(x)` returns the error of `x`, or of the nearest failed stage upstream of it, and `null` while the chain is healthy.
 
-This follows because an-error-is-graph-state-not-an-event says a failure is state on the node that failed and propagates along the graph: a node downstream of a failed stage reports that stage's failure.
+This follows because [`axiom-an-error-is-graph-state-not-an-event`](#axiom-an-error-is-graph-state-not-an-event) says a failure is state on the node that failed and propagates along the graph: a node downstream of a failed stage reports that stage's failure.
 
 ### @rule a-recovery-clears-the-error
 
 > When a failed node computes successfully again, its error is cleared and its new value is published.
 
-This follows because an-error-is-graph-state-not-an-event says a failure is state held on the node: once the node computes successfully, that state is a success, so the failure is gone.
+This follows because [`axiom-an-error-is-graph-state-not-an-event`](#axiom-an-error-is-graph-state-not-an-event) says a failure is state held on the node: once the node computes successfully, that state is a success, so the failure is gone.
 
 ### @rule suspension-is-not-a-failure
 
@@ -1839,7 +1839,7 @@ This follows because an-error-is-graph-state-not-an-event says a failure is stat
 
 Derives from: [`axiom-plain-reads-are-honest`](#axiom-plain-reads-are-honest)
 
-This follows because plain-reads-are-honest makes pending and failed separate questions, and an-error-is-graph-state-not-an-event has boundaries show failure state: a pending node holds no failure for any error boundary or handler.
+This follows because [`axiom-plain-reads-are-honest`](#axiom-plain-reads-are-honest) makes pending and failed separate questions, and [`axiom-an-error-is-graph-state-not-an-event`](#axiom-an-error-is-graph-state-not-an-event) has boundaries show failure state: a pending node holds no failure for any error boundary or handler.
 
 ### @rule a-failed-binding-leaves-the-pending-set
 
@@ -1847,7 +1847,7 @@ This follows because plain-reads-are-honest makes pending and failed separate qu
 
 Derives from: [`axiom-plain-reads-are-honest`](#axiom-plain-reads-are-honest)
 
-This follows because plain-reads-are-honest makes pending and failed separate states, and an-error-is-graph-state-not-an-event holds failure as state: a binding that has failed is no longer pending.
+This follows because [`axiom-plain-reads-are-honest`](#axiom-plain-reads-are-honest) makes pending and failed separate states, and [`axiom-an-error-is-graph-state-not-an-event`](#axiom-an-error-is-graph-state-not-an-event) holds failure as state: a binding that has failed is no longer pending.
 
 A failed binding left in the pending set would hold the gate shut forever, stranding every healthy sibling behind it.
 
@@ -1873,7 +1873,7 @@ A staged effect whose pipeline rejects reports idle, and leaves the `<Loading>` 
 
 > An `<Errored>` with a fallback shows it while at least one binding under it is failed, and shows its children again as soon as none is, with no reset. One rejection renders the fallback once, however many times the failing binding re-runs.
 
-This follows because an-error-is-graph-state-not-an-event says a boundary shows failure state and does not count throws: its fallback follows whether anything under it is failed now, not how often something threw.
+This follows because [`axiom-an-error-is-graph-state-not-an-event`](#axiom-an-error-is-graph-state-not-an-event) says a boundary shows failure state and does not count throws: its fallback follows whether anything under it is failed now, not how often something threw.
 
 Two failed bindings show one fallback, which clears only when both have recovered. The boundary is a selection over current state, not a latch.
 
@@ -1881,13 +1881,13 @@ Two failed bindings show one fallback, which clears only when both have recovere
 
 > An `<Errored>` without a fallback keeps its children mounted through an error. Its state is still readable from below.
 
-This follows because an-error-is-graph-state-not-an-event says a boundary shows failure state: with no fallback there is no other view to show it with, so the children stay and the state is read from below.
+This follows because [`axiom-an-error-is-graph-state-not-an-event`](#axiom-an-error-is-graph-state-not-an-event) says a boundary shows failure state: with no fallback there is no other view to show it with, so the children stay and the state is read from below.
 
 ### @rule a-boundary-holds-one-report-per-failed-binding
 
 > An error boundary holds one report per currently failed binding, in the order the bindings first failed. A binding that reports again replaces its own entry, and a binding that recovers or goes away removes it.
 
-This follows because an-error-is-graph-state-not-an-event says a boundary shows state rather than counting throws: it holds the set of bindings failed now, one entry each, removed when a binding recovers or goes away.
+This follows because [`axiom-an-error-is-graph-state-not-an-event`](#axiom-an-error-is-graph-state-not-an-event) says a boundary shows state rather than counting throws: it holds the set of bindings failed now, one entry each, removed when a binding recovers or goes away.
 
 ### @rule an-identical-report-publishes-nothing-new
 
@@ -1895,13 +1895,13 @@ This follows because an-error-is-graph-state-not-an-event says a boundary shows 
 
 Derives from: [`rule-an-equal-value-does-not-propagate`](#rule-an-equal-value-does-not-propagate)
 
-This follows because an-error-is-graph-state-not-an-event says a boundary shows state, not throws, and an-equal-value-does-not-propagate says an unchanged value reaches no consumer: an identical report changes nothing.
+This follows because [`axiom-an-error-is-graph-state-not-an-event`](#axiom-an-error-is-graph-state-not-an-event) says a boundary shows state, not throws, and [`rule-an-equal-value-does-not-propagate`](#rule-an-equal-value-does-not-propagate) says an unchanged value reaches no consumer: an identical report changes nothing.
 
 ### @rule a-boundarys-state-can-be-read-without-swapping
 
 > The nearest boundary's state is readable from below without swapping anything.
 
-This follows because an-error-is-graph-state-not-an-event says a boundary shows failure state: that state is a value in its own right, so it can be read from below without the fallback showing it.
+This follows because [`axiom-an-error-is-graph-state-not-an-event`](#axiom-an-error-is-graph-state-not-an-event) says a boundary shows failure state: that state is a value in its own right, so it can be read from below without the fallback showing it.
 
 #### @case use-errored-returns-accessors-to-the-nearest-boundary
 
@@ -2662,7 +2662,7 @@ Building the children is what starts the work the boundary waits for, so it cann
 
 Derives from: [`axiom-a-lifetime-belongs-to-an-owner`](#axiom-a-lifetime-belongs-to-an-owner)
 
-This follows because a-component-runs-once-and-reactivity-lives-in-its-holes builds content once, so a new first error rebuilds nothing, and a-lifetime-belongs-to-an-owner ends that content with the owner disposed when the boundary recovers.
+This follows because [`axiom-a-component-runs-once-and-reactivity-lives-in-its-holes`](#axiom-a-component-runs-once-and-reactivity-lives-in-its-holes) builds content once, so a new first error rebuilds nothing, and [`axiom-a-lifetime-belongs-to-an-owner`](#axiom-a-lifetime-belongs-to-an-owner) ends that content with the owner disposed when the boundary recovers.
 
 A change in which error is first, while the boundary stays failed, does not rebuild the content.
 
