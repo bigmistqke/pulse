@@ -1833,6 +1833,8 @@ This follows because every choice is stated where the code is written: whether a
 
 `use(x)` suspends the binding and enrols it in its boundary's commit gate. `latest(x)` returns the last resolved value and reports loading and error state to the surrounding boundaries without waiting. `peek(x)` returns the same value and reports nothing. The decision is stated in [ADR 0015](docs/adr/0015-peek-latest-split-ambient-loading-participation.md) and restated, with gate membership kept on the verb, in [ADR 0017](docs/adr/0017-decompose-loading-into-placeholder-gate-and-pending-set.md).
 
+Reach for `use` when the binding wants two things only a throw buys: a value that is never `undefined`, and a commit that lands in one pass with its siblings. Reach for `latest` otherwise, and for `peek` when the read should take part in nothing. A binding that calls `use(x)` and discards the value, only to make a boundary react, uses the wrong verb: boundaries already hear about state through `latest`.
+
 #### @spec use-renders-only-a-current-value
 
 > `use(x)` gives the binding the current value of `x` and nothing else: it returns a value that is there, and throws when there is none to give, whether `x` is pending or failed.
