@@ -27,16 +27,7 @@ For the full comparative analysis against Solid 2.x, see
 
 ## Language
 
-**Signal**:
-Plain reactive data holder. Created via `const [count, setCount] = signal(0)`.
-The getter `count()` reads the current value; the setter `setCount(value)`
-writes a new value, or `setCount(prev => next)` updates from the previous value
-(updater form). A signal stores exactly what you put in it — Promise values
-are NOT auto-resolved; `signal<T>` does not widen to `Awaited<T> | T`. For
-async derivations use `computed(() => fetchX())`. (Eager `track(value)` on
-Promise-valued signals keeps `latest`/`isPending` working without an explicit
-`use` call.)
-_Avoid_: store (different concept), atom.
+Terms are moving into the `## Terms` section of [`CANON.md`](CANON.md#terms), where each one is a definition and its behaviour lives in specs. Moved so far: present, accessor, signal, derivation, computed, pipeline, stage.
 
 **Optimistic**:
 A Signal with a different write discipline, created as
@@ -77,26 +68,7 @@ level — never another action's prediction, so a prediction can always be
 withdrawn by the action that made it.
 _Avoid_: overlay, override, optimistic value (ambiguous with the accessor).
 
-**Accessor**:
-A callable that reads a reactive value — `count()`. Type: `Accessor<T> = () => T`.
-The first element of the `signal()` tuple. Computeds also return Accessors.
-
-**Computed**:
-A derived signal. Defined as a Pipeline of one or more Stages:
-`computed(stage0, stage1, ...)`. A single sync function or single generator is
-just a one-stage pipeline. Async stages publish via **stale-while-revalidate**:
-the prior resolved value stays visible during a refetch, and downstream is
-invalidated only when the new resolved value differs (`Object.is`) from the
-prior one. Observe the refetch window with `isPending(computed)`. Sync stage
-bodies that throw `NotReadyYet` (via `use(pending)`) are absorbed as
-suspension — symmetric with `effect` — and re-run on settle.
-
-**Pipeline**:
-The ordered list of Stages passed to `computed`. The runtime threads a value
-through it: stage N receives stage N-1's (unwrapped) return value. Each stage
-registers with the external pending tracker; `isPending(downstream)` walks
-the chain (pipeline-OR).
-
+**Pipeline re-entry**:
 Conceptually, **pipelines are delimited continuations split at user-chosen
 boundaries**, with three distinct levels of re-entry:
 
@@ -137,12 +109,6 @@ See [Bauer & Pretnar's "Programming with Algebraic Effects and Handlers"](https:
 for the formal theory; [Dan Abramov's "Algebraic Effects for the Rest of Us"](https://overreacted.io/algebraic-effects-for-the-rest-of-us/)
 is the accessible JS-flavored intro (and includes the contrast with React
 Suspense's re-execution model that pulse also inherits).
-
-**Stage**:
-One function in a Pipeline. Independently sync `(value) => ...`,
-`async (value) => ...`, or `function* (value) { ... }`. Every Stage may read
-reactive signals and tracks its own dependency set. Stage N's parameter type is
-inferred from stage N-1's return type.
 
 **from**:
 The generator-side resolver helper, used as `yield* from(x)` inside a

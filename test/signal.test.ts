@@ -55,6 +55,21 @@ test('computed accessor is not writable (type-level)', () => {
 })
 
 /**
+ * @canon spec-a-signals-type-is-the-type-it-stores
+ */
+test('a signal holding a promise is typed as the promise, not the awaited value (compile-time)', () => {
+  // Exact type equality, so a read widened to `Awaited<T> | T` fails to
+  // compile, not just one that is unassignable.
+  type Equal<X, Y> = (<T>() => T extends X ? 1 : 2) extends <T>() => T extends Y ? 1 : 2 ? true : false
+  const [s] = signal(Promise.resolve(42))
+  const read: Equal<ReturnType<typeof s>, Promise<number>> = true
+  void read
+  const [union] = signal<number | Promise<number>>(0)
+  const unionRead: Equal<ReturnType<typeof union>, number | Promise<number>> = true
+  void unionRead
+})
+
+/**
  * @canon spec-a-signal-stores-a-promise-as-it-is
  */
 test('a signal stores a Promise value as-is (no auto-resolve)', async () => {
