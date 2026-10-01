@@ -25,6 +25,8 @@ import {
   signal,
   syncScheduler,
   type Owner,
+  NotReadyYet,
+  use,
 } from '../src/index'
 
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
@@ -236,4 +238,65 @@ test('an optimistic value is an ordinary node whose setter only writes a predict
   expect(duringPrediction).toBe(99)
   expect(underneath).toBe(99)
   expect(view()).toBe(20) // the prediction is gone, the derivation shows through
+})
+
+/**
+ * @canon rule-use-renders-only-a-current-value
+ */
+test('use gives one node\'s current value through each of its states, and throws whenever there is none', async () => {
+  const [version, setVersion] = signal(1)
+  const node = computed(() => {
+    const v = version()
+    if (v === 3) throw new Error('version 3 is broken')
+    return new Promise<number>((resolve) => setTimeout(() => resolve(v * 10), 1))
+  })
+  createRoot(() => catchError(() => effect(() => void node()), () => {}))
+  const outcome = (): unknown => {
+    try {
+      return use(node)
+    } catch (e) {
+      return e instanceof NotReadyYet ? 'not ready' : (e as Error).message
+    }
+  }
+  const seen: unknown[] = [outcome()] // first load
+  for (let i = 0; i < 4; i++) await tick()
+  seen.push(outcome()) // settled
+  setVersion(2)
+  seen.push(outcome()) // refetching, with a stale value it does not return
+  for (let i = 0; i < 4; i++) await tick()
+  seen.push(outcome()) // settled again
+  setVersion(3)
+  for (let i = 0; i < 4; i++) await tick()
+  seen.push(outcome()) // failed
+  expect(seen).toEqual(['not ready', 10, 'not ready', 20, 'version 3 is broken'])
+})
+
+/**
+ * @canon rule-a-write-to-a-derivation-in-an-action-touches-its-work-only-once-committed
+ */
+test('a discarded write leaves a derivation\'s reload, its change detection and its value as they were', async () => {
+  let resolveLoad: (value: string) => void = () => {}
+  const [version, setVersion] = signal(1)
+  const [label, setLabel] = signal(function* () {
+    version()
+    return yield* from(new Promise<string>((resolve) => (resolveLoad = resolve)))
+  })
+  createRoot(() => effect(() => void label()))
+  resolveLoad('first')
+  await tick()
+  setVersion(2) // a reload is now in flight
+  await tick()
+  const handle = action(function* () {
+    setLabel('second')
+    yield* from(Promise.reject(new Error('the save failed')))
+  })
+  await handle.settled
+  // The reload was not abandoned, and it lands with the very value the
+  // discarded write had: had that write moved the derivation's change
+  // detection, this result would be taken for no change and never shown.
+  resolveLoad('second')
+  await tick()
+  expect(handle.error()).toBeInstanceOf(Error)
+  expect(peek(label)).toBe('second')
+  expect(isPending(label)).toBe(false)
 })

@@ -30,7 +30,7 @@ The canon was written backwards from the existing tests and documents, and descr
     - [`@rule use-latest-reports-a-refresh-to-its-boundary`](#rule-use-latest-reports-a-refresh-to-its-boundary) — A `use.latest(x)` read made while a refetch of `x` is pending reports the refresh to the surrounding loading boundary, so `isLoading()` there is true, while the binding keeps showing the last resolved value.
     - [`@rule use-latest-enrols-the-binding-in-its-boundarys-gate`](#rule-use-latest-enrols-the-binding-in-its-boundarys-gate) — A binding that called `use.latest(x)` commits through its boundary's gate: while a sibling binding of the boundary is suspended, its commit waits, even when `use.latest(x)` returned a value.
     - [`@rule the-jsx-runtime-builds-every-element-with-h`](#rule-the-jsx-runtime-builds-every-element-with-h) — The JSX runtime's `jsx`, `jsxs` and `jsxDEV` build every element with `h`. A component receives its props object as it is, `children` included and getters intact. A DOM tag or a `Fragment` receives its children as separate arguments and the rest of its props with their getters intact.
-    - [`@rule an-optimistic-value-is-a-signal-variant`](#rule-an-optimistic-value-is-a-signal-variant) — `optimistic(...stages)` builds the same pipeline `computed` and `signal` build, and returns an ordinary node. Only its setter differs: it writes a prediction in front of the derivation instead of into it.
+    - [`@rule an-optimistic-value-is-a-signal-variant`](#rule-an-optimistic-value-is-a-signal-variant) — `optimistic(...stages)` builds the same pipeline `computed` and `signal` build, and returns an ordinary node. Only its setter differs: it writes a prediction rather than a value.
       - [`@rule an-optimistic-value-is-read-like-any-node`](#rule-an-optimistic-value-is-read-like-any-node) — The accessor of an optimistic value is an ordinary node. Every read verb applies to it, and the pending and failed state of what its recipe reads reaches the read site through it.
       - [`@rule an-optimistic-fallback-seeds-the-tolerant-read`](#rule-an-optimistic-fallback-seeds-the-tolerant-read) — A fallback passed when an optimistic value is created is what `peek` and `latest` return before the source has resolved.
   - [`@axiom pulse-uses-the-languages-meaning-where-it-has-one`](#axiom-pulse-uses-the-languages-meaning-where-it-has-one) — Where JavaScript or the DOM already gives a construct a meaning, pulse gives its own form of that construct the same meaning.
@@ -166,23 +166,24 @@ The canon was written backwards from the existing tests and documents, and descr
     - [`@rule a-signal-stores-a-promise-as-it-is`](#rule-a-signal-stores-a-promise-as-it-is) — A signal holding a promise stores the promise itself, not its result. Writing a new promise re-runs its consumers; the promise settling is not a write.
     - [`@rule from-yields-what-it-is-given`](#rule-from-yields-what-it-is-given) — `yield* from(x)` yields a plain value or a promise as it is, and calls a signal's accessor so the read is tracked. It does not look at pending state.
     - [`@rule a-stage-result-is-settled-before-it-is-passed-on`](#rule-a-stage-result-is-settled-before-it-is-passed-on) — Each value a stage returns or a generator yields is settled before it is used. A plain value or a fulfilled promise is used at once, and a pending promise suspends the stage on that promise.
+    - [`@rule settled-waits-until-every-input-is-fresh`](#rule-settled-waits-until-every-input-is-fresh) — `yield* settled([…])` suspends until every input's promise in flight has settled, then returns all the fresh values together, so a consumer never sees a frame where one input is new and another is stale.
+      - [`@rule settled-does-not-wait-on-an-input-that-has-settled`](#rule-settled-does-not-wait-on-an-input-that-has-settled) — `settled` does not suspend for an input that has already settled, a raw promise included. A run whose inputs have all settled returns at once, so a stage fed an already-settled raw promise converges instead of suspending on every run.
+      - [`@rule settled-throws-a-rejected-input`](#rule-settled-throws-a-rejected-input) — When an input of `settled` has rejected, `yield* settled([…])` throws its reason instead of returning a value for it.
+      - [`@rule settled-waits-again-when-an-input-refetches`](#rule-settled-waits-again-when-an-input-refetches) — When an input of `settled` refetches, the stage waits on that input's promise in flight, found through `promiseOf`, not on the stale value its accessor returns, and publishes the new combination only once it has settled.
   - [`@rule the-read-verb-decides-what-renders-and-what-waits`](#rule-the-read-verb-decides-what-renders-and-what-waits) — The verb a binding reads with decides what the binding renders and whether it waits for its neighbours. Everything else in the loading lifecycle is reported ambiently, from the reads the binding makes.
-    - [`@rule use-returns-a-value-that-is-not-a-promise-unchanged`](#rule-use-returns-a-value-that-is-not-a-promise-unchanged) — `use(x)` returns `x` unchanged when `x` is not a promise. A falsy value is a value: `use(0)`, `use(null)`, `use(undefined)`, `use(false)` and `use('')` return it.
-    - [`@rule use-returns-a-settled-promises-value`](#rule-use-returns-a-settled-promises-value) — `use(promise)` returns the value of a promise it has seen fulfil.
-    - [`@rule use-re-throws-a-settled-promises-rejection`](#rule-use-re-throws-a-settled-promises-rejection) — `use(promise)` throws the rejection reason of a promise it has seen reject.
-    - [`@rule use-throws-not-ready-yet-carrying-a-pending-promise`](#rule-use-throws-not-ready-yet-carrying-a-pending-promise) — `use(promise)` throws `NotReadyYet` while the promise is pending, and the thrown `NotReadyYet` carries that promise in its `promise` field.
-    - [`@rule use-of-an-accessor-reads-what-the-accessor-returns`](#rule-use-of-an-accessor-reads-what-the-accessor-returns) — `use(accessor)` calls the accessor and treats its result as `use` treats a value passed directly.
-    - [`@rule use-of-an-accessor-throws-while-it-is-pending`](#rule-use-of-an-accessor-throws-while-it-is-pending) — `use(accessor)` throws `NotReadyYet` whenever `isPending(accessor)` is true, even when the accessor has a stale value to return. The thrown promise is `promiseOf(accessor)`.
-    - [`@rule use-throws-a-parked-error`](#rule-use-throws-a-parked-error) — `use(x)` on a failed node throws the node's error.
+    - [`@rule use-renders-only-a-current-value`](#rule-use-renders-only-a-current-value) — `use(x)` gives the binding the current value of `x` and nothing else: it returns a value that is there, and throws when there is none to give, whether `x` is pending or failed.
+      - [`@rule use-returns-a-value-that-is-not-a-promise-unchanged`](#rule-use-returns-a-value-that-is-not-a-promise-unchanged) — `use(x)` returns `x` unchanged when `x` is not a promise. A falsy value is a value: `use(0)`, `use(null)`, `use(undefined)`, `use(false)` and `use('')` return it.
+      - [`@rule use-returns-a-settled-promises-value`](#rule-use-returns-a-settled-promises-value) — `use(promise)` returns the value of a promise it has seen fulfil.
+      - [`@rule use-re-throws-a-settled-promises-rejection`](#rule-use-re-throws-a-settled-promises-rejection) — `use(promise)` throws the rejection reason of a promise it has seen reject.
+      - [`@rule use-throws-not-ready-yet-carrying-a-pending-promise`](#rule-use-throws-not-ready-yet-carrying-a-pending-promise) — `use(promise)` throws `NotReadyYet` while the promise is pending, and the thrown `NotReadyYet` carries that promise in its `promise` field.
+      - [`@rule use-of-an-accessor-reads-what-the-accessor-returns`](#rule-use-of-an-accessor-reads-what-the-accessor-returns) — `use(accessor)` calls the accessor and treats its result as `use` treats a value passed directly.
+      - [`@rule use-of-an-accessor-throws-while-it-is-pending`](#rule-use-of-an-accessor-throws-while-it-is-pending) — `use(accessor)` throws `NotReadyYet` whenever `isPending(accessor)` is true, even when the accessor has a stale value to return. The thrown promise is `promiseOf(accessor)`.
+      - [`@rule use-throws-a-parked-error`](#rule-use-throws-a-parked-error) — `use(x)` on a failed node throws the node's error.
     - [`@rule use-suspends-only-the-binding-that-reads-it`](#rule-use-suspends-only-the-binding-that-reads-it) — A binding whose `use(x)` meets a pending value renders nothing new and keeps what it showed, and the rest of the tree renders around it, with or without a `<Loading>` boundary above it. It recovers when the value settles.
     - [`@rule a-suspended-hole-keeps-what-it-showed`](#rule-a-suspended-hole-keeps-what-it-showed) — A reactive child whose run throws `NotReadyYet` commits nothing, so the DOM it showed before stays in place until a later run succeeds. On its first run it has shown nothing, so it stays empty until its source settles.
     - [`@rule latest-reports-loading-without-waiting`](#rule-latest-reports-loading-without-waiting) — `latest(x)` returns the last resolved value, never throws, and never makes the binding wait. While `x` is pending it reports the load to the nearest boundary: a first load drives the boundary's first-load placeholder, and a refresh drives `isLoading()` only.
     - [`@rule a-tolerant-read-reports-a-failure-to-the-boundary`](#rule-a-tolerant-read-reports-a-failure-to-the-boundary) — A binding that reads a failed node through `latest` reports the failure to the nearest accepting error boundary, though nothing throws, and reports its recovery when a later run sees no error.
     - [`@rule peek-reports-nothing`](#rule-peek-reports-nothing) — `peek(x)` returns the last resolved value and reports nothing to any boundary, neither a first load nor a refresh.
-    - [`@rule settled-waits-until-every-input-is-fresh`](#rule-settled-waits-until-every-input-is-fresh) — `yield* settled([…])` suspends until every input's promise in flight has settled, then returns all the fresh values together, so a consumer never sees a frame where one input is new and another is stale.
-    - [`@rule settled-does-not-wait-on-an-input-that-has-settled`](#rule-settled-does-not-wait-on-an-input-that-has-settled) — `settled` does not suspend for an input that has already settled, a raw promise included. A run whose inputs have all settled returns at once, so a stage fed an already-settled raw promise converges instead of suspending on every run.
-    - [`@rule settled-throws-a-rejected-input`](#rule-settled-throws-a-rejected-input) — When an input of `settled` has rejected, `yield* settled([…])` throws its reason instead of returning a value for it.
-    - [`@rule settled-waits-again-when-an-input-refetches`](#rule-settled-waits-again-when-an-input-refetches) — When an input of `settled` refetches, the stage waits on that input's promise in flight, found through `promiseOf`, not on the stale value its accessor returns, and publishes the new combination only once it has settled.
     - [`@rule use-enrols-the-binding-in-its-boundarys-gate`](#rule-use-enrols-the-binding-in-its-boundarys-gate) — A binding that called `use(x)` during its run commits through its boundary's gate. While any binding of the boundary is suspended, its commit waits, and it lands in the same pass as the others.
       - [`@case a-reactive-child-that-called-use-waits-for-the-gate`](#case-a-reactive-child-that-called-use-waits-for-the-gate) — `bindings.ts` `insertChild`.
       - [`@case a-reactive-prop-that-called-use-waits-for-the-gate`](#case-a-reactive-prop-that-called-use-waits-for-the-gate) — `bindings.ts` `bindProp`.
@@ -352,10 +353,11 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule a-prediction-expires-with-its-action`](#rule-a-prediction-expires-with-its-action) — A prediction is dropped when the action that wrote it closes, whether it commits or is discarded. After a discard the prior value shows again.
   - [`@rule after-a-commit-only-what-the-action-wrote-to-the-source-remains`](#rule-after-a-commit-only-what-the-action-wrote-to-the-source-remains) — When the action that wrote a prediction commits, the prediction's reader shows the source's value: the action's own committed write when it wrote the source, and the source's earlier value when it did not. The prior value does not show in between.
   - [`@rule a-prediction-sits-in-front-of-its-derivation`](#rule-a-prediction-sits-in-front-of-its-derivation) — A prediction is a layer in front of the derivation, never written into it. The derivation keeps following its sources underneath, and shows through when the last layer drops. The accessor the optimistic value wraps keeps reading the canonical value throughout.
-  - [`@rule a-write-to-a-derivation-cancels-only-once-committed`](#rule-a-write-to-a-derivation-cancels-only-once-committed) — A write to a derivation made inside an action abandons the derivation's run in progress only when the write reaches committed state, which for a nested action is the outermost commit. A discarded action leaves the run in progress alive, and a recompute queued before the action still runs.
-  - [`@rule at-commit-a-write-replaces-what-the-derivation-published-meanwhile`](#rule-at-commit-a-write-replaces-what-the-derivation-published-meanwhile) — When an action that wrote to a derivation commits, the written value replaces anything the derivation published while the action was open.
-  - [`@rule a-write-to-a-derivation-moves-its-change-detection-only-once-committed`](#rule-a-write-to-a-derivation-moves-its-change-detection-only-once-committed) — A write to a derivation made inside an action updates the record the derivation compares its next result against only when the write reaches committed state. After a discard, the derivation compares against the value it last committed.
-  - [`@rule a-promise-written-inside-an-action-starts-no-recompute`](#rule-a-promise-written-inside-an-action-starts-no-recompute) — Writing a promise to a derivation inside an action does not start a fresh recompute of the derivation.
+  - [`@rule a-write-to-a-derivation-in-an-action-touches-its-work-only-once-committed`](#rule-a-write-to-a-derivation-in-an-action-touches-its-work-only-once-committed) — A write to a derivation made inside an action touches the derivation's own work, its run in progress, the value it compares its next result against, and what it has published, only once the write reaches committed state.
+    - [`@rule a-write-to-a-derivation-cancels-only-once-committed`](#rule-a-write-to-a-derivation-cancels-only-once-committed) — A write to a derivation made inside an action abandons the derivation's run in progress only when the write reaches committed state, which for a nested action is the outermost commit. A discarded action leaves the run in progress alive, and a recompute queued before the action still runs.
+    - [`@rule at-commit-a-write-replaces-what-the-derivation-published-meanwhile`](#rule-at-commit-a-write-replaces-what-the-derivation-published-meanwhile) — When an action that wrote to a derivation commits, the written value replaces anything the derivation published while the action was open.
+    - [`@rule a-write-to-a-derivation-moves-its-change-detection-only-once-committed`](#rule-a-write-to-a-derivation-moves-its-change-detection-only-once-committed) — A write to a derivation made inside an action updates the record the derivation compares its next result against only when the write reaches committed state. After a discard, the derivation compares against the value it last committed.
+    - [`@rule a-promise-written-inside-an-action-starts-no-recompute`](#rule-a-promise-written-inside-an-action-starts-no-recompute) — Writing a promise to a derivation inside an action does not start a fresh recompute of the derivation.
   - [`@rule a-scope-reads-through-its-chain`](#rule-a-scope-reads-through-its-chain) — A read in a scope takes the nearest slot up its chain of scopes, and falls through to committed state when no scope in the chain has one.
     - [`@case a-new-scope-starts-open-and-empty`](#case-a-new-scope-starts-open-and-empty) — `scope.ts` `createScope`.
     - [`@case a-scope-chain-runs-from-the-scope-to-the-root`](#case-a-scope-chain-runs-from-the-scope-to-the-root) — `scope.ts` `chainFor`.
@@ -559,7 +561,7 @@ So what holds for `h` holds for JSX.
 
 #### @rule an-optimistic-value-is-a-signal-variant
 
-> `optimistic(...stages)` builds the same pipeline `computed` and `signal` build, and returns an ordinary node. Only its setter differs: it writes a prediction in front of the derivation instead of into it.
+> `optimistic(...stages)` builds the same pipeline `computed` and `signal` build, and returns an ordinary node. Only its setter differs: it writes a prediction rather than a value.
 
 This follows because a new form is added only where composing the existing ones is awkward: an optimistic value needs a different write, not a different node, so it reuses the pipeline and changes only the setter.
 
@@ -1569,6 +1571,30 @@ This follows because a stage's input is its upstream's value with the colour rem
 
 An async stage suspends on the promise it returns, like any other pending promise.
 
+#### @rule settled-waits-until-every-input-is-fresh
+
+> `yield* settled([…])` suspends until every input's promise in flight has settled, then returns all the fresh values together, so a consumer never sees a frame where one input is new and another is stale.
+
+This follows because the value of an async node is taken out at the read site with a verb, and `settled` is the verb for code that must not combine a fresh value with a stale one: it takes all of its inputs out together, once none of them is stale.
+
+###### @rule settled-does-not-wait-on-an-input-that-has-settled
+
+> `settled` does not suspend for an input that has already settled, a raw promise included. A run whose inputs have all settled returns at once, so a stage fed an already-settled raw promise converges instead of suspending on every run.
+
+This follows because `settled` waits only for an input that is not yet fresh, and a settled input is fresh, so there is nothing to wait for.
+
+###### @rule settled-throws-a-rejected-input
+
+> When an input of `settled` has rejected, `yield* settled([…])` throws its reason instead of returning a value for it.
+
+This follows because `settled` returns only a combination of real values, and a rejected input has a reason in place of a value.
+
+###### @rule settled-waits-again-when-an-input-refetches
+
+> When an input of `settled` refetches, the stage waits on that input's promise in flight, found through `promiseOf`, not on the stale value its accessor returns, and publishes the new combination only once it has settled.
+
+This follows because `settled` returns only a combination in which no input is stale, and during a refetch the value the accessor returns is the stale one.
+
 ### @rule the-read-verb-decides-what-renders-and-what-waits
 
 > The verb a binding reads with decides what the binding renders and whether it waits for its neighbours. Everything else in the loading lifecycle is reported ambiently, from the reads the binding makes.
@@ -1577,25 +1603,33 @@ This follows because every choice is stated where the code is written: whether a
 
 `use(x)` suspends the binding and enrols it in its boundary's commit gate. `latest(x)` returns the last resolved value and reports loading and error state to the surrounding boundaries without waiting. `peek(x)` returns the same value and reports nothing. The decision is stated in [ADR 0015](docs/adr/0015-peek-latest-split-ambient-loading-participation.md) and restated, with gate membership kept on the verb, in [ADR 0017](docs/adr/0017-decompose-loading-into-placeholder-gate-and-pending-set.md).
 
-#### @rule use-returns-a-value-that-is-not-a-promise-unchanged
+#### @rule use-renders-only-a-current-value
+
+> `use(x)` gives the binding the current value of `x` and nothing else: it returns a value that is there, and throws when there is none to give, whether `x` is pending or failed.
+
+Derives from: [`axiom-only-a-generator-can-be-resumed`](#axiom-only-a-generator-can-be-resumed)
+
+This follows because the verb decides what a binding renders, and `use` is the verb for a binding that renders only what is current, rather than a stale value or none: when there is no current value, a plain synchronous body can stop short of rendering only by throwing.
+
+##### @rule use-returns-a-value-that-is-not-a-promise-unchanged
 
 > `use(x)` returns `x` unchanged when `x` is not a promise. A falsy value is a value: `use(0)`, `use(null)`, `use(undefined)`, `use(false)` and `use('')` return it.
 
 This follows because the read verb decides what a binding renders: `use` is the verb that renders only a real value, and a value that is not a promise is already real, so there is nothing to wait for.
 
-#### @rule use-returns-a-settled-promises-value
+##### @rule use-returns-a-settled-promises-value
 
 > `use(promise)` returns the value of a promise it has seen fulfil.
 
 This follows because `use` renders only a real value, and a fulfilled promise holds one, so `use` returns it without waiting.
 
-#### @rule use-re-throws-a-settled-promises-rejection
+##### @rule use-re-throws-a-settled-promises-rejection
 
 > `use(promise)` throws the rejection reason of a promise it has seen reject.
 
 This follows because `use` renders only a real value, and a rejected promise holds a reason in place of a value, so `use` raises the reason instead of returning something it does not have.
 
-#### @rule use-throws-not-ready-yet-carrying-a-pending-promise
+##### @rule use-throws-not-ready-yet-carrying-a-pending-promise
 
 > `use(promise)` throws `NotReadyYet` while the promise is pending, and the thrown `NotReadyYet` carries that promise in its `promise` field.
 
@@ -1603,13 +1637,13 @@ Derives from: [`axiom-only-a-generator-can-be-resumed`](#axiom-only-a-generator-
 
 This follows because `use` renders only a real value and a pending promise has none yet, so the binding waits. `use` is called inside a plain synchronous body, and such a body can stop short of the value only by throwing. The throw carries the promise so that whoever catches it knows what to wait for.
 
-#### @rule use-of-an-accessor-reads-what-the-accessor-returns
+##### @rule use-of-an-accessor-reads-what-the-accessor-returns
 
 > `use(accessor)` calls the accessor and treats its result as `use` treats a value passed directly.
 
 This follows because the read verb applies to what a binding reads, and an accessor is how a binding reads a node: passing the accessor or passing what it returns asks the same question.
 
-#### @rule use-of-an-accessor-throws-while-it-is-pending
+##### @rule use-of-an-accessor-throws-while-it-is-pending
 
 > `use(accessor)` throws `NotReadyYet` whenever `isPending(accessor)` is true, even when the accessor has a stale value to return. The thrown promise is `promiseOf(accessor)`.
 
@@ -1617,7 +1651,7 @@ This follows because each verb gives one answer about what a binding renders: `u
 
 So `use` suspends on every pending episode, the refetches included. A read that wants the stale value during a refetch uses `peek`, `latest` or `use.latest`.
 
-#### @rule use-throws-a-parked-error
+##### @rule use-throws-a-parked-error
 
 > `use(x)` on a failed node throws the node's error.
 
@@ -1643,6 +1677,8 @@ This follows because the verb decides what a binding renders, and a suspended bi
 
 > `latest(x)` returns the last resolved value, never throws, and never makes the binding wait. While `x` is pending it reports the load to the nearest boundary: a first load drives the boundary's first-load placeholder, and a refresh drives `isLoading()` only.
 
+Derives from: [`rule-a-boundary-shows-initial-until-its-first-load`](#rule-a-boundary-shows-initial-until-its-first-load)
+
 This follows because only the verb decides whether a binding waits, and everything else is reported ambiently: `latest` is the verb that does not wait, so the load can only be reported.
 
 #### @rule a-tolerant-read-reports-a-failure-to-the-boundary
@@ -1658,30 +1694,6 @@ This follows because everything in the loading lifecycle other than rendering an
 This follows because the verb decides what a read takes part in: `peek` is the verb defined to take part in nothing, so it reports neither a first load nor a refresh.
 
 What `peek` returns is stated in [the rule on peek's value](#rule-peek-returns-the-last-resolved-value).
-
-#### @rule settled-waits-until-every-input-is-fresh
-
-> `yield* settled([…])` suspends until every input's promise in flight has settled, then returns all the fresh values together, so a consumer never sees a frame where one input is new and another is stale.
-
-This follows because the verb decides what a reader waits for: `settled` is the verb that waits for every input together, so it returns only a combination in which no input is stale.
-
-#### @rule settled-does-not-wait-on-an-input-that-has-settled
-
-> `settled` does not suspend for an input that has already settled, a raw promise included. A run whose inputs have all settled returns at once, so a stage fed an already-settled raw promise converges instead of suspending on every run.
-
-This follows because `settled` waits only for an input that is not yet fresh, and a settled input is fresh, so there is nothing to wait for.
-
-#### @rule settled-throws-a-rejected-input
-
-> When an input of `settled` has rejected, `yield* settled([…])` throws its reason instead of returning a value for it.
-
-This follows because `settled` returns only a combination of real values, and a rejected input has a reason in place of a value.
-
-#### @rule settled-waits-again-when-an-input-refetches
-
-> When an input of `settled` refetches, the stage waits on that input's promise in flight, found through `promiseOf`, not on the stale value its accessor returns, and publishes the new combination only once it has settled.
-
-This follows because `settled` returns only a combination in which no input is stale, and during a refetch the value the accessor returns is the stale one.
 
 #### @rule use-enrols-the-binding-in-its-boundarys-gate
 
@@ -2885,13 +2897,15 @@ An effect pushes values out of the reactive graph: into the DOM, a log, the netw
 
 > A prediction is dropped when the action that wrote it closes, whether it commits or is discarded. After a discard the prior value shows again.
 
+Derives from: [`rule-an-optimistic-value-is-a-signal-variant`](#rule-an-optimistic-value-is-a-signal-variant)
+
 This follows because a speculation's tentative state lasts until it commits or is discarded: a prediction is tentative state of its action, so it goes when the action closes.
 
 ### @rule after-a-commit-only-what-the-action-wrote-to-the-source-remains
 
 > When the action that wrote a prediction commits, the prediction's reader shows the source's value: the action's own committed write when it wrote the source, and the source's earlier value when it did not. The prior value does not show in between.
 
-Derives from: [`rule-a-prediction-expires-with-its-action`](#rule-a-prediction-expires-with-its-action)
+Derives from: [`rule-a-prediction-expires-with-its-action`](#rule-a-prediction-expires-with-its-action), [`rule-an-optimistic-value-is-a-signal-variant`](#rule-an-optimistic-value-is-a-signal-variant)
 
 This follows because a commit makes only the action's writes committed state, and the prediction is not one of them: once it is dropped, what remains is the source as the commit left it.
 
@@ -2899,11 +2913,21 @@ This follows because a commit makes only the action's writes committed state, an
 
 > A prediction is a layer in front of the derivation, never written into it. The derivation keeps following its sources underneath, and shows through when the last layer drops. The accessor the optimistic value wraps keeps reading the canonical value throughout.
 
+Derives from: [`rule-an-optimistic-value-is-a-signal-variant`](#rule-an-optimistic-value-is-a-signal-variant)
+
 This follows because a discard must leave committed state as if the speculation never ran: a prediction written into the derivation would have to be undone, while a layer in front is simply dropped.
 
 Because nothing is overwritten, a source that changes while a prediction is live is not lost, and dropping a layer never has to restore anything. The reasoning, and the two defects that decided it, are in [ADR 0016](docs/adr/0016-optimistic-as-a-signal-variant.md).
 
-### @rule a-write-to-a-derivation-cancels-only-once-committed
+### @rule a-write-to-a-derivation-in-an-action-touches-its-work-only-once-committed
+
+> A write to a derivation made inside an action touches the derivation's own work, its run in progress, the value it compares its next result against, and what it has published, only once the write reaches committed state.
+
+Derives from: [`rule-a-discard-leaves-no-trace`](#rule-a-discard-leaves-no-trace), [`axiom-the-latest-production-wins`](#axiom-the-latest-production-wins)
+
+This follows because a discard leaves no trace, and the derivation's own work lives outside the speculation: a change to it made at the write could not be undone by a discard, so it is made only once the write is committed, and then as the latest production.
+
+#### @rule a-write-to-a-derivation-cancels-only-once-committed
 
 > A write to a derivation made inside an action abandons the derivation's run in progress only when the write reaches committed state, which for a nested action is the outermost commit. A discarded action leaves the run in progress alive, and a recompute queued before the action still runs.
 
@@ -2913,7 +2937,7 @@ This follows because a write abandons the run in progress, and a discard leaves 
 
 Abandoning a run cannot be undone, because it runs cleanups and drops a suspended promise. A nested action's commit reaches only its parent, which is why cancelling waits for the outermost commit.
 
-### @rule at-commit-a-write-replaces-what-the-derivation-published-meanwhile
+#### @rule at-commit-a-write-replaces-what-the-derivation-published-meanwhile
 
 > When an action that wrote to a derivation commits, the written value replaces anything the derivation published while the action was open.
 
@@ -2921,7 +2945,7 @@ Derives from: [`rule-a-write-to-a-derivation-cancels-only-once-committed`](#rule
 
 This follows because the latest production wins, and the write takes effect at commit: a value the derivation published while the action was open came before it.
 
-### @rule a-write-to-a-derivation-moves-its-change-detection-only-once-committed
+#### @rule a-write-to-a-derivation-moves-its-change-detection-only-once-committed
 
 > A write to a derivation made inside an action updates the record the derivation compares its next result against only when the write reaches committed state. After a discard, the derivation compares against the value it last committed.
 
@@ -2929,7 +2953,7 @@ Derives from: [`rule-a-discard-leaves-no-trace`](#rule-a-discard-leaves-no-trace
 
 This follows because a discard leaves no trace, and that record is held outside the speculation: updated at the write, it would keep describing a value the discard removed, and a later result equal to that value would be taken for no change.
 
-### @rule a-promise-written-inside-an-action-starts-no-recompute
+#### @rule a-promise-written-inside-an-action-starts-no-recompute
 
 > Writing a promise to a derivation inside an action does not start a fresh recompute of the derivation.
 
