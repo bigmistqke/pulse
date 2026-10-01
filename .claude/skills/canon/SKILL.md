@@ -5,7 +5,9 @@ description: Work through a project's canon — the CANON.md document of axioms,
 
 # Canon
 
-A canon states how a system behaves now, as a tree of claims that tests cite. It is a way of working, not a document written once and forgotten. It is the guideline for every choice made in the system, internal ones included. An internal choice is where the canon matters most, because nothing outside the system will ever check it. The document is `CANON.md` at the project root. The checker beside this file holds the links between the document and the tests closed.
+A canon states how a system behaves now, and why, as a graph of claims that tests cite. It is a way of working, not a document written once and forgotten. It is the guideline for every choice made in the system, internal ones included. An internal choice is where the canon matters most, because nothing outside the system will ever check it. The document is `CANON.md` at the project root. The checker beside this file holds the links between the document and the tests closed.
+
+Working through a canon is slower than editing code alone, and that is the point. Every choice is written down as a claim, derived from what forces it, and checked by a test, before the code changes. The canon spends effort to find out whether a choice is a good one: it is the reasoning behind the system, written out where it can be read and checked, instead of left implicit in the code.
 
 The canon holds the present tense only. What someone believed on a date belongs in a decision record, where the date is the point. An axiom that stops being true is revised or retired, and the decision record says why.
 
@@ -63,13 +65,23 @@ The heading carries no prose because a renderer slugs the whole heading. Prose a
 
 The stem is written by hand, never generated from the statement. The statement can be reworded freely, because a citation names the stem.
 
+## The canon is a graph of derivations
+
+The canon is a directed acyclic graph. Every claim derives from what forces its answer, and that can be more than one thing: two axioms together, or an axiom together with rules already established. A rule may therefore depend on other rules as well as on axioms. The graph has no cycles: nothing derives, directly or through others, from itself.
+
+Each rule has one primary parent, the axiom it is nested under, and any number of further parents, written as explicit links. Choose as primary the axiom that does most of the forcing. A rule sits under the axiom that forces its answer, not under the axiom whose topic it resembles: being about the same subject is not a derivation.
+
+A rule's body opens with its derivation: one sentence saying which parents it follows from, and why they force this answer and no other. When no such sentence can be written, the rule is a choice the axioms would allow to go another way, and an axiom is missing. That is a design question for whoever owns the design, not a placement problem.
+
+How large an axiom becomes is a consequence of what it forces, never a reason to move a rule. The parts or sections a document is grouped into are navigation for a reader, and play no part in where a rule sits.
+
 ## Nesting is the citation
 
 A unit written inside another unit has cited it. A rule under an axiom's heading derives from that axiom by sitting there, and writes no link saying so.
 
-Position is stronger than a link. A link is a second statement of what the position already says, and two statements can disagree. Position cannot contradict itself. Folding the document shows the derivation tree.
+Position is stronger than a link. A link is a second statement of what the position already says, and two statements can disagree. Position cannot contradict itself. Folding the document shows each unit's primary parent.
 
-An explicit link therefore means one thing: an edge the tree cannot hold. Examples are a second parent, a cross-reference between siblings, or a citation into another document.
+An explicit link therefore means one thing: an edge of the graph that nesting cannot hold. Examples are a further parent, a rule a rule depends on, or a citation into another document.
 
 ## Cases
 
