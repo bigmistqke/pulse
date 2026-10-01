@@ -129,7 +129,7 @@ A nested axiom's body opens with one sentence, "This narrows … to …", saying
 
 A root value earns its place by deciding at least one real choice between two designs that both work. A root broad enough to sit above anything decides nothing. A fact is a root of its own, and the rules that need it name it on their `Derives from:` line.
 
-A decision nests its consequences inside it, the way an axiom nests its rules: a rule that follows from a decision sits under that decision's heading. Headings stop at six levels, so the depth is spent carefully. A root is `##`, a nested axiom or a decision `###`, the rules under it `####`, their exceptions and cases `#####`, and a case under an exception `######`. An axiom or a rule that would sit deeper names its parent on its `Derives from:` line instead.
+A decision nests its consequences inside it, the way an axiom nests its rules: a rule that follows from a decision sits under that decision's heading. A decision is still a claim of its own, and owes a test of its own: the rules beneath it each pin one consequence, and together they need not cover the decision. Headings stop at six levels, so the depth is spent carefully. A root is `##`, a nested axiom or a decision `###`, the rules under it `####`, their exceptions and cases `#####`, and a case under an exception `######`. An axiom or a rule that would sit deeper names its parent on its `Derives from:` line instead.
 
 ## Cases
 

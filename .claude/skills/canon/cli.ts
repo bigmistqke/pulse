@@ -582,12 +582,10 @@ function treeOf(
   const owesTest = (id: string): boolean => {
     const kind = kindOf(id);
     if (kind !== 'rule-' && kind !== 'case-') return false;
-    // A rule holding cases or rules is pinned through them.
+    // A rule holding cases is pinned through them. A rule holding rules is
+    // a decision, which owes a test of its own.
     return !headings.some(
-      h =>
-        h.parent === id &&
-        (kindOf(h.id ?? '') === 'case-' ||
-          (kind === 'rule-' && kindOf(h.id ?? '') === 'rule-'))
+      h => h.parent === id && kindOf(h.id ?? '') === 'case-'
     );
   };
 
@@ -857,13 +855,6 @@ function analyse(write: boolean): Analysis {
    */
   const holdsCases = new Set<string>();
 
-  /**
-   * Rules that hold rules: a decision with its consequences nested inside it.
-   * A decision is pinned through the rules beneath it, the way an axiom is
-   * reached through its rules, so it is never reported untested. A test may
-   * still cite one directly, because a decision can be a claim of its own.
-   */
-  const holdsRules = new Set<string>();
 
   const testsPer = new Map<string, number>();
 
@@ -935,8 +926,6 @@ function analyse(write: boolean): Analysis {
       const parentKind = kindOf(el.parent);
       if (!parentKind) continue;
       if (kindOf(el.id) === 'case-') holdsCases.add(`${rel}#${el.parent}`);
-      if (kindOf(el.id) === 'rule-' && parentKind === 'rule-')
-        holdsRules.add(`${rel}#${el.parent}`);
       units.get(`${rel}#${el.id}`)?.cites.add(parentKind);
       addEdge(edges, `${rel}#${el.id}`, `${rel}#${el.parent}`);
       citedTargets.add(`${rel}#${el.parent}`);
@@ -1405,10 +1394,12 @@ function analyse(write: boolean): Analysis {
   // Only a rule and a case: an axiom is reached through the rules beneath it and
   // a test naming one is already reported. A unit holding cases is pinned by
   // them, which is what an exception always was and what a rule becomes the
-  // moment it is decomposed. A rule holding rules is pinned by them the same way.
+  // moment it is decomposed. A rule holding rules is a decision, and a decision
+  // is a claim of its own: the rules beneath it each pin one consequence, and
+  // together they need not cover it, so it owes a test of its own.
   for (const [key, unit] of units) {
     if (unit.kind !== 'rule-' && unit.kind !== 'case-') continue;
-    if (holdsCases.has(key) || holdsRules.has(key)) continue;
+    if (holdsCases.has(key)) continue;
     if (!testedTargets.has(key)) {
       findings.untested.push(`${key} (a ${noun(unit.kind)})`);
     }
