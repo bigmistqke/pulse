@@ -346,12 +346,13 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule a-bare-or-attr-prop-sets-the-attribute`](#rule-a-bare-or-attr-prop-sets-the-attribute) — A prop with no prefix, or with the `attr:` prefix, sets the attribute of that name, and a function value keeps the attribute following it.
   - [`@rule a-prop-prefix-sets-the-dom-property`](#rule-a-prop-prefix-sets-the-dom-property) — A `prop:name` prop assigns the element's DOM property `name` instead of an attribute, and a function value keeps the property following it.
   - [`@rule a-class-prefix-toggles-one-class-by-truthiness`](#rule-a-class-prefix-toggles-one-class-by-truthiness) — A `class:name` prop adds the class `name` while its value is truthy and removes it while it is falsy, and a function value keeps the class following it.
-  - [`@rule a-style-prefix-sets-one-style-property`](#rule-a-style-prefix-sets-one-style-property) — A `style:name` prop sets the style property `name`. A value of `null`, `undefined` or `false` removes the property, and a function value keeps it following the value.
+  - [`@rule a-style-prefix-sets-one-style-property`](#rule-a-style-prefix-sets-one-style-property) — A `style:name` prop sets the style property `name`, and a function value keeps it following the value.
   - [`@rule a-namespaced-prop-compiles-to-a-string-key`](#rule-a-namespaced-prop-compiles-to-a-string-key) — A namespaced prop name such as `on:click` or `class:active` compiles to a plain string key on the props object, which is what the runtime's prefix dispatch reads.
 - [`@axiom an-item-is-its-reference`](#axiom-an-item-is-its-reference) — An item is its reference: pulse never compares contents to decide that two values are the same item.
   - [`@rule list-rows-are-keyed-by-reference`](#rule-list-rows-are-keyed-by-reference) — A list row belongs to an item by strict reference. The same reference keeps its row, its mapped output and its DOM nodes in the new order. A different reference gets a new row even when its contents are equal.
 - [`@axiom a-missing-value-sets-nothing`](#axiom-a-missing-value-sets-nothing) — A missing value sets nothing: `null`, `undefined` and `false` leave nothing in the DOM.
   - [`@rule an-attribute-is-removed-on-nothing`](#rule-an-attribute-is-removed-on-nothing) — An attribute prop whose value is, or becomes, `null`, `undefined` or `false` removes the attribute instead of setting it to a string.
+  - [`@rule a-style-property-is-removed-on-nothing`](#rule-a-style-property-is-removed-on-nothing) — A `style:name` prop whose value is, or becomes, `null`, `undefined` or `false` removes the style property `name` instead of setting it.
 - [`@axiom the-compiler-touches-only-jsx`](#axiom-the-compiler-touches-only-jsx) — The compiler rewrites only JSX: code without JSX reaches the runtime exactly as written.
   - [`@rule the-vite-plugin-compiles-only-jsx-files`](#rule-the-vite-plugin-compiles-only-jsx-files) — The Vite plugin compiles a `.tsx` or `.jsx` file, ignoring any query string on its id, and leaves every other file alone. It applies the props-to-getters transform, then the automatic JSX runtime imported from `pulse`.
 <!-- toc:end -->
@@ -2613,7 +2614,7 @@ This follows because a prop says how it reaches the DOM: `class:name` says "this
 
 ### @rule a-style-prefix-sets-one-style-property
 
-> A `style:name` prop sets the style property `name`. A value of `null`, `undefined` or `false` removes the property, and a function value keeps it following the value.
+> A `style:name` prop sets the style property `name`, and a function value keeps it following the value.
 
 This follows because a prop says how it reaches the DOM: `style:name` says "this one style property", so only that property is set.
 
@@ -2647,6 +2648,12 @@ No design document states this. It was accepted as a principle when the canon wa
 > An attribute prop whose value is, or becomes, `null`, `undefined` or `false` removes the attribute instead of setting it to a string.
 
 This follows because a missing value sets nothing: an attribute whose value is missing is removed, not set to a string.
+
+### @rule a-style-property-is-removed-on-nothing
+
+> A `style:name` prop whose value is, or becomes, `null`, `undefined` or `false` removes the style property `name` instead of setting it.
+
+Also derives from [`rule-a-style-prefix-sets-one-style-property`](#rule-a-style-prefix-sets-one-style-property). This follows because a missing value sets nothing: a style property whose value is missing is removed, not set to a string.
 
 ## @axiom the-compiler-touches-only-jsx
 

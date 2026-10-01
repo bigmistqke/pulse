@@ -69,7 +69,7 @@ test('style:name is reactive with a function value', () => {
 })
 
 /**
- * @canon rule-a-style-prefix-sets-one-style-property
+ * @canon rule-a-style-property-is-removed-on-nothing
  */
 test('style:name removes the property on nullish/false value', () => {
   createRoot(() => {
