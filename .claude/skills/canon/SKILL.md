@@ -1,17 +1,42 @@
 ---
 name: canon
-description: Work through a project's canon — the CANON.md document of axioms, facts, specs and exceptions that tests cite and a checker holds closed. Use before changing an area of the code (read the theory that covers it first), when adding or changing behaviour (place it against the specs it resembles, then derive it down from an axiom before writing code), when fixing a bug (climb up to the missing spec, axiom or fact before touching code), when writing a test that pins a claim, when editing CANON.md, or when running the canon checker.
+description: The methodology that governs all work on a project with a CANON.md — the document of axioms, facts, specs and exceptions that is the project itself, which the code and tests express and a checker holds closed. Load at the start of every session and before any work in such a project. Use it for every choice made in the system, internal ones included; before changing an area of the code (read the theory that covers it first); when adding or changing behaviour (place it against the specs it resembles, then derive it from an axiom before writing code); when fixing a bug (climb to the missing spec, axiom or fact before touching code); when writing a test; when editing CANON.md; before ending a session (write every decision back into the canon); and when running the canon checker.
 ---
 
 # Canon
 
-`CANON.md` states what the system does and why, as claims that tests cite. The canon is the project. The code and the tests express it.
+This protocol governs all work on the project. Follow it in every session, for every change and every choice.
 
-Every session starts without knowing why the code is the way it is. Peter Naur calls that knowledge the theory of a program, and says the program text alone cannot carry it ([Programming as Theory Building](https://gwern.net/doc/cs/algorithm/1985-naur.pdf)). The canon writes the theory down, so each session rebuilds it from the canon instead of guessing it from the code.
+`CANON.md` is the project. It states what the system does and why, as claims that tests cite. The code and the tests express the canon and follow from it. The canon is not documentation of the code.
 
-The canon is a tool for judging choices. It does not make them. The checker beside this file checks links between claims and tests, never judgement.
+Every session starts without knowing why the code is the way it is. Peter Naur calls that knowledge the theory of a program, and says the program text alone cannot carry it ([Programming as Theory Building](https://gwern.net/doc/cs/algorithm/1985-naur.pdf)). The canon holds the theory. Each session rebuilds the theory from the canon, works under it, and writes back what it decided. The canon is how the project remembers across sessions.
 
-## 1. Kinds
+Documentation rots because nothing checks it. The canon cannot rot without the checker failing: every claim has a test, and the checker reports every claim, test or link that goes stale.
+
+## 0. Authority
+
+1. The canon outranks every other source of intent: the code, the tests, the README, glossaries, decision records, memory, and your own assumptions.
+2. Only the owner of the design decides values. You propose, and the owner judges. Ask whenever the canon does not decide a question.
+3. The owner changes the project through the canon too. When the owner asks for something the canon forbids, do not carry it out. Name the conflict and the units involved.
+4. If the owner confirms, change the canon first. Then change the tests, and then the code.
+5. When the code contradicts the canon, the code has a defect. Follow section 5.
+6. When a test asserts something other than the spec it cites, the spec decides. Correct the test, unless the owner rules that the spec is wrong.
+7. When two units contradict each other, the canon is wrong. Ask the owner which claim holds, and correct the canon.
+8. When the canon is wrong, correct the canon first. Then correct the tests, and then the code.
+9. No change enters the project unless the canon accounts for it.
+
+## 1. The session
+
+1. At the start, read the root axioms and the facts. Then read every unit that covers the area of your task.
+2. Use the canon for every choice you make in the system, internal ones included. An internal choice needs the canon most, because nothing outside the system checks it.
+3. When you face a choice, find the units that decide it. Choose the option they force, and cite them in your reasoning.
+4. When the units do not decide a choice, the canon lacks a value or a spec. Ask the owner of the design, then write the answer as a unit.
+5. Before the session ends, write every decision you made into the canon. The next session knows only what the canon holds.
+6. Write each unit for a reader who has none of your context. That reader is the next session.
+7. Name in every commit the units the commit serves or changes. Follow section 7.
+8. End the session with `pnpm canon check` clean and `pnpm canon log` clean. Run `pnpm canon lint` on the text you wrote, and fix its findings.
+
+## 2. Kinds
 
 <!-- kinds:begin — generated by `canon generate`; edits are overwritten -->
 | tag | what it is | cites |
@@ -30,7 +55,7 @@ Tell the kinds apart with two questions:
 
 Axioms state how the world should be. Facts state how the platform is. A spec, together with the facts it cites, must make its axiom hold. The split follows [Zave and Jackson](http://www.pamelazave.com/4dc.pdf).
 
-## 2. Before you change code
+## 3. Before you change code
 
 1. Read the units that cover the area you will change.
 2. Answer three questions from them:
@@ -41,7 +66,7 @@ Axioms state how the world should be. Facts state how the platform is. A spec, t
 4. If an answer needs a judgement the canon cannot give, ask the owner of the design.
 5. Do all this before you edit code.
 
-## 3. Adding or changing behaviour
+## 4. Adding or changing behaviour
 
 1. Name the existing specs that the new behaviour most resembles.
 2. Say whether the change extends or refines them.
@@ -54,7 +79,7 @@ Axioms state how the world should be. Facts state how the platform is. A spec, t
 
 Tests cannot tell an extension from a patch, because many implementations pass the same tests. Only the canon can.
 
-## 4. Fixing a defect
+## 5. Fixing a defect
 
 1. Do not change the code first.
 2. Write the test that the defect breaks, and see it fail.
@@ -63,14 +88,27 @@ Tests cannot tell an extension from a patch, because many implementations pass t
 5. Write what is missing from the top down: axiom or fact, then spec, then test.
 6. Fix the code.
 
-## 5. Units
+## 6. Exploring
+
+1. Explore outside the implementation: in a prototype, a scratch directory or a separate branch.
+2. An experiment makes no claim and binds nothing. The canon does not govern it.
+3. A result enters the project only through the canon: first the units, then the tests, then the code.
+4. Once its result is in the canon, remove the experiment or keep it only as a record of the exploration.
+
+## 7. Commits
+
+1. Name in the message of every commit that changes the implementation the ids of the units it serves or changes.
+2. Name units by id, such as `spec-a-write-is-visible-before-its-flush`. A commit that retires a unit names it too.
+3. `pnpm canon log` lists the commits that change the implementation without naming a unit. With no range, it checks the commits not yet pushed.
+
+## 8. Units
 
 1. A unit is a heading with the text `@<kind> <stem>` and nothing after the stem. Its id is `<kind>-<stem>`. Text after the stem breaks the anchor (`unreachable`).
 2. Write the stem by hand. You may reword the statement at any time, because citations name the stem.
 3. Open the body with the statement as a blockquote.
 4. Make every claim about the system a unit. Body text explains its unit's claim and adds no new claim.
 5. After a change, read each sentence you added to unit bodies and code comments. A sentence that states something the system does needs a unit.
-6. Write in the present tense. History belongs in a decision record under `docs/adr/`.
+6. Write in the present tense. History belongs in a decision record.
 
 ```md
 ### @spec a-write-is-visible-before-its-flush
@@ -80,7 +118,7 @@ Tests cannot tell an extension from a patch, because many implementations pass t
 This follows because …
 ```
 
-## 6. Derivation
+## 9. Derivation
 
 1. The canon is a directed acyclic graph. A derivation must not depend on itself (`cycle`).
 2. Nesting is a citation. A unit inside another unit derives from it. Write no link to the unit you sit in.
@@ -102,7 +140,7 @@ Derives from: [`spec-a-style-prefix-sets-one-style-property`](#spec-a-style-pref
 This follows because a missing value sets nothing: …
 ```
 
-## 7. Nesting
+## 10. Nesting
 
 1. A nested axiom narrows its parent. Open its body with "This narrows … to …".
 2. If a nested axiom can only say "this follows because", its parent forces it. Make it a spec.
@@ -113,7 +151,7 @@ This follows because a missing value sets nothing: …
 7. Use these heading levels: a root `##`, a nested axiom `###`, a spec `####`, its refinements and exceptions `#####`, one level more `######`.
 8. A unit that would sit deeper than six levels names its parent on its `Derives from:` line instead.
 
-## 8. Facts and exceptions
+## 11. Facts and exceptions
 
 1. A fact is a root and holds no units.
 2. A spec or exception names each fact it relies on, on its `Derives from:` line.
@@ -122,14 +160,14 @@ This follows because a missing value sets nothing: …
 5. An exception lasts as long as its fact. Pin an exception that a library defect forces with `test.fails`. Remove the exception when that test starts failing.
 6. A spec that keeps collecting exceptions asks more than the platform gives. Restate the spec.
 
-## 9. Places in the code
+## 12. Places in the code
 
 1. A spec that answers for one place opens its statement with the place: `` `queue.ts` `drain`. `` The checker confirms the place exists (`stale-site`).
 2. Where two modules share a name, give a path that ends in the file, such as `dom/error.ts`.
 3. A place that answers for several specs gets one spec under each. The stem states the claim, not the place.
 4. Run `tree --suspect`. A spec with many tests and no nested specs probably states several claims. Split it into nested specs.
 
-## 10. Tests
+## 13. Tests
 
 1. Cite the narrowest spec or exception that the assertion could contradict.
 2. Cite with a `@canon <id>` tag in the JSDoc of a leaf test. A `describe` block never cites.
@@ -145,18 +183,18 @@ This follows because a missing value sets nothing: …
 test('a throwing listener does not stop the next one', () => {
 ```
 
-## 11. Implementation
+## 14. Implementation
 
 1. Source code carries no citations.
 2. Open each source file with a block comment: what the file is, how its parts fit, and which axiom it serves.
 3. Do not add links from code to the canon. Per-symbol tags were tried and dropped as too messy, and only a test credits a unit.
 
-## 12. Structure
+## 15. Structure
 
 1. Change the canon's structure only for a defect that points to it, or for a claim that no unit states.
 2. Never reorganise the canon for its own sake. Nothing pushes back on a reorganisation, because no test cites an axiom or a fact.
 
-## 13. Scope
+## 16. Scope
 
 Declare the scope in the `canon` field of `package.json`:
 
@@ -179,7 +217,7 @@ Declare the scope in the `canon` field of `package.json`:
 - `references`: prose documents whose links must resolve but credit no unit. Default none.
 - `command`: how the project runs the checker, for the advice in findings.
 
-## 14. Commands
+## 17. Commands
 
 ```bash
 pnpm canon check              # every finding; exits 1 on a finding
@@ -188,7 +226,10 @@ pnpm canon tree -v            # the derivation tree, with test counts and statem
 pnpm canon tree --gaps        # only the branches that lead to an untested claim
 pnpm canon tree --suspect 3   # specs with no nested specs and three or more tests
 pnpm canon lint               # language checks on the prose of the documents
+pnpm canon log                # commits that change the implementation without naming a unit
 ```
+
+The examples use `pnpm canon`, the command this project declares in its scope.
 
 1. `pnpm canon --help` lists every finding `check` reports.
 2. `check` fails when a generated region is stale. Run `generate`. The generated regions are each document's index and the kinds table in this file.

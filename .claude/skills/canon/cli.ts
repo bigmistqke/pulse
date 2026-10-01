@@ -14,6 +14,7 @@ import {
   statSync,
   writeFileSync
 } from 'node:fs';
+import { execFileSync } from 'node:child_process';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
@@ -1418,6 +1419,8 @@ Usage:
   ${COMMAND} generate              rewrite the generated regions
   ${COMMAND} tree [options]        print the derivation tree with test counts
   ${COMMAND} lint [file …]         check the language of the documents' prose; exit 1 on a finding
+  ${COMMAND} log [range]           list commits that change the implementation without naming a unit;
+                                   the range defaults to the commits not yet pushed
 
 Options for tree:
   --gaps          only the branches leading to a claim no test pins
@@ -1467,6 +1470,74 @@ function check(): void {
 
   console.log(total === 0 ? 'clean' : `${total} finding(s)`);
   process.exit(total === 0 ? 0 : 1);
+}
+
+/**
+ * The source trees that hold the implementation: every declared source that is
+ * not the suite directory or inside it.
+ */
+const IMPLEMENTATION = SOURCES.filter(
+  s => s !== TESTS && !s.startsWith(`${TESTS}/`)
+);
+
+/** A unit id as it appears in prose: a kind prefix, then a hyphenated stem. */
+const UNIT_ID = /\b(?:axiom|fact|spec|exception)-[a-z0-9]+(?:-[a-z0-9]+)*/g;
+
+const git = (...args: string[]): string =>
+  execFileSync('git', args, { cwd: ROOT, encoding: 'utf8' }).trim();
+
+/**
+ * Commits in `range` that change the implementation without naming a unit.
+ *
+ * The canon governs every change, but nothing links code back to it: per-symbol
+ * tags were tried and dropped. The commit is where a change is made, so the
+ * commit names the units the change serves or changes. A commit that touches
+ * the implementation and names none is outside the canon, and this lists it.
+ *
+ * Any id-shaped name counts, whether or not the unit still exists: a commit
+ * that retires a unit names a unit that is gone afterwards.
+ *
+ * With no range, the commits not yet pushed to the upstream branch, or the last
+ * commit when there is no upstream: what a session has made.
+ */
+function log(range: string | undefined): void {
+  let span = range;
+  if (span === undefined) {
+    try {
+      git('rev-parse', '--abbrev-ref', '@{upstream}');
+      span = '@{upstream}..HEAD';
+    } catch {
+      span = 'HEAD~1..HEAD';
+    }
+  }
+  const commits = git('rev-list', '--reverse', '--no-merges', span)
+    .split('\n')
+    .filter(Boolean);
+
+  const unnamed: string[] = [];
+  for (const sha of commits) {
+    const touched = git('diff-tree', '--no-commit-id', '--name-only', '-r', sha)
+      .split('\n')
+      .filter(f => IMPLEMENTATION.some(d => f === d || f.startsWith(`${d}/`)));
+    if (touched.length === 0) continue;
+    if (UNIT_ID.test(git('log', '-1', '--format=%B', sha))) {
+      UNIT_ID.lastIndex = 0;
+      continue;
+    }
+    UNIT_ID.lastIndex = 0;
+    unnamed.push(
+      `${git('log', '-1', '--format=%h %s', sha)}\n    changes ${touched.join(', ')}`
+    );
+  }
+
+  console.log(
+    `canon log — ${commits.length} commit(s) in ${span}, implementation in ${IMPLEMENTATION.join(', ')}\n`
+  );
+  console.log(
+    `unnamed — commit changing the implementation without naming a unit: ${unnamed.length}`
+  );
+  for (const entry of unnamed) console.log(`  · ${entry}`);
+  process.exit(unnamed.length === 0 ? 0 : 1);
 }
 
 function generate(): void {
@@ -1531,6 +1602,14 @@ async function main(argv: string[]): Promise<void> {
     // other command depends on nothing outside Node.
     const { lint } = await import('./lint.ts');
     process.exit((await lint(rest)) === 0 ? 0 : 1);
+  }
+  if (command === 'log') {
+    if (rest.length > 1) {
+      console.error(`canon: log takes at most one range\n\n${HELP}`);
+      process.exit(2);
+    }
+    log(rest[0]);
+    return;
   }
   if (rest.length > 0) {
     console.error(`canon: unexpected argument "${rest[0]}"\n\n${HELP}`);
