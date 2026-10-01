@@ -1,6 +1,6 @@
 ---
 name: canon
-description: The methodology that governs all work on a project with a CANON.md — the document of axioms, facts, specs and exceptions that is the project itself, which the code and tests express and a checker holds closed. Load at the start of every session and before any work in such a project. Use it for every choice made in the system, internal ones included; before changing an area of the code (read the theory that covers it first); when adding or changing behaviour (place it against the specs it resembles, then derive it from an axiom before writing code); when fixing a bug (climb to the missing spec, axiom or fact before touching code); when writing a test; when editing CANON.md; before ending a session (write every decision back into the canon); and when running the canon checker.
+description: The methodology that governs all work on a project with a CANON.md — the document of axioms, facts, specs and exceptions that is the project itself, which the code and tests express and a checker holds closed. Load at the start of every session and before any work in such a project. Use it for every choice made in the system, internal ones included; before changing an area of the code (read the theory that covers it first); when adding or changing behaviour (place it against the specs it resembles, then derive it from an axiom before writing code); when fixing a bug (climb to the missing spec, axiom or fact before touching code); when writing a test; when editing CANON.md; before ending a session (write every decision back into the canon); and when running the canon checker. For a design question the canon does not decide, use the grill-with-canon skill.
 ---
 
 # Canon
@@ -31,7 +31,7 @@ Documentation rots because nothing checks it. The canon cannot rot without the c
 1. At the start, read the root axioms and the facts. Then read every unit that covers the area of your task.
 2. Use the canon for every choice you make in the system, internal ones included. An internal choice needs the canon most, because nothing outside the system checks it.
 3. When you face a choice, find the units that decide it. Choose the option they force, and cite them in your reasoning.
-4. When the units do not decide a choice, the canon lacks a value or a spec. Ask the owner of the design, then write the answer as a unit.
+4. When the units do not decide a choice, the canon lacks a value or a spec. Settle it with the owner of the design through the grill-with-canon skill, which writes the answer into the canon.
 5. Before the session ends, write every decision you made into the canon. The next session knows only what the canon holds.
 6. Write each unit for a reader who has none of your context. That reader is the next session.
 7. Name in every commit the units the commit serves or changes. Follow section 7.
@@ -172,9 +172,7 @@ This follows because a missing value sets nothing: …
 4. Define only words specific to the project. General programming concepts get no term.
 5. Link a term from the units whose meaning depends on it. A term that no unit links fails the check (`dead`).
 6. Write a term the moment a word's meaning is settled. Do not collect terms for later.
-7. When the owner or a unit uses a word against its term, name the conflict at once.
-8. When a word is vague or carries two meanings, propose one precise term, and ask the owner of the design.
-9. Test a term against concrete scenarios that probe its edges. Check that the code agrees with it.
+7. To settle a vague or contested word, use the grill-with-canon skill.
 
 ```md
 ### @term present
