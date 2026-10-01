@@ -390,7 +390,7 @@ test('a stale error source from a swallowed, unboundaried effect does not leak i
   flush()
   expect(poisonedRuns).toBe(2)
 
-  // Now something entirely unrelated: a plain effect, under a real <Errored> boundary,
+  // Now something entirely unrelated: a binding, under a real <Errored> boundary,
   // that throws a plain error with no computed involved at all — its true `source`
   // is `null`.
   let throwIt = true
@@ -401,12 +401,12 @@ test('a stale error source from a swallowed, unboundaried effect does not leak i
           <button on:click={reset}>{(error as Error).message}</button>
         )}
       >
-        {() => {
-          effect(() => {
+        <p>
+          {() => {
             if (throwIt) throw new Error('plain')
-          })
-          return <p>ok</p>
-        }}
+            return 'ok'
+          }}
+        </p>
       </Errored>
     ),
     target,
@@ -433,13 +433,13 @@ test('a stale error source from a swallowed, unboundaried effect does not leak i
  * follows a throw). This test forces that distinction: the effect below reads a
  * failing computed inside its OWN `try/catch`, so the source gets marked but the
  * effect's OWN catch swallows it — the effect body then returns NORMALLY, without
- * throwing. A clear-in-catch fix never runs at all here, since `singleArgEffect`
+ * throwing. A clear-in-catch fix never runs at all here, since the effect
  * never sees a throw to catch, and the marked source would stay parked in module
  * state. Clear-on-entry does not depend on a throw happening at all.
  *
  * @canon spec-a-report-names-only-a-source-its-own-binding-read
  */
-test('a source marked and swallowed by the effect body itself (no throw reaches singleArgEffect) does not leak into an unrelated <Errored> reset', async () => {
+test('a source marked and swallowed by the effect body itself (no throw reaches the effect itself) does not leak into an unrelated <Errored> reset', async () => {
   const target = document.createElement('section')
   document.body.append(target)
 
@@ -452,7 +452,7 @@ test('a source marked and swallowed by the effect body itself (no throw reaches 
   // No <Errored> boundary anywhere near this effect. It reads `poisoned` inside its
   // OWN try/catch: `use(poisoned)` marks `poisoned` as the error source and
   // throws, the effect's own catch swallows that throw, and the effect body
-  // returns normally — `singleArgEffect`'s body never sees a throw at all.
+  // returns normally — the effect itself never sees a throw at all.
   effect(() => {
     try {
       use(poisoned)
@@ -465,7 +465,7 @@ test('a source marked and swallowed by the effect body itself (no throw reaches 
   flush()
   expect(poisonedRuns).toBe(1)
 
-  // Now something entirely unrelated: a plain effect, under a real <Errored>
+  // Now something entirely unrelated: a binding, under a real <Errored>
   // boundary, that throws a plain error with no computed involved at all — its
   // true `source` is `null`.
   let throwIt = true
@@ -476,12 +476,12 @@ test('a source marked and swallowed by the effect body itself (no throw reaches 
           <button on:click={reset}>{(error as Error).message}</button>
         )}
       >
-        {() => {
-          effect(() => {
+        <p>
+          {() => {
             if (throwIt) throw new Error('plain')
-          })
-          return <p>ok</p>
-        }}
+            return 'ok'
+          }}
+        </p>
       </Errored>
     ),
     target,
@@ -2048,4 +2048,36 @@ test('a function child of <Errored> held in a variable is a binding of that boun
   // Claimed by the boundary, not logged as unclaimed by the root.
   expect(errors).not.toHaveBeenCalled()
   errors.mockRestore()
+})
+
+/**
+ * An effect renders nothing, so an <Errored> between it and a catchError is
+ * not where its failure goes: the handler is.
+ *
+ * @canon spec-a-real-error-in-an-effect-goes-to-the-nearest-handler
+ */
+test('an effect\'s failure passes an <Errored> by and reaches the catchError around it', () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+  const caught: unknown[] = []
+  render(
+    () =>
+      catchError(
+        () => (
+          <Errored fallback={(error) => <p>boundary: {(error as Error).message}</p>}>
+            {() => {
+              effect(() => {
+                throw new Error('from the effect')
+              })
+              return <p>content</p>
+            }}
+          </Errored>
+        ),
+        (error) => caught.push(error),
+      ) as Node,
+    target,
+  )
+  flush()
+  expect((caught[0] as Error)?.message).toBe('from the effect')
+  expect(target.textContent).toBe('content')
 })

@@ -214,9 +214,9 @@ test('a reactive prop that fails under Loading does not pin the boundary', async
 })
 
 /**
- * @canon spec-a-staged-effect-leaves-the-pending-set-when-it-fails
+ * @canon spec-an-effect-is-not-coordinated-by-a-loading-boundary
  */
-test('a staged effect whose pipeline rejects under Loading does not pin the boundary', async () => {
+test('a suspended and then failing staged effect never makes its Loading pending, and its failure reaches catchError', async () => {
   const target = document.createElement('section')
   document.body.append(target)
   const source = computed(() => Promise.reject(new Error('boom')))
@@ -241,8 +241,9 @@ test('a staged effect whose pipeline rejects under Loading does not pin the boun
   )
 
   flush()
-  expect(pending()).toBe(true)
-  expect(target.textContent).toBe('loading')
+  // The effect is suspended, but the boundary does not wait on it.
+  expect(pending()).toBe(false)
+  expect(target.textContent).toBe('ok')
 
   await tick()
   flush()

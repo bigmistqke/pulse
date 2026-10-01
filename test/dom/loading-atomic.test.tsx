@@ -384,7 +384,7 @@ test('use(plainSignal) inside <Loading> defers commit when sibling is pending', 
 /**
  * @canon spec-use-enrols-the-binding-in-its-boundarys-gate
  */
-test('a reactive child, a reactive prop and a staged effect that called use all wait for a suspended sibling and land with it', async () => {
+test('a reactive child and a reactive prop that called use both wait for a suspended sibling and land with it', async () => {
   const target = document.createElement('section')
   document.body.append(target)
   const [n, setN] = signal(0)
@@ -394,23 +394,13 @@ test('a reactive child, a reactive prop and a staged effect that called use all 
   // writes, so counting batches tells whether writes landed in one pass.
   let mutationBatches = 0
   const observer = new MutationObserver(() => mutationBatches++)
-  // Each effect commit records the sibling's text and how many batches had
-  // been delivered when it ran.
-  const effectCommits: Array<{ n: number; p: string; batches: number }> = []
 
   const dispose = render(
     () => (
       <Loading>
         {() => {
-          // None of these three bindings suspends itself: each reads a ready
-          // signal through use, and only the sibling .p suspends.
-          effect([() => use(n)], (value) => {
-            effectCommits.push({
-              n: value as number,
-              p: target.querySelector('.p')?.textContent ?? '',
-              batches: mutationBatches,
-            })
-          })
+          // Neither binding suspends itself: each reads a ready signal through
+          // use, and only the sibling .p suspends.
           return (
             <div>
               <span class="n" class:odd={() => use(n) % 2 === 1}>
@@ -430,9 +420,8 @@ test('a reactive child, a reactive prop and a staged effect that called use all 
   flush()
   expect(target.querySelector('.n')!.textContent).toBe('0')
   expect(target.querySelector('.p')!.textContent).toBe('first')
-  const committedBefore = effectCommits.length
 
-  // The sibling suspends again, then the signal the three bindings read changes.
+  // The sibling suspends again, then the signal both bindings read changes.
   let resolve2!: (v: string) => void
   setSrcP(new Promise<string>((r) => (resolve2 = r)))
   await new Promise((r) => queueMicrotask(() => r(undefined)))
@@ -440,10 +429,9 @@ test('a reactive child, a reactive prop and a staged effect that called use all 
   await new Promise((r) => queueMicrotask(() => r(undefined)))
   flush()
 
-  // All three waited: the text, the class and the effect are unchanged.
+  // Both waited: the text and the class are unchanged.
   expect(target.querySelector('.n')!.textContent).toBe('0')
   expect(target.querySelector('.n')!.classList.contains('odd')).toBe(false)
-  expect(effectCommits.length).toBe(committedBefore)
 
   observer.observe(target, { subtree: true, childList: true, characterData: true, attributes: true })
   resolve2('second')
@@ -452,14 +440,12 @@ test('a reactive child, a reactive prop and a staged effect that called use all 
   await new Promise((r) => setTimeout(r))
   observer.disconnect()
 
-  // All three landed with the sibling. The DOM writes of the child, the prop
-  // and the sibling arrived as one batch, and the effect committed after the
-  // sibling's write but before that batch was delivered: the same pass.
+  // Both landed with the sibling: the DOM writes of the child, the prop and
+  // the sibling arrived as one batch, the same pass.
   expect(target.querySelector('.n')!.textContent).toBe('1')
   expect(target.querySelector('.n')!.classList.contains('odd')).toBe(true)
   expect(target.querySelector('.p')!.textContent).toBe('second')
   expect(mutationBatches).toBe(1)
-  expect(effectCommits.slice(committedBefore)).toEqual([{ n: 1, p: 'second', batches: 0 }])
   dispose()
 })
 

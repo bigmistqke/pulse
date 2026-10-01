@@ -1,5 +1,5 @@
 import { NotReadyYet } from '../async'
-import { effect } from '../effect'
+import { bindingEffect } from '../effect'
 import {
   createSubOwner,
   disposeOwner,
@@ -139,7 +139,7 @@ function reactiveCommit<T>(
     controller = null
     ambientErrors.dispose()
   })
-  effect(() => {
+  bindingEffect(() => {
     let result: {
       value: T
       engagedTransition: boolean
@@ -295,7 +295,7 @@ export function insertChild(parent: Node, value: unknown): void {
       controller = null
       ambientErrors.dispose()
     })
-    effect(() => {
+    bindingEffect(() => {
       if (heldRunOwner !== null) {
         // Withdraw the held commit first, so disposing its content cannot
         // open the gate and apply it.
@@ -343,7 +343,7 @@ export function insertChild(parent: Node, value: unknown): void {
           const suspendedIn = ensureController() === null ? null : heldScope
           if (suspendedIn !== null) suspendedHoles.set(start, suspendedIn)
           ensureController()?.report({ status: 'throwing' })
-          // Re-throw so the outer effect() handles re-run-on-settle.
+          // Re-throw so the outer bindingEffect() handles re-run-on-settle.
           // The outer effect's controller registration becomes redundant
           // with ours — we accept the small duplication; both controllers
           // report 'throwing' to the same scope, and both will report

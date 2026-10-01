@@ -21,7 +21,10 @@ This document is the project. It holds the theory of pulse: why it is the way it
 - [`@term owner`](#term-owner) — A node in the tree of lifetimes, to which reactive nodes, cleanups and other owners belong.
 - [`@term boundary`](#term-boundary) — A loading boundary or an error boundary.
 - [`@term loading-boundary`](#term-loading-boundary) — The owner a `<Loading>` component creates to gather the pending state of the bindings beneath it.
-- [`@term error-boundary`](#term-error-boundary) — An owner that failures beneath it are routed to: an `<Errored>` component or a `catchError` call.
+- [`@term error-boundary`](#term-error-boundary) — An owner, made by an `<Errored>` component or by a root, that holds the failures of the bindings beneath it.
+- [`@term error-handler`](#term-error-handler) — A function installed with `catchError`, to which failures thrown beneath it are routed.
+- [`@term binding`](#term-binding) — A reactive child or a reactive prop: a part of what a component returns that follows its sources.
+- [`@term effect`](#term-effect) — A function made with `effect` that runs for its side effects, and again after each change to what it read.
 - [`@term scheduler`](#term-scheduler) — The injectable function that decides when consumers run after a write.
 - [`@term component`](#term-component) — A function that builds a part of the page and returns it, called by writing it as a tag.
 - [`@term control-flow`](#term-control-flow) — The components that choose what to render from a value: `Show`, `Switch` and `For`.
@@ -206,9 +209,10 @@ This document is the project. It holds the theory of pulse: why it is the way it
     - [`@spec use-enrols-the-binding-in-its-boundarys-gate`](#spec-use-enrols-the-binding-in-its-boundarys-gate) — A binding that called `use(x)` during its run commits through its boundary's gate. While any binding of the boundary is suspended, its commit waits, and it lands in the same pass as the others.
       - [`@spec a-reactive-child-that-called-use-waits-for-the-gate`](#spec-a-reactive-child-that-called-use-waits-for-the-gate) — `bindings.ts` `insertChild`.
       - [`@spec a-reactive-prop-that-called-use-waits-for-the-gate`](#spec-a-reactive-prop-that-called-use-waits-for-the-gate) — `bindings.ts` `bindProp`.
-      - [`@spec a-staged-effect-reads-its-pipeline-with-use`](#spec-a-staged-effect-reads-its-pipeline-with-use) — `effect.ts` `stagedEffect`.
       - [`@spec a-queued-commit-is-checked-again-at-the-end-of-the-microtask`](#spec-a-queued-commit-is-checked-again-at-the-end-of-the-microtask) — `loading.ts` `deferOrCommit`.
     - [`@spec a-read-without-use-commits-at-once`](#spec-a-read-without-use-commits-at-once) — A binding that did not call `use` commits as soon as it runs, whatever state its boundary is in.
+  - [`@axiom a-boundary-coordinates-only-what-a-component-returns`](#axiom-a-boundary-coordinates-only-what-a-component-returns) — A boundary coordinates the bindings of the region placed inside it. An [effect](#term-effect) created in that region is its own: no boundary waits on it, and no boundary shows its failure.
+    - [`@spec an-effect-is-not-coordinated-by-a-loading-boundary`](#spec-an-effect-is-not-coordinated-by-a-loading-boundary) — An effect that suspends reports to no loading boundary. No boundary waits on it or shows a placeholder for it, and its commits never wait at the gate. It runs again on its own once its source settles.
   - [`@spec a-boundary-wraps-what-it-coordinates`](#spec-a-boundary-wraps-what-it-coordinates) — A [boundary](#term-boundary) coordinates the region placed inside it. Which bindings land together, and which region shows a placeholder, is decided by where a `<Loading>` boundary is placed. The state of every boundary, a `<Loading>` or an `<Errored>`, belongs to the region it wraps, so a reader finds it by position, whatever intercepts errors in between.
     - [`@spec a-boundary-shows-initial-until-its-first-load`](#spec-a-boundary-shows-initial-until-its-first-load) — Until every suspended binding inside it has settled once, a boundary shows `initial`, or `fallback` when there is no `initial`. After that it shows the loaded subtree. A subtree in which nothing suspends is shown at once.
     - [`@spec after-its-first-load-a-boundary-shows-fallback-or-holds`](#spec-after-its-first-load-a-boundary-shows-fallback-or-holds) — When a boundary that has loaded before becomes pending again, it shows `fallback` if one is given, and otherwise keeps showing the subtree it last committed.
@@ -217,7 +221,7 @@ This document is the project. It holds the theory of pulse: why it is the way it
     - [`@spec is-loading-reads-the-nearest-boundary`](#spec-is-loading-reads-the-nearest-boundary) — `isLoading()` and `useLoading()` report whether the nearest enclosing boundary has anything in flight: a suspended binding, or a first load or refresh reported by `latest`. A commit waiting at the gate is not in flight. `isLoading()` returns the answer at the call site, and `useLoading()` looks the boundary up once and returns an accessor to read later.
     - [`@spec a-lookup-from-a-fragment-child-starts-where-the-fragment-was-built`](#spec-a-lookup-from-a-fragment-child-starts-where-the-fragment-was-built) — A lookup of the nearest boundary from inside a function child of a `Fragment`, such as `useLoading()`, starts from the owner the `Fragment` was built in, wherever the array is inserted.
     - [`@spec loading-is-false-outside-any-boundary`](#spec-loading-is-false-outside-any-boundary) — Outside any loading boundary, `isLoading()` returns false, and `useLoading()` returns an accessor that always returns false.
-    - [`@spec a-suspension-is-reported-to-the-nearest-boundary`](#spec-a-suspension-is-reported-to-the-nearest-boundary) — A binding or effect that suspends reports to the nearest enclosing [loading boundary](#term-loading-boundary) and to no other. It reports again when it settles. One that never suspends never reports.
+    - [`@spec a-suspension-is-reported-to-the-nearest-boundary`](#spec-a-suspension-is-reported-to-the-nearest-boundary) — A [binding](#term-binding) that suspends reports to the nearest enclosing [loading boundary](#term-loading-boundary) and to no other. It reports again when it settles. One that never suspends never reports.
     - [`@spec a-structural-commit-waits-for-the-content-it-brings`](#spec-a-structural-commit-waits-for-the-content-it-brings) — A reactive child whose new content contains a suspended reactive child of the same boundary commits through that boundary's gate. The new structure lands in the same pass as that content, and the structure it replaces stays on screen until then.
       - [`@spec a-hole-holds-new-content-that-is-not-ready`](#spec-a-hole-holds-new-content-that-is-not-ready) — `bindings.ts` `insertChild`.
       - [`@spec a-held-commit-places-its-nodes-only-when-it-lands`](#spec-a-held-commit-places-its-nodes-only-when-it-lands) — `bindings.ts` `insertChild`.
@@ -280,7 +284,7 @@ This document is the project. It holds the theory of pulse: why it is the way it
     - [`@spec a-catch-error-sub-owner-is-disposed-with-its-parent`](#spec-a-catch-error-sub-owner-is-disposed-with-its-parent) — Disposing the owner a `catchError` was called under disposes its sub-owner, and stops what was created inside it.
     - [`@spec catch-error-refuses-a-disposed-owner`](#spec-catch-error-refuses-a-disposed-owner) — Calling `catchError` inside an owner that has been disposed throws.
     - [`@spec a-boundary-is-disposed-with-its-owner`](#spec-a-boundary-is-disposed-with-its-owner) — A boundary is owned by the owner it is created in, and disposing that owner disposes the boundary and everything inside it.
-    - [`@spec a-disposed-binding-releases-its-boundary`](#spec-a-disposed-binding-releases-its-boundary) — A binding or effect that is disposed while suspended stops holding its boundary, and a commit it had queued never runs.
+    - [`@spec a-disposed-binding-releases-its-boundary`](#spec-a-disposed-binding-releases-its-boundary) — A binding that is disposed while suspended stops holding its boundary, and a commit it had queued never runs.
     - [`@spec render-returns-a-dispose-that-removes-what-it-mounted`](#spec-render-returns-a-dispose-that-removes-what-it-mounted) — `render(component, target)` inserts what the component returns into `target` and returns a `dispose`. Disposing removes every node that render added.
     - [`@spec render-dispose-tears-down-everything-the-component-created`](#spec-render-dispose-tears-down-everything-the-component-created) — Disposing what `render` returned stops every binding the component created and disposes every owner created under it, nested `catchError` owners included.
     - [`@spec a-component-that-throws-during-render-leaves-nothing-behind`](#spec-a-component-that-throws-during-render-leaves-nothing-behind) — When the component throws while `render` is running it, `render` disposes the root it opened before the error escapes.
@@ -297,7 +301,7 @@ This document is the project. It holds the theory of pulse: why it is the way it
       - [`@spec generator-cleanups-run-newest-first-after-its-finally-blocks`](#spec-generator-cleanups-run-newest-first-after-its-finally-blocks) — `computed.ts` `endGen`.
     - [`@spec a-discarded-generator-is-closed-with-return`](#spec-a-discarded-generator-is-closed-with-return) — A generator that is discarded is closed with `gen.return()`, so its `finally` blocks run. Reads made in those blocks are not tracked.
 - [`@axiom a-failure-reaches-code-that-can-act-on-it`](#axiom-a-failure-reaches-code-that-can-act-on-it) — A failure, or a call pulse cannot honour, reaches the code or the developer that can act on it, at the place where it can be acted on. It is never lost, and never raised where it does not belong.
-  - [`@spec error-boundaries-are-sub-owners`](#spec-error-boundaries-are-sub-owners) — An [error boundary](#term-error-boundary) is an owner in the owner tree. An error goes to the nearest boundary above the owner it happened under that accepts it.
+  - [`@spec error-boundaries-are-sub-owners`](#spec-error-boundaries-are-sub-owners) — An [error boundary](#term-error-boundary) and an error handler are both owners in the owner tree. A binding's error goes to the nearest of them above the owner it happened under that accepts it.
     - [`@spec catch-error-runs-its-body-in-a-sub-owner`](#spec-catch-error-runs-its-body-in-a-sub-owner) — `catchError(fn, handler)` runs `fn` inside a new sub-owner of the current owner and returns what `fn` returns, or `undefined` when `fn` throws and the handler takes the error.
     - [`@spec the-nearest-accepting-boundary-claims-an-error`](#spec-the-nearest-accepting-boundary-claims-an-error) — An error is claimed by the nearest boundary above its owner that accepts it, and no boundary further up hears of it.
     - [`@spec a-boundary-whose-for-declines-passes-the-error-on`](#spec-a-boundary-whose-for-declines-passes-the-error-on) — A boundary whose `for` predicate returns false for an error does not claim it, and the walk continues to the next boundary up.
@@ -310,7 +314,7 @@ This document is the project. It holds the theory of pulse: why it is the way it
     - [`@spec a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller`](#spec-a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller) — A failed action reports to the nearest boundary that accepts its error, above the owner it was called under: an `<Errored>`, a root's default boundary, or a `catchError`, whose handler is then called with the error.
     - [`@spec a-failed-action-chooses-its-boundary-again-on-every-failure`](#spec-a-failed-action-chooses-its-boundary-again-on-every-failure) — Each failure of an action chooses its boundary anew, so a retry whose error a different boundary now accepts moves its report there and releases the boundary that held the earlier one.
     - [`@spec a-throwing-handler-passes-a-failed-action-on-with-the-handlers-error`](#spec-a-throwing-handler-passes-a-failed-action-on-with-the-handlers-error) — When a `catchError` handler called for a failed action throws, the search continues to the boundaries beyond it with the handler's error, and the one that claims it receives the handler's error. The action's handle keeps the action's own error.
-    - [`@spec a-real-error-in-an-effect-goes-to-the-nearest-handler`](#spec-a-real-error-in-an-effect-goes-to-the-nearest-handler) — A thrown error that is not a suspension, from an effect's body, a stage or a commit, goes to the nearest error handler above the effect, on its first run and on every later run that throws.
+    - [`@spec a-real-error-in-an-effect-goes-to-the-nearest-handler`](#spec-a-real-error-in-an-effect-goes-to-the-nearest-handler) — A thrown error that is not a suspension, from an effect's body, a stage or a commit, goes to the nearest [error handler](#term-error-handler) above the effect that accepts it. That holds on its first run and on every later run that throws, and the error never goes to an error boundary.
     - [`@spec a-loading-boundary-does-not-catch-a-real-error`](#spec-a-loading-boundary-does-not-catch-a-real-error) — A `<Loading>` boundary between a binding and an error handler lets a real error from that binding pass on to the handler. It takes only suspensions.
     - [`@spec a-hole-that-throws-reports-to-the-nearest-catch-error`](#spec-a-hole-that-throws-reports-to-the-nearest-catch-error) — An error thrown inside a reactive child reaches the handler of the nearest enclosing `catchError`, and does not escape the write that caused it.
     - [`@spec with-no-owner-the-boundary-state-is-inert`](#spec-with-no-owner-the-boundary-state-is-inert) — Called with no owner at all, `useErrored()` returns a state that is never active and whose retry does nothing, and `isErrored()` returns `undefined`.
@@ -338,7 +342,6 @@ This document is the project. It holds the theory of pulse: why it is the way it
     - [`@spec a-failed-binding-leaves-the-pending-set`](#spec-a-failed-binding-leaves-the-pending-set) — A binding that suspended and then fails for real reports itself as no longer pending to its `<Loading>`, so the boundary's gate can open and its fallback can clear.
       - [`@spec a-child-binding-leaves-the-pending-set-when-it-fails`](#spec-a-child-binding-leaves-the-pending-set-when-it-fails) — `bindings.ts` `insertChild`.
       - [`@spec a-reactive-prop-leaves-the-pending-set-when-it-fails`](#spec-a-reactive-prop-leaves-the-pending-set-when-it-fails) — `bindings.ts` `reactiveCommit`.
-      - [`@spec a-staged-effect-leaves-the-pending-set-when-it-fails`](#spec-a-staged-effect-leaves-the-pending-set-when-it-fails) — `effect.ts` `stagedEffect`.
     - [`@spec a-boundary-shows-its-fallback-exactly-while-something-under-it-is-failed`](#spec-a-boundary-shows-its-fallback-exactly-while-something-under-it-is-failed) — An `<Errored>` with a fallback shows it while at least one binding under it is failed, and shows its children again as soon as none is, with no reset. One rejection renders the fallback once, however many times the failing binding re-runs.
     - [`@spec a-boundary-without-a-fallback-swaps-nothing`](#spec-a-boundary-without-a-fallback-swaps-nothing) — An `<Errored>` without a fallback keeps its children mounted through an error. Its state is still readable from below.
     - [`@spec a-boundary-holds-one-report-per-failed-binding`](#spec-a-boundary-holds-one-report-per-failed-binding) — An error boundary holds one report per currently failed binding, in the order the bindings first failed. A binding that reports again replaces its own entry, and a binding that recovers or goes away removes it.
@@ -464,7 +467,21 @@ _Avoid_: suspense, transition
 
 ### @term error-boundary
 
-> An owner that failures beneath it are routed to: an `<Errored>` component or a `catchError` call.
+> An owner, made by an `<Errored>` component or by a root, that holds the failures of the bindings beneath it.
+
+### @term error-handler
+
+> A function installed with `catchError`, to which failures thrown beneath it are routed.
+
+_Avoid_: error boundary (an error boundary holds failures, a handler receives them)
+
+### @term binding
+
+> A reactive child or a reactive prop: a part of what a component returns that follows its sources.
+
+### @term effect
+
+> A function made with `effect` that runs for its side effects, and again after each change to what it read.
 
 ### @term scheduler
 
@@ -1820,12 +1837,6 @@ A reactive child that called `use` reports its commit to the boundary instead of
 
 A reactive property, such as a `class:` binding, routes its commit through the gate the same way as a reactive child.
 
-##### @spec a-staged-effect-reads-its-pipeline-with-use
-
-> `effect.ts` `stagedEffect`.
-
-A staged effect reads its whole pipeline with `use`, so its commit always joins the gate, and waits for a suspended sibling even after its own stages have resolved.
-
 ##### @spec a-queued-commit-is-checked-again-at-the-end-of-the-microtask
 
 > `loading.ts` `deferOrCommit`.
@@ -1837,6 +1848,20 @@ A commit from a binding that called `use` but did not suspend is queued, not app
 > A binding that did not call `use` commits as soon as it runs, whatever state its boundary is in.
 
 This follows because only the verb decides whether a binding waits for its neighbours: a binding that did not call `use` has not chosen to wait, so it commits as soon as it runs.
+
+### @axiom a-boundary-coordinates-only-what-a-component-returns
+
+> A boundary coordinates the bindings of the region placed inside it. An [effect](#term-effect) created in that region is its own: no boundary waits on it, and no boundary shows its failure.
+
+This narrows the axiom above to boundaries: where a boundary is placed states which rendering it coordinates. An effect renders nothing, so it states none.
+
+#### @spec an-effect-is-not-coordinated-by-a-loading-boundary
+
+> An effect that suspends reports to no loading boundary. No boundary waits on it or shows a placeholder for it, and its commits never wait at the gate. It runs again on its own once its source settles.
+
+This follows because a boundary coordinates only what a component returns, and an effect is not part of that.
+
+A side effect that has to land together with rendered content belongs in a binding, such as a `ref` or a reactive prop. The boundary coordinates that binding.
 
 ### @spec a-boundary-wraps-what-it-coordinates
 
@@ -1898,7 +1923,7 @@ This follows because a boundary coordinates only the bindings placed inside it: 
 
 #### @spec a-suspension-is-reported-to-the-nearest-boundary
 
-> A binding or effect that suspends reports to the nearest enclosing [loading boundary](#term-loading-boundary) and to no other. It reports again when it settles. One that never suspends never reports.
+> A [binding](#term-binding) that suspends reports to the nearest enclosing [loading boundary](#term-loading-boundary) and to no other. It reports again when it settles. One that never suspends never reports.
 
 This follows because a boundary coordinates the bindings placed inside it: the nearest enclosing boundary is the one whose region contains the binding, so the suspension is reported there and to no other.
 
@@ -2348,7 +2373,7 @@ This follows because every reactive node lives as long as the owner it was creat
 
 #### @spec a-disposed-binding-releases-its-boundary
 
-> A binding or effect that is disposed while suspended stops holding its boundary, and a commit it had queued never runs.
+> A binding that is disposed while suspended stops holding its boundary, and a commit it had queued never runs.
 
 Derives from: [`spec-a-boundary-wraps-what-it-coordinates`](#spec-a-boundary-wraps-what-it-coordinates)
 
@@ -2474,13 +2499,13 @@ The principle is [P7 in the exploration record](docs/pulse/framings.md#p7--a-fai
 
 ### @spec error-boundaries-are-sub-owners
 
-> An [error boundary](#term-error-boundary) is an owner in the owner tree. An error goes to the nearest boundary above the owner it happened under that accepts it.
+> An [error boundary](#term-error-boundary) and an error handler are both owners in the owner tree. A binding's error goes to the nearest of them above the owner it happened under that accepts it.
 
 Derives from: [`spec-a-lifetime-belongs-to-an-owner`](#spec-a-lifetime-belongs-to-an-owner)
 
 This follows because a failure reaches the code that can act on it: that is the code that placed a boundary around where the failure happened, and the owner tree already records where every piece of code was placed.
 
-A boundary is a real node in the runtime, not a closure captured at creation. `catchError` and `<Errored>` both create a sub-owner of the current owner and run their contents inside it, so the owner tree is also the tree of boundaries. The decision is in [ADR 0006](docs/adr/0006-error-boundaries-as-sub-owners.md).
+Each is a real node in the runtime, not a closure captured at creation. `catchError` and `<Errored>` both create a sub-owner of the current owner and run their contents inside it. So the owner tree is also the tree of boundaries and handlers. The decision is in [ADR 0006](docs/adr/0006-error-boundaries-as-sub-owners.md).
 
 #### @spec catch-error-runs-its-body-in-a-sub-owner
 
@@ -2570,9 +2595,11 @@ This is the same as [a handler that throws for a node's error](#spec-a-handler-t
 
 #### @spec a-real-error-in-an-effect-goes-to-the-nearest-handler
 
-> A thrown error that is not a suspension, from an effect's body, a stage or a commit, goes to the nearest error handler above the effect, on its first run and on every later run that throws.
+> A thrown error that is not a suspension, from an effect's body, a stage or a commit, goes to the nearest [error handler](#term-error-handler) above the effect that accepts it. That holds on its first run and on every later run that throws, and the error never goes to an error boundary.
 
-This follows because [`spec-error-boundaries-are-sub-owners`](#spec-error-boundaries-are-sub-owners) says an error goes to the nearest accepting boundary above the owner it happened under: an effect's body, stages and commit all run under the effect's owner.
+Derives from: [`axiom-a-boundary-coordinates-only-what-a-component-returns`](#axiom-a-boundary-coordinates-only-what-a-component-returns)
+
+This follows because a failure reaches code that can act on it, and an error handler is code. An effect's body, stages and commit all run under the effect's owner, so the walk starts there. An error boundary shows failures of what is rendered, and an effect renders nothing.
 
 What happens to an error with no handler above it is stated in [the spec for an error nothing claims](#spec-an-error-nothing-claims-is-thrown-on-a-first-run).
 
@@ -2779,12 +2806,6 @@ A reactive child that fails reports idle before re-throwing to the error routing
 > `bindings.ts` `reactiveCommit`.
 
 A reactive property, attribute, class or style binding that fails reports idle before re-throwing.
-
-##### @spec a-staged-effect-leaves-the-pending-set-when-it-fails
-
-> `effect.ts` `stagedEffect`.
-
-A staged effect whose pipeline rejects reports idle, and leaves the `<Loading>` it registered with.
 
 #### @spec a-boundary-shows-its-fallback-exactly-while-something-under-it-is-failed
 

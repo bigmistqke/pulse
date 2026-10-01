@@ -181,67 +181,41 @@ test('an effect re-throwing after a signal change routes the new throw too', () 
 })
 
 /**
- * @canon spec-a-suspension-is-reported-to-the-nearest-boundary
+ * @canon spec-an-effect-is-not-coordinated-by-a-loading-boundary
  */
-test('effect that suspends increments nearest pending boundary scope', async () => {
+test('an effect that suspends reports nothing to the loading boundary above it, and still runs again on settle', async () => {
   setScheduler(syncScheduler(flush))
-  let count = 0
+  let registered = 0
+  let reports = 0
   const scope: LoadingScope = {
     kind: 'pending',
-    active: () => count > 0,
-    register: () => ({
-      report(state) { count = state.status === 'throwing' ? count + 1 : count > 0 ? count - 1 : 0 },
-      unregister() { count = 0 },
-    }),
+    active: () => false,
+    register: () => {
+      registered++
+      return { report() { reports++ }, unregister() {} }
+    },
     deferOrCommit(commit) { commit() },
-    trackBackground() {},
-    trackFirstLoad() {},
+    trackBackground() { reports++ },
+    trackFirstLoad() { reports++ },
   }
   let resolveP!: (v: number) => void
   const p = new Promise<number>((r) => { resolveP = r })
+  const seen: number[] = []
 
   await createRoot(async (dispose) => {
     getOwner()!.boundaries.pending = scope
-    effect(() => { use(p) })
-    expect(count).toBe(1) // suspended → throwing reported
+    effect(() => { seen.push(use(p)) })
+    expect(seen).toEqual([]) // suspended
     resolveP(42)
     await p
     flush()
-    expect(count).toBe(0) // settled → idle reported
+    expect(seen).toEqual([42]) // ran again on its own once p settled
     dispose()
   })
 
-  setScheduler(microtaskScheduler(flush))
-})
-
-/**
- * @canon spec-a-disposed-binding-releases-its-boundary
- */
-test('effect disposal while pending unregisters from the pending boundary scope', () => {
-  setScheduler(syncScheduler(flush))
-  let count = 0
-  const scope: LoadingScope = {
-    kind: 'pending',
-    active: () => count > 0,
-    register: () => ({
-      report(state) { count = state.status === 'throwing' ? count + 1 : count > 0 ? count - 1 : 0 },
-      unregister() { count = 0 },
-    }),
-    deferOrCommit(commit) { commit() },
-    trackBackground() {},
-    trackFirstLoad() {},
-  }
-  const p = new Promise<number>(() => {}) // never settles
-
-  const dispose = createRoot((d) => {
-    getOwner()!.boundaries.pending = scope
-    effect(() => { use(p) })
-    return d
-  })
-  expect(count).toBe(1) // suspended
-  dispose()
-  expect(count).toBe(0) // disposed → unregistered
-
+  // The boundary never heard of the effect: no registration, no report.
+  expect(registered).toBe(0)
+  expect(reports).toBe(0)
   setScheduler(microtaskScheduler(flush))
 })
 
