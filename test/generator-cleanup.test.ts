@@ -118,9 +118,9 @@ test('cleanups run most recently registered first, after finally blocks', async 
     onCleanup(() => events.push('first'))
     onCleanup(() => events.push('second'))
     try {
-      const p: number = yield* from(
-        new Promise<number>((resolve) => setTimeout(() => resolve(10), 5)),
-      )
+      // Never settles, so the change to `a` below always finds the generator
+      // paused here and discards it. A timer here would race the test's ticks.
+      const p: number = yield* from(new Promise<number>(() => {}))
       return av + p
     } finally {
       events.push('finally')

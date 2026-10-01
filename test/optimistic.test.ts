@@ -373,7 +373,7 @@ test('an action reads back its own prediction, and a sibling action does not', a
 })
 
 /**
- * @canon spec-an-update-function-never-builds-on-another-actions-prediction
+ * @canon spec-an-update-function-builds-only-on-predictions-of-its-own-chain
  */
 test('a refused action does not leave its prediction inside a later action layer', async () => {
   const [source] = signal(() => Promise.resolve(['saved'] as string[]), [] as string[])
@@ -402,6 +402,42 @@ test('a refused action does not leave its prediction inside a later action layer
   b.resolve()
   await runB.settled
   expect(latest(view)).toEqual(['saved'])
+})
+
+/**
+ * @canon spec-an-update-function-builds-only-on-predictions-of-its-own-chain
+ */
+test('a nested action with no prediction of its own builds on its parent\'s, never on a sibling\'s', async () => {
+  const [source] = signal(() => Promise.resolve(['saved'] as string[]), [] as string[])
+  const [view, setView] = optimistic(source, [] as string[])
+  await tick()
+  await tick()
+
+  const sibling = gate()
+  const outer = gate()
+  let prevInNested: unknown
+  const runSibling = action(function* () {
+    setView((prev) => [...prev, 'S1'])
+    yield* from(sibling.promise)
+  })
+  const runOuter = action(function* () {
+    setView((prev) => [...prev, 'P1'])
+    // The nested action has no prediction yet: its update function receives the
+    // parent's, not the sibling's, and not the derivation's value alone.
+    action(() => {
+      setView((prev) => {
+        prevInNested = prev
+        return [...prev, 'C1']
+      })
+    })
+    yield* from(outer.promise)
+  })
+  expect(prevInNested).toEqual(['saved', 'P1'])
+
+  sibling.resolve()
+  outer.resolve()
+  await runSibling.settled
+  await runOuter.settled
 })
 
 /**

@@ -245,7 +245,7 @@ This document is the project. It holds the theory of pulse: why it is the way it
   - [`@axiom flows-share-fate-only-where-the-code-says-so`](#axiom-flows-share-fate-only-where-the-code-says-so) — Two flows are coupled only where the code couples them explicitly. Everything else is isolated.
     - [`@spec sibling-speculations-do-not-see-each-other`](#spec-sibling-speculations-do-not-see-each-other) — Two actions that are not nested never read each other's writes or predictions.
     - [`@spec a-reader-in-an-action-sees-the-predictions-of-its-own-chain`](#spec-a-reader-in-an-action-sees-the-predictions-of-its-own-chain) — Inside an action, a reader of an optimistic value sees the nearest prediction up its own chain of actions, its parents' included, and otherwise the derivation.
-    - [`@spec an-update-function-never-builds-on-another-actions-prediction`](#spec-an-update-function-never-builds-on-another-actions-prediction) — The previous value an optimistic setter's update function receives is never another action's prediction: it is the action's own prediction, or else the derivation's value.
+    - [`@spec an-update-function-builds-only-on-predictions-of-its-own-chain`](#spec-an-update-function-builds-only-on-predictions-of-its-own-chain) — An optimistic setter's update function receives the nearest prediction up its own chain of actions, its parents' included, or else the derivation's value. It never receives the prediction of an action outside that chain.
     - [`@spec nesting-makes-actions-share-fate`](#spec-nesting-makes-actions-share-fate) — A nested action commits into its parent, not into committed state. Its writes reach committed state only if the parent commits, and its discard does not discard the parent.
     - [`@spec overlapping-writes-resolve-by-commit-order`](#spec-overlapping-writes-resolve-by-commit-order) — When two sibling actions write the same node, the one that commits last decides its committed value.
     - [`@spec a-speculative-write-reaches-only-consumers-in-its-chain`](#spec-a-speculative-write-reaches-only-consumers-in-its-chain) — A write in a scope invalidates only the consumers whose scope has the writing scope in its chain, and only where no nearer scope has its own slot for the written node.
@@ -2090,11 +2090,11 @@ This follows because two flows are coupled only where the code couples them: two
 
 This follows because nesting is the explicit coupling between actions: a reader sees the predictions of the actions its own action is nested in, and none from actions it is not coupled to.
 
-#### @spec an-update-function-never-builds-on-another-actions-prediction
+#### @spec an-update-function-builds-only-on-predictions-of-its-own-chain
 
-> The previous value an optimistic setter's update function receives is never another action's prediction: it is the action's own prediction, or else the derivation's value.
+> An optimistic setter's update function receives the nearest prediction up its own chain of actions, its parents' included, or else the derivation's value. It never receives the prediction of an action outside that chain.
 
-This follows because uncoupled flows are isolated: an update function that built on another action's prediction would tie its value to that action's fate, so it receives its own prediction or the derivation's value.
+This follows because uncoupled flows are isolated. Building on the prediction of an action it is not nested in would tie the update function's value to that action's fate. A parent's prediction ties it to nothing new, because a nested action already shares its parent's fate.
 
 So an action can always withdraw what it predicted, without its prediction having been baked into another action's.
 
