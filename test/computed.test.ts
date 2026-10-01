@@ -163,7 +163,7 @@ test('a generator stage suspends on a pending promise, resumes on settle', async
 })
 
 /**
- * @canon rule-a-computed-is-a-pipeline-of-stages
+ * @canon rule-reading-a-computed-again-without-a-change-re-runs-nothing
  */
 test('cross-stage caching: a sync stage downstream of an unchanged stage is not re-run', () => {
   setScheduler(syncScheduler(flush))
@@ -181,6 +181,31 @@ test('cross-stage caching: a sync stage downstream of an unchanged stage is not 
   // Reading c() again does not re-run.
   expect(c()).toBe(101)
   expect(calls).toBe(1)
+  setScheduler(microtaskScheduler(flush))
+})
+
+/**
+ * @canon case-a-computed-publishes-only-a-changed-value
+ */
+test('a sync stage downstream of a stage that produced an equal value is not re-run', () => {
+  setScheduler(syncScheduler(flush))
+  const [a, setA] = signal(1)
+  let calls = 0
+  const c = computed(
+    () => a() > 0,
+    (positive: boolean) => {
+      calls++
+      return positive ? 'positive' : 'not positive'
+    },
+  )
+  expect(c()).toBe('positive')
+  expect(calls).toBe(1)
+  setA(2) // the first stage re-runs and produces true again
+  expect(c()).toBe('positive')
+  expect(calls).toBe(1)
+  setA(-1) // now the first stage's value changes
+  expect(c()).toBe('not positive')
+  expect(calls).toBe(2)
   setScheduler(microtaskScheduler(flush))
 })
 

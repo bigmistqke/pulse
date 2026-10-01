@@ -92,7 +92,7 @@ describe('pending tracker — pipeline-OR walk', () => {
 
 describe('pending tracker — computed integration', () => {
   /**
-   * @canon rule-an-async-node-keeps-its-last-value-while-it-refetches
+   * @canon rule-is-pending-reports-an-unsettled-pipeline
    */
   test('isPending(asyncComputed) true during initial load, false after settle', async () => {
     let resolve!: (v: number) => void

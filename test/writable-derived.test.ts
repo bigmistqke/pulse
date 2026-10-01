@@ -99,7 +99,7 @@ test('a write into a multi-stage pipeline lands on the output', () => {
 })
 
 /**
- * @canon rule-a-pipeline-reads-as-a-promise-while-its-value-came-through-async
+ * @canon rule-a-write-keeps-a-pipelines-colour
  */
 test('a bare write into an asynchronously coloured stage keeps the read a promise', async () => {
   let resolveList: (v: string[]) => void = () => {}
@@ -123,7 +123,7 @@ test('a bare write into an asynchronously coloured stage keeps the read a promis
 })
 
 /**
- * @canon rule-a-pipeline-reads-as-a-promise-while-its-value-came-through-async
+ * @canon rule-a-write-keeps-a-pipelines-colour
  */
 test('a write into a synchronously coloured stage does not introduce a promise', () => {
   const [n, setN] = signal(() => 1)
@@ -207,7 +207,7 @@ test('signal(fn, default): peek() reports the real value once resolved, not the 
 })
 
 /**
- * @canon rule-a-construction-default-seeds-only-the-tolerant-read
+ * @canon rule-a-construction-default-leaves-the-raw-read-a-promise
  */
 test('signal(fn, default) does not change the raw read — still a promise while pending', () => {
   const [todos] = signal(function* () {

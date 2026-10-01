@@ -40,11 +40,13 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule an-equal-value-does-not-propagate`](#rule-an-equal-value-does-not-propagate) — A value equal to the one a node already holds does not reach the node's consumers: nothing re-runs.
     - [`@case a-computed-publishes-only-a-changed-value`](#case-a-computed-publishes-only-a-changed-value) — `computed.ts` `makeStageNode`.
     - [`@case an-equal-committed-signal-write-is-dropped`](#case-an-equal-committed-signal-write-is-dropped) — `scope.ts` `writeValue`.
+  - [`@rule reading-a-computed-again-without-a-change-re-runs-nothing`](#rule-reading-a-computed-again-without-a-change-re-runs-nothing) — Reading a computed a second time, when nothing it read has changed since the first read, returns the same value and runs no stage.
+  - [`@rule a-staged-effect-skips-a-commit-equal-to-its-last`](#rule-a-staged-effect-skips-a-commit-equal-to-its-last) — A staged effect does not call `commit` with a value `Object.is`-equal to the one it last committed.
 - [`@axiom compose-rather-than-proliferate`](#axiom-compose-rather-than-proliferate) — A small set of primitives covers the use cases. A new form is added only where composing the existing ones is awkward for a common case.
-  - [`@rule a-computed-is-a-pipeline-of-stages`](#rule-a-computed-is-a-pipeline-of-stages) — `computed(s0, s1, …)` threads each stage's resolved value into the next. Any stage may read signals, and a stage re-runs only when its input or one of its own reads changes.
+  - [`@rule a-computed-is-a-pipeline-of-stages`](#rule-a-computed-is-a-pipeline-of-stages) — `computed(s0, s1, …)` threads each stage's resolved value into the next. Any stage may read signals, and a change to something a stage read re-runs that stage and passes its new value on.
   - [`@rule a-computed-has-no-setter`](#rule-a-computed-has-no-setter) — `computed` returns an accessor and nothing to write with. A derivation that can also be written is made with `signal`.
   - [`@rule a-signal-given-stages-is-a-writable-derivation`](#rule-a-signal-given-stages-is-a-writable-derivation) — `signal(s0, s1, …)` builds the same pipeline `computed` builds and adds a setter, whose write lands on the output of the last stage. `signal(value)` given a value that is not a function stays a plain signal.
-  - [`@rule a-staged-effect-is-a-pipeline-ending-in-a-commit`](#rule-a-staged-effect-is-a-pipeline-ending-in-a-commit) — `effect([stage0, …, stageN], commit)` runs the same pipeline a computed runs, and passes the final stage's resolved value to `commit`. It commits again whenever the pipeline produces a new value, and skips a value `Object.is`-equal to the one it last committed.
+  - [`@rule a-staged-effect-is-a-pipeline-ending-in-a-commit`](#rule-a-staged-effect-is-a-pipeline-ending-in-a-commit) — `effect([stage0, …, stageN], commit)` runs the same pipeline a computed runs, and passes the final stage's resolved value to `commit`, an async stage's included. It commits again whenever the pipeline produces a new value.
   - [`@rule an-optimistic-value-is-read-like-any-node`](#rule-an-optimistic-value-is-read-like-any-node) — The accessor of an optimistic value is an ordinary node. Every read verb applies to it, and the pending and failed state of what its recipe reads reaches the read site through it.
   - [`@rule an-optimistic-fallback-seeds-the-tolerant-read`](#rule-an-optimistic-fallback-seeds-the-tolerant-read) — A fallback passed when an optimistic value is created is what `peek` and `latest` return before the source has resolved.
   - [`@rule use-latest-throws-only-before-the-first-value`](#rule-use-latest-throws-only-before-the-first-value) — `use.latest(x)` throws `NotReadyYet` only while nothing has ever resolved for `x`, carrying `promiseOf(x)`, exactly as `use` would.
@@ -72,7 +74,8 @@ The canon was written backwards from the existing tests and documents, and descr
     - [`@case pipeline-read-colours-by-the-stages-that-can-be-async`](#case-pipeline-read-colours-by-the-stages-that-can-be-async) — `async.ts` `PipelineRead`.
     - [`@case a-generator-stage-is-coloured-by-what-it-reads`](#case-a-generator-stage-is-coloured-by-what-it-reads) — `async.ts` `PipelineRead`.
     - [`@case resolved-unwraps-what-a-stage-receives`](#case-resolved-unwraps-what-a-stage-receives) — `async.ts` `Resolved`.
-  - [`@rule a-pipeline-reads-as-a-promise-while-its-value-came-through-async`](#rule-a-pipeline-reads-as-a-promise-while-its-value-came-through-async) — The raw read of a pipeline is a promise when its current value was produced through an asynchronous stage, and bare otherwise. A write never changes that colour.
+  - [`@rule a-pipeline-reads-as-a-promise-while-its-value-came-through-async`](#rule-a-pipeline-reads-as-a-promise-while-its-value-came-through-async) — The raw read of a pipeline is a promise when its current value was produced through an asynchronous stage, and bare otherwise. A sync last stage fed by an async stage still reads as a promise, and a stage that is async on one evaluation and sync on the next flips its read shape each time, even when the value is the same.
+  - [`@rule a-write-keeps-a-pipelines-colour`](#rule-a-write-keeps-a-pipelines-colour) — A write into a pipeline stage keeps the colour the stage already has: a bare write into an asynchronously coloured stage still reads as a promise, and a write into a synchronously coloured stage does not introduce one.
   - [`@rule a-generator-stage-is-asynchronous-only-when-it-suspends`](#rule-a-generator-stage-is-asynchronous-only-when-it-suspends) — A generator stage counts as an asynchronous stage only when it actually suspended on a pending promise. One that ran to completion without suspending publishes its value bare.
   - [`@rule a-use-suspended-stage-reads-as-its-promise-until-it-settles`](#rule-a-use-suspended-stage-reads-as-its-promise-until-it-settles) — While a sync stage that suspended through `use` waits on a first load, the pipeline reads as the promise in flight. Once that promise settles, the sync stage publishes its bare value.
   - [`@rule a-promise-carries-its-state-in-one-weakmap`](#rule-a-promise-carries-its-state-in-one-weakmap) — The status, value, rejection reason and stale prior of a promise live in one `WeakMap` keyed on the promise. The promise itself carries nothing extra.
@@ -83,7 +86,8 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule a-signal-stores-a-promise-as-it-is`](#rule-a-signal-stores-a-promise-as-it-is) — A signal holding a promise stores the promise itself, not its result. Writing a new promise re-runs its consumers; the promise settling is not a write.
   - [`@rule from-yields-what-it-is-given`](#rule-from-yields-what-it-is-given) — `yield* from(x)` yields a plain value or a promise as it is, and calls a signal's accessor so the read is tracked. It does not look at pending state.
   - [`@rule a-stage-result-is-settled-before-it-is-passed-on`](#rule-a-stage-result-is-settled-before-it-is-passed-on) — Each value a stage returns or a generator yields is settled before it is used. A plain value or a fulfilled promise is used at once, and a pending promise suspends the stage on that promise.
-  - [`@rule a-construction-default-seeds-only-the-tolerant-read`](#rule-a-construction-default-seeds-only-the-tolerant-read) — `signal(fn, default)` makes `peek` return `default` until the derivation first resolves, and an update function receive `default` in place of `undefined`. The raw read stays a pending promise.
+  - [`@rule a-construction-default-seeds-only-the-tolerant-read`](#rule-a-construction-default-seeds-only-the-tolerant-read) — `signal(fn, default)` makes `peek` return `default` until the derivation first resolves, and an update function receive `default` in place of `undefined`. Once a real value has resolved, both see it instead of the default.
+  - [`@rule a-construction-default-leaves-the-raw-read-a-promise`](#rule-a-construction-default-leaves-the-raw-read-a-promise) — With `signal(fn, default)`, the raw read is still a pending promise until the derivation first resolves.
   - [`@rule pending-follows-where-a-value-came-from`](#rule-pending-follows-where-a-value-came-from) — A node is pending when any stage upstream of it is pending, or when a source its value was read from is. `promiseOf` returns the nearest promise in flight along the same path.
   - [`@rule is-pending-reports-an-unsettled-pipeline`](#rule-is-pending-reports-an-unsettled-pipeline) — `isPending(c)` is true while any stage of the pipeline is waiting on a promise, on the first load and during a refetch, and `promiseOf(c)` returns that promise. Both clear when it settles.
 - [`@axiom code-that-builds-on-a-value-receives-it-resolved`](#axiom-code-that-builds-on-a-value-receives-it-resolved) — Code that computes a new value from an earlier one is handed that value resolved, never as a promise.
@@ -96,7 +100,7 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule peek-returns-a-given-fallback-until-a-value-resolves`](#rule-peek-returns-a-given-fallback-until-a-value-resolves) — `peek(x, fallback)` returns `fallback` wherever `peek(x)` would return `undefined`: before the first resolution, and after a rejection when nothing resolved before it. Once a value has resolved, it returns that value.
   - [`@rule is-optimistic-is-true-while-a-prediction-is-live`](#rule-is-optimistic-is-true-while-a-prediction-is-live) — The `isOptimistic` accessor returned by `optimistic` reads true while a prediction is live, and false before any prediction and once the action that wrote it has closed.
   - [`@rule a-construction-default-removes-undefined-from-the-types`](#rule-a-construction-default-removes-undefined-from-the-types) — With a construction default given, the types of `peek` and of an update function's argument leave out `undefined`, so neither needs a check.
-  - [`@rule an-async-node-keeps-its-last-value-while-it-refetches`](#rule-an-async-node-keeps-its-last-value-while-it-refetches) — When an async node's inputs change, its last resolved value stays readable until the new one settles: `peek` returns it, `use` keeps delivering it to a consumer that already has it, and the node reports the refetch as pending.
+  - [`@rule an-async-node-keeps-its-last-value-while-it-refetches`](#rule-an-async-node-keeps-its-last-value-while-it-refetches) — When an async node's inputs change, its last resolved value stays readable through `peek` until the new one settles, while `isPending` reports the refetch.
   - [`@rule a-written-promise-leaves-the-prior-value-to-the-tolerant-read`](#rule-a-written-promise-leaves-the-prior-value-to-the-tolerant-read) — While a written promise is pending, and after it rejects, the tolerant read returns the value from before the write.
   - [`@rule from-yields-the-stale-value-during-a-refetch`](#rule-from-yields-the-stale-value-during-a-refetch) — During a refetch, `yield* from(c)` on a computed yields the stale value its accessor returns, not the promise in flight.
   - [`@rule pending-is-asked-and-answered-directly`](#rule-pending-is-asked-and-answered-directly) — `isPending(x)` and `promiseOf(x)` answer whether `x` has a promise in flight, and which one, as plain values called fresh at each read site.
@@ -560,6 +564,18 @@ A stage that settles to a value `Object.is`-equal to the one it last published d
 
 A committed write to a signal that equals its current value is dropped. The equality is SameValueZero: `NaN` equals `NaN`, and `0` equals `-0`. ADR 0008 chose `Object.is`. r3 compares with `===`, which already makes `0` and `-0` equal, and pulse builds on r3 rather than changing it, so pulse adds the `NaN` case in its own write path. SameValueZero is the equality `Map`, `Set` and `Array.prototype.includes` use.
 
+### @rule reading-a-computed-again-without-a-change-re-runs-nothing
+
+> Reading a computed a second time, when nothing it read has changed since the first read, returns the same value and runs no stage.
+
+This follows because a consumer re-runs only for a real change, and a second read with nothing changed in between is no change.
+
+### @rule a-staged-effect-skips-a-commit-equal-to-its-last
+
+> A staged effect does not call `commit` with a value `Object.is`-equal to the one it last committed.
+
+Also derives from [`rule-a-staged-effect-is-a-pipeline-ending-in-a-commit`](#rule-a-staged-effect-is-a-pipeline-ending-in-a-commit). This follows because a consumer re-runs only for a real change, and `commit` is the staged effect's consumer of the pipeline's value.
+
 ## @axiom compose-rather-than-proliferate
 
 > A small set of primitives covers the use cases. A new form is added only where composing the existing ones is awkward for a common case.
@@ -568,11 +584,11 @@ The principle is [P5 in the exploration record](docs/pulse/framings.md#p5--compo
 
 ### @rule a-computed-is-a-pipeline-of-stages
 
-> `computed(s0, s1, …)` threads each stage's resolved value into the next. Any stage may read signals, and a stage re-runs only when its input or one of its own reads changes.
+> `computed(s0, s1, …)` threads each stage's resolved value into the next. Any stage may read signals, and a change to something a stage read re-runs that stage and passes its new value on.
 
-Also derives from [`axiom-a-paused-computation-is-re-entered-at-its-pause`](#axiom-a-paused-computation-is-re-entered-at-its-pause). This follows because a computed is composed of stages rather than being a primitive per shape, and a paused computation is re-entered at a stage boundary: a stage runs again only when its input or its own reads changed.
+Also derives from [`axiom-a-paused-computation-is-re-entered-at-its-pause`](#axiom-a-paused-computation-is-re-entered-at-its-pause). This follows because a computed is composed of stages rather than being a primitive per shape, and a paused computation is re-entered at a stage boundary: a stage runs again when its input or its own reads changed.
 
-So a stage downstream of a stage whose value did not change is not re-run, and reading the computed again without a change re-runs nothing.
+A stage downstream of a stage whose value did not change is not re-run, as [the case for a computed's publish](#case-a-computed-publishes-only-a-changed-value) states.
 
 ### @rule a-computed-has-no-setter
 
@@ -588,11 +604,9 @@ This follows because a small set of primitives covers the use cases: a writable 
 
 ### @rule a-staged-effect-is-a-pipeline-ending-in-a-commit
 
-> `effect([stage0, …, stageN], commit)` runs the same pipeline a computed runs, and passes the final stage's resolved value to `commit`. It commits again whenever the pipeline produces a new value, and skips a value `Object.is`-equal to the one it last committed.
+> `effect([stage0, …, stageN], commit)` runs the same pipeline a computed runs, and passes the final stage's resolved value to `commit`, an async stage's included. It commits again whenever the pipeline produces a new value.
 
 This follows because a small set of primitives covers the use cases: a staged effect reuses the computed's pipeline and adds only the commit, instead of a second pipeline mechanism.
-
-Stages may be sync or async; an async stage's resolved value is what reaches `commit`.
 
 ### @rule an-optimistic-value-is-read-like-any-node
 
@@ -776,11 +790,15 @@ A generator stage is coloured by what its `yield* from(…)` calls read, not by 
 
 ### @rule a-pipeline-reads-as-a-promise-while-its-value-came-through-async
 
-> The raw read of a pipeline is a promise when its current value was produced through an asynchronous stage, and bare otherwise. A write never changes that colour.
+> The raw read of a pipeline is a promise when its current value was produced through an asynchronous stage, and bare otherwise. A sync last stage fed by an async stage still reads as a promise, and a stage that is async on one evaluation and sync on the next flips its read shape each time, even when the value is the same.
 
 This follows because a value that has a future says so, and the colour stays visible through every stage: a value produced through an async stage reads as a promise however late in the pipeline.
 
-A sync last stage fed by an async stage therefore still reads as a promise, and a stage that is async on one evaluation and sync on the next flips its read shape each time, even when the value is the same.
+### @rule a-write-keeps-a-pipelines-colour
+
+> A write into a pipeline stage keeps the colour the stage already has: a bare write into an asynchronously coloured stage still reads as a promise, and a write into a synchronously coloured stage does not introduce one.
+
+Also derives from [`rule-a-pipeline-reads-as-a-promise-while-its-value-came-through-async`](#rule-a-pipeline-reads-as-a-promise-while-its-value-came-through-async). This follows because a node's read shape says whether it has a future, which is a property of how the node produces its value, and a write stands in for one production without changing how the node produces.
 
 ### @rule a-generator-stage-is-asynchronous-only-when-it-suspends
 
@@ -852,11 +870,15 @@ An async stage suspends on the promise it returns, like any other pending promis
 
 ### @rule a-construction-default-seeds-only-the-tolerant-read
 
-> `signal(fn, default)` makes `peek` return `default` until the derivation first resolves, and an update function receive `default` in place of `undefined`. The raw read stays a pending promise.
+> `signal(fn, default)` makes `peek` return `default` until the derivation first resolves, and an update function receive `default` in place of `undefined`. Once a real value has resolved, both see it instead of the default.
 
-Also derives from [`axiom-plain-reads-are-honest`](#axiom-plain-reads-are-honest). This follows because an async node reads as a promise until it settles, and a tolerant read reports what is there: a default may stand in where nothing is there, but never for the raw read, which would hide the future.
+Also derives from [`axiom-plain-reads-are-honest`](#axiom-plain-reads-are-honest). This follows because a tolerant read reports what is there: a default may stand in where nothing is there.
 
-Once a real value has resolved, both see it instead of the default.
+### @rule a-construction-default-leaves-the-raw-read-a-promise
+
+> With `signal(fn, default)`, the raw read is still a pending promise until the derivation first resolves.
+
+This follows because an async node reads as a promise until it settles, and a default standing in for the raw read would hide the future it has.
 
 ### @rule pending-follows-where-a-value-came-from
 
@@ -942,11 +964,11 @@ Also derives from [`rule-a-construction-default-seeds-only-the-tolerant-read`](#
 
 ### @rule an-async-node-keeps-its-last-value-while-it-refetches
 
-> When an async node's inputs change, its last resolved value stays readable until the new one settles: `peek` returns it, `use` keeps delivering it to a consumer that already has it, and the node reports the refetch as pending.
+> When an async node's inputs change, its last resolved value stays readable through `peek` until the new one settles, while `isPending` reports the refetch.
 
 This follows because a read reports what is there, and whether a newer value is pending is a separate question: during a refetch, what is there is the last resolved value.
 
-This is stale-while-revalidate.
+This is stale-while-revalidate. `use` does not return the stale value: [it throws while the node is pending](#rule-use-of-an-accessor-throws-while-it-is-pending).
 
 ### @rule a-written-promise-leaves-the-prior-value-to-the-tolerant-read
 

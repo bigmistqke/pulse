@@ -126,7 +126,7 @@ test('disposal stops the staged effect from firing further commits', () => {
 })
 
 /**
- * @canon rule-a-staged-effect-is-a-pipeline-ending-in-a-commit
+ * @canon rule-a-staged-effect-skips-a-commit-equal-to-its-last
  */
 test('a staged effect skips a commit equal to the one it last made', () => {
   const [n, setN] = signal(1)
