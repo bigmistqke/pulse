@@ -2,7 +2,7 @@
 
 **Status:** design complete.
 **Date:** 2026-05-16.
-**Companion docs:** [`CONTEXT.md`](../../../CONTEXT.md), [master design spec §11](2026-05-14-pulse-design.md), [Plan 3b spec](2026-05-15-pulse-control-flow-design.md), `docs/adr/0001`–`0006`.
+**Companion docs:** [`CONTEXT.md`](../../../CANON.md#terms), [master design spec §11](2026-05-14-pulse-design.md), [Plan 3b spec](2026-05-15-pulse-control-flow-design.md), `docs/adr/0001`–`0006`.
 
 ---
 

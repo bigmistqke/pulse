@@ -2,7 +2,7 @@
 
 **Status:** design complete.
 **Date:** 2026-08-19.
-**Companion docs:** [`CONTEXT.md`](../../../CONTEXT.md), `src/dom/bindings.ts`,
+**Companion docs:** [`CONTEXT.md`](../../../CANON.md#terms), `src/dom/bindings.ts`,
 `src/dom/h.ts`, `src/dom/jsx-runtime.ts`.
 
 ---

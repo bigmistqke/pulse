@@ -227,7 +227,7 @@ JS generators are one-shot delimited continuations. Each `yield*` is a perform; 
 
 This is what effect-ts does. The limitation is one-shot resumption: you can't call the continuation multiple times from inside a generator. **Multi-shot effects (nondeterminism, backtracking) aren't expressible via this encoding** without further machinery.
 
-For pulse: same encoding. Generator computeds (`computed(function* () { yield* read(x) })`) ARE single-stage algebraic effect handlers. Multi-shot at the stage boundary is achieved by decomposition into separate r3 computeds — see [the CONTEXT.md Pipeline definition](../../../CONTEXT.md).
+For pulse: same encoding. Generator computeds (`computed(function* () { yield* read(x) })`) ARE single-stage algebraic effect handlers. Multi-shot at the stage boundary is achieved by decomposition into separate r3 computeds — see [how a pipeline re-enters work, in CANON.md](../../../CANON.md#spec-a-paused-computation-is-re-entered-at-its-pause).
 
 ---
 
@@ -318,7 +318,7 @@ React Suspense is an encoded effect handler. `use(promise)` performs a Suspend e
 
 ### In pulse
 
-Three encoded effects, with the table from our [the effects table under `axiom-each-job-is-done-by-one-mechanism` in CANON.md](../../../CANON.md#axiom-each-job-is-done-by-one-mechanism):
+Three encoded effects, with the table under [`axiom-each-job-is-done-by-one-mechanism` in CANON.md](../../../CANON.md#axiom-each-job-is-done-by-one-mechanism):
 
 | Effect | Performer | Handler |
 |---|---|---|

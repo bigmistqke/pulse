@@ -2,7 +2,7 @@
 
 **Status:** design complete.
 **Date:** 2026-05-16.
-**Companion docs:** [`CONTEXT.md`](../../../CONTEXT.md), [master design spec §7](2026-05-14-pulse-design.md), [ADR 0003](../../adr/0003-reentry-on-normal-node.md), [`docs/follow-ups.md`](../../follow-ups.md) ("'reuse-value' stash consumption…").
+**Companion docs:** [`CONTEXT.md`](../../../CANON.md#terms), [master design spec §7](2026-05-14-pulse-design.md), [ADR 0003](../../adr/0003-reentry-on-normal-node.md), [`docs/follow-ups.md`](../../follow-ups.md) ("'reuse-value' stash consumption…").
 
 ---
 

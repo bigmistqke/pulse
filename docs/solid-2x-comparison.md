@@ -1,6 +1,6 @@
 # Pulse vs Solid 2.x — A Comparative Analysis
 
-> For an overview of pulse and how to use it, see the [top-level README](../README.md). For project conventions and the conceptual model, see [`CONTEXT.md`](../CONTEXT.md).
+> For an overview of pulse and how to use it, see the [top-level README](../README.md). For the language of pulse and its conceptual model, see [`CANON.md`](../CANON.md).
 
 This analysis compares pulse at commit `408da57` (2026-08-22) with Solid 2.0.0-rc.13, published 2026-09-30. On the Solid side, it draws on these sources:
 

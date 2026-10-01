@@ -45,7 +45,7 @@ plain reactive accessors (`isPending`, `promiseOf`). No hidden async coloring.
 
 For the full design rationale and a point-by-point comparison with Solid 2.x,
 see [`docs/solid-2x-comparison.md`](./docs/solid-2x-comparison.md) and
-[`CONTEXT.md`](./CONTEXT.md).
+[`CANON.md`](CANON.md).
 
 ## Setup
 
@@ -242,7 +242,7 @@ Related helpers: `latest(x)` (last resolved value, never throws),
 `isPending(x)`, `promiseOf(x)`, and `from(x)` for `yield* from(x)` inside
 generator stages.
 
-See [`CONTEXT.md`](./CONTEXT.md) for the full language and transition model.
+See [`CANON.md`](CANON.md) for the language of pulse and the model behind it.
 
 ## Examples
 

@@ -2,7 +2,7 @@
 
 **Status:** design complete for the async/reactivity core + DOM layer (v1).
 **Date:** 2026-05-14.
-**Companion docs:** [`CONTEXT.md`](../../../CONTEXT.md) (glossary), `docs/adr/0001`–`0004` (point decisions). This spec is the readable whole; those stay as the living reference.
+**Companion docs:** [`CONTEXT.md`](../../../CANON.md#terms) (glossary), `docs/adr/0001`–`0004` (point decisions). This spec is the readable whole; those stay as the living reference.
 
 ---
 

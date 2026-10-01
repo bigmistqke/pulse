@@ -2,7 +2,7 @@
 
 **Status:** design complete.
 **Date:** 2026-05-16.
-**Companion docs:** [`CONTEXT.md`](../../../CONTEXT.md), [master design spec §10](2026-05-14-pulse-design.md), [ADR 0007 (Async coordination)](../../adr/0007-async-coordination-data-as-signals.md), [Plan 4 spec](2026-05-16-pulse-loading-design.md).
+**Companion docs:** [`CONTEXT.md`](../../../CANON.md#terms), [master design spec §10](2026-05-14-pulse-design.md), [ADR 0007 (Async coordination)](../../adr/0007-async-coordination-data-as-signals.md), [Plan 4 spec](2026-05-16-pulse-loading-design.md).
 
 ---
 
