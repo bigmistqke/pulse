@@ -85,7 +85,10 @@ The canon was written backwards from the existing tests and documents, and descr
 - [`@axiom code-that-builds-on-a-value-receives-it-resolved`](#axiom-code-that-builds-on-a-value-receives-it-resolved) — Code that computes a new value from an earlier one is handed that value resolved, never as a promise.
   - [`@rule an-update-function-receives-the-last-resolved-value`](#rule-an-update-function-receives-the-last-resolved-value) — An update function on a writable derivation receives the last value that actually resolved, never a promise, and `undefined` when nothing has resolved yet.
 - [`@axiom plain-reads-are-honest`](#axiom-plain-reads-are-honest) — A read reports what is there. Whether a value is still pending, or has failed, is a separate question asked through its own verb.
-  - [`@rule peek-returns-the-last-resolved-value-and-never-throws`](#rule-peek-returns-the-last-resolved-value-and-never-throws) — `peek(x)` returns the most recent resolved value of `x`, or `undefined` when it never resolved. It never throws, not even for a failed node.
+  - [`@rule peek-returns-the-last-resolved-value`](#rule-peek-returns-the-last-resolved-value) — `peek(x)` returns the most recent value that resolved for `x`. A value that is not a promise counts as resolved, and is returned as it is.
+  - [`@rule peek-returns-undefined-before-anything-resolved`](#rule-peek-returns-undefined-before-anything-resolved) — `peek(x)` returns `undefined` while nothing has ever resolved for `x`.
+  - [`@rule peek-keeps-the-last-resolved-value-while-a-newer-promise-is-pending`](#rule-peek-keeps-the-last-resolved-value-while-a-newer-promise-is-pending) — While a newer promise for `x` is pending, `peek(x)` keeps returning the value that resolved before it.
+  - [`@rule peek-never-throws-for-a-failed-node`](#rule-peek-never-throws-for-a-failed-node) — `peek(x)` on a failed node returns the last value that resolved before the failure, or `undefined` when none did. It never throws.
   - [`@rule peek-returns-a-given-fallback-until-a-value-resolves`](#rule-peek-returns-a-given-fallback-until-a-value-resolves) — `peek(x, fallback)` returns `fallback` wherever `peek(x)` would return `undefined`: before the first resolution, and after a rejection when nothing resolved before it. Once a value has resolved, it returns that value.
   - [`@rule a-construction-default-removes-undefined-from-the-types`](#rule-a-construction-default-removes-undefined-from-the-types) — With a construction default given, the types of `peek` and of an update function's argument leave out `undefined`, so neither needs a check.
   - [`@rule an-async-node-keeps-its-last-value-while-it-refetches`](#rule-an-async-node-keeps-its-last-value-while-it-refetches) — When an async node's inputs change, its last resolved value stays readable until the new one settles: `peek` returns it, `use` keeps delivering it to a consumer that already has it, and the node reports the refetch as pending.
@@ -136,7 +139,9 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule catch-error-refuses-a-disposed-owner`](#rule-catch-error-refuses-a-disposed-owner) — Calling `catchError` inside an owner that has been disposed throws.
   - [`@rule a-boundary-is-disposed-with-its-owner`](#rule-a-boundary-is-disposed-with-its-owner) — A boundary is owned by the owner it is created in, and disposing that owner disposes the boundary and everything inside it.
   - [`@rule a-disposed-binding-releases-its-boundary`](#rule-a-disposed-binding-releases-its-boundary) — A binding or effect that is disposed while suspended stops holding its boundary, and a commit it had queued never runs.
-  - [`@rule render-returns-a-dispose-that-removes-what-it-mounted`](#rule-render-returns-a-dispose-that-removes-what-it-mounted) — `render(component, target)` inserts what the component returns into `target` and returns a `dispose`. Disposing removes every node that render added and tears down everything created during the component.
+  - [`@rule render-returns-a-dispose-that-removes-what-it-mounted`](#rule-render-returns-a-dispose-that-removes-what-it-mounted) — `render(component, target)` inserts what the component returns into `target` and returns a `dispose`. Disposing removes every node that render added.
+  - [`@rule render-dispose-tears-down-everything-the-component-created`](#rule-render-dispose-tears-down-everything-the-component-created) — Disposing what `render` returned stops every binding the component created and disposes every owner created under it, nested `catchError` owners included.
+  - [`@rule render-inserts-a-components-return-as-a-child`](#rule-render-inserts-a-components-return-as-a-child) — `render` inserts what the component returns as a child of `target`, in whatever form a child may take: a node, an array, a primitive, or a function, which becomes a reactive child.
   - [`@rule a-component-that-throws-during-render-leaves-nothing-behind`](#rule-a-component-that-throws-during-render-leaves-nothing-behind) — When the component throws while `render` is running it, `render` disposes the root it opened before the error escapes.
   - [`@rule what-a-hole-builds-lives-under-its-own-owner-until-it-leaves`](#rule-what-a-hole-builds-lives-under-its-own-owner-until-it-leaves) — Content that a hole, a branch or a list row builds is built once, under a sub-owner of its own. That sub-owner is disposed when the content leaves, or when the surrounding owner is disposed.
     - [`@case each-run-of-a-reactive-child-owns-what-it-creates`](#case-each-run-of-a-reactive-child-owns-what-it-creates) — `bindings.ts` `insertChild`.
@@ -238,7 +243,8 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule after-its-first-load-a-boundary-shows-fallback-or-holds`](#rule-after-its-first-load-a-boundary-shows-fallback-or-holds) — When a boundary that has loaded before becomes pending again, it shows `fallback` if one is given, and otherwise keeps showing the subtree it last committed.
   - [`@rule a-boundary-without-placeholders-swaps-nothing`](#rule-a-boundary-without-placeholders-swaps-nothing) — A boundary with neither `initial` nor `fallback` never swaps its subtree out. What does not depend on a pending value stays visible while it waits.
   - [`@rule a-boundary-flushes-ready-commits-together`](#rule-a-boundary-flushes-ready-commits-together) — A boundary holds the commits of its ready bindings until no binding registered with it is suspended, then runs them all in one pass. A binding that reports idle, or unregisters, stops holding the gate.
-  - [`@rule is-loading-reads-the-nearest-boundary`](#rule-is-loading-reads-the-nearest-boundary) — `isLoading()` and `useLoading()` report whether the nearest enclosing boundary has anything in flight: a suspended binding, a queued commit, or a first load or refresh reported by `latest`. `isLoading()` returns the answer at the call site, and `useLoading()` looks the boundary up once and returns an accessor to read later. Outside any boundary the answer is false, and `useLoading()` returns an accessor that is always false.
+  - [`@rule is-loading-reads-the-nearest-boundary`](#rule-is-loading-reads-the-nearest-boundary) — `isLoading()` and `useLoading()` report whether the nearest enclosing boundary has anything in flight: a suspended binding, a queued commit, or a first load or refresh reported by `latest`. `isLoading()` returns the answer at the call site, and `useLoading()` looks the boundary up once and returns an accessor to read later.
+  - [`@rule loading-is-false-outside-any-boundary`](#rule-loading-is-false-outside-any-boundary) — Outside any loading boundary, `isLoading()` returns false, and `useLoading()` returns an accessor that always returns false.
   - [`@rule a-suspension-is-reported-to-the-nearest-boundary`](#rule-a-suspension-is-reported-to-the-nearest-boundary) — A binding or effect that suspends reports to the nearest enclosing `<Loading>` boundary and to no other. It reports again when it settles. One that never suspends never reports.
   - [`@rule a-structural-commit-waits-for-the-content-it-brings`](#rule-a-structural-commit-waits-for-the-content-it-brings) — A reactive child whose new content contains a suspended reactive child of the same boundary commits through that boundary's gate. The new structure lands in the same pass as that content, and the structure it replaces stays on screen until then.
     - [`@case a-hole-holds-new-content-that-is-not-ready`](#case-a-hole-holds-new-content-that-is-not-ready) — `bindings.ts` `insertChild`.
@@ -254,7 +260,8 @@ The canon was written backwards from the existing tests and documents, and descr
 - [`@axiom a-speculation-commits-or-is-discarded-whole`](#axiom-a-speculation-commits-or-is-discarded-whole) — A speculation holds tentative writes over committed state until it either commits or is discarded, and it does either as one unit. Both outcomes are ordinary.
   - [`@rule a-speculative-write-stays-out-of-committed-state`](#rule-a-speculative-write-stays-out-of-committed-state) — A write inside a speculation is invisible to committed state until the speculation commits: a reader outside the speculation, and `committed(x)` called anywhere, inside the speculation included, keep seeing the committed value.
     - [`@exception a-prediction-shows-outside-its-action`](#exception-a-prediction-shows-outside-its-action) — A write through an optimistic setter is shown to readers outside every action while its action is open. While several actions have predictions live, readers outside every action see the most recent one.
-  - [`@rule a-speculation-reads-its-own-writes`](#rule-a-speculation-reads-its-own-writes) — Inside a speculation, every read sees the speculation's writes, directly and through any number of derivations, chains of computeds and pipeline stages included. An update function's previous value is the speculation's own write once it has written.
+  - [`@rule a-speculation-reads-its-own-writes`](#rule-a-speculation-reads-its-own-writes) — Inside a speculation, every read sees the speculation's writes, directly and through any number of derivations, chains of computeds and pipeline stages included.
+  - [`@rule an-update-function-inside-a-speculation-sees-its-earlier-writes`](#rule-an-update-function-inside-a-speculation-sees-its-earlier-writes) — An update function called inside a speculation receives as its previous value the speculation's own latest write, or the committed value when the speculation has not written yet.
   - [`@rule a-commit-promotes-every-write-at-once`](#rule-a-commit-promotes-every-write-at-once) — When a speculation commits, all of its writes reach committed state together, and a committed consumer sees them as one change, not one change per write.
   - [`@rule a-discard-leaves-no-trace`](#rule-a-discard-leaves-no-trace) — When a speculation is discarded, its writes vanish, and committed state is as if it never ran.
   - [`@rule a-discard-drops-what-was-derived-from-its-writes`](#rule-a-discard-drops-what-was-derived-from-its-writes) — When a speculation is discarded, every value derived from its writes vanishes with it, at any depth of derivation, and a read afterwards sees the value derived from committed state.
@@ -854,13 +861,31 @@ A written promise has not resolved while it is pending, so an update function ca
 
 Reading a value should not be a discipline to learn. Pending state and failure are queried through `isPending`, `promiseOf` and `error`, not raised by the tolerant reads. The principle is [P3 in the exploration record](docs/pulse/framings.md#p3--plain-reads-are-honest).
 
-### @rule peek-returns-the-last-resolved-value-and-never-throws
+### @rule peek-returns-the-last-resolved-value
 
-> `peek(x)` returns the most recent resolved value of `x`, or `undefined` when it never resolved. It never throws, not even for a failed node.
+> `peek(x)` returns the most recent value that resolved for `x`. A value that is not a promise counts as resolved, and is returned as it is.
 
-This follows because a read reports what is there, and pending and failure are separate questions: `peek` returns the last resolved value, and never raises the failure it is not asked about.
+This follows because a read reports what is there, and the last resolved value is what is there.
 
-A plain value counts as resolved, and is returned as it is. While a newer promise is pending, the most recent resolved value is still the previous one, and after a rejection it stays the last value that resolved. What `peek` reports to boundaries is stated in [the rule on peek's reporting](#rule-peek-reports-nothing).
+What `peek` reports to boundaries is stated in [the rule on peek's reporting](#rule-peek-reports-nothing).
+
+### @rule peek-returns-undefined-before-anything-resolved
+
+> `peek(x)` returns `undefined` while nothing has ever resolved for `x`.
+
+This follows because a read reports what is there, and pending is a separate question: before the first resolution nothing is there, so `peek` returns nothing rather than waiting or raising.
+
+### @rule peek-keeps-the-last-resolved-value-while-a-newer-promise-is-pending
+
+> While a newer promise for `x` is pending, `peek(x)` keeps returning the value that resolved before it.
+
+This follows because a read reports what is there, and whether a newer value is pending is a separate question: the previous value is still the most recent one that resolved.
+
+### @rule peek-never-throws-for-a-failed-node
+
+> `peek(x)` on a failed node returns the last value that resolved before the failure, or `undefined` when none did. It never throws.
+
+This follows because a read reports what is there, and failure is a separate question asked through `error`: `peek` does not raise the failure it was not asked about.
 
 ### @rule peek-returns-a-given-fallback-until-a-value-resolves
 
@@ -1198,11 +1223,21 @@ A suspended branch that is unmounted therefore cannot keep its siblings waiting.
 
 ### @rule render-returns-a-dispose-that-removes-what-it-mounted
 
-> `render(component, target)` inserts what the component returns into `target` and returns a `dispose`. Disposing removes every node that render added and tears down everything created during the component.
+> `render(component, target)` inserts what the component returns into `target` and returns a `dispose`. Disposing removes every node that render added.
 
-This follows because disposing an owner ends everything beneath it: `render` creates its content under a root of its own, so disposing that root removes and tears down everything it mounted.
+This follows because disposing an owner ends everything beneath it: `render` creates its content under a root of its own, so disposing that root removes everything it mounted.
 
-The component may return a node, an array, a primitive or a function. A function becomes a reactive child, the same as in any child position. Everything the component created belongs to the root that `render` opened, so disposing it also stops every binding and disposes nested `catchError` owners.
+### @rule render-dispose-tears-down-everything-the-component-created
+
+> Disposing what `render` returned stops every binding the component created and disposes every owner created under it, nested `catchError` owners included.
+
+This follows because disposing an owner ends everything beneath it, and everything the component created belongs to the root that `render` opened.
+
+### @rule render-inserts-a-components-return-as-a-child
+
+> `render` inserts what the component returns as a child of `target`, in whatever form a child may take: a node, an array, a primitive, or a function, which becomes a reactive child.
+
+Also derives from [`rule-a-static-child-is-inserted-by-its-kind`](#rule-a-static-child-is-inserted-by-its-kind) and [`rule-a-function-child-is-a-reactive-hole`](#rule-a-function-child-is-a-reactive-hole). This follows because `render` places the component's result where its children go, so the result is a child and is inserted as any child is.
 
 ### @rule a-component-that-throws-during-render-leaves-nothing-behind
 
@@ -1800,7 +1835,7 @@ This follows because everything in the loading lifecycle other than rendering an
 
 This follows because the verb decides what a read takes part in: `peek` is the verb defined to take part in nothing, so it reports neither a first load nor a refresh.
 
-What `peek` returns is stated in [the rule on peek's value](#rule-peek-returns-the-last-resolved-value-and-never-throws).
+What `peek` returns is stated in [the rule on peek's value](#rule-peek-returns-the-last-resolved-value).
 
 ### @rule settled-waits-until-every-input-is-fresh
 
@@ -1886,9 +1921,15 @@ This follows because which bindings land together is decided by where the bounda
 
 ### @rule is-loading-reads-the-nearest-boundary
 
-> `isLoading()` and `useLoading()` report whether the nearest enclosing boundary has anything in flight: a suspended binding, a queued commit, or a first load or refresh reported by `latest`. `isLoading()` returns the answer at the call site, and `useLoading()` looks the boundary up once and returns an accessor to read later. Outside any boundary the answer is false, and `useLoading()` returns an accessor that is always false.
+> `isLoading()` and `useLoading()` report whether the nearest enclosing boundary has anything in flight: a suspended binding, a queued commit, or a first load or refresh reported by `latest`. `isLoading()` returns the answer at the call site, and `useLoading()` looks the boundary up once and returns an accessor to read later.
 
 This follows because a boundary coordinates the bindings placed inside it: the question whether something is loading is asked of the region the reader sits in, which is the nearest enclosing boundary.
+
+### @rule loading-is-false-outside-any-boundary
+
+> Outside any loading boundary, `isLoading()` returns false, and `useLoading()` returns an accessor that always returns false.
+
+This follows because a boundary coordinates only the bindings placed inside it: with no boundary above the reader, there is no region in which anything could be in flight.
 
 ### @rule a-suspension-is-reported-to-the-nearest-boundary
 
@@ -1996,9 +2037,15 @@ An optimistic value exists to put a prediction on screen before the action finis
 
 ### @rule a-speculation-reads-its-own-writes
 
-> Inside a speculation, every read sees the speculation's writes, directly and through any number of derivations, chains of computeds and pipeline stages included. An update function's previous value is the speculation's own write once it has written.
+> Inside a speculation, every read sees the speculation's writes, directly and through any number of derivations, chains of computeds and pipeline stages included.
 
 This follows because a speculation holds its writes over committed state: a read inside it sees committed state with the speculation's writes on top, and everything derived inside it is derived from that.
+
+### @rule an-update-function-inside-a-speculation-sees-its-earlier-writes
+
+> An update function called inside a speculation receives as its previous value the speculation's own latest write, or the committed value when the speculation has not written yet.
+
+Also derives from [`rule-a-speculation-reads-its-own-writes`](#rule-a-speculation-reads-its-own-writes). This follows because an update function's previous value is a read of the signal, and a read inside a speculation sees the speculation's writes.
 
 ### @rule a-commit-promotes-every-write-at-once
 

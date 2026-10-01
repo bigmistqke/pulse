@@ -28,7 +28,7 @@ test('a promise-holding signal flows through an effect via use', async () => {
 })
 
 /**
- * @canon rule-peek-returns-the-last-resolved-value-and-never-throws
+ * @canon rule-peek-keeps-the-last-resolved-value-while-a-newer-promise-is-pending
  */
 test('peek gives stale-while-revalidate across a re-fetch', async () => {
   const [data, setData] = signal<Promise<number>>(Promise.resolve(1))

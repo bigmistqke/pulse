@@ -41,7 +41,7 @@ test('render dispose removes the mounted nodes', () => {
 })
 
 /**
- * @canon rule-render-returns-a-dispose-that-removes-what-it-mounted
+ * @canon rule-render-dispose-tears-down-everything-the-component-created
  */
 test('render dispose tears down binding-effects', () => {
   const target = document.createElement('section')
@@ -58,7 +58,7 @@ test('render dispose tears down binding-effects', () => {
 })
 
 /**
- * @canon rule-render-returns-a-dispose-that-removes-what-it-mounted
+ * @canon rule-render-inserts-a-components-return-as-a-child
  */
 test('render supports a component returning an array', () => {
   const target = document.createElement('section')
@@ -74,7 +74,7 @@ test('render supports a component returning an array', () => {
 })
 
 /**
- * @canon rule-render-returns-a-dispose-that-removes-what-it-mounted
+ * @canon rule-render-inserts-a-components-return-as-a-child
  * @canon rule-a-function-child-is-a-reactive-hole
  */
 test('render accepts a top-level reactive (function) return', () => {
@@ -92,7 +92,7 @@ test('render accepts a top-level reactive (function) return', () => {
 })
 
 /**
- * @canon rule-render-returns-a-dispose-that-removes-what-it-mounted
+ * @canon rule-render-inserts-a-components-return-as-a-child
  */
 test('render accepts a top-level primitive return', () => {
   const target = document.createElement('section')

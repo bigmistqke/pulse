@@ -88,7 +88,7 @@ test('a throw inside a reactive binding is caught by an enclosing catchError', (
 })
 
 /**
- * @canon rule-render-returns-a-dispose-that-removes-what-it-mounted
+ * @canon rule-render-dispose-tears-down-everything-the-component-created
  */
 test('dispose tears down nested catchError children', () => {
   const target = document.createElement('section')

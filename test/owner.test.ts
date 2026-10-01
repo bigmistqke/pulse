@@ -455,7 +455,7 @@ test('a nearer catchError that declines the error lets a farther ErrorScope clai
 })
 
 /**
- * @canon rule-is-loading-reads-the-nearest-boundary
+ * @canon rule-loading-is-false-outside-any-boundary
  */
 test('Owner.boundaries.pending defaults to null', () => {
   createRoot(() => {
@@ -558,7 +558,7 @@ test('findBoundaryScope walks parent chain to find first non-null entry', () => 
 })
 
 /**
- * @canon rule-is-loading-reads-the-nearest-boundary
+ * @canon rule-loading-is-false-outside-any-boundary
  */
 test('findBoundaryScope returns null when no scope on chain', () => {
   let captured: LoadingScope | null = { kind: 'pending', active: () => false, register: () => ({ report() {}, unregister() {} }), deferOrCommit(commit) { commit() }, trackBackground() {}, trackFirstLoad() {} }

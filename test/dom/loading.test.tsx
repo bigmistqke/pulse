@@ -389,7 +389,7 @@ test('disposing surrounding owner cascades to Loading', () => {
 })
 
 /**
- * @canon rule-is-loading-reads-the-nearest-boundary
+ * @canon rule-loading-is-false-outside-any-boundary
  */
 test('useLoading() outside any Loading returns constant-false accessor', () => {
   const target = document.createElement('section')
@@ -454,7 +454,7 @@ test('isLoading() inside subtree reflects pending state, read fresh each call', 
 })
 
 /**
- * @canon rule-is-loading-reads-the-nearest-boundary
+ * @canon rule-loading-is-false-outside-any-boundary
  */
 test('isLoading() outside any Loading returns false', () => {
   const target = document.createElement('section')

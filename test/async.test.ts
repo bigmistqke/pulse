@@ -26,7 +26,7 @@ test('isPending is true for a signal holding a pending promise', () => {
 })
 
 /**
- * @canon rule-peek-returns-the-last-resolved-value-and-never-throws
+ * @canon rule-peek-returns-undefined-before-anything-resolved
  */
 test('peek is undefined before the first resolution', () => {
   const [s] = signal(new Promise<number>(() => {})) // never resolves
@@ -34,7 +34,7 @@ test('peek is undefined before the first resolution', () => {
 })
 
 /**
- * @canon rule-peek-returns-the-last-resolved-value-and-never-throws
+ * @canon rule-peek-returns-the-last-resolved-value
  */
 test('peek returns the resolved value after the promise settles', async () => {
   const [s] = signal(Promise.resolve(1))
@@ -44,7 +44,7 @@ test('peek returns the resolved value after the promise settles', async () => {
 })
 
 /**
- * @canon rule-peek-returns-the-last-resolved-value-and-never-throws
+ * @canon rule-peek-keeps-the-last-resolved-value-while-a-newer-promise-is-pending
  */
 test('peek keeps the last resolved value while a newer promise is pending', async () => {
   const [s, setS] = signal<Promise<number>>(Promise.resolve(1))

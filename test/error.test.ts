@@ -16,7 +16,7 @@ const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
  */
 
 /**
- * @canon rule-peek-returns-the-last-resolved-value-and-never-throws
+ * @canon rule-peek-never-throws-for-a-failed-node
  */
 test('a failed refetch keeps the stale value readable through peek', async () => {
   const [id, setId] = signal(1)
@@ -76,7 +76,7 @@ test('use() still throws on error — the fatal read is unchanged', async () => 
 })
 
 /**
- * @canon rule-peek-returns-the-last-resolved-value-and-never-throws
+ * @canon rule-peek-never-throws-for-a-failed-node
  */
 test('peek returns undefined (not a throw) when a node fails with no prior value', async () => {
   const c = computed(() => Promise.reject(new Error('boom')))

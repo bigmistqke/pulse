@@ -42,7 +42,7 @@ test('a public signal write inside an action is isolated from committed state un
 })
 
 /**
- * @canon rule-a-speculation-reads-its-own-writes
+ * @canon rule-an-update-function-inside-a-speculation-sees-its-earlier-writes
  */
 test('the updater form reads the scope-appropriate previous value', () => {
   const [count, setCount] = signal(10)
