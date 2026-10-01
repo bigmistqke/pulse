@@ -457,7 +457,7 @@ test('async stage rejection: rejected promise re-thrown on next r3 invocation (r
 })
 
 /**
- * @canon spec-an-async-computed-refetches-when-a-source-changes
+ * @canon spec-an-async-computed-refreshes-when-a-source-changes
  */
 test('an async first stage keeps its dependency tracked across settles', async () => {
   setScheduler(syncScheduler(flush))
@@ -489,7 +489,7 @@ test('an async first stage keeps its dependency tracked across settles', async (
 })
 
 /**
- * @canon spec-an-async-computed-refetches-when-a-source-changes
+ * @canon spec-an-async-computed-refreshes-when-a-source-changes
  */
 test('refetch with different resolved value: downstream effect re-runs', async () => {
   setScheduler(syncScheduler(flush))
@@ -644,7 +644,7 @@ test('a stage whose use settles to -0 after 0 does not re-run the next stage', a
 })
 
 /**
- * @canon spec-an-async-node-keeps-its-last-value-while-it-refetches
+ * @canon spec-an-async-node-keeps-its-last-value-while-it-refreshes
  */
 test('stale-while-revalidate: prior value visible during refetch', async () => {
   setScheduler(syncScheduler(flush))
@@ -780,7 +780,7 @@ test('a stage returning a new .then-chained promise on every call settles withou
 })
 
 /**
- * @canon spec-an-async-computed-refetches-when-a-source-changes
+ * @canon spec-an-async-computed-refreshes-when-a-source-changes
  */
 test('a promise returned by a later stage is settled before it is published', async () => {
   setScheduler(syncScheduler(flush))
@@ -942,7 +942,7 @@ describe('computed — NotReadyYet absorbed as suspension (Plan B)', () => {
   })
 
   /**
-   * @canon spec-an-async-node-keeps-its-last-value-while-it-refetches
+   * @canon spec-an-async-node-keeps-its-last-value-while-it-refreshes
    */
   test('SWR-refetch: stage body throwing NotReadyYet during refetch keeps prior value visible', async () => {
     const [src, setSrc] = signal(1)

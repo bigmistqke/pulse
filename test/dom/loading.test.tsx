@@ -518,7 +518,7 @@ test('rapidly swapping a pending source keeps the boundary on initial', async ()
 // read must never reopen a boundary's fallback on remount, even while its
 // background refresh is still in flight — see docs/adr/0014-use-latest-composed-on-latest.md.
 /**
- * @canon spec-use-latest-returns-the-last-resolved-value-during-a-refetch
+ * @canon spec-use-latest-returns-the-last-resolved-value-during-a-refresh
  */
 test('use.latest() holds prior across a Loading boundary remount, even while a background refresh is in flight', async () => {
   const target = document.createElement('section')

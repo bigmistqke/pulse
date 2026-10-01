@@ -97,7 +97,7 @@ test('a signal written a promise reads back as the plain promise it was given', 
 })
 
 /**
- * @canon spec-an-async-node-keeps-its-last-value-while-it-refetches
+ * @canon spec-an-async-node-keeps-its-last-value-while-it-refreshes
  */
 test('SWR: while a refetch is pending the prior resolved value stays available via peek', async () => {
   const [s, setS] = signal<number | Promise<number>>(0)

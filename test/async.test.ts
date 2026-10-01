@@ -462,7 +462,7 @@ describe('use.latest(accessor) — throws only before the first value, tolerant 
   })
 
   /**
-   * @canon spec-use-latest-returns-the-last-resolved-value-during-a-refetch
+   * @canon spec-use-latest-returns-the-last-resolved-value-during-a-refresh
    */
   test('returns the resolved value once settled, same as use()', async () => {
     const [s] = signal(Promise.resolve(10))
@@ -471,7 +471,7 @@ describe('use.latest(accessor) — throws only before the first value, tolerant 
   })
 
   /**
-   * @canon spec-use-latest-returns-the-last-resolved-value-during-a-refetch
+   * @canon spec-use-latest-returns-the-last-resolved-value-during-a-refresh
    */
   test('does NOT throw during an SWR refetch — returns the stale value instead of use()\'s throw', async () => {
     const [id, setId] = signal(1)
@@ -496,7 +496,7 @@ describe('use.latest(accessor) — throws only before the first value, tolerant 
   })
 
   /**
-   * @canon spec-use-latest-returns-the-last-resolved-value-during-a-refetch
+   * @canon spec-use-latest-returns-the-last-resolved-value-during-a-refresh
    */
   test('use(swrComputed) throwing during refetch and use.latest(swrComputed) returning stale are both true at once', async () => {
     const [page, setPage] = signal(1)
@@ -521,7 +521,7 @@ describe('use.latest(accessor) — throws only before the first value, tolerant 
 
 describe('from — post-Plan-A (no brand suspension)', () => {
   /**
-   * @canon spec-from-yields-the-stale-value-during-a-refetch
+   * @canon spec-from-yields-the-stale-value-during-a-refresh
    */
   test('yield* from on an SWR-refetching computed yields the stale value, NOT brand.promise', async () => {
     const [page, setPage] = signal(1)

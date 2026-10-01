@@ -109,7 +109,7 @@ test('settled resolves immediately when every input is already settled', async (
 })
 
 /**
- * @canon spec-settled-waits-again-when-an-input-refetches
+ * @canon spec-settled-waits-again-when-an-input-refreshes
  */
 test('settled re-runs and re-coordinates when an input refetches', async () => {
   let ra!: (v: number) => void
