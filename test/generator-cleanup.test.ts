@@ -4,6 +4,7 @@ import { signal } from '../src/signal'
 import { peek, from } from '../src/async'
 import { createRoot, onCleanup } from '../src/owner'
 import { action, onSettled } from '../src/scope'
+import { effect } from '../src/effect'
 
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
 const ticks = async (n: number) => {
@@ -246,3 +247,35 @@ test('settle callbacks, owner cleanups and generator cleanups all run newest fir
   expect(generated).toEqual([3, 2, 1])
 })
 
+/**
+ * @canon spec-closing-runs-callbacks-newest-first
+ */
+test('cleanups registered in a sync stage and in an effect run newest first', async () => {
+  // A sync stage and an effect body are r3 computations, so their cleanups run
+  // when r3 re-runs or detaches them, not when an owner or a generator closes.
+  const [a, setA] = signal(1)
+  const staged: number[] = []
+  const effected: number[] = []
+
+  const dispose = createRoot((dispose) => {
+    const c = computed(() => {
+      const v = a()
+      for (const i of [1, 2, 3]) onCleanup(() => staged.push(i))
+      return v
+    })
+    effect(() => {
+      a()
+      for (const i of [1, 2, 3]) onCleanup(() => effected.push(i))
+    })
+    c()
+    return dispose
+  })
+  await ticks(3)
+
+  setA(2)
+  await ticks(3)
+  dispose()
+
+  expect(staged.slice(0, 3)).toEqual([3, 2, 1])
+  expect(effected.slice(0, 3)).toEqual([3, 2, 1])
+})

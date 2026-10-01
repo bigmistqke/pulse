@@ -616,6 +616,39 @@ export function onCleanup(fn: Disposable): Disposable {
 }
 
 /**
+ * The cleanups registered during the current run of each r3 computation.
+ *
+ * r3 runs a computation's own cleanups in registration order, and a throw in
+ * one stops the rest. So pulse gives r3 one cleanup per run, which runs this
+ * list newest first, the order every other closing place in pulse uses.
+ */
+const runCleanups = new WeakMap<object, Disposable[]>()
+
+/**
+ * The single r3 cleanup for one run: every callback runs, newest first, even
+ * when an earlier one throws. The first error is rethrown once all have run,
+ * so it leaves the way a throwing cleanup left before.
+ */
+function runNewestFirst(context: object, cleanups: Disposable[]): Disposable {
+  return () => {
+    runCleanups.delete(context)
+    let failed = false
+    let firstError: unknown
+    for (let i = cleanups.length - 1; i >= 0; i--) {
+      try {
+        cleanups[i]()
+      } catch (e) {
+        if (!failed) {
+          failed = true
+          firstError = e
+        }
+      }
+    }
+    if (failed) throw firstError
+  }
+}
+
+/**
  * Internal: register `fn` like `onCleanup`, but without refusing when there is
  * no owner. Pulse's own bindings use this, because a binding created outside
  * every owner still works and only loses its teardown, which the binding warns
@@ -629,8 +662,16 @@ export function registerCleanup(fn: Disposable): Disposable {
     generatorCleanups.push(fn)
     return fn
   }
-  if (getContext() !== null) {
-    return r3OnCleanup(fn)
+  const context = getContext()
+  if (context !== null) {
+    let cleanups = runCleanups.get(context)
+    if (cleanups === undefined) {
+      cleanups = []
+      runCleanups.set(context, cleanups)
+      r3OnCleanup(runNewestFirst(context, cleanups))
+    }
+    cleanups.push(fn)
+    return fn
   }
   if (currentOwner !== null && !currentOwner.disposed) {
     currentOwner.cleanups.push(fn)
