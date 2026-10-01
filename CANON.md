@@ -22,6 +22,12 @@ This document is the project. It holds the theory of pulse: why it is the way it
 - [`@term refresh`](#term-refresh) — A pending episode of a source that has resolved a real value before.
 - [`@term ambient-context`](#term-ambient-context) — A value set for the duration of one call and visible to everything the call runs: the current owner, speculation or binding.
 - [`@term report`](#term-report) — What a binding's read tells the boundaries above it about a source, loading, refreshing or failed, without the binding waiting.
+- [`@term pending`](#term-pending) — The state of a value that waits on a promise not yet settled, in it or in a source it came from.
+- [`@term suspension`](#term-suspension) — A run that stopped to wait on a pending promise, by throwing `NotReadyYet` or by a stage handing back the promise.
+- [`@term read-verb`](#term-read-verb) — A function that takes a value out of an accessor at the read site, and decides how: `use`, `use.latest`, `latest`, `peek`, or `from` in a generator stage.
+- [`@term tolerant-read`](#term-tolerant-read) — A read verb that returns the last resolved value, or a fallback, instead of waiting or throwing: `peek` or `latest`.
+- [`@term hole`](#term-hole) — A reactive child: a function in a child position, whose binding fills its place in the page.
+- [`@term gate`](#term-gate) — The queue in which a loading boundary holds the commits of the bindings enrolled in it, so they land together.
 - [`@term owner`](#term-owner) — A node in the tree of lifetimes, to which reactive nodes, cleanups and other owners belong.
 - [`@term boundary`](#term-boundary) — A loading boundary or an error boundary.
 - [`@term loading-boundary`](#term-loading-boundary) — The owner a `<Loading>` component creates to gather the pending state of the bindings beneath it.
@@ -57,7 +63,7 @@ This document is the project. It holds the theory of pulse: why it is the way it
     - [`@spec use-latest-enrols-the-binding-in-its-boundarys-gate`](#spec-use-latest-enrols-the-binding-in-its-boundarys-gate) — A binding that called `use.latest(x)` commits through its boundary's gate: while a sibling binding of the boundary is suspended, its commit waits, even when `use.latest(x)` returned a value.
     - [`@spec the-jsx-runtime-builds-every-element-with-h`](#spec-the-jsx-runtime-builds-every-element-with-h) — The JSX runtime's `jsx`, `jsxs` and `jsxDEV` build every element with `h`. A component receives its props object as it is, `children` included and getters intact. A DOM tag or a `Fragment` receives its children as separate arguments and the rest of its props with their getters intact.
     - [`@spec an-optimistic-value-is-a-signal-variant`](#spec-an-optimistic-value-is-a-signal-variant) — `optimistic(...stages)` builds the same pipeline `computed` and `signal` build, and returns an ordinary node. Only its setter differs: it writes a prediction rather than a value.
-      - [`@spec an-optimistic-value-is-read-like-any-node`](#spec-an-optimistic-value-is-read-like-any-node) — The accessor of an [optimistic value](#term-optimistic-value) is an ordinary node. Every read verb applies to it, and the pending and failed state of what its recipe reads reaches the read site through it.
+      - [`@spec an-optimistic-value-is-read-like-any-node`](#spec-an-optimistic-value-is-read-like-any-node) — The accessor of an [optimistic value](#term-optimistic-value) is an ordinary node. Every [read verb](#term-read-verb) applies to it, and the pending and failed state of what its recipe reads reaches the read site through it.
       - [`@spec an-optimistic-fallback-seeds-the-tolerant-read`](#spec-an-optimistic-fallback-seeds-the-tolerant-read) — A fallback passed when an optimistic value is created is what `peek` and `latest` return before the source has resolved.
   - [`@spec ambient-context-is-set-for-a-call-and-restored-after`](#spec-ambient-context-is-set-for-a-call-and-restored-after) — [Ambient context](#term-ambient-context), such as the current owner, is set for the duration of one call and restored when that call ends, however it ends.
     - [`@spec there-is-no-ambient-owner-outside-every-root`](#spec-there-is-no-ambient-owner-outside-every-root) — Outside every root, `getOwner()` returns null, also after a root has run and after it has been disposed.
@@ -89,7 +95,7 @@ This document is the project. It holds the theory of pulse: why it is the way it
   - [`@spec an-update-function-sees-the-value-a-sync-derivation-produced-at-creation`](#spec-an-update-function-sees-the-value-a-sync-derivation-produced-at-creation) — An update function on a sync derivation receives the value the derivation produced when it was created, even before any write, wherever the derivation was created. An async derivation that suspended has produced nothing yet.
 - [`@axiom nothing-is-hidden-from-the-code-that-uses-it`](#axiom-nothing-is-hidden-from-the-code-that-uses-it) — What a value is, including that it is still pending or has failed, is visible to the code that reads it, rather than smoothed over by the framework.
   - [`@spec a-component-that-suspends-in-its-body-warns`](#spec-a-component-that-suspends-in-its-body-warns) — When a component's body suspends, pulse logs a warning that names the component, once per component function. The component still runs again once the source settles.
-  - [`@axiom plain-reads-are-honest`](#axiom-plain-reads-are-honest) — A read reports what is there. Whether a value is still pending, or has failed, is a separate question asked through its own verb.
+  - [`@axiom plain-reads-are-honest`](#axiom-plain-reads-are-honest) — A read reports what is there. Whether a value is still [pending](#term-pending), or has failed, is a separate question asked through its own verb.
     - [`@spec peek-returns-the-last-resolved-value`](#spec-peek-returns-the-last-resolved-value) — `peek(x)` returns the most recent value that resolved for `x`. A value that is not a promise counts as resolved, and is returned as it is.
     - [`@spec peek-returns-undefined-before-anything-resolved`](#spec-peek-returns-undefined-before-anything-resolved) — `peek(x)` returns `undefined` while nothing has ever resolved for `x`.
     - [`@spec peek-keeps-the-last-resolved-value-while-a-newer-promise-is-pending`](#spec-peek-keeps-the-last-resolved-value-while-a-newer-promise-is-pending) — While a newer promise for `x` is pending, `peek(x)` keeps returning the value that resolved before it.
@@ -98,12 +104,12 @@ This document is the project. It holds the theory of pulse: why it is the way it
     - [`@spec is-optimistic-is-true-while-a-prediction-is-live`](#spec-is-optimistic-is-true-while-a-prediction-is-live) — The `isOptimistic` accessor returned by `optimistic` reads true while a prediction is live, and false before any prediction and once the action that wrote it has closed.
     - [`@spec a-construction-default-removes-undefined-from-the-types`](#spec-a-construction-default-removes-undefined-from-the-types) — With a construction default given, the types of `peek` and of an update function's argument leave out `undefined`, so neither needs a check.
     - [`@spec an-async-node-keeps-its-last-value-while-it-refreshes`](#spec-an-async-node-keeps-its-last-value-while-it-refreshes) — When an async node's inputs change, its last resolved value stays readable through `peek` until the new one settles, while `isPending` reports the refresh.
-    - [`@spec a-written-promise-leaves-the-prior-value-to-the-tolerant-read`](#spec-a-written-promise-leaves-the-prior-value-to-the-tolerant-read) — While a written promise is pending, and after it rejects, the tolerant read returns the value from before the write.
+    - [`@spec a-written-promise-leaves-the-prior-value-to-the-tolerant-read`](#spec-a-written-promise-leaves-the-prior-value-to-the-tolerant-read) — While a written promise is pending, and after it rejects, the [tolerant read](#term-tolerant-read) returns the value from before the write.
     - [`@spec from-yields-the-stale-value-during-a-refresh`](#spec-from-yields-the-stale-value-during-a-refresh) — During a refresh, `yield* from(c)` on a computed yields the stale value its accessor returns, not the promise in flight.
     - [`@spec pending-is-asked-and-answered-directly`](#spec-pending-is-asked-and-answered-directly) — `isPending(x)` and `promiseOf(x)` answer whether `x` has a promise in flight, and which one, as plain values called fresh at each read site.
       - [`@spec pending-is-a-reactive-read`](#spec-pending-is-a-reactive-read) — `isPending(x)` and `promiseOf(x)` are reactive reads: a consumer that read them runs again when their answer changes. That holds for a plain signal holding a promise as for a pipeline.
     - [`@spec a-signals-pending-state-is-the-state-of-the-promise-it-holds`](#spec-a-signals-pending-state-is-the-state-of-the-promise-it-holds) — A signal holding a plain value is never pending, and its `promiseOf` is `null`. A signal holding a promise is pending until that promise settles, and `promiseOf` returns it while it is.
-    - [`@spec a-tolerant-read-carries-loading-state-into-its-reader`](#spec-a-tolerant-read-carries-loading-state-into-its-reader) — A computed that read a pending source through `latest` or `use` reports pending, and hands out that source's promise through `promiseOf`, until the source settles, even though it holds a value of its own. The state composes through a chain of such readers, and survives the reader re-running during a refresh.
+    - [`@spec a-read-through-latest-or-use-carries-loading-state-into-its-reader`](#spec-a-read-through-latest-or-use-carries-loading-state-into-its-reader) — A computed that read a pending source through `latest` or `use` reports pending, and hands out that source's promise through `promiseOf`, until the source settles, even though it holds a value of its own. The state composes through a chain of such readers, and survives the reader re-running during a refresh.
     - [`@spec a-read-through-peek-carries-no-pending-state-into-its-reader`](#spec-a-read-through-peek-carries-no-pending-state-into-its-reader) — A computed that read a pending source only through `peek` does not report pending because of it.
     - [`@spec a-seeded-source-still-counts-as-a-first-load`](#spec-a-seeded-source-still-counts-as-a-first-load) — A source given a construction default is on its first load until it genuinely resolves. A `latest` read of it during that time drives the boundary's first-load placeholder, although the read has a value to return.
     - [`@spec a-live-prediction-reports-neither-pending-nor-failed`](#spec-a-live-prediction-reports-neither-pending-nor-failed) — While a prediction is live, the optimistic node reports neither pending nor failed, and `use` returns the prediction. The source underneath keeps reporting its own state, and when the last layer drops the node reports that state again, a masked failure included.
@@ -219,7 +225,7 @@ This document is the project. It holds the theory of pulse: why it is the way it
       - [`@spec a-latest-report-survives-a-boundary-remount`](#spec-a-latest-report-survives-a-boundary-remount) — What `latest` and `use.latest` report about a source, a first load or a refresh, is the same after the boundary around them is removed and mounted again.
     - [`@spec a-tolerant-read-reports-a-failure-to-the-boundary`](#spec-a-tolerant-read-reports-a-failure-to-the-boundary) — A binding that reads a failed node through `latest` reports the failure to the nearest accepting error boundary, though nothing throws, and reports its recovery when a later run sees no error.
     - [`@spec peek-reports-nothing`](#spec-peek-reports-nothing) — `peek(x)` returns the last resolved value and reports nothing to any boundary, neither a first load nor a refresh.
-    - [`@spec use-enrols-the-binding-in-its-boundarys-gate`](#spec-use-enrols-the-binding-in-its-boundarys-gate) — A binding that called `use(x)` during its run commits through its boundary's gate. While any binding of the boundary is suspended, its commit waits, and it lands in the same pass as the others.
+    - [`@spec use-enrols-the-binding-in-its-boundarys-gate`](#spec-use-enrols-the-binding-in-its-boundarys-gate) — A binding that called `use(x)` during its run commits through its boundary's [gate](#term-gate). While any binding of the boundary is suspended, its commit waits, and it lands in the same pass as the others.
       - [`@spec a-reactive-child-that-called-use-waits-for-the-gate`](#spec-a-reactive-child-that-called-use-waits-for-the-gate) — `bindings.ts` `insertChild`.
       - [`@spec a-reactive-prop-that-called-use-waits-for-the-gate`](#spec-a-reactive-prop-that-called-use-waits-for-the-gate) — `bindings.ts` `bindProp`.
       - [`@spec a-queued-commit-is-checked-again-at-the-end-of-the-microtask`](#spec-a-queued-commit-is-checked-again-at-the-end-of-the-microtask) — `loading.ts` `deferOrCommit`.
@@ -302,7 +308,7 @@ This document is the project. It holds the theory of pulse: why it is the way it
     - [`@spec render-returns-a-dispose-that-removes-what-it-mounted`](#spec-render-returns-a-dispose-that-removes-what-it-mounted) — `render(component, target)` inserts what the component returns into `target` and returns a `dispose`. Disposing removes every node that render added.
     - [`@spec render-dispose-tears-down-everything-the-component-created`](#spec-render-dispose-tears-down-everything-the-component-created) — Disposing what `render` returned stops every binding the component created and disposes every owner created under it, nested `catchError` owners included.
     - [`@spec a-component-that-throws-during-render-leaves-nothing-behind`](#spec-a-component-that-throws-during-render-leaves-nothing-behind) — When the component throws while `render` is running it, `render` disposes the root it opened before the error escapes.
-    - [`@spec what-a-hole-builds-lives-under-its-own-owner-until-it-leaves`](#spec-what-a-hole-builds-lives-under-its-own-owner-until-it-leaves) — Content that a hole, a branch or a list row builds is built under a sub-owner of its own. That sub-owner is disposed when the content leaves, or when the surrounding owner is disposed.
+    - [`@spec what-a-hole-builds-lives-under-its-own-owner-until-it-leaves`](#spec-what-a-hole-builds-lives-under-its-own-owner-until-it-leaves) — Content that a [hole](#term-hole), a branch or a list row builds is built under a sub-owner of its own. That sub-owner is disposed when the content leaves, or when the surrounding owner is disposed.
       - [`@spec each-run-of-a-reactive-child-owns-what-it-creates`](#spec-each-run-of-a-reactive-child-owns-what-it-creates) — `bindings.ts` `insertChild`.
       - [`@spec map-array-builds-each-item-once-under-its-own-owner`](#spec-map-array-builds-each-item-once-under-its-own-owner) — `map-array.ts` `mapArray`.
     - [`@spec a-fragment-child-belongs-to-the-owner-the-fragment-was-built-in`](#spec-a-fragment-child-belongs-to-the-owner-the-fragment-was-built-in) — A function child of a `Fragment` belongs wholly to the owner that was ambient when the `Fragment` was built, wherever the array is inserted later: the binding itself, each run of it, and everything a run creates. Disposing that owner stops the binding, and disposing the owner where the array was inserted does not.
@@ -328,7 +334,7 @@ This document is the project. It holds the theory of pulse: why it is the way it
     - [`@spec a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller`](#spec-a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller) — A failed action reports to the nearest boundary that accepts its error, above the owner it was called under: an `<Errored>`, a root's default boundary, or a `catchError`, whose handler is then called with the error.
     - [`@spec a-failed-action-chooses-its-boundary-again-on-every-failure`](#spec-a-failed-action-chooses-its-boundary-again-on-every-failure) — Each failure of an action chooses its boundary anew, so a retry whose error a different boundary now accepts moves its report there and releases the boundary that held the earlier one.
     - [`@spec a-throwing-handler-passes-a-failed-action-on-with-the-handlers-error`](#spec-a-throwing-handler-passes-a-failed-action-on-with-the-handlers-error) — When a `catchError` handler called for a failed action throws, the search continues to the boundaries beyond it with the handler's error, and the one that claims it receives the handler's error. The action's handle keeps the action's own error.
-    - [`@spec a-real-error-in-an-effect-goes-to-the-nearest-handler`](#spec-a-real-error-in-an-effect-goes-to-the-nearest-handler) — A thrown error that is not a suspension, from an effect's body, a stage or a commit, goes to the nearest [error handler](#term-error-handler) above the effect that accepts it. That holds on its first run and on every later run that throws, and the error never goes to an error boundary.
+    - [`@spec a-real-error-in-an-effect-goes-to-the-nearest-handler`](#spec-a-real-error-in-an-effect-goes-to-the-nearest-handler) — A thrown error that is not a [suspension](#term-suspension), from an effect's body, a stage or a commit, goes to the nearest [error handler](#term-error-handler) above the effect that accepts it. That holds on its first run and on every later run that throws, and the error never goes to an error boundary.
     - [`@spec a-loading-boundary-does-not-catch-a-real-error`](#spec-a-loading-boundary-does-not-catch-a-real-error) — A `<Loading>` boundary between a binding and an error handler lets a real error from that binding pass on to the handler. It takes only suspensions.
     - [`@spec a-hole-that-throws-reports-to-the-nearest-catch-error`](#spec-a-hole-that-throws-reports-to-the-nearest-catch-error) — An error thrown inside a reactive child reaches the handler of the nearest enclosing `catchError`, and does not escape the write that caused it.
     - [`@spec with-no-owner-the-boundary-state-is-inert`](#spec-with-no-owner-the-boundary-state-is-inert) — Called with no owner at all, `useErrored()` returns a state that is never active and whose retry does nothing, and `isErrored()` returns `undefined`.
@@ -480,6 +486,32 @@ _Avoid_: refetch, reload
 ### @term report
 
 > What a binding's read tells the boundaries above it about a source, loading, refreshing or failed, without the binding waiting.
+
+### @term pending
+
+> The state of a value that waits on a promise not yet settled, in it or in a source it came from.
+
+### @term suspension
+
+> A run that stopped to wait on a pending promise, by throwing `NotReadyYet` or by a stage handing back the promise.
+
+### @term read-verb
+
+> A function that takes a value out of an accessor at the read site, and decides how: `use`, `use.latest`, `latest`, `peek`, or `from` in a generator stage.
+
+### @term tolerant-read
+
+> A read verb that returns the last resolved value, or a fallback, instead of waiting or throwing: `peek` or `latest`.
+
+### @term hole
+
+> A reactive child: a function in a child position, whose binding fills its place in the page.
+
+_Avoid_: slot
+
+### @term gate
+
+> The queue in which a loading boundary holds the commits of the bindings enrolled in it, so they land together.
 
 ### @term owner
 
@@ -731,7 +763,7 @@ The decision is [ADR 0016](docs/adr/0016-optimistic-as-a-signal-variant.md).
 
 ##### @spec an-optimistic-value-is-read-like-any-node
 
-> The accessor of an [optimistic value](#term-optimistic-value) is an ordinary node. Every read verb applies to it, and the pending and failed state of what its recipe reads reaches the read site through it.
+> The accessor of an [optimistic value](#term-optimistic-value) is an ordinary node. Every [read verb](#term-read-verb) applies to it, and the pending and failed state of what its recipe reads reaches the read site through it.
 
 This follows because a new form is added only where composing is awkward: an optimistic value is a signal variant, so the existing read verbs serve it instead of a read API of its own.
 
@@ -979,7 +1011,7 @@ Only the component whose own body suspended is named. A component that holds it 
 
 ### @axiom plain-reads-are-honest
 
-> A read reports what is there. Whether a value is still pending, or has failed, is a separate question asked through its own verb.
+> A read reports what is there. Whether a value is still [pending](#term-pending), or has failed, is a separate question asked through its own verb.
 
 This narrows the axiom above to a read: it reports what is there, and pending and failure are asked through verbs of their own, rather than raised at the reader or folded into the value.
 
@@ -1045,7 +1077,7 @@ This is stale-while-revalidate. `use` does not return the stale value: [it throw
 
 #### @spec a-written-promise-leaves-the-prior-value-to-the-tolerant-read
 
-> While a written promise is pending, and after it rejects, the tolerant read returns the value from before the write.
+> While a written promise is pending, and after it rejects, the [tolerant read](#term-tolerant-read) returns the value from before the write.
 
 Derives from: [`spec-a-written-promise-is-published-like-a-produced-one`](#spec-a-written-promise-is-published-like-a-produced-one)
 
@@ -1077,7 +1109,7 @@ This follows because code sees the present: an answer that went stale without th
 
 This follows because pending is a question about what is there: a signal holding a plain value has nothing in flight, and one holding a promise is in flight until that promise settles.
 
-#### @spec a-tolerant-read-carries-loading-state-into-its-reader
+#### @spec a-read-through-latest-or-use-carries-loading-state-into-its-reader
 
 > A computed that read a pending source through `latest` or `use` reports pending, and hands out that source's promise through `promiseOf`, until the source settles, even though it holds a value of its own. The state composes through a chain of such readers, and survives the reader re-running during a refresh.
 
@@ -1913,7 +1945,7 @@ What `peek` returns is stated in [the spec on peek's value](#spec-peek-returns-t
 
 #### @spec use-enrols-the-binding-in-its-boundarys-gate
 
-> A binding that called `use(x)` during its run commits through its boundary's gate. While any binding of the boundary is suspended, its commit waits, and it lands in the same pass as the others.
+> A binding that called `use(x)` during its run commits through its boundary's [gate](#term-gate). While any binding of the boundary is suspended, its commit waits, and it lands in the same pass as the others.
 
 This follows because the verb decides whether a binding waits for its neighbours: `use` is that verb, so calling it enrols the binding in the gate even when its own value is ready.
 
@@ -2505,7 +2537,7 @@ Cleanups the component registered before throwing therefore run, and the error s
 
 #### @spec what-a-hole-builds-lives-under-its-own-owner-until-it-leaves
 
-> Content that a hole, a branch or a list row builds is built under a sub-owner of its own. That sub-owner is disposed when the content leaves, or when the surrounding owner is disposed.
+> Content that a [hole](#term-hole), a branch or a list row builds is built under a sub-owner of its own. That sub-owner is disposed when the content leaves, or when the surrounding owner is disposed.
 
 This follows because every reactive node lives as long as the owner it was created under: content built under its own sub-owner ends, with everything it created, when that sub-owner is disposed as the content leaves.
 
@@ -2695,7 +2727,7 @@ This is the same as [a handler that throws for a node's error](#spec-a-handler-t
 
 #### @spec a-real-error-in-an-effect-goes-to-the-nearest-handler
 
-> A thrown error that is not a suspension, from an effect's body, a stage or a commit, goes to the nearest [error handler](#term-error-handler) above the effect that accepts it. That holds on its first run and on every later run that throws, and the error never goes to an error boundary.
+> A thrown error that is not a [suspension](#term-suspension), from an effect's body, a stage or a commit, goes to the nearest [error handler](#term-error-handler) above the effect that accepts it. That holds on its first run and on every later run that throws, and the error never goes to an error boundary.
 
 Derives from: [`axiom-a-boundary-coordinates-only-what-a-component-returns`](#axiom-a-boundary-coordinates-only-what-a-component-returns)
 
