@@ -205,9 +205,10 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule an-error-nothing-claims-on-a-re-run-is-logged`](#rule-an-error-nothing-claims-on-a-re-run-is-logged) — Outside any root, an error from a node that no boundary claims is logged to the console when it happens during a later re-run, and is not thrown at the writer whose write caused the re-run.
 - [`@axiom every-failure-in-a-root-is-held`](#axiom-every-failure-in-a-root-is-held) — Every failure inside a root is held by some boundary: none is lost, and none is thrown at a writer that did not cause it.
   - [`@rule every-root-has-an-error-boundary`](#rule-every-root-has-an-error-boundary) — `createRoot` installs an error boundary on the root owner. It claims every error no nearer boundary claims, and tracks it like any other boundary.
-  - [`@rule the-roots-boundary-logs-every-failed-report`](#rule-the-roots-boundary-logs-every-failed-report) — The root's error boundary logs each failed report it receives to the console with `console.error`, a repeated report of the same error included.
   - [`@rule a-failed-action-reports-after-its-calling-owner-is-disposed`](#rule-a-failed-action-reports-after-its-calling-owner-is-disposed) — A failed action reports to the boundary above the owner it was called under even when that owner was disposed before the action failed.
   - [`@rule a-failed-action-whose-boundary-is-gone-reports-to-the-next-one-up`](#rule-a-failed-action-whose-boundary-is-gone-reports-to-the-next-one-up) — When the boundary a failed action would report to has been disposed, the report goes to the next accepting boundary above it, at the latest the root's.
+- [`@axiom an-unhandled-failure-is-never-silent`](#axiom-an-unhandled-failure-is-never-silent) — A failure that nothing handles reaches the developer: it is thrown to a caller it belongs to, or else logged. It never disappears without a word.
+  - [`@rule the-roots-boundary-logs-every-failed-report`](#rule-the-roots-boundary-logs-every-failed-report) — The root's error boundary logs each failed report it receives to the console with `console.error`, a repeated report of the same error included.
 - [`@axiom an-error-is-graph-state-not-an-event`](#axiom-an-error-is-graph-state-not-an-event) — A failure is state held on the node that failed, beside its last resolved value, and it propagates along the graph the way pending does. A boundary shows that state; it does not count throws.
   - [`@rule error-returns-the-failure-of-a-node-or-anything-upstream`](#rule-error-returns-the-failure-of-a-node-or-anything-upstream) — `error(x)` returns the error of `x`, or of the nearest failed stage upstream of it, and `null` while the chain is healthy.
   - [`@rule a-recovery-clears-the-error`](#rule-a-recovery-clears-the-error) — When a failed node computes successfully again, its error is cleared and its new value is published.
@@ -1773,7 +1774,9 @@ Inside a root this never happens, because [the root's own boundary](#rule-every-
 
 > Outside any root, an error from a node that no boundary claims is logged to the console when it happens during a later re-run, and is not thrown at the writer whose write caused the re-run.
 
-This follows because a throw on the caller's stack belongs to the caller: a re-run happens on the stack of a writer the error does not belong to, so it is not thrown there.
+Derives from: [`axiom-an-unhandled-failure-is-never-silent`](#axiom-an-unhandled-failure-is-never-silent)
+
+This follows because a throw on the caller's stack belongs to the caller: a re-run happens on the stack of a writer the error does not belong to, so it is not thrown there. A failure nothing handles must still reach the developer, so with no caller to throw it to, it is logged.
 
 ## @axiom every-failure-in-a-root-is-held
 
@@ -1788,14 +1791,6 @@ No design document states this. It was accepted as a principle when the canon wa
 This follows because every failure inside a root is held by some boundary: the root itself must therefore hold what nothing nearer does.
 
 An explicit boundary below the root is nearer, so [it wins over the root's](#rule-the-nearest-accepting-boundary-claims-an-error).
-
-### @rule the-roots-boundary-logs-every-failed-report
-
-> The root's error boundary logs each failed report it receives to the console with `console.error`, a repeated report of the same error included.
-
-Derives from: [`rule-every-root-has-an-error-boundary`](#rule-every-root-has-an-error-boundary)
-
-This follows because no failure in a root may be lost, and nothing on the page shows what only the root's boundary holds: logging each report is how such a failure still reaches someone.
 
 ### @rule a-failed-action-reports-after-its-calling-owner-is-disposed
 
@@ -1814,6 +1809,20 @@ The calling owner can be gone before the action fails, for example a list row re
 Derives from: [`rule-a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller`](#rule-a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller), [`rule-every-root-has-an-error-boundary`](#rule-every-root-has-an-error-boundary)
 
 This follows because every failure inside a root is held by some boundary: a disposed boundary can no longer hold or show the report, so it must go to a boundary that still can, and the root's boundary is always there.
+
+## @axiom an-unhandled-failure-is-never-silent
+
+> A failure that nothing handles reaches the developer: it is thrown to a caller it belongs to, or else logged. It never disappears without a word.
+
+No design document states this. It was accepted as a principle when the canon was reviewed. A boundary that holds a failure no code reads has not handled it, so holding is not enough.
+
+### @rule the-roots-boundary-logs-every-failed-report
+
+> The root's error boundary logs each failed report it receives to the console with `console.error`, a repeated report of the same error included.
+
+Derives from: [`rule-every-root-has-an-error-boundary`](#rule-every-root-has-an-error-boundary)
+
+This follows because a failure that reaches the root's boundary is one nothing nearer handled, and the root's boundary has no caller to throw it to, so it logs each report.
 
 ## @axiom an-error-is-graph-state-not-an-event
 
