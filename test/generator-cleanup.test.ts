@@ -171,7 +171,7 @@ test('onCleanup fires when a generator throws without ever pausing', () => {
 })
 
 /**
- * @canon rule-oncleanup-in-a-generator-stage-belongs-to-the-generator
+ * @canon rule-oncleanup-in-a-sync-stage-runs-before-its-next-run
  */
 test('onCleanup outside a generator stage is unchanged', async () => {
   // A sync stage re-runs from the top, so per-run cleanup is still the right

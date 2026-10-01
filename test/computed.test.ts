@@ -147,7 +147,7 @@ test('a generator stage with yield* read of a settled value runs synchronously',
 })
 
 /**
- * @canon rule-a-resumed-generator-does-not-rerun-code-before-its-pause
+ * @canon case-a-stage-node-resumes-its-paused-generator
  */
 test('a generator stage suspends on a pending promise, resumes on settle', async () => {
   let release!: (v: number) => void
@@ -632,7 +632,7 @@ test('isPending(computed) true during refetch (after first settle)', async () =>
 })
 
 /**
- * @canon rule-an-async-computed-refetches-when-a-source-changes
+ * @canon rule-a-fresh-promise-each-run-settles-once-per-change
  */
 test('a stage returning a new .then-chained promise on every call settles without looping', async () => {
   setScheduler(syncScheduler(flush))
@@ -801,6 +801,7 @@ import { describe } from 'vitest'
 describe('computed — NotReadyYet absorbed as suspension (Plan B)', () => {
   /**
    * @canon rule-a-stage-suspended-through-use-is-absorbed
+   * @canon rule-a-use-suspended-stage-reads-as-its-promise-until-it-settles
    */
   test('sync stage body throwing NotReadyYet suspends, then resumes on settle', async () => {
     let resolve!: (v: number) => void

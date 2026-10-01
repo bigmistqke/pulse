@@ -35,7 +35,7 @@ test('W2: an update function receives the last resolved value', () => {
 })
 
 /**
- * @canon rule-an-update-function-receives-the-last-resolved-value
+ * @canon rule-an-update-function-sees-the-value-a-sync-derivation-produced-at-creation
  */
 test('W3: an update function receives the value an eagerly-run derivation produced', () => {
   let seen: unknown = 'not called'
@@ -64,7 +64,7 @@ test('W3: an update function receives undefined while nothing has resolved yet',
 })
 
 /**
- * @canon rule-an-update-function-receives-the-last-resolved-value
+ * @canon rule-writes-in-one-tick-chain-their-update-functions
  */
 test('W21: two writes in one tick chain, and the last one wins', () => {
   const [list, setList] = signal(() => ['a'])
@@ -133,7 +133,7 @@ test('a write into a synchronously coloured stage does not introduce a promise',
 })
 
 /**
- * @canon rule-a-pipeline-reads-as-a-promise-while-its-value-came-through-async
+ * @canon rule-a-generator-stage-is-asynchronous-only-when-it-suspends
  */
 test('a generator stage that never suspends publishes its value bare', () => {
   let runs = 0
@@ -156,7 +156,7 @@ test('a generator stage that never suspends publishes its value bare', () => {
 })
 
 /**
- * @canon rule-a-pipeline-reads-as-a-promise-while-its-value-came-through-async
+ * @canon rule-a-generator-stage-is-asynchronous-only-when-it-suspends
  */
 test('a generator stage colours its read by what it actually reads, not by being a generator', async () => {
   const [syncSource] = signal(() => 5)
@@ -220,7 +220,7 @@ test('signal(fn, default) does not change the raw read — still a promise while
 })
 
 /**
- * @canon rule-a-construction-default-seeds-only-the-tolerant-read
+ * @canon rule-a-construction-default-removes-undefined-from-the-types
  */
 test('signal(fn, default): peek(todos) needs no second argument to type as non-optional (compile-time)', () => {
   // This is mostly a typecheck-only assertion — the `const … : T = …` lines
@@ -277,7 +277,7 @@ test('signal(fn, default): an update function still sees the real resolved value
 })
 
 /**
- * @canon rule-a-construction-default-seeds-only-the-tolerant-read
+ * @canon rule-a-construction-default-removes-undefined-from-the-types
  */
 test('signal(fn, default): an update function needs no ?? default to type as non-optional (compile-time)', () => {
   // This is mostly a typecheck-only assertion — the `const … : T = …` lines
@@ -684,6 +684,7 @@ test('W5: a write clears the error through more than one never-resolved stage', 
 
 /**
  * @canon rule-a-written-promise-is-published-like-a-produced-one
+ * @canon rule-a-written-promise-leaves-the-prior-value-to-the-tolerant-read
  */
 test('W6: a written promise reports as pending and then resolves', async () => {
   const [todos, setTodos] = signal(function* () {
@@ -749,6 +750,7 @@ test('W7: a dependency change supersedes a written promise that has not settled'
 
 /**
  * @canon rule-a-written-promise-is-published-like-a-produced-one
+ * @canon rule-a-written-promise-leaves-the-prior-value-to-the-tolerant-read
  */
 test('W6: a rejected written promise parks as an error', async () => {
   const [todos, setTodos] = signal(function* () {

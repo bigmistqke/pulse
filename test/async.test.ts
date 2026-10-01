@@ -10,7 +10,7 @@ import { signal } from '../src/signal'
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
 
 /**
- * @canon rule-pending-is-asked-and-answered-directly
+ * @canon rule-a-signals-pending-state-is-the-state-of-the-promise-it-holds
  */
 test('isPending is false for a signal holding a plain value', () => {
   const [s] = signal(0)
@@ -18,7 +18,7 @@ test('isPending is false for a signal holding a plain value', () => {
 })
 
 /**
- * @canon rule-pending-is-asked-and-answered-directly
+ * @canon rule-a-signals-pending-state-is-the-state-of-the-promise-it-holds
  */
 test('isPending is true for a signal holding a pending promise', () => {
   const [s] = signal(new Promise<number>(() => {}))
@@ -61,7 +61,7 @@ test('peek keeps the last resolved value while a newer promise is pending', asyn
 })
 
 /**
- * @canon rule-peek-returns-the-last-resolved-value-and-never-throws
+ * @canon rule-peek-returns-a-given-fallback-until-a-value-resolves
  */
 test('peek(s, fallback) returns the fallback before the first resolution', () => {
   const [s] = signal(new Promise<number[]>(() => {})) // never resolves
@@ -69,7 +69,7 @@ test('peek(s, fallback) returns the fallback before the first resolution', () =>
 })
 
 /**
- * @canon rule-peek-returns-the-last-resolved-value-and-never-throws
+ * @canon rule-peek-returns-a-given-fallback-until-a-value-resolves
  */
 test('peek(s, fallback) reports the real value once resolved, not the fallback', async () => {
   const [s] = signal(Promise.resolve([1, 2]))
@@ -79,7 +79,7 @@ test('peek(s, fallback) reports the real value once resolved, not the fallback',
 })
 
 /**
- * @canon rule-peek-returns-the-last-resolved-value-and-never-throws
+ * @canon rule-peek-returns-a-given-fallback-until-a-value-resolves
  */
 test('peek(s, fallback) falls back again after a rejection with nothing seeded', () => {
   const [s] = signal(Promise.reject(new Error('nope')))
@@ -420,7 +420,7 @@ describe('use.latest(accessor) — throws only before the first value, tolerant 
 
 describe('from — post-Plan-A (no brand suspension)', () => {
   /**
-   * @canon rule-from-yields-what-it-is-given
+   * @canon rule-from-yields-the-stale-value-during-a-refetch
    */
   test('yield* from on an SWR-refetching computed yields the stale value, NOT brand.promise', async () => {
     const [page, setPage] = signal(1)

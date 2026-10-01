@@ -22,7 +22,7 @@ test('sync stage returning a pending promise -> suspended', () => {
 })
 
 /**
- * @canon rule-a-stage-result-is-settled-before-it-is-passed-on
+ * @canon rule-a-settled-promise-is-used-at-once-the-next-time-a-stage-runs
  */
 test('sync stage returning a settled promise -> resolved synchronously on second call', async () => {
   const p = Promise.resolve(7)
@@ -75,7 +75,7 @@ test('generator stage yielding a pending promise -> suspended', () => {
 })
 
 /**
- * @canon rule-a-stage-result-is-settled-before-it-is-passed-on
+ * @canon rule-a-settled-promise-is-used-at-once-the-next-time-a-stage-runs
  */
 test('generator stage: settled promise resolves synchronously on re-call', async () => {
   const p = Promise.resolve(42)
@@ -123,7 +123,7 @@ test('generator stage: uncaught rejection propagates out of runStage', async () 
 })
 
 /**
- * @canon rule-a-resumed-generator-does-not-rerun-code-before-its-pause
+ * @canon case-a-paused-generator-is-handed-back-to-its-caller
  */
 test('a suspended generator stage hands its generator back in the outcome', () => {
   const p = new Promise<number>(() => {})
@@ -138,7 +138,7 @@ test('a suspended generator stage hands its generator back in the outcome', () =
 })
 
 /**
- * @canon rule-a-resumed-generator-does-not-rerun-code-before-its-pause
+ * @canon case-a-retained-generator-is-driven-from-its-pause
  */
 test('resumeStage drives a retained generator forward with a value', () => {
   const p = new Promise<number>(() => {})
@@ -152,7 +152,7 @@ test('resumeStage drives a retained generator forward with a value', () => {
 })
 
 /**
- * @canon rule-a-resumed-generator-does-not-rerun-code-before-its-pause
+ * @canon case-a-retained-generator-is-driven-from-its-pause
  */
 test('resumeStage does not re-run the code before the pause', () => {
   let before = 0
@@ -187,7 +187,7 @@ test('resumeStage with a throw seed reaches the generator try/catch', () => {
 })
 
 /**
- * @canon rule-a-resumed-generator-does-not-rerun-code-before-its-pause
+ * @canon case-a-paused-generator-is-handed-back-to-its-caller
  */
 test('a generator that pauses twice hands back the same generator each time', () => {
   const p1 = new Promise<number>(() => {})
@@ -208,7 +208,7 @@ test('a generator that pauses twice hands back the same generator each time', ()
 })
 
 /**
- * @canon rule-a-resumed-generator-does-not-rerun-code-before-its-pause
+ * @canon case-a-paused-generator-is-handed-back-to-its-caller
  */
 test('a sync stage outcome carries no generator', () => {
   const p = new Promise<number>(() => {})

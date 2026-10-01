@@ -52,7 +52,7 @@ test('pipeline re-runs when its signal input changes', async () => {
 })
 
 /**
- * @canon rule-the-read-type-carries-the-async-colour
+ * @canon case-resolved-unwraps-what-a-stage-receives
  */
 test('Resolved<T> type unwraps signals, promises, and generators (compile-time)', () => {
   // This is a typecheck-only assertion — runtime is irrelevant.
@@ -66,7 +66,7 @@ test('Resolved<T> type unwraps signals, promises, and generators (compile-time)'
 })
 
 /**
- * @canon rule-the-read-type-carries-the-async-colour
+ * @canon case-pipeline-read-colours-by-the-stages-that-can-be-async
  */
 test('PipelineRead keeps async colour honestly (compile-time)', () => {
   // Each `const … : T = value` line is the compile-time assertion — a wrong type
@@ -92,7 +92,7 @@ test('PipelineRead keeps async colour honestly (compile-time)', () => {
 })
 
 /**
- * @canon rule-the-read-type-carries-the-async-colour
+ * @canon case-a-generator-stage-is-coloured-by-what-it-reads
  */
 test('PipelineRead colours a generator stage by what it actually yields, not by being a generator (compile-time)', () => {
   // Three shapes of `function*` stage, colour derived from their `yield*

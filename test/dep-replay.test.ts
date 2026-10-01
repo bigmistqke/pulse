@@ -10,7 +10,7 @@ import {
 import { replayDeps, snapshotDeps, type DepRecord } from '../src/dep-replay'
 
 /**
- * @canon rule-dependencies-read-before-a-pause-stay-linked
+ * @canon case-a-run-records-every-dependency-it-read
  */
 test('snapshotDeps records every dependency a run read, with its value', () => {
   const a = r3Signal(1)
@@ -24,7 +24,7 @@ test('snapshotDeps records every dependency a run read, with its value', () => {
 })
 
 /**
- * @canon rule-dependencies-read-before-a-pause-stay-linked
+ * @canon case-a-run-records-every-dependency-it-read
  */
 test('snapshotDeps records nothing for a run that read no dependencies', () => {
   const node = r3Computed(() => 42)
@@ -32,7 +32,7 @@ test('snapshotDeps records nothing for a run that read no dependencies', () => {
 })
 
 /**
- * @canon rule-dependencies-read-before-a-pause-stay-linked
+ * @canon case-a-run-records-every-dependency-it-read
  */
 test('snapshotDeps records nothing when the cursor is null but stale entries remain', () => {
   // The case the null-cursor guard actually exists for. r3 resets the cursor to
@@ -71,7 +71,7 @@ test('snapshotDeps records nothing when the cursor is null but stale entries rem
 })
 
 /**
- * @canon rule-a-changed-input-replaces-the-paused-generator
+ * @canon case-the-wake-signal-is-not-an-input
  */
 test('snapshotDeps leaves out the excluded dependency', () => {
   const a = r3Signal(1)
@@ -88,7 +88,7 @@ test('snapshotDeps leaves out the excluded dependency', () => {
 })
 
 /**
- * @canon rule-a-changed-input-replaces-the-paused-generator
+ * @canon case-the-wake-signal-is-not-an-input
  */
 test('an excluded control signal does not make replayDeps report a change', () => {
   // The error this guards against: a caller that bumps its own control signal
@@ -107,7 +107,7 @@ test('an excluded control signal does not make replayDeps report a change', () =
 })
 
 /**
- * @canon rule-a-changed-input-replaces-the-paused-generator
+ * @canon case-replay-reports-a-changed-dependency
  */
 test('replayDeps reports false when nothing changed', () => {
   const a = r3Signal(1)
@@ -118,7 +118,7 @@ test('replayDeps reports false when nothing changed', () => {
 })
 
 /**
- * @canon rule-a-changed-input-replaces-the-paused-generator
+ * @canon case-replay-reports-a-changed-dependency
  */
 test('replayDeps reports true when a recorded dependency changed', () => {
   const a = r3Signal(1)
@@ -132,7 +132,7 @@ test('replayDeps reports true when a recorded dependency changed', () => {
 })
 
 /**
- * @canon rule-dependencies-read-before-a-pause-stay-linked
+ * @canon case-replay-reads-every-record
  */
 test('replayDeps reads every record even after finding a change', () => {
   // Each recorded dependency has to be read so r3 keeps it linked. A loop that

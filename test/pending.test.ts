@@ -25,7 +25,7 @@ describe('pending tracker — basics', () => {
 
 describe('pending tracker — value-as-promise fallback', () => {
   /**
-   * @canon rule-pending-is-asked-and-answered-directly
+   * @canon rule-a-signals-pending-state-is-the-state-of-the-promise-it-holds
    */
   test('isPending true for a signal holding a pending promise', () => {
     const [s] = signal(new Promise(() => {}))
@@ -33,7 +33,7 @@ describe('pending tracker — value-as-promise fallback', () => {
   })
 
   /**
-   * @canon rule-pending-is-asked-and-answered-directly
+   * @canon rule-a-signals-pending-state-is-the-state-of-the-promise-it-holds
    */
   test('isPending false for a signal holding a resolved promise (after track)', async () => {
     const p = Promise.resolve('x')
@@ -43,7 +43,7 @@ describe('pending tracker — value-as-promise fallback', () => {
   })
 
   /**
-   * @canon rule-pending-is-asked-and-answered-directly
+   * @canon rule-a-signals-pending-state-is-the-state-of-the-promise-it-holds
    */
   test('promiseOf returns the pending promise for a signal holding one', () => {
     const p = new Promise<number>(() => {})

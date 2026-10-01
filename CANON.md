@@ -152,33 +152,63 @@ The canon was written backwards from the existing tests and documents, and descr
 - [`@axiom async-is-acknowledged-not-hidden`](#axiom-async-is-acknowledged-not-hidden) — A value that has a future says so. An async node reads as a promise, and unwrapping it is an explicit act at the read site.
   - [`@rule an-async-node-reads-as-a-plain-promise`](#rule-an-async-node-reads-as-a-plain-promise) — An async signal or computed reads as a plain `Promise`, before it settles and after. It never turns into its bare value on settle.
   - [`@rule the-read-type-carries-the-async-colour`](#rule-the-read-type-carries-the-async-colour) — A computed's read type is a `Promise` exactly where a stage can make it one, and a stage's input type is its upstream's value with the colour removed.
+    - [`@case pipeline-read-colours-by-the-stages-that-can-be-async`](#case-pipeline-read-colours-by-the-stages-that-can-be-async) — `async.ts` `PipelineRead`.
+    - [`@case a-generator-stage-is-coloured-by-what-it-reads`](#case-a-generator-stage-is-coloured-by-what-it-reads) — `async.ts` `PipelineRead`.
+    - [`@case resolved-unwraps-what-a-stage-receives`](#case-resolved-unwraps-what-a-stage-receives) — `async.ts` `Resolved`.
   - [`@rule a-promise-carries-its-state-in-one-weakmap`](#rule-a-promise-carries-its-state-in-one-weakmap) — The status, value, rejection reason and stale prior of a promise live in one `WeakMap` keyed on the promise. The promise itself carries nothing extra.
     - [`@case track-seeds-the-stale-prior`](#case-track-seeds-the-stale-prior) — `async.ts` `track`.
     - [`@case a-published-result-reads-fulfilled-at-once`](#case-a-published-result-reads-fulfilled-at-once) — `async.ts` `resolvedPromise`.
+    - [`@case the-driver-reads-settledness-from-the-promise-map`](#case-the-driver-reads-settledness-from-the-promise-map) — `driver.ts` `runStage`.
   - [`@rule a-signal-stores-a-promise-as-it-is`](#rule-a-signal-stores-a-promise-as-it-is) — A signal holding a promise stores the promise itself, not its result. Writing a new promise re-runs its consumers; the promise settling is not a write.
   - [`@rule from-yields-what-it-is-given`](#rule-from-yields-what-it-is-given) — `yield* from(x)` yields a plain value or a promise as it is, and calls a signal's accessor so the read is tracked. It does not look at pending state.
+  - [`@rule from-yields-the-stale-value-during-a-refetch`](#rule-from-yields-the-stale-value-during-a-refetch) — During a refetch, `yield* from(c)` on a computed yields the stale value its accessor returns, not the promise in flight.
   - [`@rule a-pipeline-reads-as-a-promise-while-its-value-came-through-async`](#rule-a-pipeline-reads-as-a-promise-while-its-value-came-through-async) — The raw read of a pipeline is a promise when its current value was produced through an asynchronous stage, and bare otherwise. A write never changes that colour.
+  - [`@rule a-generator-stage-is-asynchronous-only-when-it-suspends`](#rule-a-generator-stage-is-asynchronous-only-when-it-suspends) — A generator stage counts as an asynchronous stage only when it actually suspended on a pending promise. One that ran to completion without suspending publishes its value bare.
   - [`@rule a-written-promise-is-published-like-a-produced-one`](#rule-a-written-promise-is-published-like-a-produced-one) — A promise written into a derivation is its value: pending until it settles, then the resolved value, or a parked failure if it rejects.
+  - [`@rule a-written-promise-leaves-the-prior-value-to-the-tolerant-read`](#rule-a-written-promise-leaves-the-prior-value-to-the-tolerant-read) — While a written promise is pending, and after it rejects, the tolerant read returns the value from before the write.
   - [`@rule an-async-computed-refetches-when-a-source-changes`](#rule-an-async-computed-refetches-when-a-source-changes) — An async stage keeps following the sources it read after its promise settles, and runs again when one of them changes. A consumer then receives the new resolved value.
+  - [`@rule a-fresh-promise-each-run-settles-once-per-change`](#rule-a-fresh-promise-each-run-settles-once-per-change) — A stage that returns a new promise on every run, such as a `.then`-chained one, settles once per change and does not loop.
   - [`@rule is-pending-reports-an-unsettled-pipeline`](#rule-is-pending-reports-an-unsettled-pipeline) — `isPending(c)` is true while any stage of the pipeline is waiting on a promise, on the first load and during a refetch, and `promiseOf(c)` returns that promise. Both clear when it settles.
   - [`@rule a-stage-suspended-through-use-is-absorbed`](#rule-a-stage-suspended-through-use-is-absorbed) — A sync stage whose body throws `NotReadyYet` through `use` suspends like an async stage, reports pending, and runs again when the promise settles.
+  - [`@rule a-use-suspended-stage-reads-as-its-promise-until-it-settles`](#rule-a-use-suspended-stage-reads-as-its-promise-until-it-settles) — While a sync stage that suspended through `use` waits on a first load, the pipeline reads as the promise in flight. Once that promise settles, the sync stage publishes its bare value.
   - [`@rule an-update-function-receives-the-last-resolved-value`](#rule-an-update-function-receives-the-last-resolved-value) — An update function on a writable derivation receives the last value that actually resolved, never a promise, and `undefined` when nothing has resolved yet.
+  - [`@rule an-update-function-sees-the-value-a-sync-derivation-produced-at-creation`](#rule-an-update-function-sees-the-value-a-sync-derivation-produced-at-creation) — A derivation runs when it is created. An update function on a sync derivation therefore receives the value that first run produced, even before any write. An async derivation that suspended has produced nothing yet.
+  - [`@rule writes-in-one-tick-chain-their-update-functions`](#rule-writes-in-one-tick-chain-their-update-functions) — Two writes in the same tick chain: the second update function receives the value the first one produced, and the last write is what the derivation holds.
   - [`@rule a-construction-default-seeds-only-the-tolerant-read`](#rule-a-construction-default-seeds-only-the-tolerant-read) — `signal(fn, default)` makes `peek` return `default` until the derivation first resolves, and an update function receive `default` in place of `undefined`. The raw read stays a pending promise.
+  - [`@rule a-construction-default-removes-undefined-from-the-types`](#rule-a-construction-default-removes-undefined-from-the-types) — With a construction default given, the types of `peek` and of an update function's argument leave out `undefined`, so neither needs a check.
   - [`@rule a-stage-result-is-settled-before-it-is-passed-on`](#rule-a-stage-result-is-settled-before-it-is-passed-on) — Each value a stage returns or a generator yields is settled before it is used. A plain value or a fulfilled promise is used at once, and a pending promise suspends the stage on that promise.
+  - [`@rule a-settled-promise-is-used-at-once-the-next-time-a-stage-runs`](#rule-a-settled-promise-is-used-at-once-the-next-time-a-stage-runs) — A promise that a stage saw pending, and that has settled since, is used at once the next time the stage runs. It does not suspend the stage again.
   - [`@rule a-rejected-yield-is-thrown-into-the-generator`](#rule-a-rejected-yield-is-thrown-into-the-generator) — A yielded promise that rejects is thrown into the generator at its yield, where a `try`/`catch` can handle it. Uncaught, it leaves the stage as an error.
 - [`@axiom plain-reads-are-honest`](#axiom-plain-reads-are-honest) — A read reports what is there. Whether a value is still pending, or has failed, is a separate question asked through its own verb.
   - [`@rule peek-returns-the-last-resolved-value-and-never-throws`](#rule-peek-returns-the-last-resolved-value-and-never-throws) — `peek(x)` returns the most recent resolved value of `x`, or `undefined` when it never resolved. It never throws, not even for a failed node.
+  - [`@rule peek-returns-a-given-fallback-until-a-value-resolves`](#rule-peek-returns-a-given-fallback-until-a-value-resolves) — `peek(x, fallback)` returns `fallback` wherever `peek(x)` would return `undefined`: before the first resolution, and after a rejection when nothing resolved before it. Once a value has resolved, it returns that value.
   - [`@rule an-async-node-keeps-its-last-value-while-it-refetches`](#rule-an-async-node-keeps-its-last-value-while-it-refetches) — When an async node's inputs change, its last resolved value stays readable until the new one settles: `peek` returns it, `use` keeps delivering it to a consumer that already has it, and the node reports the refetch as pending.
   - [`@rule pending-is-asked-and-answered-directly`](#rule-pending-is-asked-and-answered-directly) — `isPending(x)` and `promiseOf(x)` answer whether `x` has a promise in flight, and which one, as plain values called fresh at each read site.
+  - [`@rule a-signals-pending-state-is-the-state-of-the-promise-it-holds`](#rule-a-signals-pending-state-is-the-state-of-the-promise-it-holds) — A signal holding a plain value is never pending, and its `promiseOf` is `null`. A signal holding a promise is pending until that promise settles, and `promiseOf` returns it while it is.
   - [`@rule pending-follows-where-a-value-came-from`](#rule-pending-follows-where-a-value-came-from) — A node is pending when any stage upstream of it is pending, or when a source its value was read from is. `promiseOf` returns the nearest promise in flight along the same path.
 - [`@axiom a-paused-computation-is-re-entered-at-its-pause`](#axiom-a-paused-computation-is-re-entered-at-its-pause) — Pulse re-enters a paused computation at the finest point it can: a stage boundary with a new input, a generator stage at its pause, and anything else from the top of its body. Work done before that point runs again only when an input it read has changed.
   - [`@rule a-resumed-generator-does-not-rerun-code-before-its-pause`](#rule-a-resumed-generator-does-not-rerun-code-before-its-pause) — A generator stage that paused on a pending value is resumed with that value when it settles. The code before the pause does not run again.
+    - [`@case a-paused-generator-is-handed-back-to-its-caller`](#case-a-paused-generator-is-handed-back-to-its-caller) — `driver.ts` `runStage`.
+    - [`@case a-retained-generator-is-driven-from-its-pause`](#case-a-retained-generator-is-driven-from-its-pause) — `driver.ts` `resumeStage`.
+    - [`@case a-stage-node-resumes-its-paused-generator`](#case-a-stage-node-resumes-its-paused-generator) — `computed.ts` `makeStageNode`.
   - [`@rule dependencies-read-before-a-pause-stay-linked`](#rule-dependencies-read-before-a-pause-stay-linked) — Before a paused generator is resumed, the dependencies recorded before its pause are read again, so a change to any of them still re-runs the stage.
+    - [`@case a-run-records-every-dependency-it-read`](#case-a-run-records-every-dependency-it-read) — `dep-replay.ts` `snapshotDeps`.
+    - [`@case replay-reads-every-record`](#case-replay-reads-every-record) — `dep-replay.ts` `replayDeps`.
+    - [`@case a-resumed-stage-replays-its-recorded-dependencies`](#case-a-resumed-stage-replays-its-recorded-dependencies) — `computed.ts` `makeStageNode`.
   - [`@rule a-changed-input-replaces-the-paused-generator`](#rule-a-changed-input-replaces-the-paused-generator) — When a dependency read before the pause has changed, the paused generator is discarded and a fresh one runs from the top.
+    - [`@case replay-reports-a-changed-dependency`](#case-replay-reports-a-changed-dependency) — `dep-replay.ts` `replayDeps`.
+    - [`@case the-wake-signal-is-not-an-input`](#case-the-wake-signal-is-not-an-input) — `dep-replay.ts` `snapshotDeps`.
+    - [`@case a-stage-node-discards-a-generator-whose-input-changed`](#case-a-stage-node-discards-a-generator-whose-input-changed) — `computed.ts` `makeStageNode`.
   - [`@rule a-discarded-generator-is-closed-with-return`](#rule-a-discarded-generator-is-closed-with-return) — A generator that is discarded is closed with `gen.return()`, so its `finally` blocks run. Reads made in those blocks are not tracked.
+  - [`@rule a-reset-discards-a-paused-generator`](#rule-a-reset-discards-a-paused-generator) — When a boundary resets the error a stage parked, a generator that the stage has paused since is discarded, and the stage runs a fresh one.
+  - [`@rule disposing-its-owner-discards-a-paused-generator`](#rule-disposing-its-owner-discards-a-paused-generator) — Disposing the owner of a stage discards the generator it has paused, so the generator's `finally` blocks run.
   - [`@rule oncleanup-in-a-generator-stage-belongs-to-the-generator`](#rule-oncleanup-in-a-generator-stage-belongs-to-the-generator) — An `onCleanup` called inside a generator stage registers on the generator, not on the run. It fires when the generator ends: by completing, by throwing, or by being discarded.
+  - [`@rule oncleanup-in-a-sync-stage-runs-before-its-next-run`](#rule-oncleanup-in-a-sync-stage-runs-before-its-next-run) — Inside a sync stage, `onCleanup` keeps its usual meaning: the cleanup runs before the stage's next run.
   - [`@rule a-returned-promise-is-the-result-not-a-pause`](#rule-a-returned-promise-is-the-result-not-a-pause) — A generator stage that returns a promise has finished. The promise is its result: the stage publishes what it fulfils to, and parks the reason if it rejects.
+  - [`@rule a-stage-that-returned-a-promise-stays-reactive`](#rule-a-stage-that-returned-a-promise-stays-reactive) — A generator stage that returned a promise keeps no generator, so a change to a source it read runs it again from the top.
+  - [`@rule a-returned-promise-rejection-skips-the-generators-catch`](#rule-a-returned-promise-rejection-skips-the-generators-catch) — When the promise a generator stage returned rejects, the generator's `try`/`catch` does not see it: the body has already ended. The stage parks the rejection as its error.
   - [`@rule use-inside-a-generator-stage-restarts-the-stage`](#rule-use-inside-a-generator-stage-restarts-the-stage) — A `use` that throws inside a generator stage suspends the stage like a sync stage: the generator is dropped, and the body runs again from the top when the promise settles.
+  - [`@rule repeated-use-of-one-pending-promise-adds-no-listener`](#rule-repeated-use-of-one-pending-promise-adds-no-listener) — A stage body that hits `use` on the same still-pending promise on several runs attaches one settle listener to that promise, not one per run.
 - [`@axiom the-read-verb-decides-what-renders-and-what-waits`](#axiom-the-read-verb-decides-what-renders-and-what-waits) — The verb a binding reads with decides what the binding renders and whether it waits for its neighbours. Everything else in the loading lifecycle is reported ambiently, from the reads the binding makes.
   - [`@rule use-suspends-only-the-binding-that-reads-it`](#rule-use-suspends-only-the-binding-that-reads-it) — A binding whose `use(x)` meets a pending value renders nothing new and keeps what it showed, and the rest of the tree renders around it, with or without a `<Loading>` boundary above it. It recovers when the value settles.
   - [`@rule a-suspended-effect-re-runs-when-its-promise-settles`](#rule-a-suspended-effect-re-runs-when-its-promise-settles) — An effect whose body suspends on `use(x)` holds its body, and runs it again from the top once the promise it suspended on settles. When its source is written with a new pending promise, it suspends again and re-runs when that one settles.
@@ -1021,19 +1051,33 @@ A promise in the type is information: the value has, or had, a future. Pulse giv
 
 > An async signal or computed reads as a plain `Promise`, before it settles and after. It never turns into its bare value on settle.
 
-A computed whose stages include an async one returns a promise from its accessor, and its value is taken out through a verb such as `use`. When an async stage settles, pulse publishes a fresh promise that is already recorded as fulfilled, so a read sees the result at once without the promise changing shape.
+Its value is taken out through a verb such as `use`. The promise a settled async stage publishes is [already recorded as fulfilled](#case-a-published-result-reads-fulfilled-at-once).
 
 ### @rule the-read-type-carries-the-async-colour
 
 > A computed's read type is a `Promise` exactly where a stage can make it one, and a stage's input type is its upstream's value with the colour removed.
 
-An async upstream stage makes the whole read a `Promise`. A stage that may or may not be async makes it a union of both. A generator stage is coloured by what its `yield* from(…)` calls read, not by being a generator: one that only reads settled values reads bare. `Resolved<T>` unwraps what a stage receives, from a signal, a promise or a generator.
+#### @case pipeline-read-colours-by-the-stages-that-can-be-async
+
+> `async.ts` `PipelineRead`.
+
+An async upstream stage makes the whole read a `Promise`. A stage that may or may not return a promise makes the read a union of both.
+
+#### @case a-generator-stage-is-coloured-by-what-it-reads
+
+> `async.ts` `PipelineRead`.
+
+A generator stage is coloured by what its `yield* from(…)` calls read, not by being a generator. One that reads only settled values reads bare.
+
+#### @case resolved-unwraps-what-a-stage-receives
+
+> `async.ts` `Resolved`.
+
+`Resolved<T>` removes the colour from what a stage receives: a signal gives its value, a promise what it fulfils to, and a generator what it returns.
 
 ### @rule a-promise-carries-its-state-in-one-weakmap
 
 > The status, value, rejection reason and stale prior of a promise live in one `WeakMap` keyed on the promise. The promise itself carries nothing extra.
-
-The same map is the generator driver's memory of which promises have settled, so read state and driver memory are one mechanism.
 
 #### @case track-seeds-the-stale-prior
 
@@ -1047,6 +1091,12 @@ The first time a promise is seen, it is recorded as pending, carrying the prior 
 
 The promise pulse publishes when an async stage settles is recorded fulfilled the moment it is made, so a synchronous read reports its value without waiting a microtask.
 
+#### @case the-driver-reads-settledness-from-the-promise-map
+
+> `driver.ts` `runStage`.
+
+The driver decides whether a returned or yielded promise has settled by reading the same map. Read state and the driver's memory of settled promises are one mechanism: a promise the map records as fulfilled is used at once, even on the first run that sees it.
+
 ### @rule a-signal-stores-a-promise-as-it-is
 
 > A signal holding a promise stores the promise itself, not its result. Writing a new promise re-runs its consumers; the promise settling is not a write.
@@ -1057,55 +1107,85 @@ A consumer that wants to re-run when such a promise settles either suspends on i
 
 > `yield* from(x)` yields a plain value or a promise as it is, and calls a signal's accessor so the read is tracked. It does not look at pending state.
 
-The driver resumes the generator with the value, or with the promise's result once it settles. During a refetch the accessor returns the stale value, so `from` yields that stale value, not the promise in flight.
+What happens to the yielded value next is [the driver settling it](#rule-a-stage-result-is-settled-before-it-is-passed-on).
+
+### @rule from-yields-the-stale-value-during-a-refetch
+
+> During a refetch, `yield* from(c)` on a computed yields the stale value its accessor returns, not the promise in flight.
 
 ### @rule a-pipeline-reads-as-a-promise-while-its-value-came-through-async
 
 > The raw read of a pipeline is a promise when its current value was produced through an asynchronous stage, and bare otherwise. A write never changes that colour.
 
-A sync last stage fed by an async stage still reads as a promise. A stage that is async on one evaluation and sync on the next flips its read shape each time, even when the value is the same. A generator stage is asynchronous only if it actually suspended on a pending promise, not because it is written as a generator.
+A sync last stage fed by an async stage therefore still reads as a promise, and a stage that is async on one evaluation and sync on the next flips its read shape each time, even when the value is the same.
+
+### @rule a-generator-stage-is-asynchronous-only-when-it-suspends
+
+> A generator stage counts as an asynchronous stage only when it actually suspended on a pending promise. One that ran to completion without suspending publishes its value bare.
 
 ### @rule a-written-promise-is-published-like-a-produced-one
 
 > A promise written into a derivation is its value: pending until it settles, then the resolved value, or a parked failure if it rejects.
 
-While it is pending, the tolerant read returns the value from before the write. A rejection keeps that value readable too.
+### @rule a-written-promise-leaves-the-prior-value-to-the-tolerant-read
+
+> While a written promise is pending, and after it rejects, the tolerant read returns the value from before the write.
 
 ### @rule an-async-computed-refetches-when-a-source-changes
 
 > An async stage keeps following the sources it read after its promise settles, and runs again when one of them changes. A consumer then receives the new resolved value.
 
-A stage that returns a new `.then`-chained promise on every run settles once per change and does not loop.
+### @rule a-fresh-promise-each-run-settles-once-per-change
+
+> A stage that returns a new promise on every run, such as a `.then`-chained one, settles once per change and does not loop.
 
 ### @rule is-pending-reports-an-unsettled-pipeline
 
 > `isPending(c)` is true while any stage of the pipeline is waiting on a promise, on the first load and during a refetch, and `promiseOf(c)` returns that promise. Both clear when it settles.
 
-A stage that reads another computed as its input sees that computed's pending state as its own.
+A stage that reads another node as its input reports that node's pending state as well, as [the pending walk](#rule-pending-follows-where-a-value-came-from) states.
 
 ### @rule a-stage-suspended-through-use-is-absorbed
 
 > A sync stage whose body throws `NotReadyYet` through `use` suspends like an async stage, reports pending, and runs again when the promise settles.
 
-On a first load the stage publishes the in-flight promise. After it settles, a sync stage publishes the bare value.
+### @rule a-use-suspended-stage-reads-as-its-promise-until-it-settles
+
+> While a sync stage that suspended through `use` waits on a first load, the pipeline reads as the promise in flight. Once that promise settles, the sync stage publishes its bare value.
 
 ### @rule an-update-function-receives-the-last-resolved-value
 
 > An update function on a writable derivation receives the last value that actually resolved, never a promise, and `undefined` when nothing has resolved yet.
 
-A derivation runs when it is created. A sync one has therefore resolved before any write, and an async one that suspended has not. Two writes in the same tick chain, each update function receiving the previous write's value. While a written promise is pending, the update function receives the value from before it.
+A written promise has not resolved while it is pending, so an update function called then receives the value from before it.
+
+### @rule an-update-function-sees-the-value-a-sync-derivation-produced-at-creation
+
+> A derivation runs when it is created. An update function on a sync derivation therefore receives the value that first run produced, even before any write. An async derivation that suspended has produced nothing yet.
+
+### @rule writes-in-one-tick-chain-their-update-functions
+
+> Two writes in the same tick chain: the second update function receives the value the first one produced, and the last write is what the derivation holds.
 
 ### @rule a-construction-default-seeds-only-the-tolerant-read
 
 > `signal(fn, default)` makes `peek` return `default` until the derivation first resolves, and an update function receive `default` in place of `undefined`. The raw read stays a pending promise.
 
-Once a real value has resolved, both see it instead of the default. The types follow: `peek` and the update function's argument need no `undefined` check when a default is given.
+Once a real value has resolved, both see it instead of the default.
+
+### @rule a-construction-default-removes-undefined-from-the-types
+
+> With a construction default given, the types of `peek` and of an update function's argument leave out `undefined`, so neither needs a check.
 
 ### @rule a-stage-result-is-settled-before-it-is-passed-on
 
 > Each value a stage returns or a generator yields is settled before it is used. A plain value or a fulfilled promise is used at once, and a pending promise suspends the stage on that promise.
 
-A promise that has already settled resolves synchronously when the stage runs again. An async stage suspends on the promise it returns.
+An async stage suspends on the promise it returns, like any other pending promise.
+
+### @rule a-settled-promise-is-used-at-once-the-next-time-a-stage-runs
+
+> A promise that a stage saw pending, and that has settled since, is used at once the next time the stage runs. It does not suspend the stage again.
 
 ### @rule a-rejected-yield-is-thrown-into-the-generator
 
@@ -1121,19 +1201,27 @@ Reading a value should not be a discipline to learn. Pending state and failure a
 
 > `peek(x)` returns the most recent resolved value of `x`, or `undefined` when it never resolved. It never throws, not even for a failed node.
 
-Before anything has resolved it returns `undefined`, or the fallback passed as its second argument, or the fallback `x` was constructed with. It keeps the last resolved value while a newer promise is pending, and does not revert to `undefined`. After a rejection it degrades to the last value it had, and to the fallback when there was none. A plain value is returned as it is. `peek` has no other effect: it reports nothing to any boundary.
+A plain value counts as resolved, and is returned as it is. While a newer promise is pending, the most recent resolved value is still the previous one, and after a rejection it stays the last value that resolved. What `peek` reports to boundaries is stated in [the rule on peek's reporting](#rule-peek-reports-nothing).
+
+### @rule peek-returns-a-given-fallback-until-a-value-resolves
+
+> `peek(x, fallback)` returns `fallback` wherever `peek(x)` would return `undefined`: before the first resolution, and after a rejection when nothing resolved before it. Once a value has resolved, it returns that value.
+
+A fallback given when `x` was constructed works the same way, as [the construction default](#rule-a-construction-default-seeds-only-the-tolerant-read) states.
 
 ### @rule an-async-node-keeps-its-last-value-while-it-refetches
 
 > When an async node's inputs change, its last resolved value stays readable until the new one settles: `peek` returns it, `use` keeps delivering it to a consumer that already has it, and the node reports the refetch as pending.
 
-This is stale-while-revalidate. `isPending(x)` is true from the first load until it settles, false once it has, and true again for each refetch. `peek(x)` returns the previous result throughout.
+This is stale-while-revalidate.
 
 ### @rule pending-is-asked-and-answered-directly
 
 > `isPending(x)` and `promiseOf(x)` answer whether `x` has a promise in flight, and which one, as plain values called fresh at each read site.
 
-A plain signal holding a plain value is never pending, and its `promiseOf` is `null`. A signal holding a promise is pending until that promise settles, and `promiseOf` returns it.
+### @rule a-signals-pending-state-is-the-state-of-the-promise-it-holds
+
+> A signal holding a plain value is never pending, and its `promiseOf` is `null`. A signal holding a promise is pending until that promise settles, and `promiseOf` returns it while it is.
 
 ### @rule pending-follows-where-a-value-came-from
 
@@ -1151,43 +1239,113 @@ A stage boundary is where work that should not be redone belongs. Within a gener
 
 > A generator stage that paused on a pending value is resumed with that value when it settles. The code before the pause does not run again.
 
-The paused generator is retained, and the same generator is resumed at every later pause. A promise built inside the body is therefore built once, and the stage converges. A sync stage has no generator to retain.
+#### @case a-paused-generator-is-handed-back-to-its-caller
+
+> `driver.ts` `runStage`.
+
+A generator stage that pauses hands the paused generator back with its outcome, and the same generator at every later pause. A sync stage's outcome carries no generator, because it has none to retain.
+
+#### @case a-retained-generator-is-driven-from-its-pause
+
+> `driver.ts` `resumeStage`.
+
+Resuming drives the retained generator forward from its pause with the settled value. The code before the pause does not run again.
+
+#### @case a-stage-node-resumes-its-paused-generator
+
+> `computed.ts` `makeStageNode`.
+
+When the promise a generator stage paused on settles, the stage resumes the generator it retained instead of building a new one. A promise built inside the body is therefore built once, and the stage converges.
 
 ### @rule dependencies-read-before-a-pause-stay-linked
 
 > Before a paused generator is resumed, the dependencies recorded before its pause are read again, so a change to any of them still re-runs the stage.
 
-r3 rebuilds a node's dependency list from the reads of each run, and a resumed run only executes the code after the pause. The recorded dependencies are taken from r3's own list, up to the run's cursor, so they include every read however it was made. Each record is read even after a change is found, so none of them drops out. The mechanism is added above r3 rather than in it, as [the r3 axiom](#axiom-build-on-r3-rather-than-change-it) requires.
+r3 rebuilds a node's dependency list from the reads of each run, and a resumed run only executes the code after the pause. The mechanism is added above r3 rather than in it, as [the r3 axiom](#axiom-build-on-r3-rather-than-change-it) requires.
+
+#### @case a-run-records-every-dependency-it-read
+
+> `dep-replay.ts` `snapshotDeps`.
+
+The record is taken from r3's own dependency list up to the run's cursor, with each dependency's value, so it includes every read however it was made. A run that read nothing records nothing, also when stale entries remain behind a null cursor.
+
+#### @case replay-reads-every-record
+
+> `dep-replay.ts` `replayDeps`.
+
+Replay reads every record, even after it has found a change, so none of them drops out of the next dependency list.
+
+#### @case a-resumed-stage-replays-its-recorded-dependencies
+
+> `computed.ts` `makeStageNode`.
+
+Before resuming, the stage replays the dependencies it recorded at the pause, so a signal read before the pause is still a dependency after the resume.
 
 ### @rule a-changed-input-replaces-the-paused-generator
 
 > When a dependency read before the pause has changed, the paused generator is discarded and a fresh one runs from the top.
 
-The replay compares each recorded value with the current one. A change is found only in an input the stage read, never in the control signal pulse itself writes to wake the stage. The discarded generator's promise can no longer re-run the stage when it settles.
+#### @case replay-reports-a-changed-dependency
+
+> `dep-replay.ts` `replayDeps`.
+
+Replay compares each recorded value with the current one, and reports whether any of them changed.
+
+#### @case the-wake-signal-is-not-an-input
+
+> `dep-replay.ts` `snapshotDeps`.
+
+The control signal pulse writes to wake a paused stage is left out of the record, so waking the stage never counts as a changed input.
+
+#### @case a-stage-node-discards-a-generator-whose-input-changed
+
+> `computed.ts` `makeStageNode`.
+
+On a changed input the stage discards the paused generator and runs a fresh one from the top. The discarded generator's promise can no longer re-run the stage when it settles.
 
 ### @rule a-discarded-generator-is-closed-with-return
 
 > A generator that is discarded is closed with `gen.return()`, so its `finally` blocks run. Reads made in those blocks are not tracked.
 
-A generator is discarded when an input it read changed, when a boundary resets the error its stage parked, and when its owner is disposed.
+A generator is discarded on [a changed input](#rule-a-changed-input-replaces-the-paused-generator), [a reset](#rule-a-reset-discards-a-paused-generator), and [the disposal of its owner](#rule-disposing-its-owner-discards-a-paused-generator).
+
+### @rule a-reset-discards-a-paused-generator
+
+> When a boundary resets the error a stage parked, a generator that the stage has paused since is discarded, and the stage runs a fresh one.
+
+### @rule disposing-its-owner-discards-a-paused-generator
+
+> Disposing the owner of a stage discards the generator it has paused, so the generator's `finally` blocks run.
 
 ### @rule oncleanup-in-a-generator-stage-belongs-to-the-generator
 
 > An `onCleanup` called inside a generator stage registers on the generator, not on the run. It fires when the generator ends: by completing, by throwing, or by being discarded.
 
-A resume is not the end of the generator, so the cleanup does not fire then. A generator that completes or throws without ever pausing still fires its cleanups. Outside a generator stage, `onCleanup` keeps its usual meaning and fires before the body's next run.
+A resume is not the end of the generator, so the cleanup does not fire then.
+
+### @rule oncleanup-in-a-sync-stage-runs-before-its-next-run
+
+> Inside a sync stage, `onCleanup` keeps its usual meaning: the cleanup runs before the stage's next run.
 
 ### @rule a-returned-promise-is-the-result-not-a-pause
 
 > A generator stage that returns a promise has finished. The promise is its result: the stage publishes what it fulfils to, and parks the reason if it rejects.
 
-The generator is not retained, so the stage stays reactive to its dependencies. A rejection of the returned promise cannot reach the generator's `try`/`catch`, because the body has already ended.
+### @rule a-stage-that-returned-a-promise-stays-reactive
+
+> A generator stage that returned a promise keeps no generator, so a change to a source it read runs it again from the top.
+
+### @rule a-returned-promise-rejection-skips-the-generators-catch
+
+> When the promise a generator stage returned rejects, the generator's `try`/`catch` does not see it: the body has already ended. The stage parks the rejection as its error.
 
 ### @rule use-inside-a-generator-stage-restarts-the-stage
 
 > A `use` that throws inside a generator stage suspends the stage like a sync stage: the generator is dropped, and the body runs again from the top when the promise settles.
 
-A body that hits the same pending promise repeatedly attaches no further settle listener to it.
+### @rule repeated-use-of-one-pending-promise-adds-no-listener
+
+> A stage body that hits `use` on the same still-pending promise on several runs attaches one settle listener to that promise, not one per run.
 
 ## @axiom the-read-verb-decides-what-renders-and-what-waits
 
