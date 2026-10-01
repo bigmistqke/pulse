@@ -174,7 +174,7 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule there-is-no-ambient-owner-outside-every-root`](#rule-there-is-no-ambient-owner-outside-every-root) — Outside every root, `getOwner()` returns null, also after a root has run and after it has been disposed.
   - [`@rule runwithowner-restores-the-previous-owner`](#rule-runwithowner-restores-the-previous-owner) — `runWithOwner` makes its owner ambient for the call, `null` included, and restores the previous owner when the call returns or throws.
   - [`@rule an-action-body-is-speculative-while-pulse-drives-it`](#rule-an-action-body-is-speculative-while-pulse-drives-it) — An action's body writes speculatively for as long as pulse is running it: the whole of a sync body, every resume of a generator body, and the synchronous prefix of an async body. A write after `yield*` in a generator body is still speculative, and so is a derivation read there.
-    - [`@exception a-write-after-an-await-escapes-the-speculation`](#exception-a-write-after-an-await-escapes-the-speculation) — In an async body, a write after the first `await` lands in committed state, and the action's commit then overwrites it.
+    - [`@exception a-write-after-an-await-escapes-the-speculation`](#exception-a-write-after-an-await-escapes-the-speculation) — In an async body, a write after the first `await` is not a write of the speculation. It lands in committed state at once, where every reader sees it before the action settles. When the action commits, its own earlier writes to the same node replace it; when the action is discarded, it stays.
   - [`@rule an-event-handler-runs-under-the-owner-it-was-bound-in`](#rule-an-event-handler-runs-under-the-owner-it-was-bound-in) — An event handler runs with the owner that was ambient when its element was built.
 - [`@axiom teardown-unwinds`](#axiom-teardown-unwinds) — What runs when something closes runs in reverse order of registration, and a callback that throws stops neither the others nor the close. Whatever ends runs its own teardown, also when it ends early.
   - [`@rule closing-runs-callbacks-newest-first`](#rule-closing-runs-callbacks-newest-first) — Callbacks registered to run when something closes run in reverse order of registration, at every place where pulse runs them.
@@ -1574,7 +1574,7 @@ A generator body is resumed by pulse itself, inside the speculation, which is wh
 
 #### @exception a-write-after-an-await-escapes-the-speculation
 
-> In an async body, a write after the first `await` lands in committed state, and the action's commit then overwrites it.
+> In an async body, a write after the first `await` is not a write of the speculation. It lands in committed state at once, where every reader sees it before the action settles. When the action commits, its own earlier writes to the same node replace it; when the action is discarded, it stays.
 
 After the first `await`, the async function has returned control to pulse, and the continuation runs later with the speculation no longer ambient. JavaScript offers no way to carry it across. A body that must write after waiting is written as a generator.
 
@@ -2324,6 +2324,8 @@ An `action` is the write face of a speculation: a body of writes held tentativel
 
 This follows because a speculation holds its writes over committed state until it commits: a write that reached committed state earlier would already be committed, and a discard could not remove it.
 
+A write made after an `await` in an async action body is not inside the speculation, as [the exception for such a write](#exception-a-write-after-an-await-escapes-the-speculation) states.
+
 #### @exception a-prediction-shows-outside-its-action
 
 > A write through an optimistic setter is shown to readers outside every action while its action is open. While several actions have predictions live, readers outside every action see the most recent one.
@@ -2363,6 +2365,8 @@ This follows because a speculation commits as one unit: a consumer that saw its 
 > When a speculation is discarded, its writes vanish, and committed state is as if it never ran.
 
 This follows because a speculation is discarded as one unit: everything it holds goes, and since nothing reached committed state, committed state is as if it never ran.
+
+A write made after an `await` in an async action body is not one of the speculation's writes, so a discard does not remove it, as [the exception for such a write](#exception-a-write-after-an-await-escapes-the-speculation) states.
 
 A discard drops what the speculation holds. It never has to undo anything, because nothing reached committed state.
 

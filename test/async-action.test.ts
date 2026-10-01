@@ -146,6 +146,44 @@ test('SHARP EDGE: a write after an await in an async body escapes the speculatio
 })
 
 /**
+ * @canon exception-a-write-after-an-await-escapes-the-speculation
+ */
+test('a write after an await is visible outside the action before the action settles', async () => {
+  const [name, setName] = signal('alice')
+  let release!: () => void
+  const gate = new Promise<void>((resolve) => (release = resolve))
+  const handle = action(async () => {
+    await tick()
+    setName('after')
+    await gate
+  })
+  await tick()
+  await tick()
+  expect(name()).toBe('after')
+  expect(committed(name)).toBe('after')
+  release()
+  await handle.settled
+})
+
+/**
+ * @canon exception-a-write-after-an-await-escapes-the-speculation
+ */
+test('a discard leaves a write made after an await in place', async () => {
+  const [name, setName] = signal('alice')
+  const [other, setOther] = signal('x0')
+  const handle = action(async () => {
+    setOther('x1') // speculative: discarded with the action
+    await tick()
+    setName('after') // escaped: already committed
+    throw new Error('fail')
+  })
+  await handle.settled
+  expect(handle.error()).toBeInstanceOf(Error)
+  expect(committed(other)).toBe('x0')
+  expect(committed(name)).toBe('after')
+})
+
+/**
  * @canon rule-sibling-speculations-do-not-see-each-other
  */
 test('two concurrent async actions are isolated from each other', async () => {
