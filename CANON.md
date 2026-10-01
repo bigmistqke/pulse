@@ -21,6 +21,7 @@ This document is the project. It holds the theory of pulse: why it is the way it
 - [`@term loading-boundary`](#term-loading-boundary) — The owner a `<Loading>` component creates to gather the pending state of the bindings beneath it.
 - [`@term error-boundary`](#term-error-boundary) — An owner that failures beneath it are routed to: an `<Errored>` component or a `catchError` call.
 - [`@term scheduler`](#term-scheduler) — The injectable function that decides when consumers run after a write.
+- [`@term component`](#term-component) — A function that builds a part of the page and returns it, called by writing it as a tag.
 - [`@term control-flow`](#term-control-flow) — The components that choose what to render from a value: `Show`, `Switch` and `For`.
 - [`@axiom each-job-is-done-by-one-mechanism`](#axiom-each-job-is-done-by-one-mechanism) — Each job is done by one mechanism, reused wherever the job comes back, rather than a mechanism for each use.
   - [`@axiom build-on-r3-rather-than-change-it`](#axiom-build-on-r3-rather-than-change-it) — Pulse uses r3 as it is. What r3 does not do is built in a layer above it, not patched into it.
@@ -77,6 +78,7 @@ This document is the project. It holds the theory of pulse: why it is the way it
   - [`@spec an-update-function-receives-the-last-resolved-value`](#spec-an-update-function-receives-the-last-resolved-value) — An update function on a writable derivation receives the last value that actually resolved, never a promise, and `undefined` when nothing has resolved yet.
   - [`@spec an-update-function-sees-the-value-a-sync-derivation-produced-at-creation`](#spec-an-update-function-sees-the-value-a-sync-derivation-produced-at-creation) — An update function on a sync derivation receives the value the derivation produced when it was created, even before any write, wherever the derivation was created. An async derivation that suspended has produced nothing yet.
 - [`@axiom nothing-is-hidden-from-the-code-that-uses-it`](#axiom-nothing-is-hidden-from-the-code-that-uses-it) — What a value is, including that it is still pending or has failed, is visible to the code that reads it, rather than smoothed over by the framework.
+  - [`@spec a-component-that-suspends-in-its-body-warns`](#spec-a-component-that-suspends-in-its-body-warns) — When a component's body suspends, pulse logs a warning that names the component, once per component function. The component still runs again once the source settles.
   - [`@axiom plain-reads-are-honest`](#axiom-plain-reads-are-honest) — A read reports what is there. Whether a value is still pending, or has failed, is a separate question asked through its own verb.
     - [`@spec peek-returns-the-last-resolved-value`](#spec-peek-returns-the-last-resolved-value) — `peek(x)` returns the most recent value that resolved for `x`. A value that is not a promise counts as resolved, and is returned as it is.
     - [`@spec peek-returns-undefined-before-anything-resolved`](#spec-peek-returns-undefined-before-anything-resolved) — `peek(x)` returns `undefined` while nothing has ever resolved for `x`.
@@ -144,7 +146,8 @@ This document is the project. It holds the theory of pulse: why it is the way it
     - [`@spec a-suspended-effect-re-runs-when-its-promise-settles`](#spec-a-suspended-effect-re-runs-when-its-promise-settles) — An effect whose body suspends on `use(x)` holds its body, and runs it again from the top once the promise it suspended on settles. When its source is written with a new pending promise, it suspends again and re-runs when that one settles.
     - [`@spec a-fresh-promise-each-run-settles-once-per-change`](#spec-a-fresh-promise-each-run-settles-once-per-change) — A stage that returns a new promise on every run, such as a `.then`-chained one, settles once per change and does not loop.
   - [`@spec repeated-use-of-one-pending-promise-adds-no-listener`](#spec-repeated-use-of-one-pending-promise-adds-no-listener) — A stage body that hits `use` on the same still-pending promise on several runs attaches one settle listener to that promise, not one per run.
-  - [`@spec a-component-runs-once-and-reactivity-lives-in-its-holes`](#spec-a-component-runs-once-and-reactivity-lives-in-its-holes) — A component function runs once. What changes afterwards changes inside the holes it returned — reactive children and reactive props — never by running the component again.
+  - [`@spec a-component-runs-once-and-reactivity-lives-in-its-holes`](#spec-a-component-runs-once-and-reactivity-lives-in-its-holes) — A [component](#term-component) function runs once. What changes afterwards changes inside the holes it returned — reactive children and reactive props — never by running the component again.
+    - [`@exception a-component-that-suspends-in-its-body-runs-again`](#exception-a-component-that-suspends-in-its-body-runs-again) — A component whose body calls `use` on a pending source throws. When the source settles, the hole that built the component runs again and calls the component again. What the body created on the earlier run is disposed and created again.
     - [`@spec a-function-tag-is-called-once-with-its-props`](#spec-a-function-tag-is-called-once-with-its-props) — A function tag is called once, with its props. Children passed to `h` after the props arrive on `props.children`.
     - [`@spec a-function-child-is-a-reactive-hole`](#spec-a-function-child-is-a-reactive-hole) — A function in a child position is a binding. It runs in its own effect, and its result replaces whatever sits between the binding's two marker comments each time something it read changes.
     - [`@spec a-function-child-returns-anything-a-static-child-may-be`](#spec-a-function-child-returns-anything-a-static-child-may-be) — A function child's result is inserted exactly as a child of the same kind would be in that position, whether it is a string, a number, a DOM node, an array, nothing, or a function, which becomes a reactive child of its own.
@@ -450,6 +453,10 @@ _Avoid_: suspense, transition
 ### @term scheduler
 
 > The injectable function that decides when consumers run after a write.
+
+### @term component
+
+> A function that builds a part of the page and returns it, called by writing it as a tag.
 
 ### @term control-flow
 
@@ -886,6 +893,16 @@ This follows because a derivation runs when it is created and an update function
 > What a value is, including that it is still pending or has failed, is visible to the code that reads it, rather than smoothed over by the framework.
 
 Two principles of the exploration record make this commitment from two sides. [P2](docs/pulse/framings.md#p2--acknowledge-async-dont-hide-it) keeps a future in the type rather than erasing it, and [P3](docs/pulse/framings.md#p3--plain-reads-are-honest) has a read report what is there rather than raise what it was not asked about.
+
+### @spec a-component-that-suspends-in-its-body-warns
+
+> When a component's body suspends, pulse logs a warning that names the component, once per component function. The component still runs again once the source settles.
+
+Derives from: [`exception-a-component-that-suspends-in-its-body-runs-again`](#exception-a-component-that-suspends-in-its-body-runs-again)
+
+This follows because the code that uses pulse sees what pulse does. Running a body again recreates everything the body built, and without the warning the code would not see that cost.
+
+Only the component whose own body suspended is named. A component that holds it sees the same throw pass through, and is not named for it.
 
 ### @axiom plain-reads-are-honest
 
@@ -1373,11 +1390,19 @@ This follows because only what changed runs again: a body that suspends again on
 
 ### @spec a-component-runs-once-and-reactivity-lives-in-its-holes
 
-> A component function runs once. What changes afterwards changes inside the holes it returned — reactive children and reactive props — never by running the component again.
+> A [component](#term-component) function runs once. What changes afterwards changes inside the holes it returned — reactive children and reactive props — never by running the component again.
 
 This follows because only the work that depends on a change runs again: a change concerns the holes that read it, so running the whole component again would run work that did not depend on it.
 
-This is stated in the [README](README.md) and in the _Component_ entry of [`CONTEXT.md`](CONTEXT.md): reactivity lives in the holes a component returns, not in re-invoking the function, so local state created in its body is created once.
+This is stated in the [README](README.md): reactivity lives in the holes a component returns, not in re-invoking the function, so local state created in its body is created once.
+
+#### @exception a-component-that-suspends-in-its-body-runs-again
+
+> A component whose body calls `use` on a pending source throws. When the source settles, the hole that built the component runs again and calls the component again. What the body created on the earlier run is disposed and created again.
+
+Derives from: [`fact-only-a-generator-can-be-resumed`](#fact-only-a-generator-can-be-resumed)
+
+A component body is a plain function, so once it throws it has ended, and the only way on is to run it again. Async belongs in the holes a component returns, where a suspension runs only that hole again, not in the body's own control flow.
 
 #### @spec a-function-tag-is-called-once-with-its-props
 

@@ -27,7 +27,7 @@ For the full comparative analysis against Solid 2.x, see
 
 ## Language
 
-Terms are moving into the `## Terms` section of [`CANON.md`](CANON.md#terms), where each one is a definition and its behaviour lives in specs. Moved so far: present, accessor, signal, derivation, computed, pipeline, stage, owner, boundary, loading boundary, error boundary, scheduler, control flow.
+Terms are moving into the `## Terms` section of [`CANON.md`](CANON.md#terms), where each one is a definition and its behaviour lives in specs. Moved so far: present, accessor, signal, derivation, computed, pipeline, stage, owner, boundary, loading boundary, error boundary, scheduler, control flow, component.
 
 **Optimistic**:
 A Signal with a different write discipline, created as
@@ -249,17 +249,6 @@ _Avoid_: a value-less binding that calls `use(x)` and discards the result
 purely to make a boundary react — that conscripts the guaranteed-value
 primitive for the one thing that isn't its benefit. Boundaries hear about
 state through `latest`; `use` is for when the call site wants the value.
-
-**Component**:
-A function that runs once and returns a DOM node tree (or an accessor that
-returns one). A component body never re-executes — reactivity lives in the
-holes it returns, not in re-invoking the function. Local state created in the
-body (`signal(0)`, `computed(...)`) is created once. Async always lives
-*inside* a component — in bindings and effects — never in the body's own
-control flow. **Caveat**: a component whose body calls `use(...)` at the top
-level (before creating local state) will re-execute the WHOLE body on
-suspension retry; if it created state in earlier lines, that state is lost.
-The safe pattern is `use(...)` inside a JSX hole, not in the body.
 
 **effect (single-arg form)**:
 `effect(fn: () => void)` runs a side-effecting function reactively. Re-runs on

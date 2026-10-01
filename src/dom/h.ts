@@ -1,6 +1,7 @@
 import { bindProp, insertChild, tagChildOwner } from './bindings'
 import { mergeProps } from './merge-props'
 import { getOwner, type Owner } from '../owner'
+import { NotReadyYet } from '../async'
 
 /**
  * Anything `insertChild` will render: a Node, a primitive, null/undefined/
@@ -62,7 +63,7 @@ export function h(tag: Tag, props: Record<string, unknown> | null, ...children: 
   }
   if (typeof tag === 'function') {
     if (children.length === 0) {
-      return tag(props ?? {})
+      return callComponent(tag, props ?? {})
     }
     // A manual (non-JSX-compiled) h() call passing children as trailing
     // args - merge them onto props as a plain value. mergeProps (not
@@ -70,7 +71,7 @@ export function h(tag: Tag, props: Record<string, unknown> | null, ...children: 
     // the merge instead of being flattened.
     const childrenValue = children.length === 1 ? children[0] : children
     const merged = props ? mergeProps(props, { children: childrenValue }) : { children: childrenValue }
-    return tag(merged)
+    return callComponent(tag, merged)
   }
   if (typeof tag !== 'string') {
     throw new Error(`h: unsupported tag: ${String(tag)}`)
@@ -85,4 +86,36 @@ export function h(tag: Tag, props: Record<string, unknown> | null, ...children: 
     insertChild(el, child)
   }
   return el
+}
+
+/** Component functions whose suspended body has been reported. */
+const warnedComponents = new WeakSet<Function>()
+
+/** Suspensions already reported, so a component they pass through is not named. */
+const reportedSuspensions = new WeakSet<NotReadyYet>()
+
+/**
+ * Call a component. A body that suspends throws, and the hole the component
+ * was built in runs it again from the top once the source settles, recreating
+ * everything the body built. That cost is otherwise invisible, so the first
+ * suspension of each component function is reported. Only the innermost body
+ * is named: the same throw passing through an enclosing component's body was
+ * not caused by that body.
+ */
+function callComponent<R>(tag: (props: any) => R, props: object): R {
+  try {
+    return tag(props)
+  } catch (error) {
+    if (error instanceof NotReadyYet && !reportedSuspensions.has(error)) {
+      reportedSuspensions.add(error)
+      if (!warnedComponents.has(tag)) {
+        warnedComponents.add(tag)
+        console.warn(
+          `pulse: <${tag.name || 'anonymous'}> suspended in its body, so it runs again from the top ` +
+            `when the source settles. Move the use() call into a hole the component returns.`,
+        )
+      }
+    }
+    throw error
+  }
 }
