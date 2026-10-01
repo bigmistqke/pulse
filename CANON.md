@@ -63,7 +63,7 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule a-write-abandons-the-run-in-progress`](#rule-a-write-abandons-the-run-in-progress) — A write abandons every stage's run in progress, a fetch in flight or a paused generator, in whichever stage it is, and the abandoned run never publishes.
   - [`@rule a-write-withdraws-a-recompute-queued-in-the-same-tick`](#rule-a-write-withdraws-a-recompute-queued-in-the-same-tick) — A recompute queued earlier in the same tick as a write is withdrawn before it starts, so it makes no request, also when the write is an update function.
   - [`@rule a-write-from-inside-the-derivation-abandons-its-own-run-without-raising`](#rule-a-write-from-inside-the-derivation-abandons-its-own-run-without-raising) — A write made from inside the derivation's own body abandons that run without raising, and the cleanups the run registered still run.
-  - [`@rule a-dependency-change-after-a-write-takes-over`](#rule-a-dependency-change-after-a-write-takes-over) — When a source the derivation reads changes after a write, the derivation runs again and its result replaces the written value.
+  - [`@rule a-dependency-change-after-a-write-takes-over`](#rule-a-dependency-change-after-a-write-takes-over) — When a source the derivation reads changes after a write, the derivation runs again and its result replaces the written value. This holds when the change comes in the same tick as the write, and when the written value is a promise that has not settled.
   - [`@rule the-written-value-stays-visible-while-the-derivation-reloads`](#rule-the-written-value-stays-visible-while-the-derivation-reloads) — While the run started by a dependency change is in flight, the derivation keeps showing the written value, and reports the reload as pending.
   - [`@rule an-older-production-never-publishes-over-a-newer-one`](#rule-an-older-production-never-publishes-over-a-newer-one) — A promise that settles after its stage has started a newer run is ignored, even when it settles before the flush that runs the newer input.
   - [`@rule a-write-clears-a-parked-failure`](#rule-a-write-clears-a-parked-failure) — A write to a derivation holding a parked failure clears the failure, whichever stage of the pipeline it was parked on.
@@ -174,7 +174,7 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule runwithowner-restores-the-previous-owner`](#rule-runwithowner-restores-the-previous-owner) — `runWithOwner` makes its owner ambient for the call, `null` included, and restores the previous owner when the call returns or throws.
   - [`@rule an-action-body-is-speculative-while-pulse-drives-it`](#rule-an-action-body-is-speculative-while-pulse-drives-it) — An action's body writes speculatively for as long as pulse is running it: the whole of a sync body, every resume of a generator body, and the synchronous prefix of an async body. A write after `yield*` in a generator body is still speculative, and so is a derivation read there.
     - [`@exception a-write-after-an-await-escapes-the-speculation`](#exception-a-write-after-an-await-escapes-the-speculation) — In an async body, a write after the first `await` is not a write of the speculation. It lands in committed state at once, where every reader sees it before the action settles. When the action commits, its own earlier writes to the same node replace it; when the action is discarded, it stays.
-  - [`@rule an-event-handler-runs-under-the-owner-it-was-bound-in`](#rule-an-event-handler-runs-under-the-owner-it-was-bound-in) — An event handler runs with the owner that was ambient when its element was built.
+  - [`@rule an-event-handler-runs-under-the-owner-it-was-bound-in`](#rule-an-event-handler-runs-under-the-owner-it-was-bound-in) — An event handler runs with the owner that was ambient when its element was built, so an `onCleanup` called inside the handler attaches to that owner and runs when it is disposed.
 - [`@axiom teardown-unwinds`](#axiom-teardown-unwinds) — What runs when something closes runs in reverse order of registration, and a callback that throws stops neither the others nor the close. Whatever ends runs its own teardown, also when it ends early.
   - [`@rule closing-runs-callbacks-newest-first`](#rule-closing-runs-callbacks-newest-first) — Callbacks registered to run when something closes run in reverse order of registration, at every place where pulse runs them.
     - [`@case settle-callbacks-run-newest-first-and-in-isolation`](#case-settle-callbacks-run-newest-first-and-in-isolation) — `scope.ts` `fireSettle`.
@@ -246,7 +246,7 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule use-of-an-accessor-throws-while-it-is-pending`](#rule-use-of-an-accessor-throws-while-it-is-pending) — `use(accessor)` throws `NotReadyYet` whenever `isPending(accessor)` is true, even when the accessor has a stale value to return. The thrown promise is `promiseOf(accessor)`.
   - [`@rule use-throws-a-parked-error`](#rule-use-throws-a-parked-error) — `use(x)` on a failed node throws the node's error.
   - [`@rule use-suspends-only-the-binding-that-reads-it`](#rule-use-suspends-only-the-binding-that-reads-it) — A binding whose `use(x)` meets a pending value renders nothing new and keeps what it showed, and the rest of the tree renders around it, with or without a `<Loading>` boundary above it. It recovers when the value settles.
-  - [`@rule a-suspended-hole-keeps-what-it-showed`](#rule-a-suspended-hole-keeps-what-it-showed) — A reactive child whose run throws `NotReadyYet` commits nothing, so the DOM it showed before stays in place until a later run succeeds.
+  - [`@rule a-suspended-hole-keeps-what-it-showed`](#rule-a-suspended-hole-keeps-what-it-showed) — A reactive child whose run throws `NotReadyYet` commits nothing, so the DOM it showed before stays in place until a later run succeeds. On its first run it has shown nothing, so it stays empty until its source settles.
   - [`@rule latest-reports-loading-without-waiting`](#rule-latest-reports-loading-without-waiting) — `latest(x)` returns the last resolved value, never throws, and never makes the binding wait. While `x` is pending it reports the load to the nearest boundary: a first load drives the boundary's first-load placeholder, and a refresh drives `isLoading()` only.
   - [`@rule a-tolerant-read-reports-a-failure-to-the-boundary`](#rule-a-tolerant-read-reports-a-failure-to-the-boundary) — A binding that reads a failed node through `latest` reports the failure to the nearest accepting error boundary, though nothing throws, and reports its recovery when a later run sees no error.
   - [`@rule peek-reports-nothing`](#rule-peek-reports-nothing) — `peek(x)` returns the last resolved value and reports nothing to any boundary, neither a first load nor a refresh.
@@ -261,7 +261,7 @@ The canon was written backwards from the existing tests and documents, and descr
     - [`@case a-queued-commit-is-checked-again-at-the-end-of-the-microtask`](#case-a-queued-commit-is-checked-again-at-the-end-of-the-microtask) — `loading.ts` `deferOrCommit`.
   - [`@rule a-read-without-use-commits-at-once`](#rule-a-read-without-use-commits-at-once) — A binding that did not call `use` commits as soon as it runs, whatever state its boundary is in.
 - [`@axiom a-boundary-wraps-what-it-coordinates`](#axiom-a-boundary-wraps-what-it-coordinates) — A boundary coordinates the region placed inside it. Which bindings land together, and which region shows a placeholder, is decided by where a `<Loading>` boundary is placed. The state of every boundary, a `<Loading>` or an `<Errored>`, belongs to the region it wraps, so a reader finds it by position, whatever intercepts errors in between.
-  - [`@rule a-boundary-shows-initial-until-its-first-load`](#rule-a-boundary-shows-initial-until-its-first-load) — Until every suspended binding inside it has settled once, a boundary shows `initial`, or `fallback` when there is no `initial`. After that it shows the loaded subtree.
+  - [`@rule a-boundary-shows-initial-until-its-first-load`](#rule-a-boundary-shows-initial-until-its-first-load) — Until every suspended binding inside it has settled once, a boundary shows `initial`, or `fallback` when there is no `initial`. After that it shows the loaded subtree. A subtree in which nothing suspends is shown at once.
   - [`@rule after-its-first-load-a-boundary-shows-fallback-or-holds`](#rule-after-its-first-load-a-boundary-shows-fallback-or-holds) — When a boundary that has loaded before becomes pending again, it shows `fallback` if one is given, and otherwise keeps showing the subtree it last committed.
   - [`@rule a-boundary-without-placeholders-swaps-nothing`](#rule-a-boundary-without-placeholders-swaps-nothing) — A boundary with neither `initial` nor `fallback` never swaps its subtree out. What does not depend on a pending value stays visible while it waits.
   - [`@rule a-boundary-flushes-ready-commits-together`](#rule-a-boundary-flushes-ready-commits-together) — A boundary holds the commits of its ready bindings until no binding registered with it is suspended, then runs them all in one pass. A binding that reports idle, or unregisters, stops holding the gate.
@@ -336,7 +336,7 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule switch-renders-the-first-truthy-match`](#rule-switch-renders-the-first-truthy-match) — `Switch` renders the children of the first `Match`, in written order, whose `when` is truthy, and its `fallback` when none is. A function child is called with the truthy value. Children of a `Switch` that are not `Match` elements are ignored.
   - [`@rule for-renders-its-fallback-when-there-are-no-rows`](#rule-for-renders-its-fallback-when-there-are-no-rows) — `For` renders one row per item, in the list's order, and renders its `fallback` when the list is empty.
   - [`@rule a-row-index-follows-its-position`](#rule-a-row-index-follows-its-position) — Each row receives an index accessor that returns the row's current position. A reorder updates what the accessor returns, and the row is not rebuilt.
-  - [`@rule a-dynamic-prop-becomes-a-getter`](#rule-a-dynamic-prop-becomes-a-getter) — The compiler turns a prop whose value is an expression into a getter on the props object, so the expression is evaluated where the prop is read, not where it is written.
+  - [`@rule a-dynamic-prop-becomes-a-getter`](#rule-a-dynamic-prop-becomes-a-getter) — The compiler turns a prop whose value is an expression into a getter on the props object, so the expression is evaluated where the prop is read, not where it is written. This holds the same way for a component and for a DOM element, and for every binding kind on an element, `attr:` included.
     - [`@exception a-literal-or-function-prop-stays-as-written`](#exception-a-literal-or-function-prop-stays-as-written) — A prop whose value is a literal, or a function or arrow expression, is not converted to a getter.
     - [`@exception ref-and-on-props-stay-as-written`](#exception-ref-and-on-props-stay-as-written) — A `ref` prop and an `on:`-prefixed prop are never converted to a getter, whatever their value.
   - [`@rule a-spread-merges-descriptors-not-values`](#rule-a-spread-merges-descriptors-not-values) — A props object that contains a spread is compiled to a `mergeProps` call over its segments, so a getter in a spread source stays a getter. One `mergeProps` import is added per file, however many spreads it has.
@@ -770,11 +770,11 @@ This follows because a production started earlier never publishes over a later o
 
 ### @rule a-dependency-change-after-a-write-takes-over
 
-> When a source the derivation reads changes after a write, the derivation runs again and its result replaces the written value.
+> When a source the derivation reads changes after a write, the derivation runs again and its result replaces the written value. This holds when the change comes in the same tick as the write, and when the written value is a promise that has not settled.
 
 This follows because a derived value shows whatever produced it last: a dependency change after a write is the later production, so its result replaces the written value.
 
-A write followed by a change in the same tick is the same ordering, so the change wins; a written promise that has not settled is replaced the same way.
+A write followed by a change in the same tick is still a write followed by a change, so the change is the later production.
 
 ### @rule the-written-value-stays-visible-while-the-derivation-reloads
 
@@ -1572,13 +1572,13 @@ After the first `await`, the async function has returned control to pulse, and t
 
 ### @rule an-event-handler-runs-under-the-owner-it-was-bound-in
 
-> An event handler runs with the owner that was ambient when its element was built.
+> An event handler runs with the owner that was ambient when its element was built, so an `onCleanup` called inside the handler attaches to that owner and runs when it is disposed.
 
 Derives from: [`axiom-a-lifetime-belongs-to-an-owner`](#axiom-a-lifetime-belongs-to-an-owner)
 
 This follows because ambient context is set for one call, and what a call creates belongs to the ambient owner: a DOM event brings no owner, so pulse sets the bind-time owner around the handler.
 
-A DOM event fires outside any owner. Restoring the bind-time owner lets code inside the handler reach it: an `onCleanup` called there attaches to that owner and runs when it is disposed.
+A DOM event fires outside any owner, so without this the handler would run with none.
 
 ## @axiom teardown-unwinds
 
@@ -2078,13 +2078,11 @@ This follows because the read verb decides what the binding that reads renders: 
 
 ### @rule a-suspended-hole-keeps-what-it-showed
 
-> A reactive child whose run throws `NotReadyYet` commits nothing, so the DOM it showed before stays in place until a later run succeeds.
+> A reactive child whose run throws `NotReadyYet` commits nothing, so the DOM it showed before stays in place until a later run succeeds. On its first run it has shown nothing, so it stays empty until its source settles.
 
 Derives from: [`rule-use-suspends-only-the-binding-that-reads-it`](#rule-use-suspends-only-the-binding-that-reads-it)
 
 This follows because the verb decides what a binding renders, and a suspended binding renders nothing new: a hole that suspends commits nothing, so its previous content stays.
-
-On a first run there is nothing to keep, so the hole stays empty until its source settles.
 
 ### @rule latest-reports-loading-without-waiting
 
@@ -2178,11 +2176,9 @@ What a region shows is the region's, not the business of whoever catches an erro
 
 ### @rule a-boundary-shows-initial-until-its-first-load
 
-> Until every suspended binding inside it has settled once, a boundary shows `initial`, or `fallback` when there is no `initial`. After that it shows the loaded subtree.
+> Until every suspended binding inside it has settled once, a boundary shows `initial`, or `fallback` when there is no `initial`. After that it shows the loaded subtree. A subtree in which nothing suspends is shown at once.
 
 This follows because a boundary decides which region shows a placeholder: until everything suspended in its region has a value once, the region has nothing complete to show, so the placeholder shows.
-
-A subtree that never suspends is shown at once.
 
 ### @rule after-its-first-load-a-boundary-shows-fallback-or-holds
 
@@ -2196,7 +2192,7 @@ This follows because the boundary's placement and props decide what its region s
 
 This follows because a boundary shows a placeholder only as its props provide one: with neither `initial` nor `fallback` there is nothing to swap to, so the subtree stays.
 
-Each suspended binding still withholds its own commit.
+Each suspended binding still withholds its own commit, as [the rule on suspending only the reader](#rule-use-suspends-only-the-binding-that-reads-it) states.
 
 ### @rule a-boundary-flushes-ready-commits-together
 
@@ -2222,7 +2218,7 @@ This follows because a boundary coordinates only the bindings placed inside it: 
 
 This follows because a boundary coordinates the bindings placed inside it: the nearest enclosing boundary is the one whose region contains the binding, so the suspension is reported there and to no other.
 
-A boundary nested inside another collects the suspensions below it, and the outer boundary does not wait for them.
+So a boundary nested inside another collects the suspensions below it, and the outer boundary does not wait for them.
 
 ### @rule a-structural-commit-waits-for-the-content-it-brings
 
@@ -2719,11 +2715,11 @@ This follows because a row, like a component, is built once and changes only thr
 
 ### @rule a-dynamic-prop-becomes-a-getter
 
-> The compiler turns a prop whose value is an expression into a getter on the props object, so the expression is evaluated where the prop is read, not where it is written.
+> The compiler turns a prop whose value is an expression into a getter on the props object, so the expression is evaluated where the prop is read, not where it is written. This holds the same way for a component and for a DOM element, and for every binding kind on an element, `attr:` included.
 
 This follows because a component runs once: a prop evaluated where it is written would be read a single time and freeze, so the expression is deferred to where the prop is read, inside a hole.
 
-`<Foo a={count()} />` compiles to a props object with `get a() { return count(); }`. The rule is the same for a component and for a DOM element: every binding kind on an element, `attr:` included, reads its prop through the same getter.
+`<Foo a={count()} />` compiles to a props object with `get a() { return count(); }`.
 
 #### @exception a-literal-or-function-prop-stays-as-written
 
