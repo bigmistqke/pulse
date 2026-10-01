@@ -30,6 +30,8 @@ A defect is read upward. A bug in the implementation is not something to patch. 
 
 At each layer the question is the same: does the layer above already answer this? If the rule already answers it, only the case and its test were missing. If no rule answers it, the rule is missing, and the axioms must say which rule is right. If the axioms cannot say, an axiom is missing. Look first for a root that the missing axiom would narrow. Either way the outcome is a design question, and it goes to whoever owns the design.
 
+The canon's structure changes for the same reasons its content does: a defect that points up to it, or a claim found that no unit states. A new way of organising the canon is not a reason on its own. Every reorganisation rewrites derivations in bulk, and nothing pushes back on it, because no test cites an axiom. Once every claim is stated and placed, the structure is held still.
+
 ## Every claim is a unit
 
 The canon carves behaviour into stone: each claim is a unit under an axiom, and a test cites it. A claim that exists only in a unit's body text, a code comment, or a commit message is not encoded. The checker never sees it, no test is held to it, and a later change can undo it without anything noticing.
