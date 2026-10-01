@@ -33,8 +33,7 @@ import { computed, signal } from '../src/index'
  *
  * Tracked: `docs/follow-ups.md` (r3-side findings → "dep-list partially stale
  * after a throw in `recompute`").
- */
-/**
+ *
  * @canon exception-a-throwing-run-keeps-dependencies-it-did-not-reread
  */
 test.fails('r3 phantom re-trigger: throwing body retains deps it did not re-read', () => {

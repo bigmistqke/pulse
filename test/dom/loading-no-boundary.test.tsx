@@ -85,8 +85,7 @@ test('a pending use() is NOT reported to an error boundary', async () => {
  * So a `catchError` wrapped AROUND `render` is never an ancestor of the bindings
  * inside it, and `routeError`'s walk up the owner chain cannot reach the handler.
  * The boundary belongs in the tree it is guarding.
- */
-/**
+ *
  * @canon spec-a-catch-error-handler-is-called-for-each-throw-under-it
  */
 test('an error boundary inside render catches a real error', async () => {
@@ -121,8 +120,7 @@ test('an error boundary inside render catches a real error', async () => {
  * unhandled rejection.
  *
  * The error is graph state. It parks whether or not anyone is listening.
- */
-/**
+ *
  * @canon spec-error-returns-the-failure-of-a-node-or-anything-upstream
  */
 test('a rejected computed parks its error even when the consumer has no boundary', async () => {

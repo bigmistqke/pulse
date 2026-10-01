@@ -39,8 +39,7 @@ const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
  * effect's settle-kick), and each re-run re-reads the failed node and re-throws.
  * All three reports come from the same controller, so the collection holds ONE
  * entry and the fallback renders once.
- */
-/**
+ *
  * @canon spec-a-boundary-shows-its-fallback-exactly-while-something-under-it-is-failed
  */
 test('one rejection renders the fallback once, however many times the binding re-runs', async () => {
@@ -72,8 +71,8 @@ test('one rejection renders the fallback once, however many times the binding re
 
 /** The boundary is not a latch. It shows the fallback exactly while something under
  *  it is failed — so when the error clears on its own, it returns to the subtree
- *  with no reset() call at all. */
-/**
+ *  with no reset() call at all.
+ *
  * @canon spec-a-boundary-shows-its-fallback-exactly-while-something-under-it-is-failed
  */
 test('the boundary unlatches itself when the error clears', async () => {
@@ -105,8 +104,8 @@ test('the boundary unlatches itself when the error clears', async () => {
 })
 
 /** The collection is a set of failed bindings. It empties only when ALL of them
- *  recover. */
-/**
+ *  recover.
+ *
  * @canon spec-a-boundary-shows-its-fallback-exactly-while-something-under-it-is-failed
  */
 test('two failed siblings render one fallback, which clears only when both recover', async () => {
@@ -153,8 +152,8 @@ test('two failed siblings render one fallback, which clears only when both recov
 
 /** `<Errored>` and `catchError` are peers in one walk up the owner chain. The
  *  nearest one wins, so a `catchError` INSIDE an `<Errored>` intercepts first and the
- *  boundary never activates. */
-/**
+ *  boundary never activates.
+ *
  * @canon spec-catch-error-and-errored-are-peers-in-one-walk
  */
 test('a catchError nested inside <Errored> wins, and the boundary never activates', async () => {
@@ -186,8 +185,8 @@ test('a catchError nested inside <Errored> wins, and the boundary never activate
 })
 
 /** Suspension is not an error. A pending read routes to `<Loading>` and must never
- *  reach `<Errored>`. */
-/**
+ *  reach `<Errored>`.
+ *
  * @canon spec-suspension-is-not-a-failure
  */
 test('a pending read reaches <Loading>, never <Errored>', async () => {
@@ -221,8 +220,8 @@ test('a pending read reaches <Loading>, never <Errored>', async () => {
 
 /** The retry button. Nothing in the graph changed, so nothing will re-run on its
  *  own: reset() must clear the parked error on the node that failed and recompute
- *  it — even though that node was created outside the boundary entirely. */
-/**
+ *  it — even though that node was created outside the boundary entirely.
+ *
  * @canon spec-reset-recomputes-the-failed-source-at-the-root-of-its-chain
  */
 test('reset() retries with unchanged inputs', async () => {
@@ -262,8 +261,8 @@ test('reset() retries with unchanged inputs', async () => {
 
 /** A downstream stage only PROPAGATES its upstream's error. Resetting it alone
  *  would leave the real source parked and the retry would fail identically, so
- *  reset() walks the upstream chain to the root failed stage. */
-/**
+ *  reset() walks the upstream chain to the root failed stage.
+ *
  * @canon spec-reset-recomputes-the-failed-source-at-the-root-of-its-chain
  */
 test('reset() recomputes the root failed stage of a pipeline, not the leaf', async () => {
@@ -308,8 +307,8 @@ test('reset() recomputes the root failed stage of a pipeline, not the leaf', asy
 })
 
 /** A binding that threw a plain error has no failed node behind it (`source` is
- *  null). reset() simply re-runs the binding. */
-/**
+ *  null). reset() simply re-runs the binding.
+ *
  * @canon spec-reset-reruns-a-binding-that-threw-a-plain-error
  */
 test('reset() re-runs a binding that threw a plain error', () => {
@@ -360,8 +359,7 @@ test('reset() re-runs a binding that threw a plain error', () => {
  * unrelated plain error under a real `<Errored>` boundary must not inherit that stale
  * source: its own `source` is `null` (it never touched a failed computed), and
  * `reset()` must not recompute the computed the first effect happened to leave behind.
- */
-/**
+ *
  * @canon spec-a-report-names-only-a-source-its-own-binding-read
  */
 test('a stale error source from a swallowed, unboundaried effect does not leak into an unrelated <Errored> reset', async () => {
@@ -438,8 +436,7 @@ test('a stale error source from a swallowed, unboundaried effect does not leak i
  * throwing. A clear-in-catch fix never runs at all here, since `singleArgEffect`
  * never sees a throw to catch, and the marked source would stay parked in module
  * state. Clear-on-entry does not depend on a throw happening at all.
- */
-/**
+ *
  * @canon spec-a-report-names-only-a-source-its-own-binding-read
  */
 test('a source marked and swallowed by the effect body itself (no throw reaches singleArgEffect) does not leak into an unrelated <Errored> reset', async () => {
