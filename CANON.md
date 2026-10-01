@@ -35,28 +35,47 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule overlapping-writes-resolve-by-commit-order`](#rule-overlapping-writes-resolve-by-commit-order) — When two sibling actions write the same node, the one that commits last decides its committed value.
 - [`@axiom build-on-r3-rather-than-change-it`](#axiom-build-on-r3-rather-than-change-it) — Pulse uses r3 as it is. What r3 does not do is built in a layer above it, not patched into it.
   - [`@rule r3-holds-only-committed-values`](#rule-r3-holds-only-committed-values) — r3 holds one committed value per node. A read or write with no speculation open goes straight through r3.
+    - [`@case a-signal-node-is-backed-by-an-r3-signal`](#case-a-signal-node-is-backed-by-an-r3-signal) — `scope.ts` `signalNode`.
+    - [`@case a-computed-node-carries-its-recipe-on-an-r3-computed`](#case-a-computed-node-carries-its-recipe-on-an-r3-computed) — `scope.ts` `computedNode`.
+    - [`@case a-committed-read-and-write-go-through-r3`](#case-a-committed-read-and-write-go-through-r3) — `scope.ts` `writeValue`.
   - [`@rule a-scope-reads-through-its-chain`](#rule-a-scope-reads-through-its-chain) — A read in a scope takes the nearest slot up its chain of scopes, and falls through to committed state when no scope in the chain has one.
+    - [`@case a-new-scope-starts-open-and-empty`](#case-a-new-scope-starts-open-and-empty) — `scope.ts` `createScope`.
+    - [`@case a-scope-chain-runs-from-the-scope-to-the-root`](#case-a-scope-chain-runs-from-the-scope-to-the-root) — `scope.ts` `chainFor`.
+    - [`@case a-read-takes-the-nearest-slot-in-the-chain`](#case-a-read-takes-the-nearest-slot-in-the-chain) — `scope.ts` `readSlot`.
+    - [`@case entering-a-scope-restores-the-previous-one-even-on-a-throw`](#case-entering-a-scope-restores-the-previous-one-even-on-a-throw) — `scope.ts` `runInScope`.
   - [`@rule a-speculative-write-reaches-only-consumers-in-its-chain`](#rule-a-speculative-write-reaches-only-consumers-in-its-chain) — A write in a scope invalidates only the consumers whose scope has the writing scope in its chain, and only where no nearer scope has its own slot for the written node.
+    - [`@case chain-match-decides-whether-a-write-reaches-a-link`](#case-chain-match-decides-whether-a-write-reaches-a-link) — `scope.ts` `chainMatch`.
+    - [`@case a-link-is-indexed-on-its-source-and-held-by-its-scope`](#case-a-link-is-indexed-on-its-source-and-held-by-its-scope) — `scope.ts` `linkEdge`.
+    - [`@case a-write-fires-only-the-links-that-match`](#case-a-write-fires-only-the-links-that-match) — `scope.ts` `edgesToFire`.
   - [`@rule speculative-derivation-is-pulled-on-read`](#rule-speculative-derivation-is-pulled-on-read) — Under a speculation, a computed is recomputed when it is read, into a slot of that scope, and a write only marks the affected slots dirty.
+    - [`@case a-speculative-read-recomputes-into-a-slot-of-its-scope`](#case-a-speculative-read-recomputes-into-a-slot-of-its-scope) — `scope.ts` `readValue`.
+    - [`@case a-speculative-write-dirties-what-derives-from-it`](#case-a-speculative-write-dirties-what-derives-from-it) — `scope.ts` `invalidateDownstream`.
+    - [`@case a-slot-caches-undefined-like-any-value`](#case-a-slot-caches-undefined-like-any-value) — `scope.ts` `DIRTY`.
+    - [`@case a-recompute-replaces-its-links`](#case-a-recompute-replaces-its-links) — `scope.ts` `resetSlotDeps`.
   - [`@rule only-written-nodes-are-promoted-at-commit`](#rule-only-written-nodes-are-promoted-at-commit) — A commit promotes the nodes the speculation wrote, and drops everything else it holds.
+    - [`@case a-write-records-its-node-for-promotion`](#case-a-write-records-its-node-for-promotion) — `scope.ts` `writeSlot`.
+    - [`@case closing-a-scope-unlinks-it-from-its-sources`](#case-closing-a-scope-unlinks-it-from-its-sources) — `scope.ts` `closeScopeEdges`.
+    - [`@case a-node-only-read-is-not-promoted`](#case-a-node-only-read-is-not-promoted) — `scope.ts` `commit`.
   - [`@rule pulse-reaches-r3-only-through-its-exports`](#rule-pulse-reaches-r3-only-through-its-exports) — Pulse uses r3 through the functions r3 exports. Where pulse needs more, the fork gains an export instead of pulse reaching into r3's internals.
   - [`@rule a-throwing-run-keeps-dependencies-it-did-not-reread`](#rule-a-throwing-run-keeps-dependencies-it-did-not-reread) — A computed whose run throws partway stays subscribed to sources it read in an earlier run but not in the throwing one. A later change to such a source re-runs it.
 - [`@axiom teardown-unwinds`](#axiom-teardown-unwinds) — What runs when something closes runs in reverse order of registration, and a callback that throws stops neither the others nor the close.
   - [`@rule close-callbacks-unwind`](#rule-close-callbacks-unwind) — The `onSettled` callbacks of a speculation fire in reverse order of registration. One that throws is isolated: the others still fire, and the speculation still closes.
   - [`@rule owner-cleanups-unwind`](#rule-owner-cleanups-unwind) — When an owner is disposed, its `onCleanup` callbacks run in reverse order of registration. One that throws is swallowed: the others still run, and the dispose does not throw.
+  - [`@rule an-owner-disposes-its-children-before-its-own-cleanups`](#rule-an-owner-disposes-its-children-before-its-own-cleanups) — When an owner is disposed, the effects, computeds and sub-owners it owns are disposed first, the most recently created first, and the owner's own `onCleanup` callbacks run after them.
   - [`@rule generator-cleanups-unwind-after-its-finally-blocks`](#rule-generator-cleanups-unwind-after-its-finally-blocks) — A discarded generator's `onCleanup` callbacks run most recently registered first, after its `finally` blocks.
 - [`@axiom a-lifetime-belongs-to-an-owner`](#axiom-a-lifetime-belongs-to-an-owner) — Every reactive node lives as long as the owner it was created under. Disposing an owner ends everything beneath it. Plain data has no owner and no lifetime.
-  - [`@rule createroot-starts-a-new-owner-tree`](#rule-createroot-starts-a-new-owner-tree) — `createRoot` runs its body at once under a new root owner, and returns what the body returns.
+  - [`@rule createroot-starts-a-new-owner-tree`](#rule-createroot-starts-a-new-owner-tree) — `createRoot` runs its body at once under a new root owner, and returns what the body returns. The body receives the root's `dispose` function.
   - [`@rule a-root-is-never-owned-by-an-enclosing-root`](#rule-a-root-is-never-owned-by-an-enclosing-root) — A root created inside another root has no parent. Disposing the outer root leaves it alive, and only its own `dispose` ends it.
   - [`@rule disposing-an-owner-ends-what-it-owns`](#rule-disposing-an-owner-ends-what-it-owns) — Disposing an owner stops the effects and computeds created under it and runs its cleanups. Signals created under it keep working.
   - [`@rule dispose-runs-once`](#rule-dispose-runs-once) — Disposing an owner a second time does nothing: its cleanups do not run again, and nothing throws.
   - [`@rule a-disposed-owner-cannot-be-entered`](#rule-a-disposed-owner-cannot-be-entered) — `runWithOwner` with an owner that has been disposed throws.
-  - [`@rule oncleanup-without-an-owner-does-nothing`](#rule-oncleanup-without-an-owner-does-nothing) — `onCleanup` called outside every owner, and outside any running computation, registers nothing and does not throw.
+  - [`@rule oncleanup-without-an-owner-does-nothing`](#rule-oncleanup-without-an-owner-does-nothing) — `onCleanup` called outside every owner, and outside any running computation, registers nothing, does not throw, and returns the callback it was given.
+  - [`@rule a-bare-effect-or-computed-without-an-owner-does-not-warn`](#rule-a-bare-effect-or-computed-without-an-owner-does-not-warn) — An effect or a computed created outside every owner works, lives forever, and warns about nothing.
   - [`@rule a-dom-binding-without-an-owner-warns`](#rule-a-dom-binding-without-an-owner-warns) — A reactive DOM binding or an event listener created with no owner still works, but warns once that it will never be disposed. Inside an owner, nothing warns.
     - [`@case a-reactive-child-without-an-owner-warns`](#case-a-reactive-child-without-an-owner-warns) — `bindings.ts` `insertChild`.
     - [`@case a-prop-binding-or-listener-without-an-owner-warns`](#case-a-prop-binding-or-listener-without-an-owner-warns) — `bindings.ts` `bindProp`.
 - [`@axiom ambient-context-is-set-for-a-call-and-restored-after`](#axiom-ambient-context-is-set-for-a-call-and-restored-after) — Ambient context, such as the current owner, is set for the duration of one call and restored when that call ends, however it ends.
-  - [`@rule there-is-no-ambient-owner-outside-every-root`](#rule-there-is-no-ambient-owner-outside-every-root) — Outside every root, `getOwner()` returns null.
+  - [`@rule there-is-no-ambient-owner-outside-every-root`](#rule-there-is-no-ambient-owner-outside-every-root) — Outside every root, `getOwner()` returns null, also after a root has run and after it has been disposed.
   - [`@rule runwithowner-restores-the-previous-owner`](#rule-runwithowner-restores-the-previous-owner) — `runWithOwner` makes its owner ambient for the call, `null` included, and restores the previous owner when the call returns or throws.
 - [`@axiom error-boundaries-are-sub-owners`](#axiom-error-boundaries-are-sub-owners) — An error boundary is an owner in the owner tree. An error goes to the nearest boundary above the owner it happened under that accepts it.
   - [`@rule catch-error-runs-its-body-in-a-sub-owner`](#rule-catch-error-runs-its-body-in-a-sub-owner) — `catchError(fn, handler)` runs `fn` inside a new sub-owner of the current owner and returns what `fn` returns, or `undefined` when `fn` throws and the handler takes the error.
@@ -387,15 +406,53 @@ r3 stays a plain dependency, never a fork to maintain. The price is a parallel p
 
 > r3 holds one committed value per node. A read or write with no speculation open goes straight through r3.
 
-A signal node is backed by an r3 signal, and a computed node by an r3 computed that carries the recipe.
+#### @case a-signal-node-is-backed-by-an-r3-signal
+
+> `scope.ts` `signalNode`.
+
+A signal node holds its committed value in an r3 signal, and starts with no speculative subscribers.
+
+#### @case a-computed-node-carries-its-recipe-on-an-r3-computed
+
+> `scope.ts` `computedNode`.
+
+A computed node keeps its recipe, so a speculation can run it again into a slot, and is backed by an r3 computed that runs the same recipe for the committed value.
+
+#### @case a-committed-read-and-write-go-through-r3
+
+> `scope.ts` `writeValue`.
+
+With the root as the ambient scope, a write sets the r3 signal and a read returns the r3 value.
 
 ### @rule a-scope-reads-through-its-chain
 
 > A read in a scope takes the nearest slot up its chain of scopes, and falls through to committed state when no scope in the chain has one.
 
-A scope's chain runs from itself to the root. A slot in a more specific scope shadows the same node's slot further up. The ambient scope is the root until a scope is entered, and entering one restores the previous scope on the way out, even on a throw.
-
 Entering a scope and restoring the previous one on the way out is the same pattern [ambient context](#axiom-ambient-context-is-set-for-a-call-and-restored-after) describes for owners.
+
+#### @case a-new-scope-starts-open-and-empty
+
+> `scope.ts` `createScope`.
+
+A new scope is open, holds no slots, links, writes or reads, and is registered as a child of its parent.
+
+#### @case a-scope-chain-runs-from-the-scope-to-the-root
+
+> `scope.ts` `chainFor`.
+
+The chain lists the scope itself first, then each parent in turn, and ends at the root.
+
+#### @case a-read-takes-the-nearest-slot-in-the-chain
+
+> `scope.ts` `readSlot`.
+
+The first scope in the chain with a slot for the node answers, so a slot in a more specific scope shadows the same node's slot further up. With no slot anywhere in the chain, the read finds nothing and falls through.
+
+#### @case entering-a-scope-restores-the-previous-one-even-on-a-throw
+
+> `scope.ts` `runInScope`.
+
+The ambient scope is the root until a scope is entered. Entering a scope sets it, and the scope that was ambient before is restored when the call returns or throws.
 
 ### @rule a-speculative-write-reaches-only-consumers-in-its-chain
 
@@ -403,17 +460,77 @@ Entering a scope and restoring the previous one on the way out is the same patte
 
 This predicate is the whole of what the overlay adds to r3's way of propagating a change.
 
+#### @case chain-match-decides-whether-a-write-reaches-a-link
+
+> `scope.ts` `chainMatch`.
+
+A link fires for a write when the writing scope is in the chain of the link's scope, and no scope nearer than the writing one has its own slot for the node.
+
+#### @case a-link-is-indexed-on-its-source-and-held-by-its-scope
+
+> `scope.ts` `linkEdge`.
+
+A new link is added to its source's subscribers, to the links its scope holds, and to the dependencies of the slot it feeds.
+
+#### @case a-write-fires-only-the-links-that-match
+
+> `scope.ts` `edgesToFire`.
+
+Of a node's links, a write fires exactly those that the chain match accepts, and none whose scope lies outside the writing scope's reach.
+
 ### @rule speculative-derivation-is-pulled-on-read
 
 > Under a speculation, a computed is recomputed when it is read, into a slot of that scope, and a write only marks the affected slots dirty.
 
-A slot caches whatever its recipe returned, `undefined` included, until a write dirties it. Recomputing replaces the slot's dependency links rather than adding to them. Speculative consumers are recomputed on read, so r3's scheduler is not involved until commit.
+Speculative consumers are recomputed on read, so r3's scheduler is not involved until commit.
+
+#### @case a-speculative-read-recomputes-into-a-slot-of-its-scope
+
+> `scope.ts` `readValue`.
+
+Reading a computed under a speculation runs its recipe into a slot of that scope, and links each source the recipe read to that slot.
+
+#### @case a-speculative-write-dirties-what-derives-from-it
+
+> `scope.ts` `invalidateDownstream`.
+
+A write marks every speculative slot that derives from the written node dirty, directly or through other slots, so its next read recomputes.
+
+#### @case a-slot-caches-undefined-like-any-value
+
+> `scope.ts` `DIRTY`.
+
+A dirty slot is marked with its own symbol, not with `undefined`, so a recipe that returns `undefined` is cached and not run again on every read, and still recomputes once a write dirties it.
+
+#### @case a-recompute-replaces-its-links
+
+> `scope.ts` `resetSlotDeps`.
+
+Before a slot is recomputed, its existing links are removed from their sources, so links do not pile up across recomputes.
 
 ### @rule only-written-nodes-are-promoted-at-commit
 
 > A commit promotes the nodes the speculation wrote, and drops everything else it holds.
 
-A computed the speculation only read is not promoted, so its committed value stays derived from committed state. Closing a scope, either way, removes its slots and its links from the sources they listened to.
+A computed the speculation only read keeps a committed value derived from committed state.
+
+#### @case a-write-records-its-node-for-promotion
+
+> `scope.ts` `writeSlot`.
+
+Writing a slot records the node in the scope's write set, which is what a commit promotes.
+
+#### @case closing-a-scope-unlinks-it-from-its-sources
+
+> `scope.ts` `closeScopeEdges`.
+
+Closing a scope, on a commit or a discard, removes its links from the sources they listened to, drops its slots, clears its write and read sets, and detaches it from its parent.
+
+#### @case a-node-only-read-is-not-promoted
+
+> `scope.ts` `commit`.
+
+A computed that the speculation only read is not in its write set, so the commit leaves the computed alone, and it recomputes from the promoted values.
 
 ### @rule pulse-reaches-r3-only-through-its-exports
 
@@ -441,7 +558,9 @@ No design document states this. It is stated from the code: owner disposal in `s
 
 > When an owner is disposed, its `onCleanup` callbacks run in reverse order of registration. One that throws is swallowed: the others still run, and the dispose does not throw.
 
-Owned children are disposed before the owner's own cleanups, also last-created first.
+### @rule an-owner-disposes-its-children-before-its-own-cleanups
+
+> When an owner is disposed, the effects, computeds and sub-owners it owns are disposed first, the most recently created first, and the owner's own `onCleanup` callbacks run after them.
 
 ### @rule generator-cleanups-unwind-after-its-finally-blocks
 
@@ -457,9 +576,9 @@ Owners form a tree of lifetimes, and disposal cascades down it. Signals are data
 
 ### @rule createroot-starts-a-new-owner-tree
 
-> `createRoot` runs its body at once under a new root owner, and returns what the body returns.
+> `createRoot` runs its body at once under a new root owner, and returns what the body returns. The body receives the root's `dispose` function.
 
-Inside the body, `getOwner()` is that root. The body receives the root's `dispose` function.
+Inside the body, `getOwner()` is that root.
 
 ### @rule a-root-is-never-owned-by-an-enclosing-root
 
@@ -485,27 +604,31 @@ Code run under a disposed owner would register nodes and cleanups that nothing w
 
 ### @rule oncleanup-without-an-owner-does-nothing
 
-> `onCleanup` called outside every owner, and outside any running computation, registers nothing and does not throw.
+> `onCleanup` called outside every owner, and outside any running computation, registers nothing, does not throw, and returns the callback it was given.
 
-The callback is returned unchanged. It will never run.
+The callback will never run.
+
+### @rule a-bare-effect-or-computed-without-an-owner-does-not-warn
+
+> An effect or a computed created outside every owner works, lives forever, and warns about nothing.
+
+Only DOM bindings and event listeners warn about a missing owner (see [the DOM warning](#rule-a-dom-binding-without-an-owner-warns)).
 
 ### @rule a-dom-binding-without-an-owner-warns
 
 > A reactive DOM binding or an event listener created with no owner still works, but warns once that it will never be disposed. Inside an owner, nothing warns.
 
-The warning names the kind of binding. Effects and computeds created outside every owner do not warn.
-
 #### @case a-reactive-child-without-an-owner-warns
 
 > `bindings.ts` `insertChild`.
 
-A function child warns as a "reactive child". The owner checked is the one a Fragment tagged the child with, when there is one, and otherwise the ambient owner.
+A function child with no owner warns as a "reactive child". The owner checked is the one a `Fragment` tagged the child with, when there is one, and otherwise the ambient owner, so a child built inside an owner by a `Fragment` does not warn wherever its array is inserted.
 
 #### @case a-prop-binding-or-listener-without-an-owner-warns
 
 > `bindings.ts` `bindProp`.
 
-Every property kind except `ref` warns: `on:` as an event listener, `attr:` and a bare name as an attribute binding, `prop:`, `class:` and `style:` under their own names. An attribute with a static value warns too, because every one of these kinds is wrapped in an effect whatever its value turns out to be.
+Every property kind except `ref` warns: `on:` as an event listener, `attr:` and a bare name as an attribute binding, `prop:`, `class:` and `style:` under their own names. An attribute with a static value warns too, because every one of these kinds is wrapped in an effect whatever its value turns out to be. A `ref` is called once and never wrapped, so it does not warn.
 
 ## @axiom ambient-context-is-set-for-a-call-and-restored-after
 
@@ -515,9 +638,7 @@ Pulse passes context the way a language without first-class continuations can: a
 
 ### @rule there-is-no-ambient-owner-outside-every-root
 
-> Outside every root, `getOwner()` returns null.
-
-Running a root, and disposing it, leave no owner behind.
+> Outside every root, `getOwner()` returns null, also after a root has run and after it has been disposed.
 
 ### @rule runwithowner-restores-the-previous-owner
 
