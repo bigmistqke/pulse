@@ -1,17 +1,22 @@
 import { untrack } from 'r3'
+import { NotReadyYet } from '../async'
 import {
   createErrorScope,
   createSubOwner,
   disposeOwner,
   findBoundaryScope,
+  findNearestErrorScope,
   getOwner,
+  registerWithOwner,
+  routeError,
   runWithOwner,
+  type BindingController,
   type ErrorReport,
   type Owner,
 } from '../owner'
-import type { Accessor } from '../signal'
+import { signal, type Accessor } from '../signal'
 import type { Child } from './h'
-import { readDynamic } from './resolve'
+import { tagChildOwner } from './bindings'
 
 export interface ErroredProps<E = unknown> {
   /** JSX construction must be deferred until inside the boundary owner, so
@@ -168,11 +173,61 @@ export function Errored<E = unknown>(props: ErroredProps<E>): Accessor<unknown> 
 
   // Construct the guarded subtree once, inside boundaryOwner — same
   // components-run-once contract as `<Loading>`.
-  const subtree: unknown = runWithOwner(boundaryOwner, () => readDynamic(props, 'children'))
+  //
+  // A function the author passed as the children is a thunk for them: it runs
+  // once here, untracked, like a component body. It runs guarded, though: a
+  // throw from it is a failure of this boundary's content, so it is reported
+  // the way a binding reports one, with a retry that builds the children
+  // again, instead of leaving the boundary before the boundary exists.
+  //
+  // A function that arrives through a children getter is the resolved value,
+  // such as an accessor held in a variable, and is not called here. It is
+  // tagged with boundaryOwner, so the hole the caller inserts runs inside this
+  // boundary, and its errors reach it.
+  // Every write goes through an update function, because a pulse setter
+  // given a function calls it, and the children may well be a function.
+  const [built, setBuilt] = signal<unknown>(undefined)
+  let buildOwner: Owner | null = null
+  let failure: BindingController | null = null
+  const build = (): void => {
+    if (buildOwner !== null) disposeOwner(buildOwner)
+    buildOwner = createSubOwner(boundaryOwner)
+    const owner = buildOwner
+    const descriptor = Object.getOwnPropertyDescriptor(props, 'children')
+    if (descriptor?.get) {
+      const value = runWithOwner(owner, () => descriptor.get!.call(props))
+      if (typeof value === 'function') tagChildOwner(value as () => unknown, owner)
+      setBuilt(() => value)
+      return
+    }
+    if (typeof descriptor?.value !== 'function') {
+      setBuilt(() => descriptor?.value)
+      return
+    }
+    const thunk = descriptor.value as () => unknown
+    try {
+      const value = runWithOwner(owner, () => untrack(thunk))
+      setBuilt(() => value)
+      failure?.report({ status: 'idle' })
+    } catch (error) {
+      // A suspension is not a failure: it goes on to <Loading> unchanged.
+      if (error instanceof NotReadyYet) throw error
+      setBuilt(() => undefined)
+      const found = findNearestErrorScope(owner, error)
+      if (found === null) {
+        routeError(owner, error)
+        return
+      }
+      failure ??= found.scope.register()
+      failure.report({ status: 'error', error, source: null, retry: build })
+    }
+  }
+  build()
+  registerWithOwner({ dispose: () => failure?.unregister() })
 
   return () => {
-    if (props.fallback === undefined) return subtree
-    if (!scope.active()) return subtree
+    if (props.fallback === undefined) return built()
+    if (!scope.active()) return built()
     // Safe: fallback only runs while scope.active() is true, meaning
     // something registered an 'error' report that already checked this
     // exact scope.for against that report's own error before ever calling

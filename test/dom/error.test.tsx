@@ -1988,3 +1988,64 @@ test('resetting an ambiently-reported error retries the failed source', async ()
   expect(target.querySelector('[data-testid="content"]')?.textContent).toBe('recovered')
   expect(attempt).toBe(2)
 })
+
+/**
+ * A function child is a binding, so an error it throws on its first build is a
+ * binding's error, and goes to the boundary it sits in.
+ *
+ * @canon spec-error-boundaries-are-sub-owners
+ */
+test('a function child of <Errored> that throws on its first build shows the fallback instead of escaping', () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+  let thrown: unknown = null
+  try {
+    render(
+      () => (
+        <Errored fallback={(error) => <p>caught: {(error as Error).message}</p>}>
+          {() => {
+            throw new Error('first build')
+          }}
+        </Errored>
+      ),
+      target,
+    )
+  } catch (e) {
+    thrown = e
+  }
+  flush()
+  expect(thrown).toBeNull()
+  expect(target.textContent).toBe('caught: first build')
+})
+
+/**
+ * A function handed to <Errored> through a variable reaches it through the
+ * children getter unchanged. It is still a binding of that boundary, wherever
+ * the boundary's result is inserted.
+ *
+ * @canon spec-error-boundaries-are-sub-owners
+ */
+test('a function child of <Errored> held in a variable is a binding of that boundary, and its error reaches it', () => {
+  const target = document.createElement('section')
+  document.body.append(target)
+  const [fail, setFail] = signal(false)
+  const content = () => {
+    if (fail()) throw new Error('later')
+    return <p>ok</p>
+  }
+  const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+  render(
+    () => (
+      <Errored fallback={(error) => <p>caught: {(error as Error).message}</p>}>{content}</Errored>
+    ),
+    target,
+  )
+  flush()
+  expect(target.textContent).toBe('ok')
+  setFail(true)
+  flush()
+  expect(target.textContent).toBe('caught: later')
+  // Claimed by the boundary, not logged as unclaimed by the root.
+  expect(errors).not.toHaveBeenCalled()
+  errors.mockRestore()
+})
