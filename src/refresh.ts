@@ -136,7 +136,7 @@ function refreshInSpeculation(target: Refreshable, scope: Scope): Promise<unknow
   tail.publishValue(result)
   whenCommitted(scope, () => {
     for (let i = built.length - 1; i >= 0; i--) built[i].abandonRun()
-    tail.applyWriteEffects(result)
+    tail.applyWriteEffects(result, true)
   })
   return result
 }

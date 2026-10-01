@@ -115,7 +115,7 @@ export type StageHandle = {
   accessor: Signal<unknown>
   r3Node: R3Computed<unknown>
   publishValue: (value: unknown) => void
-  applyWriteEffects: (value: unknown) => void
+  applyWriteEffects: (value: unknown, asRefresh?: boolean) => void
   readPrev: () => unknown
   withdrawQueuedRun: (isTail: boolean) => void
   markNeedsRecomputation: () => void
@@ -909,8 +909,12 @@ function makeStageNode(
   }
 
   /** Everything a write implies that is not scope-aware. Runs immediately for a
-   *  committed write, and at commit for one made inside an action. */
-  const applyWriteEffects = (value: unknown): void => {
+   *  committed write, and at commit for one made inside an action.
+   *
+   *  `asRefresh` says the promise is the answer of a refresh an action made.
+   *  While it is in flight the stage reports refreshing, not pending, because
+   *  the answer it asks again still stands. */
+  const applyWriteEffects = (value: unknown, asRefresh = false): void => {
     if (!isPromise(value)) {
       lastResolvedValue = value
       lastPublishedShapeIsPromise = writeWrapsInPromise()
@@ -927,7 +931,6 @@ function makeStageNode(
     // supersedes it through the check below and a dependency change cancels a
     // write for free.
     suspendedOn = written
-    setPendingSig(true)
 
     const settle = (): void => {
       if (suspendedOn !== written) return // superseded
@@ -935,6 +938,7 @@ function makeStageNode(
       // The pending flag clears regardless of whether anything is published, or
       // a write that settles to the value already held would leave it stuck on.
       setPendingSig(false)
+      endRefresh()
       const state = track(written)
       if (state.status === 'rejected') {
         setErrorSig(state.reason)
@@ -948,6 +952,20 @@ function makeStageNode(
         setErrorSig(null)
         publishResolvedPromise(state.value)
       }
+    }
+
+    // A promise that has already settled, such as a refresh an action waited
+    // for before it committed, is applied now. Waiting a microtask for it
+    // would report a value that is already here as not yet here.
+    if (track(written).status !== 'pending') {
+      settle()
+      return
+    }
+    if (asRefresh) {
+      refreshPhase = 'running'
+      setRefreshingSig(true)
+    } else {
+      setPendingSig(true)
     }
     written.then(settle, settle)
   }

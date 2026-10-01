@@ -7,6 +7,9 @@ import { afterEach, expect, test, vi } from 'vitest'
 import {
   action,
   computed,
+  effect,
+  flush,
+  onSettled,
   optimistic,
   from,
   isPending,
@@ -257,6 +260,35 @@ test('isRefreshing is true while a refresh is in flight, and isPending stays fal
 })
 
 /**
+ * @canon spec-is-refreshing-reports-a-refresh-in-flight
+ */
+test('an effect that reads isRefreshing runs again when a refresh starts and when it lands', async () => {
+  const { source, settle } = controlledSource()
+  peek(source)
+  settle(1, 'first')
+  await ticks(2)
+
+  const seen: Array<{ refreshing: boolean; pending: boolean }> = []
+  effect(() => {
+    seen.push({ refreshing: isRefreshing(source), pending: isPending(source) })
+  })
+  flush()
+
+  refresh(source)
+  await ticks(2)
+  flush()
+  settle(2, 'second')
+  await ticks(2)
+  flush()
+
+  expect(seen).toEqual([
+    { refreshing: false, pending: false },
+    { refreshing: true, pending: false },
+    { refreshing: false, pending: false },
+  ])
+})
+
+/**
  * A source whose every run waits on a promise the test settles by hand, and
  * whose recipe reads the signal `n`, so a write to `n` starts a revision.
  */
@@ -383,6 +415,45 @@ test('a refresh inside an action is seen inside it, reaches committed state at c
   settle(3, 'discarded')
   await discarding.settled
   expect(peek(source)).toBe('refreshed')
+})
+
+/**
+ * @canon spec-a-refresh-inside-an-action-is-part-of-its-speculation
+ * @canon spec-is-refreshing-reports-a-refresh-in-flight
+ */
+test('a refresh an action commits is not pending, whether it has landed by then or is still in flight', async () => {
+  const { source, settle } = controlledSource()
+  peek(source)
+  settle(1, 'committed')
+  await ticks(2)
+
+  // Landed before the commit: committed state takes the answer at once.
+  let atCommit: unknown = null
+  const landed = action(function* () {
+    yield* from(refresh(source))
+    onSettled(() => {
+      atCommit = { pending: isPending(source), refreshing: isRefreshing(source), value: peek(source) }
+    })
+  })
+  await ticks(1)
+  settle(2, 'landed')
+  await landed.settled
+  expect(atCommit).toEqual({ pending: false, refreshing: false, value: 'landed' })
+
+  // Still in flight at the commit: committed state carries it as a refresh.
+  const inFlight = action(function* () {
+    refresh(source)
+  })
+  await inFlight.settled
+  const whileInFlight = { pending: isPending(source), refreshing: isRefreshing(source), value: peek(source) }
+  settle(3, 'carried')
+  await ticks(2)
+  expect(whileInFlight).toEqual({ pending: false, refreshing: true, value: 'landed' })
+  expect({ pending: isPending(source), refreshing: isRefreshing(source), value: peek(source) }).toEqual({
+    pending: false,
+    refreshing: false,
+    value: 'carried',
+  })
 })
 
 /**
