@@ -225,6 +225,7 @@ test('a live prediction stops the node reporting pending, so a use() read shows 
 
 /**
  * @canon rule-an-optimistic-value-is-read-like-any-node
+ * @canon rule-resetting-an-optimistic-error-retries-its-source
  */
 test('a failed source reports through the optimistic node, and a retry resets that source', async () => {
   let failing = true
@@ -294,7 +295,7 @@ test('a recipe that produces its own value needs no separate source', async () =
 })
 
 /**
- * @canon rule-an-optimistic-value-is-read-like-any-node
+ * @canon rule-an-optimistic-fallback-seeds-the-tolerant-read
  */
 test('a construction-time fallback seeds the tolerant read', () => {
   const [view] = optimistic(() => new Promise<string[]>(() => {}), [] as string[])

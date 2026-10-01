@@ -90,9 +90,11 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule a-predicate-narrows-what-a-reader-sees-not-which-boundary-it-reads`](#rule-a-predicate-narrows-what-a-reader-sees-not-which-boundary-it-reads) — A predicate given to `useErrored`, `isErrored` or `<Errored.Error for>` narrows the reports a reader sees and retries to those that match. It does not change which boundary is read.
   - [`@rule errored-error-builds-its-content-once-per-failure`](#rule-errored-error-builds-its-content-once-per-failure) — `<Errored.Error>` builds its content when the boundary becomes failed, keeps it while the boundary stays failed, and disposes it when the boundary recovers.
 - [`@axiom reads-pull-and-consumers-are-pushed`](#axiom-reads-pull-and-consumers-are-pushed) — A read always returns the value consistent with every write so far, synchronously. Consumers with side effects are re-run in batches, and the batching is invisible to reads.
-  - [`@rule a-read-is-current-without-a-flush`](#rule-a-read-is-current-without-a-flush) — Reading a signal or a computed returns the value consistent with the latest writes, whether or not the scheduler has flushed since.
+  - [`@rule a-read-is-current-without-a-flush`](#rule-a-read-is-current-without-a-flush) — Reading a signal or a computed returns the value consistent with the latest writes, whether or not the scheduler has flushed since. A computed read outside any reactive context recomputes on the spot when a source changed.
   - [`@rule a-signal-reads-back-its-last-write`](#rule-a-signal-reads-back-its-last-write) — A signal returns its initial value until it is written, and afterwards the last value written. An update function receives the current value.
   - [`@rule one-scheduler-flushes-every-consumer`](#rule-one-scheduler-flushes-every-consumer) — Every write asks one injectable scheduler for a flush. The default scheduler batches every request made in one tick into a single flush on a microtask; the synchronous scheduler flushes on each request.
+  - [`@rule several-writes-in-one-tick-re-run-an-effect-once`](#rule-several-writes-in-one-tick-re-run-an-effect-once) — Under the default scheduler, an effect does not re-run between a write and the end of the tick. Several writes in one tick re-run it once, with the last value.
+  - [`@rule a-promise-settling-requests-a-flush-from-the-active-scheduler`](#rule-a-promise-settling-requests-a-flush-from-the-active-scheduler) — When a promise a node is waiting on settles, pulse asks the active scheduler for a flush, the same way a write does. The readers re-run in that flush.
   - [`@rule an-equal-value-does-not-notify-consumers`](#rule-an-equal-value-does-not-notify-consumers) — A computed that settles to a value `Object.is`-equal to the one it already published does not re-run its consumers.
   - [`@rule a-committed-write-of-an-equal-value-is-a-no-op`](#rule-a-committed-write-of-an-equal-value-is-a-no-op) — A committed write to a signal that equals its current value re-runs nothing. Equality is SameValueZero: `NaN` equals `NaN`, and `0` equals `-0`.
   - [`@rule an-error-write-schedules-its-own-flush`](#rule-an-error-write-schedules-its-own-flush) — A write to error state — a boundary's report collection, or an action's error — requests a flush itself, so its readers update without any other write happening.
@@ -102,14 +104,20 @@ The canon was written backwards from the existing tests and documents, and descr
 - [`@axiom compose-rather-than-proliferate`](#axiom-compose-rather-than-proliferate) — A small set of primitives covers the use cases. A new form is added only where composing the existing ones is awkward for a common case.
   - [`@rule a-computed-is-a-pipeline-of-stages`](#rule-a-computed-is-a-pipeline-of-stages) — `computed(s0, s1, …)` threads each stage's resolved value into the next. Any stage may read signals, and a stage re-runs only when its input or one of its own reads changes.
   - [`@rule a-computed-has-no-setter`](#rule-a-computed-has-no-setter) — `computed` returns an accessor and nothing to write with. A derivation that can also be written is made with `signal`.
-  - [`@rule a-signal-given-stages-is-a-writable-derivation`](#rule-a-signal-given-stages-is-a-writable-derivation) — `signal(s0, s1, …)` builds the same pipeline `computed` builds and adds a setter. `signal(value)` given a value that is not a function stays a plain signal.
+  - [`@rule a-signal-given-stages-is-a-writable-derivation`](#rule-a-signal-given-stages-is-a-writable-derivation) — `signal(s0, s1, …)` builds the same pipeline `computed` builds and adds a setter, whose write lands on the output of the last stage. `signal(value)` given a value that is not a function stays a plain signal.
   - [`@rule an-optimistic-value-is-read-like-any-node`](#rule-an-optimistic-value-is-read-like-any-node) — The accessor of an optimistic value is an ordinary node. Every read verb applies to it, and the pending and failed state of what its recipe reads reaches the read site through it.
+  - [`@rule an-optimistic-fallback-seeds-the-tolerant-read`](#rule-an-optimistic-fallback-seeds-the-tolerant-read) — A fallback passed when an optimistic value is created is what `peek` and `latest` return before the source has resolved.
+  - [`@rule resetting-an-optimistic-error-retries-its-source`](#rule-resetting-an-optimistic-error-retries-its-source) — Resetting the error of an optimistic value, as an error boundary's retry does, recomputes the failed source it wraps.
   - [`@rule a-staged-effect-is-a-pipeline-ending-in-a-commit`](#rule-a-staged-effect-is-a-pipeline-ending-in-a-commit) — `effect([stage0, …, stageN], commit)` runs the same pipeline a computed runs, and passes the final stage's resolved value to `commit`. It commits again whenever the pipeline produces a new value, and skips a value `Object.is`-equal to the one it last committed.
 - [`@axiom the-latest-production-wins`](#axiom-the-latest-production-wins) — A derived value shows whatever produced it last — a dependency change or a direct write — and a production that was started earlier never publishes over a later one.
   - [`@rule a-write-replaces-a-derived-value-without-rerunning-it`](#rule-a-write-replaces-a-derived-value-without-rerunning-it) — A write to a writable derivation replaces its value at once, and the body does not run again because of it.
   - [`@rule a-write-abandons-the-run-in-progress`](#rule-a-write-abandons-the-run-in-progress) — A write abandons every stage's run in progress — a fetch in flight, a paused generator, or a recompute queued in the same tick — and the abandoned run never publishes.
+  - [`@rule abandoning-a-paused-stage-runs-its-cleanups-after-the-write`](#rule-abandoning-a-paused-stage-runs-its-cleanups-after-the-write) — When a write abandons a paused generator stage, the cleanups that stage registered run, and they already see the written value.
+  - [`@rule a-write-from-inside-the-derivation-abandons-its-own-run-without-raising`](#rule-a-write-from-inside-the-derivation-abandons-its-own-run-without-raising) — A write made from inside the derivation's own body abandons that run without raising, and the cleanups the run registered still run.
   - [`@rule a-dependency-change-after-a-write-takes-over`](#rule-a-dependency-change-after-a-write-takes-over) — When a source the derivation reads changes after a write, the derivation runs again and its result replaces the written value.
-  - [`@rule an-older-production-never-publishes-over-a-newer-one`](#rule-an-older-production-never-publishes-over-a-newer-one) — A promise that settles after its stage has started a newer run is ignored.
+  - [`@rule the-written-value-stays-visible-while-the-derivation-reloads`](#rule-the-written-value-stays-visible-while-the-derivation-reloads) — While the run started by a dependency change is in flight, the derivation keeps showing the written value, and reports the reload as pending.
+  - [`@rule an-abandoned-stage-restarts-when-the-pipeline-is-next-pulled`](#rule-an-abandoned-stage-restarts-when-the-pipeline-is-next-pulled) — A stage whose run a write abandoned is left needing recomputation, not clean. When anything next pulls the pipeline up to date, that stage runs again and makes a fresh request.
+  - [`@rule an-older-production-never-publishes-over-a-newer-one`](#rule-an-older-production-never-publishes-over-a-newer-one) — A promise that settles after its stage has started a newer run is ignored, even when it settles before the flush that runs the newer input.
   - [`@rule a-write-clears-a-parked-failure`](#rule-a-write-clears-a-parked-failure) — A write to a derivation holding a parked failure clears the failure, whichever stage of the pipeline it was parked on.
   - [`@rule an-update-function-that-throws-cancels-nothing`](#rule-an-update-function-that-throws-cancels-nothing) — If an update function throws, the write does not happen, and a recompute that was queued before it still runs.
 - [`@axiom async-is-acknowledged-not-hidden`](#axiom-async-is-acknowledged-not-hidden) — A value that has a future says so. An async node reads as a promise, and unwrapping it is an explicit act at the read site.
@@ -681,9 +689,7 @@ Invalidation spreads through the graph when a value is written, and a computed r
 
 ### @rule a-read-is-current-without-a-flush
 
-> Reading a signal or a computed returns the value consistent with the latest writes, whether or not the scheduler has flushed since.
-
-A computed read at the top level, outside any reactive context, recomputes on the spot if a source changed.
+> Reading a signal or a computed returns the value consistent with the latest writes, whether or not the scheduler has flushed since. A computed read outside any reactive context recomputes on the spot when a source changed.
 
 ### @rule a-signal-reads-back-its-last-write
 
@@ -693,7 +699,15 @@ A computed read at the top level, outside any reactive context, recomputes on th
 
 > Every write asks one injectable scheduler for a flush. The default scheduler batches every request made in one tick into a single flush on a microtask; the synchronous scheduler flushes on each request.
 
-An effect therefore does not re-run between a write and the end of the tick, and re-runs once for several writes in the same tick. Promise settlements re-enter through the same scheduler.
+### @rule several-writes-in-one-tick-re-run-an-effect-once
+
+> Under the default scheduler, an effect does not re-run between a write and the end of the tick. Several writes in one tick re-run it once, with the last value.
+
+### @rule a-promise-settling-requests-a-flush-from-the-active-scheduler
+
+> When a promise a node is waiting on settles, pulse asks the active scheduler for a flush, the same way a write does. The readers re-run in that flush.
+
+A settlement is not a write, but it reaches consumers through the same single path, so an injected scheduler governs it too.
 
 ### @rule an-equal-value-does-not-notify-consumers
 
@@ -731,7 +745,7 @@ The principle is [P5 in the exploration record](docs/pulse/framings.md#p5--compo
 
 > `computed(s0, s1, …)` threads each stage's resolved value into the next. Any stage may read signals, and a stage re-runs only when its input or one of its own reads changes.
 
-A stage downstream of a stage whose value did not change is not re-run. Reading the computed again without a change re-runs nothing.
+So a stage downstream of a stage whose value did not change is not re-run, and reading the computed again without a change re-runs nothing.
 
 ### @rule a-computed-has-no-setter
 
@@ -739,21 +753,29 @@ A stage downstream of a stage whose value did not change is not re-run. Reading 
 
 ### @rule a-signal-given-stages-is-a-writable-derivation
 
-> `signal(s0, s1, …)` builds the same pipeline `computed` builds and adds a setter. `signal(value)` given a value that is not a function stays a plain signal.
-
-A write into a pipeline of several stages lands on the output of the last stage.
+> `signal(s0, s1, …)` builds the same pipeline `computed` builds and adds a setter, whose write lands on the output of the last stage. `signal(value)` given a value that is not a function stays a plain signal.
 
 ### @rule an-optimistic-value-is-read-like-any-node
 
 > The accessor of an optimistic value is an ordinary node. Every read verb applies to it, and the pending and failed state of what its recipe reads reaches the read site through it.
 
-`use` on it suspends until the source resolves. A construction-time fallback seeds `peek` and `latest`. A failed source is reported by `error()` on the optimistic node, while `peek` still does not throw, and resetting the optimistic node's error retries the source. The decision is [ADR 0016](docs/adr/0016-optimistic-as-a-signal-variant.md).
+So `use` on it suspends until the source resolves, and a failed source is reported by `error()` on the optimistic node while `peek` still does not throw. The decision is [ADR 0016](docs/adr/0016-optimistic-as-a-signal-variant.md).
+
+### @rule an-optimistic-fallback-seeds-the-tolerant-read
+
+> A fallback passed when an optimistic value is created is what `peek` and `latest` return before the source has resolved.
+
+### @rule resetting-an-optimistic-error-retries-its-source
+
+> Resetting the error of an optimistic value, as an error boundary's retry does, recomputes the failed source it wraps.
+
+The failure is parked on the source, not on the optimistic node, so a reset that only cleared the optimistic node would fail again the same way.
 
 ### @rule a-staged-effect-is-a-pipeline-ending-in-a-commit
 
 > `effect([stage0, …, stageN], commit)` runs the same pipeline a computed runs, and passes the final stage's resolved value to `commit`. It commits again whenever the pipeline produces a new value, and skips a value `Object.is`-equal to the one it last committed.
 
-Stages may be sync or async. An async stage delays the commit until it resolves. A value equal to the last committed one, by `Object.is`, is not committed again.
+Stages may be sync or async; an async stage's resolved value is what reaches `commit`.
 
 ## @axiom the-latest-production-wins
 
@@ -765,25 +787,41 @@ A write to a derivation cancels the run in progress exactly as a dependency chan
 
 > A write to a writable derivation replaces its value at once, and the body does not run again because of it.
 
-The write does not change which sources the derivation follows. It re-runs when one of them next changes.
+The write leaves the derivation following the same sources; what happens when one of them changes is [the dependency rule](#rule-a-dependency-change-after-a-write-takes-over).
 
 ### @rule a-write-abandons-the-run-in-progress
 
 > A write abandons every stage's run in progress — a fetch in flight, a paused generator, or a recompute queued in the same tick — and the abandoned run never publishes.
 
-Abandoning a paused generator runs its cleanups, and those cleanups already see the written value. A recompute queued before the write in the same tick is withdrawn, so no request is made. A write made from inside the derivation's own body abandons its own run without raising, and the body's cleanups still run.
+A recompute that is withdrawn never starts, so it makes no request.
+
+### @rule abandoning-a-paused-stage-runs-its-cleanups-after-the-write
+
+> When a write abandons a paused generator stage, the cleanups that stage registered run, and they already see the written value.
+
+### @rule a-write-from-inside-the-derivation-abandons-its-own-run-without-raising
+
+> A write made from inside the derivation's own body abandons that run without raising, and the cleanups the run registered still run.
 
 ### @rule a-dependency-change-after-a-write-takes-over
 
 > When a source the derivation reads changes after a write, the derivation runs again and its result replaces the written value.
 
-The written value stays visible while the new run is in flight. A write followed by a change in the same tick lets the change win. A stage whose run was abandoned is left needing recomputation rather than clean, so it restarts when anything pulls the pipeline up to date. A dependency change also supersedes a written promise that has not settled.
+A write followed by a change in the same tick is the same ordering, so the change wins; a written promise that has not settled is replaced the same way.
+
+### @rule the-written-value-stays-visible-while-the-derivation-reloads
+
+> While the run started by a dependency change is in flight, the derivation keeps showing the written value, and reports the reload as pending.
+
+### @rule an-abandoned-stage-restarts-when-the-pipeline-is-next-pulled
+
+> A stage whose run a write abandoned is left needing recomputation, not clean. When anything next pulls the pipeline up to date, that stage runs again and makes a fresh request.
+
+A stage left clean would keep serving data for an input the pipeline has already moved past.
 
 ### @rule an-older-production-never-publishes-over-a-newer-one
 
-> A promise that settles after its stage has started a newer run is ignored.
-
-A settled result that was computed for an input the stage has since moved past is discarded, even when it settles before the flush that runs the newer input.
+> A promise that settles after its stage has started a newer run is ignored, even when it settles before the flush that runs the newer input.
 
 ### @rule a-write-clears-a-parked-failure
 

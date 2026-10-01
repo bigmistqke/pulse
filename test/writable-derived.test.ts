@@ -337,7 +337,7 @@ test('W1: a write abandons the fetch in flight and it never publishes', async ()
 })
 
 /**
- * @canon rule-a-write-abandons-the-run-in-progress
+ * @canon rule-abandoning-a-paused-stage-runs-its-cleanups-after-the-write
  */
 test('W13: abandoning a paused stage runs its cleanups', async () => {
   const aborted: string[] = []
@@ -354,7 +354,7 @@ test('W13: abandoning a paused stage runs its cleanups', async () => {
 })
 
 /**
- * @canon rule-a-write-abandons-the-run-in-progress
+ * @canon rule-abandoning-a-paused-stage-runs-its-cleanups-after-the-write
  */
 test('a cleanup fired by a write sees the value that was written', () => {
   const seen: unknown[] = []
@@ -461,7 +461,7 @@ test('W9: a write abandons a fetch that is in a middle stage', async () => {
 })
 
 /**
- * @canon rule-a-dependency-change-after-a-write-takes-over
+ * @canon rule-an-abandoned-stage-restarts-when-the-pipeline-is-next-pulled
  */
 test('W10: a stage whose request was abandoned refetches when the tail next needs it', async () => {
   let requests = 0
@@ -511,7 +511,8 @@ test('W10: a stage whose request was abandoned refetches when the tail next need
 })
 
 /**
- * @canon rule-a-dependency-change-after-a-write-takes-over
+ * @canon rule-an-abandoned-stage-restarts-when-the-pipeline-is-next-pulled
+ * @canon rule-the-written-value-stays-visible-while-the-derivation-reloads
  */
 test('W11: a later change to the abandoned stage own dependency restarts it', async () => {
   let requests = 0
@@ -945,7 +946,7 @@ test('writing a promise inside an action does not trigger a fresh recompute', as
 })
 
 /**
- * @canon rule-a-write-abandons-the-run-in-progress
+ * @canon rule-a-write-from-inside-the-derivation-abandons-its-own-run-without-raising
  */
 test('W22: a write from inside the derivation own body does not raise', async () => {
   // A write here cancels every stage's run, including this one's own — the
@@ -978,6 +979,7 @@ test('W22: a write from inside the derivation own body does not raise', async ()
 
 /**
  * @canon rule-a-dependency-change-after-a-write-takes-over
+ * @canon rule-the-written-value-stays-visible-while-the-derivation-reloads
  */
 test('W4: a dependency change after a write takes the derivation back over', async () => {
   const [version, setVersion] = signal(1)
@@ -997,7 +999,7 @@ test('W4: a dependency change after a write takes the derivation back over', asy
 })
 
 /**
- * @canon rule-a-dependency-change-after-a-write-takes-over
+ * @canon rule-an-abandoned-stage-restarts-when-the-pipeline-is-next-pulled
  */
 test('a read from inside an effect while an earlier stage is waiting to reload', async () => {
   // Rewritten from the brief's original, which asserted the write survives
