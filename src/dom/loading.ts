@@ -11,7 +11,7 @@ import {
 } from '../owner'
 import { signal, type Accessor } from '../signal'
 import type { Child } from './h'
-import { readDynamic } from './resolve'
+import { buildBoundaryChildren } from './boundary-children'
 
 const CONST_FALSE_ACCESSOR: Accessor<boolean> = () => false
 
@@ -230,8 +230,10 @@ export function Loading(props: LoadingProps): Accessor<unknown> {
   }
   boundaryOwner.boundaries.pending = scope
 
-  // Construct loaded subtree once, inside boundaryOwner.
-  const loadedSubtree: unknown = runWithOwner(boundaryOwner, () => readDynamic(props, 'children'))
+  // Construct the loaded subtree once, inside boundaryOwner, through the
+  // guarded build both boundaries share: a suspension while building it
+  // suspends this boundary, and a failure goes to the boundary above.
+  const loadedSubtree = buildBoundaryChildren(props, boundaryOwner)
 
   // Detect "ever loaded": flip true the first time pending drops to false.
   // Owned by boundaryOwner (symmetric with loadedSubtree) so the lifetime
@@ -244,19 +246,19 @@ export function Loading(props: LoadingProps): Accessor<unknown> {
   })
 
   return () => {
-    if (!gatePending() && !firstLoadPending()) return loadedSubtree
+    if (!gatePending() && !firstLoadPending()) return loadedSubtree()
     // Neither prop given at all (not merely falsy — an explicit fallback of
     // null/''/false still means "swap to this") → context-only: stay
     // mounted. The atomic-commit gate above is unaffected either way — it
     // lives in the individual bindings' own reporting to this scope, not in
     // this swap decision, so a still-pending binding inside loadedSubtree
     // continues to withhold its own commit exactly as it already does.
-    if (props.initial === undefined && props.fallback === undefined) return loadedSubtree
+    if (props.initial === undefined && props.fallback === undefined) return loadedSubtree()
     // initial/fallback are plain Child, not a duck-typed accessor union -
     // read directly and pass through untouched, function value or not;
     // insertChild is what decides whether the result needs its own
     // reactive effect, not this component.
     if (!hasEverLoaded) return props.initial ?? props.fallback
-    return props.fallback ?? loadedSubtree
+    return props.fallback ?? loadedSubtree()
   }
 }

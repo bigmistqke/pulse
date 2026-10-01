@@ -158,6 +158,8 @@ This document is the project. It holds the theory of pulse: why it is the way it
     - [`@spec a-function-child-returns-anything-a-static-child-may-be`](#spec-a-function-child-returns-anything-a-static-child-may-be) — A function child's result is inserted exactly as a child of the same kind would be in that position, whether it is a string, a number, a DOM node, an array, nothing, or a function, which becomes a reactive child of its own.
     - [`@spec a-function-childs-static-siblings-keep-their-place`](#spec-a-function-childs-static-siblings-keep-their-place) — When a function child re-runs, the static siblings on either side of it stay where they are, and its new content lands between them.
     - [`@spec a-boundary-builds-its-children-once-up-front`](#spec-a-boundary-builds-its-children-once-up-front) — A boundary builds its children once, when it is created, inside its own owner, whether it then displays them or a placeholder. Settling, and every later swap between the placeholder and the subtree, shows the subtree already built and runs no component again.
+      - [`@spec a-throw-while-a-boundary-builds-its-children-stays-in-its-region`](#spec-a-throw-while-a-boundary-builds-its-children-stays-in-its-region) — A failure thrown while a boundary builds its children goes to the nearest error boundary or error handler above them. A retry builds the children again. A suspension thrown then suspends the nearest loading boundary, which is the boundary itself when it is a `<Loading>`. The boundary builds its children again once the promise settles.
+      - [`@spec a-function-a-boundary-receives-runs-inside-it`](#spec-a-function-a-boundary-receives-runs-inside-it) — A function that a boundary receives through its children getter, such as one held in a variable, runs as a binding inside the boundary. That holds wherever the boundary's result is inserted.
     - [`@spec errored-error-builds-its-content-once-per-failure`](#spec-errored-error-builds-its-content-once-per-failure) — `<Errored.Error>` builds its content when the boundary becomes failed, keeps it while the boundary stays failed, and disposes it when the boundary recovers.
     - [`@spec a-ref-is-called-once-with-its-element`](#spec-a-ref-is-called-once-with-its-element) — A `ref` prop is not a hole. Its function is called once, with the element, when the element is created.
     - [`@spec show-renders-its-children-when-truthy-and-its-fallback-otherwise`](#spec-show-renders-its-children-when-truthy-and-its-fallback-otherwise) — `Show` renders its children while `when` is truthy and its `fallback` while it is falsy. A function child is called with the truthy value.
@@ -1472,6 +1474,22 @@ Derives from: [`spec-a-boundary-wraps-what-it-coordinates`](#spec-a-boundary-wra
 This follows because a component runs once, and a boundary only chooses what its region shows: it cannot rebuild its children per display, so it builds them once and swaps what is shown.
 
 Building the children is what starts the work the boundary waits for, so it cannot wait for the display to choose them.
+
+##### @spec a-throw-while-a-boundary-builds-its-children-stays-in-its-region
+
+> A failure thrown while a boundary builds its children goes to the nearest error boundary or error handler above them. A retry builds the children again. A suspension thrown then suspends the nearest loading boundary, which is the boundary itself when it is a `<Loading>`. The boundary builds its children again once the promise settles.
+
+Derives from: [`spec-error-boundaries-are-sub-owners`](#spec-error-boundaries-are-sub-owners), [`spec-a-suspension-is-reported-to-the-nearest-boundary`](#spec-a-suspension-is-reported-to-the-nearest-boundary)
+
+This follows because the boundary builds its children inside its own owner. What goes wrong while building them happened under that owner, so it goes where anything under that owner goes.
+
+A function passed as the children is called to build them, once, like a component body. Thrown out of that call, an error would leave the boundary before the boundary existed.
+
+##### @spec a-function-a-boundary-receives-runs-inside-it
+
+> A function that a boundary receives through its children getter, such as one held in a variable, runs as a binding inside the boundary. That holds wherever the boundary's result is inserted.
+
+This follows because the children are what the boundary coordinates. A binding among them belongs to that boundary, not to the place where its result is inserted.
 
 #### @spec errored-error-builds-its-content-once-per-failure
 

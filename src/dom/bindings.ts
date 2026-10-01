@@ -114,6 +114,16 @@ function reportPendingReads(
 }
 
 /**
+ * A binding whose commit hands its value to `apply` instead of writing the
+ * DOM, made under the owner ambient now. It reports to the boundaries above
+ * exactly as a DOM binding does. A boundary uses it to resolve a function
+ * among its children inside itself.
+ */
+export function bindValue<T>(read: () => T, apply: (value: T) => void): void {
+  reactiveCommit(getOwner(), read, apply)
+}
+
+/**
  * Wrap a reactive `apply(value)` binding in the compute/commit split. The
  * effect body evaluates `read()` (which may throw NotReadyYet), then either
  * commits via `apply(value)` immediately (no Loading scope) or defers via
