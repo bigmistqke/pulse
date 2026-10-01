@@ -635,14 +635,14 @@ function treeOf(
         if (said) {
           out.push(paint('90', sill) + paint(SAID, clip(said, sill.length)));
         }
-        // The edges nesting cannot show: further parents first, as "from",
+        // The edges nesting cannot show: further parents first, as "also",
         // then references, as "see". A link into another document keeps its
         // file name.
         const own = links.get(`${rel}#${row.id}`) ?? [];
         for (const link of [...own.filter(l => l.derives), ...own.filter(l => !l.derives)]) {
           const [doc, id] = link.target.split('#');
           const label = doc === rel ? prose(id) : `${doc}#${id}`;
-          const verb = link.derives ? 'from' : 'see';
+          const verb = link.derives ? 'also' : 'see';
           out.push(paint('90', `${sill}╌ ${verb} `) + paint(HUE[kindOf(id) ?? 'case-'], label));
         }
       }
