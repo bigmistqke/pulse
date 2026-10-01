@@ -498,7 +498,7 @@ test('refetch with different resolved value: downstream effect re-runs', async (
 })
 
 /**
- * @canon rule-an-equal-value-does-not-notify-consumers
+ * @canon case-a-computed-publishes-only-a-changed-value
  */
 test('refetch with same resolved value (Object.is): downstream effect does not re-run', async () => {
   setScheduler(syncScheduler(flush))

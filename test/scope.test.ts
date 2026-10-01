@@ -523,7 +523,7 @@ test('onSettled fires with discarded when the scope is discarded', () => {
 })
 
 /**
- * @canon rule-close-callbacks-unwind
+ * @canon case-settle-callbacks-run-newest-first-and-in-isolation
  */
 test('onSettled fires each callback once, in last-in-first-out order', () => {
   const s = createScope(ROOT_SCOPE, 'speculative')
@@ -544,7 +544,7 @@ test('onSettled throws when called with no active speculative scope', () => {
 })
 
 /**
- * @canon rule-close-callbacks-unwind
+ * @canon case-settle-callbacks-run-newest-first-and-in-isolation
  */
 test('a throwing settle callback does not strand the scope or block siblings', () => {
   const s = createScope(ROOT_SCOPE, 'speculative')

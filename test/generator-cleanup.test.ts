@@ -105,7 +105,7 @@ test('onCleanup fires when the owner is disposed while paused', async () => {
 })
 
 /**
- * @canon rule-generator-cleanups-unwind-after-its-finally-blocks
+ * @canon case-generator-cleanups-run-newest-first-after-its-finally-blocks
  */
 test('cleanups run most recently registered first, after finally blocks', async () => {
   const [a, setA] = signal(1)

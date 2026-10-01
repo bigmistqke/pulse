@@ -114,28 +114,28 @@ async function runsAfterWrite<T>(initial: T, next: T): Promise<number> {
 }
 
 /**
- * @canon rule-a-committed-write-of-an-equal-value-is-a-no-op
+ * @canon case-an-equal-committed-signal-write-is-dropped
  */
 test('writing the same number again re-runs nothing', async () => {
   expect(await runsAfterWrite(1, 1)).toBe(0)
 })
 
 /**
- * @canon rule-a-committed-write-of-an-equal-value-is-a-no-op
+ * @canon case-an-equal-committed-signal-write-is-dropped
  */
 test('writing NaN over NaN re-runs nothing', async () => {
   expect(await runsAfterWrite(Number.NaN, Number.NaN)).toBe(0)
 })
 
 /**
- * @canon rule-a-committed-write-of-an-equal-value-is-a-no-op
+ * @canon case-an-equal-committed-signal-write-is-dropped
  */
 test('writing 0 over -0 re-runs nothing', async () => {
   expect(await runsAfterWrite(-0, 0)).toBe(0)
 })
 
 /**
- * @canon rule-a-committed-write-of-an-equal-value-is-a-no-op
+ * @canon case-an-equal-committed-signal-write-is-dropped
  */
 test('writing the same object again re-runs nothing, and a different object re-runs once', async () => {
   const same = { a: 1 }

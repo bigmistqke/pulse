@@ -43,7 +43,7 @@ test('getOwner returns the current owner inside createRoot', () => {
 })
 
 /**
- * @canon rule-owner-cleanups-unwind
+ * @canon case-owner-cleanups-run-newest-first-and-in-isolation
  */
 test('createRoot disposes its onCleanup callbacks', () => {
   const log: string[] = []
@@ -57,7 +57,7 @@ test('createRoot disposes its onCleanup callbacks', () => {
 })
 
 /**
- * @canon rule-owner-cleanups-unwind
+ * @canon case-owner-cleanups-run-newest-first-and-in-isolation
  */
 test('a throwing onCleanup callback stops neither the others nor the dispose', () => {
   const log: string[] = []

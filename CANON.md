@@ -38,8 +38,9 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule one-scheduler-flushes-every-consumer`](#rule-one-scheduler-flushes-every-consumer) — Every write asks one injectable scheduler for a flush. The default scheduler batches every request made in one tick into a single flush on a microtask; the synchronous scheduler flushes on each request.
   - [`@rule several-writes-in-one-tick-re-run-an-effect-once`](#rule-several-writes-in-one-tick-re-run-an-effect-once) — Under the default scheduler, an effect does not re-run between a write and the end of the tick. Several writes in one tick re-run it once, with the last value.
   - [`@rule a-promise-settling-requests-a-flush-from-the-active-scheduler`](#rule-a-promise-settling-requests-a-flush-from-the-active-scheduler) — When a promise a node is waiting on settles, pulse asks the active scheduler for a flush, the same way a write does. The readers re-run in that flush.
-  - [`@rule an-equal-value-does-not-notify-consumers`](#rule-an-equal-value-does-not-notify-consumers) — A computed that settles to a value `Object.is`-equal to the one it already published does not re-run its consumers.
-  - [`@rule a-committed-write-of-an-equal-value-is-a-no-op`](#rule-a-committed-write-of-an-equal-value-is-a-no-op) — A committed write to a signal that equals its current value re-runs nothing. Equality is SameValueZero: `NaN` equals `NaN`, and `0` equals `-0`.
+  - [`@rule an-equal-value-does-not-propagate`](#rule-an-equal-value-does-not-propagate) — A value equal to the one a node already holds does not reach the node's consumers: nothing re-runs.
+    - [`@case a-computed-publishes-only-a-changed-value`](#case-a-computed-publishes-only-a-changed-value) — `computed.ts` `makeStageNode`.
+    - [`@case an-equal-committed-signal-write-is-dropped`](#case-an-equal-committed-signal-write-is-dropped) — `scope.ts` `writeValue`.
   - [`@rule an-error-write-schedules-its-own-flush`](#rule-an-error-write-schedules-its-own-flush) — A write to error state — a boundary's report collection, or an action's error — requests a flush itself, so its readers update without any other write happening.
   - [`@rule an-effect-runs-at-creation-and-after-each-change`](#rule-an-effect-runs-at-creation-and-after-each-change) — An effect runs once when it is created, and again after each change to a source it read.
   - [`@rule an-effects-cleanups-run-before-its-next-run`](#rule-an-effects-cleanups-run-before-its-next-run) — A cleanup registered with `onCleanup` inside an effect's body belongs to that run. It runs before the effect's next run, not when the owner is disposed.
@@ -138,10 +139,11 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule there-is-no-ambient-owner-outside-every-root`](#rule-there-is-no-ambient-owner-outside-every-root) — Outside every root, `getOwner()` returns null, also after a root has run and after it has been disposed.
   - [`@rule runwithowner-restores-the-previous-owner`](#rule-runwithowner-restores-the-previous-owner) — `runWithOwner` makes its owner ambient for the call, `null` included, and restores the previous owner when the call returns or throws.
 - [`@axiom teardown-unwinds`](#axiom-teardown-unwinds) — What runs when something closes runs in reverse order of registration, and a callback that throws stops neither the others nor the close.
-  - [`@rule close-callbacks-unwind`](#rule-close-callbacks-unwind) — The `onSettled` callbacks of a speculation fire in reverse order of registration. One that throws is isolated: the others still fire, and the speculation still closes.
-  - [`@rule owner-cleanups-unwind`](#rule-owner-cleanups-unwind) — When an owner is disposed, its `onCleanup` callbacks run in reverse order of registration. One that throws is swallowed: the others still run, and the dispose does not throw.
+  - [`@rule closing-runs-callbacks-newest-first`](#rule-closing-runs-callbacks-newest-first) — Callbacks registered to run when something closes run in reverse order of registration, at every place where pulse runs them.
+    - [`@case settle-callbacks-run-newest-first-and-in-isolation`](#case-settle-callbacks-run-newest-first-and-in-isolation) — `scope.ts` `fireSettle`.
+    - [`@case owner-cleanups-run-newest-first-and-in-isolation`](#case-owner-cleanups-run-newest-first-and-in-isolation) — `owner.ts` `disposeOwner`.
+    - [`@case generator-cleanups-run-newest-first-after-its-finally-blocks`](#case-generator-cleanups-run-newest-first-after-its-finally-blocks) — `computed.ts` `endGen`.
   - [`@rule an-owner-disposes-its-children-before-its-own-cleanups`](#rule-an-owner-disposes-its-children-before-its-own-cleanups) — When an owner is disposed, the effects, computeds and sub-owners it owns are disposed first, the most recently created first, and the owner's own `onCleanup` callbacks run after them.
-  - [`@rule generator-cleanups-unwind-after-its-finally-blocks`](#rule-generator-cleanups-unwind-after-its-finally-blocks) — A discarded generator's `onCleanup` callbacks run most recently registered first, after its `finally` blocks.
 - [`@axiom error-boundaries-are-sub-owners`](#axiom-error-boundaries-are-sub-owners) — An error boundary is an owner in the owner tree. An error goes to the nearest boundary above the owner it happened under that accepts it.
   - [`@rule catch-error-runs-its-body-in-a-sub-owner`](#rule-catch-error-runs-its-body-in-a-sub-owner) — `catchError(fn, handler)` runs `fn` inside a new sub-owner of the current owner and returns what `fn` returns, or `undefined` when `fn` throws and the handler takes the error.
   - [`@rule a-catch-error-sub-owner-is-disposed-with-its-parent`](#rule-a-catch-error-sub-owner-is-disposed-with-its-parent) — Disposing the owner a `catchError` was called under disposes its sub-owner, and stops what was created inside it.
@@ -475,15 +477,21 @@ Invalidation spreads through the graph when a value is written, and a computed r
 
 A settlement is not a write, but it reaches consumers through the same single path, so an injected scheduler governs it too.
 
-### @rule an-equal-value-does-not-notify-consumers
+### @rule an-equal-value-does-not-propagate
 
-> A computed that settles to a value `Object.is`-equal to the one it already published does not re-run its consumers.
+> A value equal to the one a node already holds does not reach the node's consumers: nothing re-runs.
 
-### @rule a-committed-write-of-an-equal-value-is-a-no-op
+#### @case a-computed-publishes-only-a-changed-value
 
-> A committed write to a signal that equals its current value re-runs nothing. Equality is SameValueZero: `NaN` equals `NaN`, and `0` equals `-0`.
+> `computed.ts` `makeStageNode`.
 
-ADR 0008 chose `Object.is`. r3 compares with `===`, which already makes `0` and `-0` equal, and pulse builds on r3 rather than changing it. Pulse adds the `NaN` case in its own write path. The result is SameValueZero, the equality `Map`, `Set` and `Array.prototype.includes` use.
+A stage that settles to a value `Object.is`-equal to the one it last published does not publish it again, so its consumers do not re-run.
+
+#### @case an-equal-committed-signal-write-is-dropped
+
+> `scope.ts` `writeValue`.
+
+A committed write to a signal that equals its current value is dropped. The equality is SameValueZero: `NaN` equals `NaN`, and `0` equals `-0`. ADR 0008 chose `Object.is`. r3 compares with `===`, which already makes `0` and `-0` equal, and pulse builds on r3 rather than changing it, so pulse adds the `NaN` case in its own write path. SameValueZero is the equality `Map`, `Set` and `Array.prototype.includes` use.
 
 ### @rule an-error-write-schedules-its-own-flush
 
@@ -995,23 +1003,31 @@ Pulse passes context the way a language without first-class continuations can: a
 
 No design document states this. It is stated from the code: owner disposal in `src/owner.ts`, and the settle callbacks in `src/scope.ts`, which say they mirror it.
 
-### @rule close-callbacks-unwind
+### @rule closing-runs-callbacks-newest-first
 
-> The `onSettled` callbacks of a speculation fire in reverse order of registration. One that throws is isolated: the others still fire, and the speculation still closes.
+> Callbacks registered to run when something closes run in reverse order of registration, at every place where pulse runs them.
 
-### @rule owner-cleanups-unwind
+#### @case settle-callbacks-run-newest-first-and-in-isolation
 
-> When an owner is disposed, its `onCleanup` callbacks run in reverse order of registration. One that throws is swallowed: the others still run, and the dispose does not throw.
+> `scope.ts` `fireSettle`.
+
+The `onSettled` callbacks of a speculation fire in reverse order of registration when it commits or is discarded. One that throws is isolated: the others still fire, and the speculation still closes.
+
+#### @case owner-cleanups-run-newest-first-and-in-isolation
+
+> `owner.ts` `disposeOwner`.
+
+When an owner is disposed, its `onCleanup` callbacks run in reverse order of registration. One that throws is swallowed: the others still run, and the dispose does not throw.
+
+#### @case generator-cleanups-run-newest-first-after-its-finally-blocks
+
+> `computed.ts` `endGen`.
+
+When a generator stage's generator ends or is discarded, its `onCleanup` callbacks run most recently registered first, after its `finally` blocks. The `finally` blocks are lexically inside the generator, so `gen.return()` runs them first, and the cleanups registered on the generator follow.
 
 ### @rule an-owner-disposes-its-children-before-its-own-cleanups
 
 > When an owner is disposed, the effects, computeds and sub-owners it owns are disposed first, the most recently created first, and the owner's own `onCleanup` callbacks run after them.
-
-### @rule generator-cleanups-unwind-after-its-finally-blocks
-
-> A discarded generator's `onCleanup` callbacks run most recently registered first, after its `finally` blocks.
-
-The `finally` blocks are lexically inside the generator, so `gen.return()` runs them first, and the cleanups registered on the generator follow.
 
 ## Part 4 — Errors
 
