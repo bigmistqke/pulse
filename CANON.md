@@ -1155,9 +1155,9 @@ When the promise a generator stage paused on settles, the stage resumes the gene
 
 > Before a paused generator is resumed, the dependencies recorded before its pause are read again, so a change to any of them still re-runs the stage.
 
-This follows because work before the pause runs again only when an input it read has changed: that is only possible if the inputs read before the pause stay linked across it.
+Derives from: [`axiom-build-on-r3-rather-than-change-it`](#axiom-build-on-r3-rather-than-change-it)
 
-r3 rebuilds a node's dependency list from the reads of each run, and a resumed run only executes the code after the pause. The mechanism is added above r3 rather than in it, as [the r3 axiom](#axiom-build-on-r3-rather-than-change-it) requires.
+This follows because work before the pause runs again only when an input it read has changed, which is only possible if the inputs read before the pause stay linked across it. r3 rebuilds a node's dependency list from the reads of each run, and a resumed run only executes the code after the pause. Pulse builds on r3 rather than changing it, so it keeps those inputs linked by reading them again before the resume.
 
 #### @case a-run-records-every-dependency-it-read
 
