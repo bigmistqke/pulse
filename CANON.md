@@ -22,7 +22,6 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule a-promise-settling-requests-a-flush-from-the-active-scheduler`](#rule-a-promise-settling-requests-a-flush-from-the-active-scheduler) — When a promise a node is waiting on settles, pulse asks the active scheduler for a flush, the same way a write does. The readers re-run in that flush.
   - [`@rule an-error-write-schedules-its-own-flush`](#rule-an-error-write-schedules-its-own-flush) — A write to error state — a boundary's report collection, or an action's error — requests a flush itself, so its readers update without any other write happening.
   - [`@rule an-effect-runs-at-creation-and-after-each-change`](#rule-an-effect-runs-at-creation-and-after-each-change) — An effect runs once when it is created, and again after each change to a source it read.
-  - [`@rule an-effects-cleanups-run-before-its-next-run`](#rule-an-effects-cleanups-run-before-its-next-run) — A cleanup registered with `onCleanup` inside an effect's body belongs to that run. It runs before the effect's next run, not when the owner is disposed.
   - [`@rule speculative-derivation-is-pulled-on-read`](#rule-speculative-derivation-is-pulled-on-read) — Under a speculation, a computed is recomputed when it is read, into a slot of that scope, and a write only marks the affected slots dirty.
     - [`@case a-speculative-read-recomputes-into-a-slot-of-its-scope`](#case-a-speculative-read-recomputes-into-a-slot-of-its-scope) — `scope.ts` `readValue`.
     - [`@case a-speculative-write-dirties-what-derives-from-it`](#case-a-speculative-write-dirties-what-derives-from-it) — `scope.ts` `invalidateDownstream`.
@@ -108,10 +107,8 @@ The canon was written backwards from the existing tests and documents, and descr
     - [`@case replay-reports-a-changed-dependency`](#case-replay-reports-a-changed-dependency) — `dep-replay.ts` `replayDeps`.
     - [`@case the-wake-signal-is-not-an-input`](#case-the-wake-signal-is-not-an-input) — `dep-replay.ts` `snapshotDeps`.
     - [`@case a-stage-node-discards-a-generator-whose-input-changed`](#case-a-stage-node-discards-a-generator-whose-input-changed) — `computed.ts` `makeStageNode`.
-  - [`@rule a-discarded-generator-is-closed-with-return`](#rule-a-discarded-generator-is-closed-with-return) — A generator that is discarded is closed with `gen.return()`, so its `finally` blocks run. Reads made in those blocks are not tracked.
   - [`@rule a-reset-discards-a-paused-generator`](#rule-a-reset-discards-a-paused-generator) — When a boundary resets the error a stage parked, a generator that the stage has paused since is discarded, and the stage runs a fresh one.
   - [`@rule oncleanup-in-a-generator-stage-belongs-to-the-generator`](#rule-oncleanup-in-a-generator-stage-belongs-to-the-generator) — An `onCleanup` called inside a generator stage registers on the generator, not on the run. It fires when the generator ends: by completing, by throwing, or by being discarded.
-  - [`@rule oncleanup-in-a-sync-stage-runs-before-its-next-run`](#rule-oncleanup-in-a-sync-stage-runs-before-its-next-run) — Inside a sync stage, `onCleanup` keeps its usual meaning: the cleanup runs before the stage's next run.
   - [`@rule a-returned-promise-is-the-result-not-a-pause`](#rule-a-returned-promise-is-the-result-not-a-pause) — A generator stage that returns a promise has finished. The promise is its result: the stage publishes what it fulfils to, and parks the reason if it rejects.
   - [`@rule a-stage-that-returned-a-promise-stays-reactive`](#rule-a-stage-that-returned-a-promise-stays-reactive) — A generator stage that returned a promise keeps no generator, so a change to a source it read runs it again from the top.
   - [`@rule a-returned-promise-rejection-skips-the-generators-catch`](#rule-a-returned-promise-rejection-skips-the-generators-catch) — When the promise a generator stage returned rejects, the generator's `try`/`catch` does not see it: the body has already ended. The stage parks the rejection as its error.
@@ -122,9 +119,8 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule a-stage-suspended-through-use-is-absorbed`](#rule-a-stage-suspended-through-use-is-absorbed) — A sync stage whose body throws `NotReadyYet` through `use` suspends like an async stage, reports pending, and runs again when the promise settles.
   - [`@rule a-rejected-yield-is-thrown-into-the-generator`](#rule-a-rejected-yield-is-thrown-into-the-generator) — A yielded promise that rejects is thrown into the generator at its yield, where a `try`/`catch` can handle it. Uncaught, it leaves the stage as an error.
   - [`@rule a-suspended-effect-re-runs-when-its-promise-settles`](#rule-a-suspended-effect-re-runs-when-its-promise-settles) — An effect whose body suspends on `use(x)` holds its body, and runs it again from the top once the promise it suspended on settles. When its source is written with a new pending promise, it suspends again and re-runs when that one settles.
-- [`@axiom a-lifetime-belongs-to-an-owner`](#axiom-a-lifetime-belongs-to-an-owner) — Every reactive node lives as long as the owner it was created under. Disposing an owner ends everything beneath it. Plain data has no owner and no lifetime.
+- [`@axiom a-lifetime-belongs-to-an-owner`](#axiom-a-lifetime-belongs-to-an-owner) — Every reactive node lives as long as the owner it was created under. Disposing an owner ends everything beneath it. Plain data has no owner and no lifetime. Each run of a computation is a lifetime of its own, ended when the next run starts, and a root's lifetime is held by the code that created it.
   - [`@rule createroot-starts-a-new-owner-tree`](#rule-createroot-starts-a-new-owner-tree) — `createRoot` runs its body at once under a new root owner, and returns what the body returns. The body receives the root's `dispose` function.
-  - [`@rule a-root-is-never-owned-by-an-enclosing-root`](#rule-a-root-is-never-owned-by-an-enclosing-root) — A root created inside another root has no parent. Disposing the outer root leaves it alive, and only its own `dispose` ends it.
   - [`@rule disposing-an-owner-ends-what-it-owns`](#rule-disposing-an-owner-ends-what-it-owns) — Disposing an owner stops the effects and computeds created under it and runs its cleanups. Signals created under it keep working.
   - [`@rule dispose-runs-once`](#rule-dispose-runs-once) — Disposing an owner a second time does nothing: its cleanups do not run again, and nothing throws.
   - [`@rule a-disposed-owner-cannot-be-entered`](#rule-a-disposed-owner-cannot-be-entered) — `runWithOwner` with an owner that has been disposed throws.
@@ -149,17 +145,21 @@ The canon was written backwards from the existing tests and documents, and descr
     - [`@case switch-rebuilds-only-when-the-winning-match-changes`](#case-switch-rebuilds-only-when-the-winning-match-changes) — `switch.ts` `Switch`.
     - [`@case map-array-builds-each-item-once-under-its-own-owner`](#case-map-array-builds-each-item-once-under-its-own-owner) — `map-array.ts` `mapArray`.
   - [`@rule an-event-prop-adds-a-listener-until-its-owner-is-disposed`](#rule-an-event-prop-adds-a-listener-until-its-owner-is-disposed) — An `on:name` prop adds its function as a listener for the event `name`, and removes it when the owner ambient at binding time is disposed.
+  - [`@rule an-effects-cleanups-run-before-its-next-run`](#rule-an-effects-cleanups-run-before-its-next-run) — A cleanup registered with `onCleanup` inside an effect's body belongs to that run. It runs before the effect's next run, not when the owner is disposed.
+  - [`@rule oncleanup-in-a-sync-stage-runs-before-its-next-run`](#rule-oncleanup-in-a-sync-stage-runs-before-its-next-run) — Inside a sync stage, `onCleanup` keeps its usual meaning: the cleanup runs before the stage's next run.
+  - [`@rule a-root-is-never-owned-by-an-enclosing-root`](#rule-a-root-is-never-owned-by-an-enclosing-root) — A root created inside another root has no parent. Disposing the outer root leaves it alive, and only its own `dispose` ends it.
 - [`@axiom ambient-context-is-set-for-a-call-and-restored-after`](#axiom-ambient-context-is-set-for-a-call-and-restored-after) — Ambient context, such as the current owner, is set for the duration of one call and restored when that call ends, however it ends.
   - [`@rule there-is-no-ambient-owner-outside-every-root`](#rule-there-is-no-ambient-owner-outside-every-root) — Outside every root, `getOwner()` returns null, also after a root has run and after it has been disposed.
   - [`@rule runwithowner-restores-the-previous-owner`](#rule-runwithowner-restores-the-previous-owner) — `runWithOwner` makes its owner ambient for the call, `null` included, and restores the previous owner when the call returns or throws.
   - [`@rule an-action-body-is-speculative-while-pulse-drives-it`](#rule-an-action-body-is-speculative-while-pulse-drives-it) — An action's body writes speculatively for as long as pulse is running it: the whole of a sync body, every resume of a generator body, and the synchronous prefix of an async body. A write after `yield*` in a generator body is still speculative, and so is a derivation read there.
     - [`@exception a-write-after-an-await-escapes-the-speculation`](#exception-a-write-after-an-await-escapes-the-speculation) — In an async body, a write after the first `await` lands in committed state, and the action's commit then overwrites it.
   - [`@rule an-event-handler-runs-under-the-owner-it-was-bound-in`](#rule-an-event-handler-runs-under-the-owner-it-was-bound-in) — An event handler runs with the owner that was ambient when its element was built.
-- [`@axiom teardown-unwinds`](#axiom-teardown-unwinds) — What runs when something closes runs in reverse order of registration, and a callback that throws stops neither the others nor the close.
+- [`@axiom teardown-unwinds`](#axiom-teardown-unwinds) — What runs when something closes runs in reverse order of registration, and a callback that throws stops neither the others nor the close. Whatever ends runs its own teardown, also when it ends early.
   - [`@rule closing-runs-callbacks-newest-first`](#rule-closing-runs-callbacks-newest-first) — Callbacks registered to run when something closes run in reverse order of registration, at every place where pulse runs them.
     - [`@case settle-callbacks-run-newest-first-and-in-isolation`](#case-settle-callbacks-run-newest-first-and-in-isolation) — `scope.ts` `fireSettle`.
     - [`@case owner-cleanups-run-newest-first-and-in-isolation`](#case-owner-cleanups-run-newest-first-and-in-isolation) — `owner.ts` `disposeOwner`.
     - [`@case generator-cleanups-run-newest-first-after-its-finally-blocks`](#case-generator-cleanups-run-newest-first-after-its-finally-blocks) — `computed.ts` `endGen`.
+  - [`@rule a-discarded-generator-is-closed-with-return`](#rule-a-discarded-generator-is-closed-with-return) — A generator that is discarded is closed with `gen.return()`, so its `finally` blocks run. Reads made in those blocks are not tracked.
 - [`@axiom error-boundaries-are-sub-owners`](#axiom-error-boundaries-are-sub-owners) — An error boundary is an owner in the owner tree. An error goes to the nearest boundary above the owner it happened under that accepts it.
   - [`@rule catch-error-runs-its-body-in-a-sub-owner`](#rule-catch-error-runs-its-body-in-a-sub-owner) — `catchError(fn, handler)` runs `fn` inside a new sub-owner of the current owner and returns what `fn` returns, or `undefined` when `fn` throws and the handler takes the error.
   - [`@rule the-nearest-accepting-boundary-claims-an-error`](#rule-the-nearest-accepting-boundary-claims-an-error) — `catchError` and `<Errored>` are peers in one walk up the owner chain. The nearest one that accepts the error claims it. One whose `for` predicate declines passes the error on to the next, and one with no `for` accepts every error.
@@ -196,8 +196,6 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule resetting-an-optimistic-error-retries-its-source`](#rule-resetting-an-optimistic-error-retries-its-source) — Resetting the error of an optimistic value, as an error boundary's retry does, recomputes the failed source it wraps.
   - [`@rule reset-reruns-a-binding-that-threw-a-plain-error`](#rule-reset-reruns-a-binding-that-threw-a-plain-error) — When a binding threw an error that no failed node stands behind, reset re-runs that binding.
   - [`@rule a-boundarys-state-can-be-read-without-swapping`](#rule-a-boundarys-state-can-be-read-without-swapping) — The nearest boundary's state is readable from below without swapping anything: `useErrored()` returns accessors, `isErrored()` returns the current state or `undefined`, and `<Errored.Error>` renders its content only while the boundary is failed.
-  - [`@rule boundary-state-is-looked-up-past-a-catch-error`](#rule-boundary-state-is-looked-up-past-a-catch-error) — `useErrored()`, `isErrored()` and `<Errored.Error>` find the nearest `<Errored>` by its position above them, and a `catchError` between them and it does not stop the lookup.
-  - [`@rule a-predicate-narrows-what-a-reader-sees-not-which-boundary-it-reads`](#rule-a-predicate-narrows-what-a-reader-sees-not-which-boundary-it-reads) — A predicate given to `useErrored`, `isErrored` or `<Errored.Error for>` narrows the reports a reader sees and retries to those that match. It does not change which boundary is read.
 - [`@axiom the-read-verb-decides-what-renders-and-what-waits`](#axiom-the-read-verb-decides-what-renders-and-what-waits) — The verb a binding reads with decides what the binding renders and whether it waits for its neighbours. Everything else in the loading lifecycle is reported ambiently, from the reads the binding makes.
   - [`@rule use-returns-the-value-or-throws-not-ready-yet`](#rule-use-returns-the-value-or-throws-not-ready-yet) — `use(x)` returns a plain value unchanged, returns a settled promise's value, re-throws a settled promise's rejection, and throws `NotReadyYet` carrying the promise while it is pending. Given an accessor, it calls it and treats the result the same way.
   - [`@rule use-of-an-accessor-throws-while-it-is-pending`](#rule-use-of-an-accessor-throws-while-it-is-pending) — `use(accessor)` throws `NotReadyYet` whenever `isPending(accessor)` is true, even when the accessor has a stale value to return. The thrown promise is `promiseOf(accessor)`.
@@ -214,7 +212,7 @@ The canon was written backwards from the existing tests and documents, and descr
     - [`@case a-staged-effect-reads-its-pipeline-with-use`](#case-a-staged-effect-reads-its-pipeline-with-use) — `effect.ts` `stagedEffect`.
     - [`@case a-queued-commit-is-checked-again-at-the-end-of-the-microtask`](#case-a-queued-commit-is-checked-again-at-the-end-of-the-microtask) — `loading.ts` `deferOrCommit`.
   - [`@rule a-read-without-use-commits-at-once`](#rule-a-read-without-use-commits-at-once) — A binding that did not call `use` commits as soon as it runs, whatever state its boundary is in.
-- [`@axiom a-boundary-wraps-what-it-coordinates`](#axiom-a-boundary-wraps-what-it-coordinates) — A `<Loading>` boundary coordinates the bindings placed inside it. Which bindings land together, and which region shows a placeholder, is decided by where the boundary is placed.
+- [`@axiom a-boundary-wraps-what-it-coordinates`](#axiom-a-boundary-wraps-what-it-coordinates) — A `<Loading>` boundary coordinates the bindings placed inside it. Which bindings land together, and which region shows a placeholder, is decided by where the boundary is placed. A boundary's state belongs to the region it wraps, so a reader finds it by position, whatever intercepts errors in between.
   - [`@rule a-boundary-shows-initial-until-its-first-load`](#rule-a-boundary-shows-initial-until-its-first-load) — Until every suspended binding inside it has settled once, a boundary shows `initial`, or `fallback` when there is no `initial`. After that it shows the loaded subtree.
   - [`@rule after-its-first-load-a-boundary-shows-fallback-or-holds`](#rule-after-its-first-load-a-boundary-shows-fallback-or-holds) — When a boundary that has loaded before becomes pending again, it shows `fallback` if one is given, and otherwise keeps showing the subtree it last committed.
   - [`@rule a-boundary-without-placeholders-swaps-nothing`](#rule-a-boundary-without-placeholders-swaps-nothing) — A boundary with neither `initial` nor `fallback` never swaps its subtree out. What does not depend on a pending value stays visible while it waits.
@@ -227,6 +225,8 @@ The canon was written backwards from the existing tests and documents, and descr
     - [`@case a-replaced-held-commit-releases-the-gate`](#case-a-replaced-held-commit-releases-the-gate) — `bindings.ts` `insertChild`.
     - [`@case a-hole-under-a-nested-boundary-does-not-hold`](#case-a-hole-under-a-nested-boundary-does-not-hold) — `bindings.ts` `holdsSuspendedHole`.
     - [`@case a-suspended-prop-does-not-hold-the-structure`](#case-a-suspended-prop-does-not-hold-the-structure) — `bindings.ts` `holdsSuspendedHole`.
+  - [`@rule boundary-state-is-looked-up-past-a-catch-error`](#rule-boundary-state-is-looked-up-past-a-catch-error) — `useErrored()`, `isErrored()` and `<Errored.Error>` find the nearest `<Errored>` by its position above them, and a `catchError` between them and it does not stop the lookup.
+  - [`@rule a-predicate-narrows-what-a-reader-sees-not-which-boundary-it-reads`](#rule-a-predicate-narrows-what-a-reader-sees-not-which-boundary-it-reads) — A predicate given to `useErrored`, `isErrored` or `<Errored.Error for>` narrows the reports a reader sees and retries to those that match. It does not change which boundary is read.
 - [`@axiom control-flow-bakes-in-no-async-policy`](#axiom-control-flow-bakes-in-no-async-policy) — `Show`, `Switch` and `For` are ordinary components. They coerce a pending input to its empty form, and decide nothing else about async.
   - [`@rule a-pending-condition-reads-as-falsy`](#rule-a-pending-condition-reads-as-falsy) — A `when` that is a pending promise counts as falsy: `Show` renders its fallback, and `Switch` skips that `Match`.
   - [`@rule a-pending-list-reads-as-empty`](#rule-a-pending-list-reads-as-empty) — A list that is a pending promise counts as an empty list: `mapArray` returns no entries, and `For` renders its fallback.
@@ -402,10 +402,6 @@ Also derives from [`axiom-an-error-is-graph-state-not-an-event`](#axiom-an-error
 > An effect runs once when it is created, and again after each change to a source it read.
 
 This follows because consumers are re-run after each change to what they read: an effect learns what it reads only by running, so it runs once at creation.
-
-### @rule an-effects-cleanups-run-before-its-next-run
-
-> A cleanup registered with `onCleanup` inside an effect's body belongs to that run. It runs before the effect's next run, not when the owner is disposed.
 
 ### @rule speculative-derivation-is-pulled-on-read
 
@@ -973,12 +969,6 @@ The control signal pulse writes to wake a paused stage is left out of the record
 
 On a changed input the stage discards the paused generator and runs a fresh one from the top. The discarded generator's promise can no longer re-run the stage when it settles.
 
-### @rule a-discarded-generator-is-closed-with-return
-
-> A generator that is discarded is closed with `gen.return()`, so its `finally` blocks run. Reads made in those blocks are not tracked.
-
-A generator is discarded on [a changed input](#rule-a-changed-input-replaces-the-paused-generator), [a reset](#rule-a-reset-discards-a-paused-generator), and [the disposal of its owner](#rule-disposing-its-owner-discards-a-paused-generator).
-
 ### @rule a-reset-discards-a-paused-generator
 
 > When a boundary resets the error a stage parked, a generator that the stage has paused since is discarded, and the stage runs a fresh one.
@@ -992,10 +982,6 @@ Also derives from [`rule-reset-recomputes-the-failed-source-at-the-root-of-its-c
 This follows because a generator stage's continuation runs forward across its pauses: a resume continues the same run, so a cleanup registered in it lasts until the generator ends.
 
 A resume is not the end of the generator, so the cleanup does not fire then.
-
-### @rule oncleanup-in-a-sync-stage-runs-before-its-next-run
-
-> Inside a sync stage, `onCleanup` keeps its usual meaning: the cleanup runs before the stage's next run.
 
 ### @rule a-returned-promise-is-the-result-not-a-pause
 
@@ -1065,9 +1051,11 @@ What lives how long: the owner tree every reactive node belongs to, the ambient 
 
 ## @axiom a-lifetime-belongs-to-an-owner
 
-> Every reactive node lives as long as the owner it was created under. Disposing an owner ends everything beneath it. Plain data has no owner and no lifetime.
+> Every reactive node lives as long as the owner it was created under. Disposing an owner ends everything beneath it. Plain data has no owner and no lifetime. Each run of a computation is a lifetime of its own, ended when the next run starts, and a root's lifetime is held by the code that created it.
 
 Owners form a tree of lifetimes, and disposal cascades down it. Signals are data, not lifetimes, so they are never owned. The principle is the Owner entry in [`CONTEXT.md`](CONTEXT.md).
+
+A run owns what it creates or registers, so a re-run starts clean. A root has no parent to end it, so only the `dispose` its creator received does.
 
 ### @rule createroot-starts-a-new-owner-tree
 
@@ -1076,12 +1064,6 @@ Owners form a tree of lifetimes, and disposal cascades down it. Signals are data
 Also derives from [`axiom-ambient-context-is-set-for-a-call-and-restored-after`](#axiom-ambient-context-is-set-for-a-call-and-restored-after). This follows because a-lifetime-belongs-to-an-owner says a node lives as long as its owner, so a top-level owner and its dispose must exist, and ambient-context-is-set-for-a-call-and-restored-after makes that root ambient for the body.
 
 Inside the body, `getOwner()` is that root.
-
-### @rule a-root-is-never-owned-by-an-enclosing-root
-
-> A root created inside another root has no parent. Disposing the outer root leaves it alive, and only its own `dispose` ends it.
-
-Nesting a `createRoot` does not link the two trees, so nothing walks from the inner root to the outer one.
 
 ### @rule disposing-an-owner-ends-what-it-owns
 
@@ -1243,6 +1225,26 @@ This follows because what is set up under an owner lives as long as that owner: 
 
 An event prop is not a hole: its function is the listener, not a value to follow.
 
+### @rule an-effects-cleanups-run-before-its-next-run
+
+> A cleanup registered with `onCleanup` inside an effect's body belongs to that run. It runs before the effect's next run, not when the owner is disposed.
+
+This follows because each run of a computation is a lifetime of its own: a cleanup an effect's run registered ends with that run, which is when the next run starts.
+
+### @rule oncleanup-in-a-sync-stage-runs-before-its-next-run
+
+> Inside a sync stage, `onCleanup` keeps its usual meaning: the cleanup runs before the stage's next run.
+
+This follows because each run of a computation is a lifetime of its own: a sync stage's run ends when the next one starts, and its cleanup runs then.
+
+### @rule a-root-is-never-owned-by-an-enclosing-root
+
+> A root created inside another root has no parent. Disposing the outer root leaves it alive, and only its own `dispose` ends it.
+
+This follows because a root's lifetime is held by the code that created it: an enclosing root disposing it would end a lifetime its creator holds.
+
+Nesting a `createRoot` does not link the two trees, so nothing walks from the inner root to the outer one.
+
 ## @axiom ambient-context-is-set-for-a-call-and-restored-after
 
 > Ambient context, such as the current owner, is set for the duration of one call and restored when that call ends, however it ends.
@@ -1285,9 +1287,11 @@ A DOM event fires outside any owner. Restoring the bind-time owner lets code ins
 
 ## @axiom teardown-unwinds
 
-> What runs when something closes runs in reverse order of registration, and a callback that throws stops neither the others nor the close.
+> What runs when something closes runs in reverse order of registration, and a callback that throws stops neither the others nor the close. Whatever ends runs its own teardown, also when it ends early.
 
 No design document states this. It is stated from the code: owner disposal in `src/owner.ts`, and the settle callbacks in `src/scope.ts`, which say they mirror it.
+
+An ending is an ending however it comes about: completed, failed, discarded or disposed.
 
 ### @rule closing-runs-callbacks-newest-first
 
@@ -1312,6 +1316,14 @@ When an owner is disposed, its `onCleanup` callbacks run in reverse order of reg
 > `computed.ts` `endGen`.
 
 When a generator stage's generator ends or is discarded, its `onCleanup` callbacks run most recently registered first, after its `finally` blocks. One that throws is isolated: the others still run, and the error goes to the stage's error handling. The `finally` blocks are lexically inside the generator, so `gen.return()` runs them first, and the cleanups registered on the generator follow.
+
+### @rule a-discarded-generator-is-closed-with-return
+
+> A generator that is discarded is closed with `gen.return()`, so its `finally` blocks run. Reads made in those blocks are not tracked.
+
+This follows because whatever ends runs its own teardown, also when it ends early: a discarded generator has ended early, and `gen.return()` is what runs its `finally` blocks.
+
+A generator is discarded on [a changed input](#rule-a-changed-input-replaces-the-paused-generator), [a reset](#rule-a-reset-discards-a-paused-generator), and [the disposal of its owner](#rule-disposing-its-owner-discards-a-paused-generator).
 
 ## Part 4 — Errors
 
@@ -1543,18 +1555,6 @@ The failure is parked on the source, not on the optimistic node, so a reset that
 
 This follows because an-error-is-graph-state-not-an-event says a boundary shows failure state: that state is a value in its own right, so it can be read from below without the fallback showing it.
 
-### @rule boundary-state-is-looked-up-past-a-catch-error
-
-> `useErrored()`, `isErrored()` and `<Errored.Error>` find the nearest `<Errored>` by its position above them, and a `catchError` between them and it does not stop the lookup.
-
-A `catchError` intercepts errors thrown below it, but it does not stand in front of the region the `<Errored>` would swap out.
-
-### @rule a-predicate-narrows-what-a-reader-sees-not-which-boundary-it-reads
-
-> A predicate given to `useErrored`, `isErrored` or `<Errored.Error for>` narrows the reports a reader sees and retries to those that match. It does not change which boundary is read.
-
-A filtered reader can find a matching report that is not the boundary's first, and its retry leaves the non-matching reports failed.
-
 ## Part 5 — Coordination
 
 How pending values reach the screen: the read verb decides what a binding waits for, and a boundary decides what lands together and what shows meanwhile.
@@ -1669,9 +1669,11 @@ This follows because only the verb decides whether a binding waits for its neigh
 
 ## @axiom a-boundary-wraps-what-it-coordinates
 
-> A `<Loading>` boundary coordinates the bindings placed inside it. Which bindings land together, and which region shows a placeholder, is decided by where the boundary is placed.
+> A `<Loading>` boundary coordinates the bindings placed inside it. Which bindings land together, and which region shows a placeholder, is decided by where the boundary is placed. A boundary's state belongs to the region it wraps, so a reader finds it by position, whatever intercepts errors in between.
 
 "These bindings land together" and "this area shows a placeholder meanwhile" are statements about a region of the interface, so they are expressed by wrapping that region. Transitions are a property of where a boundary is placed, not a separate primitive. The principle is stated in [ADR 0017](docs/adr/0017-decompose-loading-into-placeholder-gate-and-pending-set.md) and in the Transitions section of [`CONTEXT.md`](CONTEXT.md).
+
+This holds for an error boundary as well as for `<Loading>`: what a region shows is the region's, not the business of whoever catches an error on the way.
 
 ### @rule a-boundary-shows-initial-until-its-first-load
 
@@ -1752,6 +1754,22 @@ A suspended hole's marker records the boundary the hole is suspended in, and onl
 > `bindings.ts` `holdsSuspendedHole`.
 
 Only the markers of reactive children are looked for. A reactive prop that suspends, such as `class={use(x)}`, leaves no marker, so the element that carries it mounts at once, and the prop's own value waits at the gate.
+
+### @rule boundary-state-is-looked-up-past-a-catch-error
+
+> `useErrored()`, `isErrored()` and `<Errored.Error>` find the nearest `<Errored>` by its position above them, and a `catchError` between them and it does not stop the lookup.
+
+This follows because a boundary's state belongs to the region it wraps: a reader inside the region finds that boundary by position, and a `catchError` between them does not change which region the reader is in.
+
+A `catchError` intercepts errors thrown below it, but it does not stand in front of the region the `<Errored>` would swap out.
+
+### @rule a-predicate-narrows-what-a-reader-sees-not-which-boundary-it-reads
+
+> A predicate given to `useErrored`, `isErrored` or `<Errored.Error for>` narrows the reports a reader sees and retries to those that match. It does not change which boundary is read.
+
+This follows because a boundary's state belongs to the region it wraps, found by position: a predicate can narrow what the reader sees of that state, but not which region it belongs to.
+
+A filtered reader can find a matching report that is not the boundary's first, and its retry leaves the non-matching reports failed.
 
 ## @axiom control-flow-bakes-in-no-async-policy
 
