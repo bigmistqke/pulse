@@ -9,6 +9,7 @@ import { peekValue, writeValue } from './scope'
 import { makeAccessor, NODE, signal, signalWithNode, type Accessor, type Signal } from './signal'
 import { registerPending, lookupPending } from './pending'
 import { registerError, lookupError } from './error'
+import { registerRefreshable } from './refresh'
 import { requestFlush } from './scheduler'
 import { markErrorSource, runNodeCompute } from './transition-tracker'
 
@@ -99,6 +100,7 @@ export function buildStages(stages: Array<(value: any) => unknown>): StageHandle
     built.push(handle)
     inputAccessor = handle.accessor
   }
+  registerRefreshable(built[built.length - 1].accessor, { stages, built })
   registerWithOwner({
     dispose: () => {
       for (const handle of built) unwatched(handle.r3Node)
@@ -119,7 +121,21 @@ export type StageHandle = {
   markNeedsRecomputation: () => void
   abandonRun: () => void
   clearError: () => void
+  /** Mark the stage as part of a refresh: its next run is a refresh run. */
+  armRefresh: () => void
+  /** Run an armed stage again, though its input did not change. Does nothing
+   *  when the stage is no longer armed. */
+  kickRefresh: () => void
+  /** Call `listener` once, on the next run of the stage that ends with a value
+   *  or a failure, rather than a suspension. */
+  onceCompleted: (listener: (completion: Completion) => void) => void
 }
+
+/** How a run of a stage ended. `changed` says whether it published a new
+ *  value, which is what decides whether the stages after it run again. */
+export type Completion =
+  | { failed: false; changed: boolean; value: unknown }
+  | { failed: true; reason: unknown }
 
 /** Resumption strategy for a suspended stage — see the `computed` JSDoc. */
 type ResumeKind = 'fast-forward' | 'reuse-value'
@@ -353,6 +369,41 @@ function makeStageNode(
   // registry entry constructed below.
   const [pendingSig, setPendingSig] = signalWithNode(false, depTracker)
 
+  // Refresh state, kept apart from pending: a refresh asks the current question
+  // again while its answer stands, so it is not pending. `refreshPhase` is
+  // 'armed' from the start of a refresh until the stage's refresh run starts,
+  // and 'running' until that run completes. A run that starts while 'running'
+  // and does not continue the refresh run is a revision, which ends the refresh.
+  const [refreshingSig, setRefreshingSig] = signalWithNode(false, depTracker)
+  let refreshPhase: 'none' | 'armed' | 'running' = 'none'
+  // Set just before the stage kicks itself to carry a run on past a settled
+  // promise, so that run is told apart from a revision.
+  let continuing = false
+  let completionListeners: Array<(completion: Completion) => void> = []
+  const endRefresh = (): void => {
+    if (refreshPhase === 'none') return
+    refreshPhase = 'none'
+    setRefreshingSig(false)
+  }
+  /** Suspended: a refresh run reports refreshing, any other run pending. */
+  const setSuspended = (): void => {
+    if (refreshPhase === 'running') setRefreshingSig(true)
+    else setPendingSig(true)
+  }
+  const complete = (completion: Completion): void => {
+    endRefresh()
+    const listeners = completionListeners
+    completionListeners = []
+    for (const listener of listeners) listener(completion)
+  }
+  const completed = (changed: boolean): void =>
+    complete({
+      failed: false,
+      changed,
+      value: lastResolvedValue === UNRESOLVED ? undefined : lastResolvedValue,
+    })
+  const failed = (reason: unknown): void => complete({ failed: true, reason })
+
   // Generator-only kick: drives body re-run so a paused generator's retained
   // dependencies get replayed and the generator resumes forward. Non-generator
   // stages never trigger this (they publish via setPublishedValue directly).
@@ -378,7 +429,7 @@ function makeStageNode(
     if (suspendedOn === p) return
     suspendedOn = p
     suspendedInput = input
-    setPendingSig(true)
+    setSuspended()
     if (lastResolvedValue === UNRESOLVED) {
       track(p)
       setPublishedValue(p)
@@ -422,6 +473,11 @@ function makeStageNode(
     runNodeCompute(() => {
     try {
       kick() // dep so generator stash-rerun can force body re-run
+
+      const isContinuation = continuing
+      continuing = false
+      if (refreshPhase === 'armed') refreshPhase = 'running'
+      else if (refreshPhase === 'running' && !isContinuation) endRefresh()
 
       let input: unknown = undefined
       // Did this evaluation's input arrive as a promise (an async upstream)? If
@@ -481,7 +537,7 @@ function makeStageNode(
             // Pending upstream: mirror suspension on the promise itself.
             stashedResolution = null
             suspendedOn = null
-            setPendingSig(true)
+            setSuspended()
             if (lastResolvedValue === UNRESOLVED) {
               track(input as Promise<unknown>)
               setPublishedValue(input)
@@ -507,11 +563,13 @@ function makeStageNode(
             // Park the error as graph state; leave publishedValue holding the
             // stale value so a tolerant read can still degrade to it.
             setErrorSig(r.reason)
+            failed(r.reason)
             return null
           }
           lastResolvedValue = r.value
           setErrorSig(null)
           setPublishedValue(resolvedPromise(r.value))
+          completed(true)
           return null
         }
         stashedResolution = null
@@ -624,6 +682,7 @@ function makeStageNode(
               // generator, replays its recorded deps, and resumes it forward
               // from this pause (see the `retainedGen` branch above).
               resumeWith = { kind: 'fulfilled', value: state.value }
+              continuing = true
               setKick(++kickCount)
               return
             }
@@ -632,16 +691,17 @@ function makeStageNode(
             // it must re-publish when the last published value was bare (a
             // conditionally-async stage flipping back to its promise branch at an
             // unchanged value), which the value-only gate would otherwise suppress.
-            if (
+            const changed =
               lastResolvedValue === UNRESOLVED ||
               !sameValueZero(lastResolvedValue, state.value) ||
               !lastPublishedShapeIsPromise
-            ) {
+            if (changed) {
               lastResolvedValue = state.value
               setErrorSig(null)
               publishResolvedPromise(state.value)
             }
             // else: same value, already a promise — no downstream invalidation
+            completed(changed)
           } else if (state.status === 'rejected') {
             suspendedOn = null
             genOwnsSuspension = false
@@ -651,6 +711,7 @@ function makeStageNode(
               // resumption, so it is thrown at the pause point — the
               // generator's own try/catch handles it (or doesn't).
               resumeWith = { kind: 'rejected', reason: state.reason }
+              continuing = true
               setKick(++kickCount)
               return
             }
@@ -659,6 +720,7 @@ function makeStageNode(
             // tolerant read (`latest`) needs to degrade to. Consumers are dirtied
             // by the error signal instead, which the accessor reads.
             setErrorSig(state.reason)
+            failed(state.reason)
           }
         })
         // No body return value — view is via publishedValue.
@@ -678,11 +740,11 @@ function makeStageNode(
       // the shape flips at the same value (the change-gate keys on value
       // alone).
       const asPromise = inputWasAsync || resumedFromSuspension
-      if (
+      const changed =
         lastResolvedValue === UNRESOLVED ||
         !sameValueZero(lastResolvedValue, outcome.value) ||
         asPromise !== lastPublishedShapeIsPromise
-      ) {
+      if (changed) {
         lastResolvedValue = outcome.value
         lastPublishedShapeIsPromise = asPromise
         if (asPromise) {
@@ -692,6 +754,7 @@ function makeStageNode(
         }
       }
       setErrorSig(null)
+      completed(changed)
       return null
     } catch (e) {
       if (e instanceof NotReadyYet) {
@@ -733,11 +796,13 @@ function makeStageNode(
               // and publishes the stage's real result.
               setPublishedValue(state.value)
             }
+            continuing = true
             setKick(++kickCount)
           } else if (state.status === 'rejected') {
             suspendedOn = null
             setPendingSig(false)
             setErrorSig(state.reason)
+            continuing = true
             setKick(++kickCount)
           }
         })
@@ -746,8 +811,10 @@ function makeStageNode(
       try {
         discardGen()
         routeError(myOwner, e)
+        failed(e)
       } catch (rethrown) {
         setErrorSig(rethrown)
+        failed(rethrown)
       }
       return null
     }
@@ -947,6 +1014,25 @@ function makeStageNode(
     suspendedInput = undefined
     stashedResolution = null
     setPendingSig(false)
+    endRefresh()
+  }
+
+  /** Mark this stage as part of a refresh. */
+  const armRefresh = (): void => {
+    refreshPhase = 'armed'
+    setRefreshingSig(true)
+  }
+
+  /** Run an armed stage again with its input unchanged. The kick is a
+   *  dependency of the body, the same one an error's retry uses. */
+  const kickRefresh = (): void => {
+    if (refreshPhase !== 'armed') return
+    continuing = false
+    setKick(++kickCount)
+  }
+
+  const onceCompleted = (listener: (completion: Completion) => void): void => {
+    completionListeners.push(listener)
   }
 
   /** Clear this stage's parked error. Called on every stage of a pipeline by a
@@ -997,6 +1083,7 @@ function makeStageNode(
     : undefined
   registerPending(accessor, {
     pending: pendingSig,
+    refreshing: refreshingSig,
     promise: () => suspendedOn,
     upstream: upstreamEntry,
     reads: sourceReads,
@@ -1040,5 +1127,8 @@ function makeStageNode(
     markNeedsRecomputation,
     abandonRun,
     clearError,
+    armRefresh,
+    kickRefresh,
+    onceCompleted,
   }
 }

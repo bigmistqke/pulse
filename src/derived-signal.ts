@@ -123,7 +123,7 @@ export function signal(...args: any[]): [Accessor<any>, any] {
  *  since an inner commit promotes to its parent and the parent may still roll
  *  back. Reading the ambient scope is a plain module-level variable read and
  *  does not touch the graph, so callers may do it before anything else. */
-function whenCommitted(scope: Scope, effects: () => void): void {
+export function whenCommitted(scope: Scope, effects: () => void): void {
   if (scope === ROOT_SCOPE) {
     effects()
     return

@@ -23,6 +23,14 @@ const ticks = async (n: number) => {
 
 afterEach(() => vi.restoreAllMocks())
 
+/** The test runner's Node process, reached without Node's type definitions. */
+const { process } = globalThis as unknown as {
+  process: {
+    on(event: 'unhandledRejection', listener: (reason: unknown) => void): void
+    off(event: 'unhandledRejection', listener: (reason: unknown) => void): void
+  }
+}
+
 /**
  * A source whose every run waits on a promise the test settles by hand:
  * `runs` counts the runs, and `settle(i, value)` lands run `i`.

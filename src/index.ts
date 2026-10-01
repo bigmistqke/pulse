@@ -1,5 +1,6 @@
 export { latest, peek, from, settled, use, NotReadyYet, type PipelineRead, type Resolved } from './async'
-export { isPending, promiseOf } from './pending'
+export { isPending, isRefreshing, promiseOf } from './pending'
+export { refresh } from './refresh'
 export { error } from './error'
 export { computed } from './computed'
 export { effect } from './effect'

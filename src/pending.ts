@@ -17,6 +17,9 @@ import { signal, type Accessor } from './signal'
  */
 export interface PendingEntry {
   pending: Accessor<boolean>
+  /** Reactive: true while a refresh runs this stage again. A refresh is not
+   *  pending, so it is reported here and not through `pending`. */
+  refreshing?: Accessor<boolean>
   promise: Accessor<Promise<unknown> | null>
   upstream?: PendingEntry
   /** Sources whose values this node's recipe read through a verb on its last
@@ -46,6 +49,18 @@ export function registerPending(accessor: Accessor<unknown>, entry: PendingEntry
 /** Look up the pending entry for an accessor, if registered. Internal. */
 export function lookupPending(accessor: Accessor<unknown>): PendingEntry | undefined {
   return registry.get(accessor)
+}
+
+/** Is a refresh of this derivation in flight? True while any stage of its
+ *  pipeline is still running again for a refresh. Reactive, like `isPending`;
+ *  false for anything that is not a derivation. */
+export function isRefreshing<T>(x: Accessor<T>): boolean {
+  let entry = registry.get(x as Accessor<unknown>)
+  while (entry !== undefined) {
+    if (entry.refreshing?.()) return true
+    entry = entry.upstream
+  }
+  return false
 }
 
 /** Is this signal/computed (or anything upstream) pending right now? Reactive
