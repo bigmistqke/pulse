@@ -2,7 +2,7 @@ import { expect, test } from 'vitest'
 import { computed, effect, signal } from '../src/index'
 
 /**
- * @canon rule-one-scheduler-flushes-every-consumer
+ * @canon spec-one-scheduler-flushes-every-consumer
  */
 test('signals, pipeline computeds, and effects work together', async () => {
   const [price] = signal(10)
@@ -31,7 +31,7 @@ test('signals, pipeline computeds, and effects work together', async () => {
 })
 
 /**
- * @canon rule-a-read-is-current-without-a-flush
+ * @canon spec-a-read-is-current-without-a-flush
  */
 test('pull-on-read returns a fresh value before the scheduler flushes', () => {
   const [n, setN] = signal(1)

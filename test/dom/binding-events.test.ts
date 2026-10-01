@@ -5,7 +5,7 @@ import { createRoot, onCleanup } from '../../src/index'
 afterEach(() => { document.body.innerHTML = '' })
 
 /**
- * @canon rule-an-event-prop-adds-a-listener-until-its-owner-is-disposed
+ * @canon spec-an-event-prop-adds-a-listener-until-its-owner-is-disposed
  */
 test('on:click attaches a listener', () => {
   const handler = vi.fn()
@@ -18,7 +18,7 @@ test('on:click attaches a listener', () => {
 })
 
 /**
- * @canon rule-an-event-prop-adds-a-listener-until-its-owner-is-disposed
+ * @canon spec-an-event-prop-adds-a-listener-until-its-owner-is-disposed
  */
 test('on:event listens to the event named after the prefix, as written', () => {
   const handler = vi.fn()
@@ -31,7 +31,7 @@ test('on:event listens to the event named after the prefix, as written', () => {
 })
 
 /**
- * @canon rule-an-event-prop-adds-a-listener-until-its-owner-is-disposed
+ * @canon spec-an-event-prop-adds-a-listener-until-its-owner-is-disposed
  */
 test('on:click listener is removed on owner dispose', () => {
   const handler = vi.fn()
@@ -49,7 +49,7 @@ test('on:click listener is removed on owner dispose', () => {
 })
 
 /**
- * @canon rule-an-event-handler-runs-under-the-owner-it-was-bound-in
+ * @canon spec-an-event-handler-runs-under-the-owner-it-was-bound-in
  */
 test('on:click captures the owner at bind time, so onCleanup called from inside the handler attaches to it', () => {
   let cleaned = false

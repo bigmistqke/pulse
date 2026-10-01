@@ -17,7 +17,7 @@ afterEach(() => {
 })
 
 /**
- * @canon rule-a-suspended-hole-keeps-what-it-showed
+ * @canon spec-a-suspended-hole-keeps-what-it-showed
  */
 test('use-throw inside a binding holds the previous DOM (stale-but-stable)', async () => {
   const target = document.createElement('section')
@@ -56,7 +56,7 @@ test('use-throw inside a binding holds the previous DOM (stale-but-stable)', asy
 })
 
 /**
- * @canon rule-a-hole-that-throws-reports-to-the-nearest-catch-error
+ * @canon spec-a-hole-that-throws-reports-to-the-nearest-catch-error
  */
 test('a throw inside a reactive binding is caught by an enclosing catchError', () => {
   const target = document.createElement('section')
@@ -88,7 +88,7 @@ test('a throw inside a reactive binding is caught by an enclosing catchError', (
 })
 
 /**
- * @canon rule-render-dispose-tears-down-everything-the-component-created
+ * @canon spec-render-dispose-tears-down-everything-the-component-created
  */
 test('dispose tears down nested catchError children', () => {
   const target = document.createElement('section')

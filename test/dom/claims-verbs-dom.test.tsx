@@ -10,7 +10,7 @@ afterEach(() => {
 })
 
 /**
- * @canon rule-a-boundary-builds-its-children-once-up-front
+ * @canon spec-a-boundary-builds-its-children-once-up-front
  */
 test('a boundary runs its children once, while showing initial, and not again when it reveals them', async () => {
   const target = document.createElement('section')
@@ -35,7 +35,7 @@ test('a boundary runs its children once, while showing initial, and not again wh
 })
 
 /**
- * @canon rule-a-fragment-child-belongs-to-the-owner-the-fragment-was-built-in
+ * @canon spec-a-fragment-child-belongs-to-the-owner-the-fragment-was-built-in
  */
 test('a Fragment function child inserted outside every owner runs under the owner the Fragment was built in', () => {
   setScheduler(syncScheduler(flush))
@@ -90,7 +90,7 @@ function fragmentAcrossTwoRoots() {
 }
 
 /**
- * @canon rule-a-fragment-child-belongs-to-the-owner-the-fragment-was-built-in
+ * @canon spec-a-fragment-child-belongs-to-the-owner-the-fragment-was-built-in
  */
 test('disposing the owner a Fragment was inserted under leaves its reactive child running', () => {
   const { host, setCount, disposeInsertionOwner } = fragmentAcrossTwoRoots()
@@ -101,7 +101,7 @@ test('disposing the owner a Fragment was inserted under leaves its reactive chil
 })
 
 /**
- * @canon rule-a-fragment-child-belongs-to-the-owner-the-fragment-was-built-in
+ * @canon spec-a-fragment-child-belongs-to-the-owner-the-fragment-was-built-in
  */
 test("disposing a Fragment's owner stops its reactive child, wherever it was inserted", () => {
   const { host, setCount, disposeFragmentOwner } = fragmentAcrossTwoRoots()
@@ -112,7 +112,7 @@ test("disposing a Fragment's owner stops its reactive child, wherever it was ins
 })
 
 /**
- * @canon rule-a-fragment-child-inserted-after-its-owner-was-disposed-binds-nothing
+ * @canon spec-a-fragment-child-inserted-after-its-owner-was-disposed-binds-nothing
  */
 test('a Fragment child inserted after its owner was disposed binds nothing', () => {
   setScheduler(syncScheduler(flush))
@@ -132,7 +132,7 @@ test('a Fragment child inserted after its owner was disposed binds nothing', () 
 })
 
 /**
- * @canon rule-the-jsx-runtime-builds-every-element-with-h
+ * @canon spec-the-jsx-runtime-builds-every-element-with-h
  */
 test('jsx hands a component its props object as it is, getters intact', () => {
   let received: unknown
@@ -153,7 +153,7 @@ test('jsx hands a component its props object as it is, getters intact', () => {
 })
 
 /**
- * @canon rule-the-jsx-runtime-builds-every-element-with-h
+ * @canon spec-the-jsx-runtime-builds-every-element-with-h
  */
 test('jsxs builds a DOM tag the way h does, children as separate arguments, other getters intact', () => {
   setScheduler(syncScheduler(flush))
@@ -170,7 +170,7 @@ test('jsxs builds a DOM tag the way h does, children as separate arguments, othe
 })
 
 /**
- * @canon rule-a-derivation-runs-when-it-is-created
+ * @canon spec-a-derivation-runs-when-it-is-created
  */
 test('a computed created and read inside a reactive child renders its value', () => {
   const target = document.createElement('div')

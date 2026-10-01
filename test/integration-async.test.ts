@@ -6,8 +6,8 @@ import { isPending } from '../src/pending'
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
 
 /**
- * @canon rule-use-returns-a-settled-promises-value
- * @canon rule-a-suspended-effect-re-runs-when-its-promise-settles
+ * @canon spec-use-returns-a-settled-promises-value
+ * @canon spec-a-suspended-effect-re-runs-when-its-promise-settles
  */
 test('a promise-holding signal flows through an effect via use', async () => {
   const [user] = signal(Promise.resolve({ name: 'ada' }))
@@ -28,7 +28,7 @@ test('a promise-holding signal flows through an effect via use', async () => {
 })
 
 /**
- * @canon rule-peek-keeps-the-last-resolved-value-while-a-newer-promise-is-pending
+ * @canon spec-peek-keeps-the-last-resolved-value-while-a-newer-promise-is-pending
  */
 test('peek gives stale-while-revalidate across a re-fetch', async () => {
   const [data, setData] = signal<Promise<number>>(Promise.resolve(1))

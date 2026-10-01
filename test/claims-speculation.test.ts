@@ -5,7 +5,7 @@ import { flush, microtaskScheduler, setScheduler, syncScheduler } from '../src/s
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
 
 /**
- * @canon rule-a-commit-reaches-a-committed-consumer-as-one-change
+ * @canon spec-a-commit-reaches-a-committed-consumer-as-one-change
  */
 test('a commit reaches a committed consumer as one change, where the same writes made outside an action reach it one by one', () => {
   setScheduler(syncScheduler(flush))
@@ -29,7 +29,7 @@ test('a commit reaches a committed consumer as one change, where the same writes
 })
 
 /**
- * @canon rule-after-a-commit-only-what-the-action-wrote-to-the-source-remains
+ * @canon spec-after-a-commit-only-what-the-action-wrote-to-the-source-remains
  */
 test('a prediction does not survive a commit of an action that did not write its source', async () => {
   const [value] = signal('saved')
@@ -43,7 +43,7 @@ test('a prediction does not survive a commit of an action that did not write its
 })
 
 /**
- * @canon rule-a-reader-in-an-action-sees-the-predictions-of-its-own-chain
+ * @canon spec-a-reader-in-an-action-sees-the-predictions-of-its-own-chain
  */
 test('a nested action sees the prediction its parent made', async () => {
   const [value] = signal('saved')

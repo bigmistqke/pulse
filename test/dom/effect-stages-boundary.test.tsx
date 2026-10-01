@@ -17,7 +17,7 @@ afterEach(() => {
 })
 
 /**
- * @canon case-a-staged-effect-reads-its-pipeline-with-use
+ * @canon spec-a-staged-effect-reads-its-pipeline-with-use
  */
 test('staged effect commit defers when inside <Loading> with a pending sibling', async () => {
   const target = document.createElement('section')
@@ -59,7 +59,7 @@ test('staged effect commit defers when inside <Loading> with a pending sibling',
 })
 
 /**
- * @canon rule-a-disposed-binding-releases-its-boundary
+ * @canon spec-a-disposed-binding-releases-its-boundary
  */
 test('disposal cancels deferred commits queued in scope', async () => {
   // This test exercises the `scope.deferOrCommit` path: the effect's pipeline

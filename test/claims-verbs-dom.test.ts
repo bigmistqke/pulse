@@ -18,7 +18,7 @@ function transform(source: string): string {
 }
 
 /**
- * @canon rule-a-namespaced-prop-compiles-to-a-string-key
+ * @canon spec-a-namespaced-prop-compiles-to-a-string-key
  */
 test('a dynamic class: prop compiles to a getter under its plain string key', () => {
   const code = transform('<div class:active={isActive()} />;')

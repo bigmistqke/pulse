@@ -23,7 +23,7 @@ afterEach(() => {
 })
 
 /**
- * @canon case-a-prop-binding-or-listener-without-an-owner-warns
+ * @canon spec-a-prop-binding-or-listener-without-an-owner-warns
  */
 test('a static attr:/bare/prop:/class:/style: value still warns - every kind but ref/on: is always effect-wrapped', () => {
   // Every kind except ref and on: always wraps its read in an effect,
@@ -49,7 +49,7 @@ test('a static attr:/bare/prop:/class:/style: value still warns - every kind but
 })
 
 /**
- * @canon case-a-reactive-child-without-an-owner-warns
+ * @canon spec-a-reactive-child-without-an-owner-warns
  */
 test('reactive function child outside any owner warns', () => {
   const [count] = signal(0)
@@ -59,7 +59,7 @@ test('reactive function child outside any owner warns', () => {
 })
 
 /**
- * @canon case-a-prop-binding-or-listener-without-an-owner-warns
+ * @canon spec-a-prop-binding-or-listener-without-an-owner-warns
  */
 test('on: event listener outside any owner warns', () => {
   h('button', { 'on:click': () => {} })
@@ -68,7 +68,7 @@ test('on: event listener outside any owner warns', () => {
 })
 
 /**
- * @canon case-a-prop-binding-or-listener-without-an-owner-warns
+ * @canon spec-a-prop-binding-or-listener-without-an-owner-warns
  */
 test('reactive prop binding outside any owner warns', () => {
   const [v] = signal('a')
@@ -78,7 +78,7 @@ test('reactive prop binding outside any owner warns', () => {
 })
 
 /**
- * @canon case-a-prop-binding-or-listener-without-an-owner-warns
+ * @canon spec-a-prop-binding-or-listener-without-an-owner-warns
  */
 test('reactive attr/class/style bindings outside any owner warn', () => {
   const [s] = signal('x')
@@ -87,8 +87,8 @@ test('reactive attr/class/style bindings outside any owner warn', () => {
 })
 
 /**
- * @canon case-a-reactive-child-without-an-owner-warns
- * @canon case-a-prop-binding-or-listener-without-an-owner-warns
+ * @canon spec-a-reactive-child-without-an-owner-warns
+ * @canon spec-a-prop-binding-or-listener-without-an-owner-warns
  */
 test('inside createRoot, no warnings', () => {
   createRoot(() => {

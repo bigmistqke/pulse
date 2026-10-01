@@ -21,7 +21,7 @@ afterEach(() => {
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
 
 /**
- * @canon rule-boundary-state-is-looked-up-past-a-catch-error
+ * @canon spec-boundary-state-is-looked-up-past-a-catch-error
  */
 test('useErrored() inside a catchError reads the enclosing <Errored>, past the catchError', async () => {
   const target = document.createElement('section')

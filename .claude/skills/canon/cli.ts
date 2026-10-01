@@ -33,7 +33,7 @@ interface Config {
   documents?: string[];
   /** The declared suite directory. */
   suites?: string;
-  /** The trees swept for voluntary citations and for the code a case names. */
+  /** The trees swept for voluntary citations and for the code a spec names. */
   sources?: string[];
   /** Prose documents whose citations must resolve but discharge nothing. */
   references?: string[];
@@ -77,9 +77,9 @@ const DOCS = CONFIG.documents ?? ['CANON.md'];
  * Scope is a claim a suite makes, and here the claim is where it lives. Moving
  * a suite in is the declaration; moving it out withdraws it.
  *
- * Flat, and scoped by CLAIM rather than by module: one rule can bind several
+ * Flat, and scoped by CLAIM rather than by module: one spec can bind several
  * modules at once, and filing its suites by the module they happen to drive
- * would silently re-partition the rule.
+ * would silently re-partition the spec.
  */
 const TESTS = CONFIG.suites ?? 'test/canon';
 
@@ -105,7 +105,7 @@ const PROTOCOL = join(dirname(fileURLToPath(import.meta.url)), 'SKILL.md');
  * to `OWES` without a matching entry here, or cited by a name that is not one of
  * these, stops compiling instead of silently matching nothing.
  */
-type Kind = 'axiom-' | 'rule-' | 'exception-' | 'case-';
+type Kind = 'axiom-' | 'fact-' | 'spec-' | 'exception-';
 
 /**
  * kind → what a reader reaches for it for. Generated into `SKILL.md` beside
@@ -113,43 +113,57 @@ type Kind = 'axiom-' | 'rule-' | 'exception-' | 'case-';
  */
 const MEANS: Record<Kind, string> = {
   'axiom-':
-    'a given: a value the project commits to, or a fact of the world it runs in — never a decision about how to build it',
-  'rule-':
-    'a decision or a behaviour the givens force, stated so it can be contradicted',
-  'exception-':
-    'a carve-out that cannot be stated without naming the rule it narrows',
-  'case-': 'one place the code answers a rule, and the verdict for it'
+    'a value: how the project wants the world of the people using it to be — never a decision about how to build it',
+  'fact-':
+    'how the platform the project is built on is, whatever the project does',
+  'spec-':
+    'what the system does, stated so a test could contradict it, and optionally the place in the code that does it',
+  'exception-': 'where a fact keeps a spec from holding fully'
 };
 
-/** kind → the kinds it must cite at least one of; `null` means it owes nothing. */
-const OWES: Record<Kind, Kind[] | null> = {
+/**
+ * kind → what it must cite, as groups: at least one kind from every group.
+ * `null` means it owes nothing. An exception owes two things at once, the spec
+ * it narrows and the fact that forces it, which one list of alternatives could
+ * not say.
+ */
+const OWES: Record<Kind, Kind[][] | null> = {
   'axiom-': null, // primitive by kind — owes nothing
-  'rule-': ['axiom-', 'rule-'],
-  'exception-': ['rule-'],
-  'case-': ['rule-', 'exception-']
+  'fact-': null, // imposed by the platform — owes nothing
+  'spec-': [['axiom-', 'spec-']],
+  'exception-': [['spec-'], ['fact-']]
 };
 
 /**
  * kind → the kinds it may cite without owing them. An axiom owes nothing, so a
  * root axiom stands alone, but it may narrow a more general axiom by sitting
- * inside it or naming it on its "Derives from:" line.
+ * inside it or naming it on its "Derives from:" line. A spec names the facts
+ * it relies on the same way.
  */
 const MAY_CITE: Partial<Record<Kind, Kind[]>> = {
-  'axiom-': ['axiom-']
+  'axiom-': ['axiom-'],
+  'spec-': ['fact-']
 };
 
 /** kind → every kind it may cite, owed or not. */
 const citable = (kind: Kind): Kind[] => [
-  ...(OWES[kind] ?? []),
+  ...(OWES[kind] ?? []).flat(),
   ...(MAY_CITE[kind] ?? [])
 ];
+
+/** The kinds that make a claim a test can contradict, and so owe a test. */
+const CLAIMS: Kind[] = ['spec-', 'exception-'];
 
 const PREFIXES = Object.keys(OWES) as Kind[];
 const kindOf = (id: string): Kind | undefined =>
   PREFIXES.find(p => id.startsWith(p));
 
-/** `'rule-'` → `'rule'`, for prose. */
+/** `'spec-'` → `'spec'`, for prose. */
 const noun = (kind: Kind): string => kind.slice(0, -1);
+
+/** `'exception-'` → `'an exception'`, for prose. */
+const aNoun = (kind: Kind): string =>
+  `${/^[aeiou]/.test(noun(kind)) ? 'an' : 'a'} ${noun(kind)}`;
 
 // ---------------------------------------------------------------------------
 // A minimal element scanner: enough to know which element each anchor sits in.
@@ -273,7 +287,7 @@ const maskFences = (src: string): string =>
     );
 
 /**
- * A unit heading: `### @rule <stem> — <prose>`, whose id is `rule-<stem>`. The
+ * A unit heading: `### @spec <stem> — <prose>`, whose id is `spec-<stem>`. The
  * stem is declared rather than slugged from the prose, so the sentence after the
  * em dash can be reworded without breaking a citation.
  */
@@ -281,7 +295,7 @@ const UNIT_HEADING = /^(#{1,6})[ \t]+@([a-z]+)[ \t]+(\S+)[ \t]*$/gm;
 /**
  * A unit heading carrying anything past its stem. The heading is the identifier
  * and nothing else, because a renderer slugs the WHOLE heading: prose after the
- * stem lands in the anchor, so `#rule-x` resolves to nothing and every citation
+ * stem lands in the anchor, so `#spec-x` resolves to nothing and every citation
  * to that unit is a dead link in GitLab and in any local preview. Stripped, the
  * slug and the declared id are the same string by construction. The unit's
  * statement opens the body instead.
@@ -349,7 +363,7 @@ function scanMarkdown(src: string): { withId: Element[]; anchors: Anchor[] } {
     });
   }
 
-  // `[text](#rule-some-stem)`, and the raw anchors inside a kept HTML table.
+  // `[text](#spec-some-stem)`, and the raw anchors inside a kept HTML table.
   for (const m of md.matchAll(/\]\(([^)\s]+)\)/g)) {
     anchors.push({ href: m[1], at: m.index ?? 0 });
   }
@@ -372,14 +386,16 @@ const KINDS_END = '<!-- kinds:end -->';
  * is about.
  */
 function kindsTable(): string {
+  const tag = (k: Kind): string => `\`@${noun(k)}\``;
   const rows = PREFIXES.map(k => {
     const owes = OWES[k];
-    const may = MAY_CITE[k] ?? [];
+    const may = (MAY_CITE[k] ?? []).map(tag).join(' or ');
     const owed =
       owes === null
-        ? `nothing${may.length ? ` — may narrow ${may.map(o => `\`@${noun(o)}\``).join(' · ')}` : ''}`
-        : owes.map(o => `\`@${noun(o)}\``).join(' · ');
-    return `| \`@${noun(k)}\` | ${MEANS[k]} | ${owed} |`;
+        ? `nothing${may ? ` — may narrow ${may}` : ''}`
+        : owes.map(group => group.map(tag).join(' or ')).join(' and ') +
+          (may ? ` — may cite ${may}` : '');
+    return `| ${tag(k)} | ${MEANS[k]} | ${owed} |`;
   });
   return ['| tag | what it is | cites |', '| --- | --- | --- |', ...rows].join(
     '\n'
@@ -410,14 +426,14 @@ function tocOf(src: string): string {
 }
 
 /**
- * Rules carrying `least` tests or more and holding no cases.
+ * Specs carrying `least` tests or more and holding no nested specs.
  *
- * A rule that says several things and has no way to say so collects the tests
+ * A spec that says several things and has no way to say so collects the tests
  * for all of them, so the count is the signal — and a test pinning one clause
- * then reads as covering the rest. It is a smell rather than a finding: a rule
+ * then reads as covering the rest. It is a smell rather than a finding: a spec
  * can honestly carry several tests of ONE claim, enumerated per input or
- * attacked from several angles, and cases there would restate their own rule.
- * So this reports and never gates.
+ * attacked from several angles, and nested specs there would restate their
+ * parent. So this reports and never gates.
  */
 function suspectsOf(
   file: string,
@@ -429,19 +445,19 @@ function suspectsOf(
   const { withId } = scanMarkdown(src);
   const headings = withId.filter(u => u.tag === 'heading');
 
-  // Cases a table holds are counted but do not excuse a rule: they are the
-  // scenarios of a grid, not the clauses of the rule, so a rule can hold a
+  // Specs a table holds are counted but do not excuse a spec: they are the
+  // scenarios of a grid, not the clauses of the spec, so a spec can hold a
   // dozen of them and still say several things it has never separated.
   const linkedTo = new Map<string, number>();
-  for (const m of src.matchAll(/href="#(rule-[\w-]+)"/g)) {
+  for (const m of src.matchAll(/href="#(spec-[\w-]+)"/g)) {
     linkedTo.set(m[1], (linkedTo.get(m[1]) ?? 0) + 1);
   }
 
   const rows = headings
-    .filter(u => kindOf(u.id ?? '') === 'rule-')
+    .filter(u => kindOf(u.id ?? '') === 'spec-')
     .filter(
       u =>
-        !headings.some(h => h.parent === u.id && kindOf(h.id ?? '') === 'case-')
+        !headings.some(h => h.parent === u.id && kindOf(h.id ?? '') === 'spec-')
     )
     .map(u => ({
       id: u.id ?? '',
@@ -451,14 +467,14 @@ function suspectsOf(
     .filter(r => r.n >= least)
     .sort((a, b) => b.n - a.n);
 
-  const head = `${rel} — rules with no cases carrying ${least}+ tests`;
+  const head = `${rel} — specs with no nested specs carrying ${least}+ tests`;
   if (rows.length === 0) return `${head}\n\nnone`;
   return [
     head,
     '',
     ...rows.map(
       r =>
-        `${String(r.n).padStart(4)}  ${prose(r.id).replace(/^@rule /, '')}` +
+        `${String(r.n).padStart(4)}  ${prose(r.id).replace(/^@spec /, '')}` +
         (r.linked ? `  (+${r.linked} linked from a table)` : '')
     ),
     '',
@@ -488,9 +504,9 @@ const paint = (code: string, s: string): string =>
  */
 const HUE: Record<Kind, string> = {
   'axiom-': '1;35', // bold magenta
-  'rule-': '36', // cyan
-  'exception-': '33', // yellow — a carve-out should catch the eye
-  'case-': '' // plain: they outnumber everything else four to one
+  'fact-': '1;34', // bold blue — a given, but not a chosen one
+  'spec-': '36', // cyan
+  'exception-': '33' // yellow — where the shoe does not fit should catch the eye
 };
 
 /**
@@ -504,14 +520,14 @@ const SAID = '2;3';
 
 const DIM: Record<Kind, string> = {
   'axiom-': '2;35',
-  'rule-': '2;36',
-  'exception-': '2;33',
-  'case-': '90'
+  'fact-': '2;34',
+  'spec-': '2;36',
+  'exception-': '2;33'
 };
 
 /**
- * A unit id as a reader sees it: `@rule a-write-lands-at-once` reads as
- * `@rule A write lands at once`.
+ * A unit id as a reader sees it: `@spec a-write-lands-at-once` reads as
+ * `@spec A write lands at once`.
  *
  * Lossless, because a stem is lowercase and hyphenated by construction — lower
  * the words and join them with hyphens and the id is back. So a stem copied out
@@ -541,8 +557,8 @@ function clip(said: string, indent: number): string {
  * coverage backlog, so the tree doubles as the map of where it is.
  *
  * Two connectors, because there are two ways to cite. `├─` is nesting, which
- * is the ordinary case. `╌` is a link, drawn for the units a table holds: a
- * table cannot nest, so a matrix cell names its rule in an `href` instead, and
+ * is the ordinary way. `╌` is a link, drawn for the units a table holds: a
+ * table cannot nest, so a matrix cell names its spec in an `href` instead, and
  * that difference is worth seeing rather than flattening away.
  */
 function treeOf(
@@ -561,13 +577,13 @@ function treeOf(
   const tests = (id: string): number => testsPer.get(`${rel}#${id}`) ?? 0;
 
   /**
-   * What a table's case says, which the heading scanner does not collect: a
+   * What a spec in a table says, which the heading scanner does not collect: a
    * cell has no statement, so its claim is the text of its first line, with
    * the markup stripped.
    */
   const cellStatements = new Map<string, string>();
   for (const m of src.matchAll(
-    /<t[rd]\b[^>]*\bid="(case-[\w-]+)"[^>]*>([\s\S]*?)<\/t[rd]>/g
+    /<t[rd]\b[^>]*\bid="(spec-[\w-]+)"[^>]*>([\s\S]*?)<\/t[rd]>/g
   )) {
     const said = m[2]
       .split(/<br\s*\/?>/)[0]
@@ -578,21 +594,20 @@ function treeOf(
     if (said)
       cellStatements.set(m[1], said.charAt(0).toUpperCase() + said.slice(1));
   }
-  /** A claim owes a test unless it holds cases, which pin it. */
+  /**
+   * A spec or an exception owes a test of its own. A spec holding nested specs
+   * is not pinned by them: each refines one part of it, and together they need
+   * not cover it.
+   */
   const owesTest = (id: string): boolean => {
     const kind = kindOf(id);
-    if (kind !== 'rule-' && kind !== 'case-') return false;
-    // A rule holding cases is pinned through them. A rule holding rules is
-    // a decision, which owes a test of its own.
-    return !headings.some(
-      h => h.parent === id && kindOf(h.id ?? '') === 'case-'
-    );
+    return kind !== undefined && CLAIMS.includes(kind);
   };
 
   const linked = new Map<string, Element[]>();
   for (const cell of withId.filter(u => u.tag === 'td' || u.tag === 'tr')) {
     const body = src.slice(cell.start, cell.end);
-    const target = /href="#((?:rule|exception|case|axiom)-[\w-]+)"/.exec(body);
+    const target = /href="#((?:axiom|fact|spec|exception)-[\w-]+)"/.exec(body);
     if (!target) continue;
     const list = linked.get(target[1]) ?? [];
     list.push(cell);
@@ -627,20 +642,18 @@ function treeOf(
       const last = i === rows.length - 1;
       const link = row.el === undefined;
       // The corner is the tree's structure and the dash is the kind of
-      // citation, so they vary independently: a linked case still closes its
+      // citation, so they vary independently: a linked spec still closes its
       // parent's branch when it is the last child.
       const stem = `${last ? '└' : '├'}${link ? '╌ ' : '─ '}`;
       const n = tests(row.id);
-      // An exception is pinned by the cases it holds, so silence there is not
-      // a gap — but a test that cites one directly still counts.
       const mark =
         n > 0
           ? paint('90', `  ${n}`)
           : owesTest(row.id)
             ? paint('31', '  — no test')
             : '';
-      const hue = HUE[kindOf(row.id) ?? 'case-'];
-      const kind = kindOf(row.id) ?? 'case-';
+      const kind = kindOf(row.id) ?? 'spec-';
+      const hue = HUE[kind];
       const [tag, ...said] = row.label.split(' ');
       out.push(
         `${paint('90', prefix + stem)}${paint(DIM[kind], tag)} ` +
@@ -663,7 +676,7 @@ function treeOf(
         for (const link of own.filter(l => l.derives)) {
           const [doc, id] = link.target.split('#');
           const label = doc === rel ? prose(id) : `${doc}#${id}`;
-          out.push(paint('90', `${sill}→ `) + paint(HUE[kindOf(id) ?? 'case-'], label));
+          out.push(paint('90', `${sill}→ `) + paint(HUE[kindOf(id) ?? 'spec-'], label));
         }
       }
       if (row.el) walk(row.el, under);
@@ -676,8 +689,8 @@ function treeOf(
     const [rootTag, ...rootLabel] = prose(root.id ?? '').split(' ');
     out.push('');
     out.push(
-      // A root is an axiom when the document is sound, but a freelancing unit
-      // is a root too, and it is drawn as what it is rather than as an axiom.
+      // A root is an axiom or a fact when the document is sound, but a
+      // freelancing unit is a root too, and it is drawn as what it is.
       paint(DIM[rootKind], rootTag) +
         ' ' +
         paint(HUE[rootKind], rootLabel.join(' '))
@@ -704,7 +717,7 @@ function treeOf(
     `${rel} — ${counts}${cells ? ` · ${cells} linked from tables` : ''}`
   );
   if (gapsOnly && out.length === 0) {
-    return `${head}\n\nevery rule and case is pinned by a test`;
+    return `${head}\n\nevery spec and exception is pinned by a test`;
   }
   return [head, ...out].join('\n');
 }
@@ -757,8 +770,7 @@ type FindingName =
   | 'cycle'
   | 'rot'
   | 'dead'
-  | 'missing-rule'
-  | 'not-narrowest'
+  | 'missing-spec'
   | 'uncited'
   | 'unjudgeable'
   | 'stale-toc'
@@ -772,15 +784,14 @@ const MEANING: Record<FindingName, string> = {
   cycle: 'units whose citations lead back to themselves — a derivation must not depend on itself',
   rot: 'citation whose anchor does not resolve',
   dead: 'unit nothing cites',
-  'missing-rule': 'test citing an axiom rather than a rule',
-  'not-narrowest': 'test citing a unit whose cases are the narrower claim',
+  'missing-spec': 'test citing an axiom or a fact rather than a spec',
   uncited: 'test with no citation — the hierarchy inverted',
   unjudgeable: 'test shape the scanner cannot see — its citations go unread',
   'stale-toc': 'generated table of contents out of sync with the document',
   unreachable:
     'heading whose rendered anchor is not the id cited — a dead link',
-  untested: 'rule or case no test pins — cited, but only from prose',
-  'stale-site': 'case naming a code site that is not there'
+  untested: 'spec or exception no test pins — cited, but only from prose',
+  'stale-site': 'unit naming a code site that is not there'
 };
 
 interface Unit {
@@ -789,7 +800,7 @@ interface Unit {
   kind: Kind;
   /** The kinds this unit cites — not which units, since only the kind is owed. */
   cites: Set<Kind>;
-  /** Its statement, which for a case is where it names its site. */
+  /** Its statement, which is where a spec names its site. */
   statement?: string;
 }
 
@@ -823,8 +834,7 @@ function analyse(write: boolean): Analysis {
     cycle: [],
     rot: [],
     dead: [],
-    'missing-rule': [],
-    'not-narrowest': [],
+    'missing-spec': [],
     uncited: [],
     unjudgeable: [],
     'stale-toc': [],
@@ -840,21 +850,12 @@ function analyse(write: boolean): Analysis {
   /**
    * What a SUITE cites, which `citedTargets` cannot answer.
    *
-   * `dead` counts nesting, prose links and tests alike, so a rule linked from
-   * another rule's body leaves it whatever the suites do. That is the right
+   * `dead` counts nesting, prose links and tests alike, so a spec linked from
+   * another spec's body leaves it whatever the suites do. That is the right
    * question for "is this reachable" and the wrong one for "does anything hold
    * this to account".
    */
   const testedTargets = new Set<string>();
-
-  /**
-   * Units that hold at least one case, and so are pinned by them rather than
-   * directly. A decomposed rule states what its cases claim and nothing else,
-   * so a test has nothing left to cite at that level — and without this, taking
-   * a rule apart would report the rule itself as newly uncovered.
-   */
-  const holdsCases = new Set<string>();
-
 
   const testsPer = new Map<string, number>();
 
@@ -916,16 +917,15 @@ function analyse(write: boolean): Analysis {
         });
     }
 
-    // Nesting is a citation, and the strongest kind: a rule written inside its
+    // Nesting is a citation, and the strongest kind: a spec written inside its
     // axiom cannot claim one axiom and sit under another, the way a prose link
-    // repeated in every rule eventually does. So a unit that sits inside another
+    // repeated in every spec eventually does. So a unit that sits inside another
     // has already cited it, and writes no link — an explicit citation is reserved
     // for the edges the tree cannot hold, a second parent or another document.
     for (const el of withId) {
       if (!el.id || !el.parent) continue;
       const parentKind = kindOf(el.parent);
       if (!parentKind) continue;
-      if (kindOf(el.id) === 'case-') holdsCases.add(`${rel}#${el.parent}`);
       units.get(`${rel}#${el.id}`)?.cites.add(parentKind);
       addEdge(edges, `${rel}#${el.id}`, `${rel}#${el.parent}`);
       citedTargets.add(`${rel}#${el.parent}`);
@@ -937,7 +937,7 @@ function analyse(write: boolean): Analysis {
       const kind = kindOf(el.id);
       if (kind && !citable(kind).includes(parentKind)) {
         findings.misnested.push(
-          `${rel}#${el.id} — a ${noun(kind)} sitting in ${el.parent}, which a ${noun(kind)} may not cite`
+          `${rel}#${el.id} — ${aNoun(kind)} sitting in ${el.parent}, which ${aNoun(kind)} may not cite`
         );
       }
     }
@@ -963,7 +963,7 @@ function analyse(write: boolean): Analysis {
 
       // Attribute the citation exactly the way the page's backlink script does:
       // the innermost element with an id that contains the anchor, and failing
-      // that the nearest preceding one — so a rule stated by a heading is credited
+      // that the nearest preceding one — so a spec stated by a heading is credited
       // with the citation in the paragraph beneath it. Whether the element that
       // wins is a claim-bearing unit is then a separate question; if it is not,
       // the citation belongs to no unit and lands nowhere, which is honest.
@@ -1065,9 +1065,10 @@ function analyse(write: boolean): Analysis {
   for (const [key, unit] of units) {
     const owes = OWES[unit.kind];
     if (owes === null) continue;
-    if (!owes.some(p => unit.cites.has(p))) {
+    const unmet = owes.filter(group => !group.some(p => unit.cites.has(p)));
+    if (unmet.length > 0) {
       findings.freelancing.push(
-        `${key} (a ${noun(unit.kind)} owes ${owes.join(' | ')})`
+        `${key} (${aNoun(unit.kind)} owes ${unmet.map(group => group.map(noun).join(' | ')).join(' and ')})`
       );
     }
   }
@@ -1079,7 +1080,7 @@ function analyse(write: boolean): Analysis {
   // on one produced two bad outcomes when tried: an outer grouping had to be given
   // some child's anchor arbitrarily, and an inner grouping restated a citation its
   // every child already carried. Neither adds a link that was missing, and the
-  // first invents one that is not true. So the unit that owes a rule is the test
+  // first invents one that is not true. So the unit that owes a spec is the test
   // that asserts something.
   const TEST_BLOCK =
     /(?:^|\n)([ \t]*)(?:\/\*\*([\s\S]*?)\*\/\s*\n[ \t]*)?(?:it|test)(?:\.\w+)*\s*\(\s*(['"`])((?:\\.|(?!\3)[\s\S])*)\3/g;
@@ -1087,7 +1088,7 @@ function analyse(write: boolean): Analysis {
   /**
    * Every unit id, and the documents that declare it.
    *
-   * A citation names a unit by its id alone — `@canon rule-x` — so an id must
+   * A citation names a unit by its id alone — `@canon spec-x` — so an id must
    * be unique across every canon document. The file adds nothing a unique id
    * does not already say, and leaving it out means moving a unit between
    * documents breaks no test.
@@ -1136,7 +1137,7 @@ function analyse(write: boolean): Analysis {
    * READ, and only a declared one is JUDGED.
    *
    * The practical case is a suite most of which answers to mathematics or to
-   * nothing in particular, holding two or three tests that do pin a rule. Putting
+   * nothing in particular, holding two or three tests that do pin a spec. Putting
    * the whole file in scope to capture those would demand a citation from the
    * other thirty, and the only way to supply thirty is to invent them.
    */
@@ -1148,7 +1149,7 @@ function analyse(write: boolean): Analysis {
       // TEST_BLOCK demands a quoted title right after the paren, so an
       // `it.each([...])('title', fn)` or tagged-template `` it.each`table` `` is
       // invisible to it: not judged for being uncited, and its citations —
-      // however correct the JSDoc above it — never read, so a rule kept alive
+      // however correct the JSDoc above it — never read, so a spec kept alive
       // only by one reports as dead. Rather than teach the scanner every shape,
       // refuse the shape loudly where the file has claimed to participate: a
       // declared suite uses plain `it`s, or this scanner learns the form first.
@@ -1175,18 +1176,22 @@ function analyse(write: boolean): Analysis {
         );
         const specs = [...doc.matchAll(/@canon\s+(\S+)/g)].map(x => x[1]);
 
-        // A test owes a RULE. Citing an axiom is not a different way of saying the
-        // same thing — it says the canon has no addressable rule for what is being
-        // asserted, which is a gap in the canon rather than in the test. Both the
-        // dedicated tag and an `@canon` that happens to name an axiom mean
-        // that, and only checking the tag let the second form through unnoticed.
-        const axiomCitations = [
+        // A test owes a SPEC. Citing an axiom or a fact is not a different way
+        // of saying the same thing — it says the canon has no addressable spec
+        // for what is being asserted, which is a gap in the canon rather than in
+        // the test. Both the dedicated tag and an `@canon` that happens to name
+        // a given mean that, and only checking the tag let the second form
+        // through unnoticed.
+        const givenCitations = [
           ...axioms,
-          ...specs.filter(s => kindOf(s) === 'axiom-')
+          ...specs.filter(s => {
+            const kind = kindOf(s);
+            return kind !== undefined && !CLAIMS.includes(kind);
+          })
         ];
-        for (const a of enforced ? axiomCitations : []) {
-          findings['missing-rule'].push(
-            `${rel}:${line} "${title}" — cites ${a} (the canon has no addressable rule for this)`
+        for (const a of enforced ? givenCitations : []) {
+          findings['missing-spec'].push(
+            `${rel}:${line} "${title}" — cites ${a} (the canon has no addressable spec for this)`
           );
         }
 
@@ -1202,17 +1207,6 @@ function analyse(write: boolean): Analysis {
           citedTargets.add(key);
           testedTargets.add(key);
           testsPer.set(key, (testsPer.get(key) ?? 0) + 1);
-
-          // A test owes the NARROWEST unit its assertion could contradict,
-          // and where a unit has cases the claim is in one of them. Citing
-          // the parent instead leaves that case reading as uncovered in
-          // `dead`, which is the coverage backlog; citing it as well is a
-          // second statement of what the case's own position already says.
-          if (enforced && holdsCases.has(key)) {
-            findings['not-narrowest'].push(
-              `${rel}:${line} "${title}" — cites ${s}, which has cases`
-            );
-          }
         }
       }
     }
@@ -1320,7 +1314,7 @@ function analyse(write: boolean): Analysis {
 
   // Every tree is swept, read but not judged — the distinction `readSuite`
   // draws. A citation is a true statement about a link wherever it is written,
-  // so a rule pinned solely by an undeclared suite is not dead, and sweeping
+  // so a spec pinned solely by an undeclared suite is not dead, and sweeping
   // only the declared tree would report it as one: the exact misreading the
   // `dead` list exists to prevent.
   for (const root of SOURCES) {
@@ -1335,23 +1329,23 @@ function analyse(write: boolean): Analysis {
   for (const ref of REFERENCES)
     for (const file of allReferences(join(ROOT, ref))) readReference(file);
 
-  // dead — a unit nothing cites. Last, after every suite has been read: a rule
+  // dead — a unit nothing cites. Last, after every suite has been read: a spec
   // kept alive by a test it has not reached yet would otherwise report dead,
   // and the list would read as a canon full of unreachable units.
   for (const [key, unit] of units) {
     if (!citedTargets.has(key))
-      findings.dead.push(`${key} (a ${noun(unit.kind)})`);
+      findings.dead.push(`${key} (${aNoun(unit.kind)})`);
   }
 
-  // stale-site — a case naming a code site that is not there.
+  // stale-site — a unit naming a code site that is not there.
   //
-  // A case opens by naming the place it is about: `` `queue.ts` `drain` ``.
-  // That is a claim about the code, and the only one in these documents a
-  // machine can check against the code itself — whether every place has a case
-  // cannot be, so this is the half that can.
+  // A spec that answers for one place opens by naming it:
+  // `` `queue.ts` `drain` ``. That is a claim about the code, and the only one
+  // in these documents a machine can check against the code itself — whether
+  // every place has a spec cannot be, so this is the half that can.
   //
   // It is the rename it catches. Every citation of a renamed unit is caught by
-  // `rot`, and nothing watched the leads: a case would go on naming a symbol
+  // `rot`, and nothing watched the leads: a spec would go on naming a symbol
   // that had not existed since the rename that moved everything else.
   //
   // The file may be a bare name, `queue.ts`, or a path that ends in it,
@@ -1366,7 +1360,7 @@ function analyse(write: boolean): Analysis {
     modules.push(...allModules(abs));
   }
   for (const [key, unit] of units) {
-    if (unit.kind !== 'case-' || !unit.statement) continue;
+    if (!CLAIMS.includes(unit.kind) || !unit.statement) continue;
     const named = NAMES_A_SITE.exec(unit.statement);
     if (!named) continue;
     const [, file, symbol] = named;
@@ -1391,17 +1385,15 @@ function analyse(write: boolean): Analysis {
 
   // untested — a claim no test pins.
   //
-  // Only a rule and a case: an axiom is reached through the rules beneath it and
-  // a test naming one is already reported. A unit holding cases is pinned by
-  // them, which is what an exception always was and what a rule becomes the
-  // moment it is decomposed. A rule holding rules is a decision, and a decision
-  // is a claim of its own: the rules beneath it each pin one consequence, and
-  // together they need not cover it, so it owes a test of its own.
+  // Only a spec and an exception: an axiom or a fact is reached through the
+  // specs that rely on it, and a test naming one is already reported. A spec
+  // holding nested specs is a claim of its own: each nested spec refines one
+  // part of it, and together they need not cover it, so it owes a test of its
+  // own.
   for (const [key, unit] of units) {
-    if (unit.kind !== 'rule-' && unit.kind !== 'case-') continue;
-    if (holdsCases.has(key)) continue;
+    if (!CLAIMS.includes(unit.kind)) continue;
     if (!testedTargets.has(key)) {
-      findings.untested.push(`${key} (a ${noun(unit.kind)})`);
+      findings.untested.push(`${key} (${aNoun(unit.kind)})`);
     }
   }
 
@@ -1428,7 +1420,7 @@ Usage:
 Options for tree:
   --gaps          only the branches leading to a claim no test pins
   -v, --verbose   what each unit claims, and its further parents, under its stem
-  --suspect [n]   rules with no cases carrying n or more tests (default 4)
+  --suspect [n]   specs with no nested specs carrying n or more tests (default 4)
 
 The protocol is SKILL.md, beside this file. The scope is the "canon" field of
 package.json: documents, suites, sources, references, command.
@@ -1440,15 +1432,15 @@ ${(Object.keys(MEANING) as FindingName[])
 
 Tree connectors:
   ├─ └─   nesting — the ordinary citation
-  ├╌ └╌   a link — a case in a table, which cannot nest
+  ├╌ └╌   a link — a spec in a table, which cannot nest
 
-Stems are shown as prose: @rule A write lands at once is the unit
-rule-a-write-lands-at-once. Lower the words and hyphenate to get the id back.
+Stems are shown as prose: @spec A write lands at once is the unit
+spec-a-write-lands-at-once. Lower the words and hyphenate to get the id back.
 
---suspect is a heuristic and deliberately not part of check. A rule carrying
-many tests and no cases is usually saying several things with no way to say
-so. But not always: a rule can carry several tests of one claim, enumerated
-per input, and cases there would only restate their own rule.
+--suspect is a heuristic and deliberately not part of check. A spec carrying
+many tests and no nested specs is usually saying several things with no way to
+say so. But not always: a spec can carry several tests of one claim,
+enumerated per input, and nested specs there would only restate their parent.
 
 Exit codes:
   0  success

@@ -5,7 +5,7 @@ import { computed, effect, isPending, settled, signal, use } from '../src/index'
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
 
 /**
- * @canon rule-settled-waits-until-every-input-is-fresh
+ * @canon spec-settled-waits-until-every-input-is-fresh
  */
 test('settled waits for ALL inputs, then produces the combined frame atomically', async () => {
   let ra!: (v: number) => void
@@ -32,7 +32,7 @@ test('settled waits for ALL inputs, then produces the combined frame atomically'
 })
 
 /**
- * @canon rule-settled-waits-until-every-input-is-fresh
+ * @canon spec-settled-waits-until-every-input-is-fresh
  */
 test('a consumer never observes a partial frame', async () => {
   const observed: string[] = []
@@ -63,7 +63,7 @@ test('a consumer never observes a partial frame', async () => {
 })
 
 /**
- * @canon rule-settled-does-not-wait-on-an-input-that-has-settled
+ * @canon spec-settled-does-not-wait-on-an-input-that-has-settled
  */
 test('an already-settled raw promise input converges (no re-suspend loop)', async () => {
   // Regression: settled used to re-add an already-settled promise to the wait set
@@ -81,7 +81,7 @@ test('an already-settled raw promise input converges (no re-suspend loop)', asyn
 })
 
 /**
- * @canon rule-settled-throws-a-rejected-input
+ * @canon spec-settled-throws-a-rejected-input
  */
 test('settled throws a rejected input instead of silently yielding undefined', async () => {
   const [s] = signal(Promise.reject(new Error('nope')) as Promise<number>)
@@ -94,7 +94,7 @@ test('settled throws a rejected input instead of silently yielding undefined', a
 })
 
 /**
- * @canon rule-settled-does-not-wait-on-an-input-that-has-settled
+ * @canon spec-settled-does-not-wait-on-an-input-that-has-settled
  */
 test('settled resolves immediately when every input is already settled', async () => {
   const A = computed(async () => 2)
@@ -109,7 +109,7 @@ test('settled resolves immediately when every input is already settled', async (
 })
 
 /**
- * @canon rule-settled-waits-again-when-an-input-refetches
+ * @canon spec-settled-waits-again-when-an-input-refetches
  */
 test('settled re-runs and re-coordinates when an input refetches', async () => {
   let ra!: (v: number) => void

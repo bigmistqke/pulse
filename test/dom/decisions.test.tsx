@@ -33,7 +33,7 @@ function mount(view: () => unknown): HTMLElement {
 }
 
 /**
- * @canon rule-a-component-runs-once-and-reactivity-lives-in-its-holes
+ * @canon spec-a-component-runs-once-and-reactivity-lives-in-its-holes
  */
 test('a component body runs once while the holes it returned follow every change', () => {
   setScheduler(syncScheduler(flush))
@@ -58,7 +58,7 @@ test('a component body runs once while the holes it returned follow every change
 })
 
 /**
- * @canon rule-jsx-builds-real-dom-directly
+ * @canon spec-jsx-builds-real-dom-directly
  */
 test('an update writes to its own nodes and leaves a node added from outside in place', () => {
   setScheduler(syncScheduler(flush))
@@ -77,7 +77,7 @@ test('an update writes to its own nodes and leaves a node added from outside in 
 })
 
 /**
- * @canon rule-a-boundary-wraps-what-it-coordinates
+ * @canon spec-a-boundary-wraps-what-it-coordinates
  */
 test('each boundary coordinates only the region it wraps', async () => {
   const first = Promise.withResolvers<string>()
@@ -110,7 +110,7 @@ test('each boundary coordinates only the region it wraps', async () => {
 })
 
 /**
- * @canon rule-control-flow-bakes-in-no-async-policy
+ * @canon spec-control-flow-bakes-in-no-async-policy
  */
 test('Show reads a pending condition as falsy and leaves the boundary around it alone', async () => {
   const pending = new Promise<boolean>(() => {})
@@ -130,7 +130,7 @@ test('Show reads a pending condition as falsy and leaves the boundary around it 
 })
 
 /**
- * @canon rule-the-read-verb-decides-what-renders-and-what-waits
+ * @canon spec-the-read-verb-decides-what-renders-and-what-waits
  */
 test('three bindings of one source in one boundary each render and wait as their verb says', async () => {
   setScheduler(syncScheduler(flush))
@@ -162,7 +162,7 @@ test('three bindings of one source in one boundary each render and wait as their
 })
 
 /**
- * @canon rule-a-prop-says-how-it-reaches-the-dom
+ * @canon spec-a-prop-says-how-it-reaches-the-dom
  */
 test('the same name reaches the attribute or the property by its prefix, never by guessing', () => {
   setScheduler(syncScheduler(flush))
@@ -185,7 +185,7 @@ test('the same name reaches the attribute or the property by its prefix, never b
 })
 
 /**
- * @canon rule-a-missing-value-sets-nothing
+ * @canon spec-a-missing-value-sets-nothing
  */
 test('null, undefined and false leave nothing in the DOM, wherever they appear', () => {
   setScheduler(syncScheduler(flush))

@@ -17,7 +17,7 @@ afterEach(() => {
 })
 
 /**
- * @canon rule-show-renders-its-children-when-truthy-and-its-fallback-otherwise
+ * @canon spec-show-renders-its-children-when-truthy-and-its-fallback-otherwise
  */
 test('truthy when mounts function child with narrowed value', () => {
   const target = document.createElement('section')
@@ -32,7 +32,7 @@ test('truthy when mounts function child with narrowed value', () => {
 })
 
 /**
- * @canon rule-show-renders-its-children-when-truthy-and-its-fallback-otherwise
+ * @canon spec-show-renders-its-children-when-truthy-and-its-fallback-otherwise
  */
 test('falsy when mounts fallback', () => {
   const target = document.createElement('section')
@@ -51,7 +51,7 @@ test('falsy when mounts fallback', () => {
 })
 
 /**
- * @canon rule-a-pending-condition-reads-as-falsy
+ * @canon spec-a-pending-condition-reads-as-falsy
  */
 test('pending Promise<T> when → fallback', () => {
   const target = document.createElement('section')
@@ -71,7 +71,7 @@ test('pending Promise<T> when → fallback', () => {
 })
 
 /**
- * @canon case-show-rebuilds-only-when-truthiness-flips
+ * @canon spec-show-rebuilds-only-when-truthiness-flips
  */
 test('truthy → truthy with different value preserves subtree (children not re-called)', () => {
   const target = document.createElement('section')
@@ -93,7 +93,7 @@ test('truthy → truthy with different value preserves subtree (children not re-
 })
 
 /**
- * @canon case-show-rebuilds-only-when-truthiness-flips
+ * @canon spec-show-rebuilds-only-when-truthiness-flips
  */
 test('truthy → falsy disposes branch sub-owner', () => {
   const target = document.createElement('section')
@@ -118,7 +118,7 @@ test('truthy → falsy disposes branch sub-owner', () => {
 })
 
 /**
- * @canon case-show-rebuilds-only-when-truthiness-flips
+ * @canon spec-show-rebuilds-only-when-truthiness-flips
  */
 test('falsy → truthy mounts fresh children invocation', () => {
   const target = document.createElement('section')
@@ -142,7 +142,7 @@ test('falsy → truthy mounts fresh children invocation', () => {
 })
 
 /**
- * @canon case-show-rebuilds-only-when-truthiness-flips
+ * @canon spec-show-rebuilds-only-when-truthiness-flips
  */
 test('disposing surrounding owner disposes active branch', () => {
   const target = document.createElement('section')
@@ -166,7 +166,7 @@ test('disposing surrounding owner disposes active branch', () => {
 })
 
 /**
- * @canon rule-show-renders-its-children-when-truthy-and-its-fallback-otherwise
+ * @canon spec-show-renders-its-children-when-truthy-and-its-fallback-otherwise
  */
 test('static (non-function) child renders when truthy', () => {
   const target = document.createElement('section')

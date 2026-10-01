@@ -14,7 +14,7 @@ import {
 afterEach(() => setScheduler(microtaskScheduler(flush)))
 
 /**
- * @canon rule-an-owner-disposes-its-children-before-its-own-cleanups
+ * @canon spec-an-owner-disposes-its-children-before-its-own-cleanups
  */
 test('disposing an owner disposes its children, newest first, before its own cleanups', () => {
   setScheduler(syncScheduler(flush))
@@ -34,7 +34,7 @@ test('disposing an owner disposes its children, newest first, before its own cle
 })
 
 /**
- * @canon rule-a-bare-effect-or-computed-without-an-owner-does-not-warn
+ * @canon spec-a-bare-effect-or-computed-without-an-owner-does-not-warn
  */
 test('an effect and a computed created outside every owner do not warn', () => {
   const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
@@ -49,7 +49,7 @@ test('an effect and a computed created outside every owner do not warn', () => {
 })
 
 /**
- * @canon rule-oncleanup-outside-every-owner-throws
+ * @canon spec-oncleanup-outside-every-owner-throws
  */
 test('onCleanup inside an owner still registers, and returns the callback it was given', () => {
   const callback = () => {}

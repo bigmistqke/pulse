@@ -12,7 +12,7 @@ const ticks = async (n: number) => {
 }
 
 /**
- * @canon case-a-stage-node-resumes-its-paused-generator
+ * @canon spec-a-stage-node-resumes-its-paused-generator
  */
 test('a generator stage that builds its promise inside the body converges', async () => {
   let promisesCreated = 0
@@ -34,7 +34,7 @@ test('a generator stage that builds its promise inside the body converges', asyn
 })
 
 /**
- * @canon case-a-stage-node-resumes-its-paused-generator
+ * @canon spec-a-stage-node-resumes-its-paused-generator
  */
 test('the code before a pause runs once, not once per settle', async () => {
   let before = 0
@@ -54,7 +54,7 @@ test('the code before a pause runs once, not once per settle', async () => {
 })
 
 /**
- * @canon case-a-stage-node-resumes-its-paused-generator
+ * @canon spec-a-stage-node-resumes-its-paused-generator
  */
 test('a generator with two inline pauses converges and builds each promise once', async () => {
   let firstCreated = 0
@@ -85,7 +85,7 @@ test('a generator with two inline pauses converges and builds each promise once'
 })
 
 /**
- * @canon case-a-resumed-stage-replays-its-recorded-dependencies
+ * @canon spec-a-resumed-stage-replays-its-recorded-dependencies
  */
 test('a signal read before a pause stays a dependency across a resume', async () => {
   // The error this guards against: resuming runs only the code after the
@@ -113,7 +113,7 @@ test('a signal read before a pause stays a dependency across a resume', async ()
 })
 
 /**
- * @canon case-a-stage-node-discards-a-generator-whose-input-changed
+ * @canon spec-a-stage-node-discards-a-generator-whose-input-changed
  */
 test('a dependency changing mid-pause discards the generator and restarts', async () => {
   // The branch that makes retention safe. Without it a stale partial
@@ -154,7 +154,7 @@ test('a dependency changing mid-pause discards the generator and restarts', asyn
 })
 
 /**
- * @canon rule-a-rejected-yield-is-thrown-into-the-generator
+ * @canon spec-a-rejected-yield-is-thrown-into-the-generator
  */
 test('a rejected inline promise reaches the generator try/catch', async () => {
   const c = computed(function* () {
@@ -177,7 +177,7 @@ test('a rejected inline promise reaches the generator try/catch', async () => {
 })
 
 /**
- * @canon rule-a-discarded-generator-is-closed-with-return
+ * @canon spec-a-discarded-generator-is-closed-with-return
  */
 test('a discarded generator runs its finally block', async () => {
   const [a, setA] = signal(1)
@@ -209,7 +209,7 @@ test('a discarded generator runs its finally block', async () => {
 })
 
 /**
- * @canon rule-a-discarded-generator-is-closed-with-return
+ * @canon spec-a-discarded-generator-is-closed-with-return
  */
 test('a finally block reading a signal during a discard adds no dependency', async () => {
   // Scoped deliberately to the discard path. `untrack` wraps `gen.return()`,
@@ -249,7 +249,7 @@ test('a finally block reading a signal during a discard adds no dependency', asy
 })
 
 /**
- * @canon rule-a-reset-discards-a-paused-generator
+ * @canon spec-a-reset-discards-a-paused-generator
  */
 test('resetting a parked error discards a generator that has since re-paused', async () => {
   // Covers the `discardGen()` call in the error entry's `reset`. Reaching a
@@ -293,7 +293,7 @@ test('resetting a parked error discards a generator that has since re-paused', a
 })
 
 /**
- * @canon rule-disposing-its-owner-discards-a-paused-generator
+ * @canon spec-disposing-its-owner-discards-a-paused-generator
  */
 test('disposing the owner runs a paused generator finally block', async () => {
   let closed = 0
@@ -321,7 +321,7 @@ test('disposing the owner runs a paused generator finally block', async () => {
 })
 
 /**
- * @canon rule-repeated-use-of-one-pending-promise-adds-no-listener
+ * @canon spec-repeated-use-of-one-pending-promise-adds-no-listener
  */
 test('a generator stage repeatedly hitting use() on the same still-pending promise attaches no extra settle listener', async () => {
   // Regression guard for an interaction between two fixes: discarding a
@@ -379,7 +379,7 @@ test('a generator stage repeatedly hitting use() on the same still-pending promi
 })
 
 /**
- * @canon rule-use-inside-a-generator-stage-restarts-the-stage
+ * @canon spec-use-inside-a-generator-stage-restarts-the-stage
  */
 test('use(promise) inside a generator stage resolves and the stage publishes the derived result', async () => {
   // use() throws NotReadyYet directly out of gen.next() (not via a yield),
@@ -400,7 +400,7 @@ test('use(promise) inside a generator stage resolves and the stage publishes the
 })
 
 /**
- * @canon case-a-resumed-stage-replays-its-recorded-dependencies
+ * @canon spec-a-resumed-stage-replays-its-recorded-dependencies
  */
 test('use(...) then yield* from(...) inside a generator stage converges', async () => {
   const [a, setA] = signal(1)
@@ -422,7 +422,7 @@ test('use(...) then yield* from(...) inside a generator stage converges', async 
 })
 
 /**
- * @canon case-a-stage-node-discards-a-generator-whose-input-changed
+ * @canon spec-a-stage-node-discards-a-generator-whose-input-changed
  */
 test('a discarded generator does not leave its abandoned promise able to re-run the stage', async () => {
   // The reproduction: restart into a synchronously-throwing generator, then
@@ -460,7 +460,7 @@ test('a discarded generator does not leave its abandoned promise able to re-run 
 })
 
 /**
- * @canon rule-a-returned-promise-is-the-result-not-a-pause
+ * @canon spec-a-returned-promise-is-the-result-not-a-pause
  */
 test('a generator stage that returns a pending promise resolves to its value', async () => {
   const c = computed(function* () {
@@ -474,7 +474,7 @@ test('a generator stage that returns a pending promise resolves to its value', a
 })
 
 /**
- * @canon rule-a-returned-promise-is-the-result-not-a-pause
+ * @canon spec-a-returned-promise-is-the-result-not-a-pause
  */
 test('a generator stage that pauses and then returns a pending promise resolves to its value', async () => {
   // The same ending reached from a resumed generator rather than a fresh one:
@@ -495,7 +495,7 @@ test('a generator stage that pauses and then returns a pending promise resolves 
 })
 
 /**
- * @canon rule-a-stage-that-returned-a-promise-stays-reactive
+ * @canon spec-a-stage-that-returned-a-promise-stays-reactive
  */
 test('a generator stage that pauses, resumes, then returns a promise stays reactive', async () => {
   // The reactive guard for the resumed path. The test below covers the same
@@ -526,7 +526,7 @@ test('a generator stage that pauses, resumes, then returns a promise stays react
 })
 
 /**
- * @canon rule-a-returned-promise-is-the-result-not-a-pause
+ * @canon spec-a-returned-promise-is-the-result-not-a-pause
  */
 test('a generator stage whose returned promise rejects parks the error', async () => {
   // The rejected half of the same decision. A generator that has already
@@ -547,7 +547,7 @@ test('a generator stage whose returned promise rejects parks the error', async (
 })
 
 /**
- * @canon rule-a-stage-that-returned-a-promise-stays-reactive
+ * @canon spec-a-stage-that-returned-a-promise-stays-reactive
  */
 test('a generator stage returning a pending promise stays reactive to its dependencies', async () => {
   // Ending the finished generator must also clear the retained-generator field.

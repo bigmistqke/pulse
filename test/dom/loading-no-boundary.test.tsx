@@ -30,7 +30,7 @@ const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
  */
 
 /**
- * @canon rule-use-suspends-only-the-binding-that-reads-it
+ * @canon spec-use-suspends-only-the-binding-that-reads-it
  */
 test('use() with no <Loading>: only the suspended binding is empty, and it recovers', async () => {
   const target = document.createElement('section')
@@ -55,7 +55,7 @@ test('use() with no <Loading>: only the suspended binding is empty, and it recov
 })
 
 /**
- * @canon rule-suspension-is-not-a-failure
+ * @canon spec-suspension-is-not-a-failure
  */
 test('a pending use() is NOT reported to an error boundary', async () => {
   const target = document.createElement('section')
@@ -87,7 +87,7 @@ test('a pending use() is NOT reported to an error boundary', async () => {
  * The boundary belongs in the tree it is guarding.
  */
 /**
- * @canon rule-a-catch-error-handler-is-called-for-each-throw-under-it
+ * @canon spec-a-catch-error-handler-is-called-for-each-throw-under-it
  */
 test('an error boundary inside render catches a real error', async () => {
   const target = document.createElement('section')
@@ -123,7 +123,7 @@ test('an error boundary inside render catches a real error', async () => {
  * The error is graph state. It parks whether or not anyone is listening.
  */
 /**
- * @canon rule-error-returns-the-failure-of-a-node-or-anything-upstream
+ * @canon spec-error-returns-the-failure-of-a-node-or-anything-upstream
  */
 test('a rejected computed parks its error even when the consumer has no boundary', async () => {
   const target = document.createElement('section')

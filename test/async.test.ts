@@ -10,7 +10,7 @@ import { signal } from '../src/signal'
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
 
 /**
- * @canon rule-a-signals-pending-state-is-the-state-of-the-promise-it-holds
+ * @canon spec-a-signals-pending-state-is-the-state-of-the-promise-it-holds
  */
 test('isPending is false for a signal holding a plain value', () => {
   const [s] = signal(0)
@@ -18,7 +18,7 @@ test('isPending is false for a signal holding a plain value', () => {
 })
 
 /**
- * @canon rule-a-signals-pending-state-is-the-state-of-the-promise-it-holds
+ * @canon spec-a-signals-pending-state-is-the-state-of-the-promise-it-holds
  */
 test('isPending is true for a signal holding a pending promise', () => {
   const [s] = signal(new Promise<number>(() => {}))
@@ -26,7 +26,7 @@ test('isPending is true for a signal holding a pending promise', () => {
 })
 
 /**
- * @canon rule-peek-returns-undefined-before-anything-resolved
+ * @canon spec-peek-returns-undefined-before-anything-resolved
  */
 test('peek is undefined before the first resolution', () => {
   const [s] = signal(new Promise<number>(() => {})) // never resolves
@@ -34,7 +34,7 @@ test('peek is undefined before the first resolution', () => {
 })
 
 /**
- * @canon rule-peek-returns-the-last-resolved-value
+ * @canon spec-peek-returns-the-last-resolved-value
  */
 test('peek returns the resolved value after the promise settles', async () => {
   const [s] = signal(Promise.resolve(1))
@@ -44,7 +44,7 @@ test('peek returns the resolved value after the promise settles', async () => {
 })
 
 /**
- * @canon rule-peek-keeps-the-last-resolved-value-while-a-newer-promise-is-pending
+ * @canon spec-peek-keeps-the-last-resolved-value-while-a-newer-promise-is-pending
  */
 test('peek keeps the last resolved value while a newer promise is pending', async () => {
   const [s, setS] = signal<Promise<number>>(Promise.resolve(1))
@@ -61,7 +61,7 @@ test('peek keeps the last resolved value while a newer promise is pending', asyn
 })
 
 /**
- * @canon rule-peek-returns-a-given-fallback-until-a-value-resolves
+ * @canon spec-peek-returns-a-given-fallback-until-a-value-resolves
  */
 test('peek(s, fallback) returns the fallback before the first resolution', () => {
   const [s] = signal(new Promise<number[]>(() => {})) // never resolves
@@ -69,7 +69,7 @@ test('peek(s, fallback) returns the fallback before the first resolution', () =>
 })
 
 /**
- * @canon rule-peek-returns-a-given-fallback-until-a-value-resolves
+ * @canon spec-peek-returns-a-given-fallback-until-a-value-resolves
  */
 test('peek(s, fallback) reports the real value once resolved, not the fallback', async () => {
   const [s] = signal(Promise.resolve([1, 2]))
@@ -79,7 +79,7 @@ test('peek(s, fallback) reports the real value once resolved, not the fallback',
 })
 
 /**
- * @canon rule-peek-returns-a-given-fallback-until-a-value-resolves
+ * @canon spec-peek-returns-a-given-fallback-until-a-value-resolves
  */
 test('peek(s, fallback) falls back again after a rejection with nothing seeded', () => {
   const [s] = signal(Promise.reject(new Error('nope')))
@@ -87,7 +87,7 @@ test('peek(s, fallback) falls back again after a rejection with nothing seeded',
 })
 
 /**
- * @canon rule-a-signal-stores-a-promise-as-it-is
+ * @canon spec-a-signal-stores-a-promise-as-it-is
  */
 test('peek is reactive — updates when the signal is written to a new value', async () => {
   // peek re-runs the effect when the signal *value* changes (a write). It does
@@ -108,7 +108,7 @@ test('peek is reactive — updates when the signal is written to a new value', a
 })
 
 /**
- * @canon case-track-seeds-the-stale-prior
+ * @canon spec-track-seeds-the-stale-prior
  */
 test('track seeds the stale prior on a pending promise', () => {
   const p = new Promise<number>(() => {}) // never settles
@@ -117,7 +117,7 @@ test('track seeds the stale prior on a pending promise', () => {
 })
 
 /**
- * @canon case-a-published-result-reads-fulfilled-at-once
+ * @canon spec-a-published-result-reads-fulfilled-at-once
  */
 test('resolvedPromise reads as fulfilled synchronously', () => {
   const p = resolvedPromise(42)
@@ -126,7 +126,7 @@ test('resolvedPromise reads as fulfilled synchronously', () => {
 })
 
 /**
- * @canon rule-use-returns-a-value-that-is-not-a-promise-unchanged
+ * @canon spec-use-returns-a-value-that-is-not-a-promise-unchanged
  */
 test('use returns a plain (non-promise) value unchanged', () => {
   expect(use(5)).toBe(5)
@@ -134,42 +134,42 @@ test('use returns a plain (non-promise) value unchanged', () => {
 })
 
 /**
- * @canon rule-use-returns-a-value-that-is-not-a-promise-unchanged
+ * @canon spec-use-returns-a-value-that-is-not-a-promise-unchanged
  */
 test('use(0) returns 0 (falsy value, not pending)', () => {
   expect(use(0)).toBe(0)
 })
 
 /**
- * @canon rule-use-returns-a-value-that-is-not-a-promise-unchanged
+ * @canon spec-use-returns-a-value-that-is-not-a-promise-unchanged
  */
 test('use(null) returns null', () => {
   expect(use(null)).toBe(null)
 })
 
 /**
- * @canon rule-use-returns-a-value-that-is-not-a-promise-unchanged
+ * @canon spec-use-returns-a-value-that-is-not-a-promise-unchanged
  */
 test('use(undefined) returns undefined', () => {
   expect(use(undefined)).toBe(undefined)
 })
 
 /**
- * @canon rule-use-returns-a-value-that-is-not-a-promise-unchanged
+ * @canon spec-use-returns-a-value-that-is-not-a-promise-unchanged
  */
 test('use(false) returns false', () => {
   expect(use(false)).toBe(false)
 })
 
 /**
- * @canon rule-use-returns-a-value-that-is-not-a-promise-unchanged
+ * @canon spec-use-returns-a-value-that-is-not-a-promise-unchanged
  */
 test('use("") returns empty string', () => {
   expect(use('')).toBe('')
 })
 
 /**
- * @canon rule-use-throws-not-ready-yet-carrying-a-pending-promise
+ * @canon spec-use-throws-not-ready-yet-carrying-a-pending-promise
  */
 test('use throws NotReadyYet for a pending promise', () => {
   const pending = new Promise<number>(() => {})
@@ -177,7 +177,7 @@ test('use throws NotReadyYet for a pending promise', () => {
 })
 
 /**
- * @canon rule-use-throws-not-ready-yet-carrying-a-pending-promise
+ * @canon spec-use-throws-not-ready-yet-carrying-a-pending-promise
  */
 test('the thrown NotReadyYet carries the promise', () => {
   const pending = new Promise<number>(() => {})
@@ -191,7 +191,7 @@ test('the thrown NotReadyYet carries the promise', () => {
 })
 
 /**
- * @canon rule-use-treats-a-promise-it-has-not-seen-settle-as-pending
+ * @canon spec-use-treats-a-promise-it-has-not-seen-settle-as-pending
  */
 test('use resolves a promise synchronously once it has settled', async () => {
   const p = Promise.resolve(7)
@@ -201,7 +201,7 @@ test('use resolves a promise synchronously once it has settled', async () => {
 })
 
 /**
- * @canon rule-use-re-throws-a-settled-promises-rejection
+ * @canon spec-use-re-throws-a-settled-promises-rejection
  */
 test('use re-throws the rejection reason of a settled rejected promise', async () => {
   const reason = new Error('boom')
@@ -212,7 +212,7 @@ test('use re-throws the rejection reason of a settled rejected promise', async (
 })
 
 /**
- * @canon rule-from-yields-what-it-is-given
+ * @canon spec-from-yields-what-it-is-given
  */
 test('from of a plain value yields it; yield* expression resolves to it', () => {
   // Drive `from(42)` manually (no driver yet here — we drive by hand for the unit test).
@@ -226,7 +226,7 @@ test('from of a plain value yields it; yield* expression resolves to it', () => 
 })
 
 /**
- * @canon rule-from-yields-what-it-is-given
+ * @canon spec-from-yields-what-it-is-given
  */
 test('from of a signal calls its accessor (tracking happens via the call)', () => {
   const [s] = signal(7)
@@ -238,7 +238,7 @@ test('from of a signal calls its accessor (tracking happens via the call)', () =
 })
 
 /**
- * @canon rule-from-yields-what-it-is-given
+ * @canon spec-from-yields-what-it-is-given
  */
 test('from of a promise yields the promise itself', () => {
   const p = Promise.resolve(1)
@@ -248,7 +248,7 @@ test('from of a promise yields the promise itself', () => {
 })
 
 /**
- * @canon rule-use-of-an-accessor-reads-what-the-accessor-returns
+ * @canon spec-use-of-an-accessor-reads-what-the-accessor-returns
  */
 test('use() accepts an accessor (signal getter)', () => {
   const [count] = signal(42)
@@ -256,7 +256,7 @@ test('use() accepts an accessor (signal getter)', () => {
 })
 
 /**
- * @canon rule-use-of-an-accessor-reads-what-the-accessor-returns
+ * @canon spec-use-of-an-accessor-reads-what-the-accessor-returns
  */
 test('use() accessor form unwraps pending promises (throws NotReadyYet)', () => {
   const [s] = signal<Promise<number>>(new Promise(() => {}))
@@ -267,7 +267,7 @@ test('use() accessor form unwraps pending promises (throws NotReadyYet)', () => 
 // Plan B: use(accessor) now throws NotReadyYet when isPending(accessor) is true.
 // For the "give me stale" semantics, use `peek(c)` instead.
 /**
- * @canon rule-use-of-an-accessor-throws-while-it-is-pending
+ * @canon spec-use-of-an-accessor-throws-while-it-is-pending
  */
 test('use(accessor) throws NotReadyYet during SWR refetch (Plan B behavior; use peek() for stale)', async () => {
   const [id, setId] = signal(1)
@@ -295,7 +295,7 @@ test('use(accessor) throws NotReadyYet during SWR refetch (Plan B behavior; use 
 
 describe('use(accessor) — Plan B: throws on isPending', () => {
   /**
-   * @canon rule-use-of-an-accessor-throws-while-it-is-pending
+   * @canon spec-use-of-an-accessor-throws-while-it-is-pending
    */
   test('use(swrComputed) throws NotReadyYet during refetch, even though accessor returns stale', async () => {
     const [page, setPage] = signal(1)
@@ -337,7 +337,7 @@ describe('use(accessor) — Plan B: throws on isPending', () => {
 // unchanged — the tests above stay correct and untouched.
 describe('use.latest(accessor) — throws only before the first value, tolerant after', () => {
   /**
-   * @canon rule-use-latest-throws-only-before-the-first-value
+   * @canon spec-use-latest-throws-only-before-the-first-value
    */
   test('throws NotReadyYet while nothing has ever resolved, exactly like use()', () => {
     const [s] = signal<Promise<number>>(new Promise(() => {})) // never resolves
@@ -345,7 +345,7 @@ describe('use.latest(accessor) — throws only before the first value, tolerant 
   })
 
   /**
-   * @canon rule-use-latest-throws-only-before-the-first-value
+   * @canon spec-use-latest-throws-only-before-the-first-value
    */
   test('the thrown NotReadyYet carries the in-flight promise, exactly like use()', async () => {
     const [s] = signal<Promise<number>>(new Promise(() => {}))
@@ -361,7 +361,7 @@ describe('use.latest(accessor) — throws only before the first value, tolerant 
   })
 
   /**
-   * @canon rule-use-latest-returns-the-last-resolved-value-during-a-refetch
+   * @canon spec-use-latest-returns-the-last-resolved-value-during-a-refetch
    */
   test('returns the resolved value once settled, same as use()', async () => {
     const [s] = signal(Promise.resolve(10))
@@ -370,7 +370,7 @@ describe('use.latest(accessor) — throws only before the first value, tolerant 
   })
 
   /**
-   * @canon rule-use-latest-returns-the-last-resolved-value-during-a-refetch
+   * @canon spec-use-latest-returns-the-last-resolved-value-during-a-refetch
    */
   test('does NOT throw during an SWR refetch — returns the stale value instead of use()\'s throw', async () => {
     const [id, setId] = signal(1)
@@ -395,7 +395,7 @@ describe('use.latest(accessor) — throws only before the first value, tolerant 
   })
 
   /**
-   * @canon rule-use-latest-returns-the-last-resolved-value-during-a-refetch
+   * @canon spec-use-latest-returns-the-last-resolved-value-during-a-refetch
    */
   test('use(swrComputed) throwing during refetch and use.latest(swrComputed) returning stale are both true at once', async () => {
     const [page, setPage] = signal(1)
@@ -420,7 +420,7 @@ describe('use.latest(accessor) — throws only before the first value, tolerant 
 
 describe('from — post-Plan-A (no brand suspension)', () => {
   /**
-   * @canon rule-from-yields-the-stale-value-during-a-refetch
+   * @canon spec-from-yields-the-stale-value-during-a-refetch
    */
   test('yield* from on an SWR-refetching computed yields the stale value, NOT brand.promise', async () => {
     const [page, setPage] = signal(1)

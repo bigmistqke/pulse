@@ -8,7 +8,7 @@ import { peek } from '../src/async'
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
 
 /**
- * @canon rule-a-signal-reads-back-its-last-write
+ * @canon spec-a-signal-reads-back-its-last-write
  */
 test('signal holds an initial value', () => {
   const [count] = signal(0)
@@ -16,7 +16,7 @@ test('signal holds an initial value', () => {
 })
 
 /**
- * @canon rule-a-signal-reads-back-its-last-write
+ * @canon spec-a-signal-reads-back-its-last-write
  */
 test('setter updates the value, accessor reflects it', () => {
   const [count, setCount] = signal(0)
@@ -25,7 +25,7 @@ test('setter updates the value, accessor reflects it', () => {
 })
 
 /**
- * @canon rule-a-signal-reads-back-its-last-write
+ * @canon spec-a-signal-reads-back-its-last-write
  */
 test('signal works with non-number values', () => {
   const [name, setName] = signal('alice')
@@ -35,7 +35,7 @@ test('signal works with non-number values', () => {
 })
 
 /**
- * @canon rule-an-update-function-on-a-signal-receives-its-current-value
+ * @canon spec-an-update-function-on-a-signal-receives-its-current-value
  */
 test('setter supports updater function', () => {
   const [count, setCount] = signal(0)
@@ -46,7 +46,7 @@ test('setter supports updater function', () => {
 })
 
 /**
- * @canon rule-a-computed-has-no-setter
+ * @canon spec-a-computed-has-no-setter
  */
 test('computed accessor is not writable (type-level)', () => {
   const c = computed(() => 1)
@@ -55,7 +55,7 @@ test('computed accessor is not writable (type-level)', () => {
 })
 
 /**
- * @canon rule-a-signal-stores-a-promise-as-it-is
+ * @canon spec-a-signal-stores-a-promise-as-it-is
  */
 test('a signal stores a Promise value as-is (no auto-resolve)', async () => {
   // Write-back was removed: signal stores exactly what you put in it. For
@@ -68,7 +68,7 @@ test('a signal stores a Promise value as-is (no auto-resolve)', async () => {
 })
 
 /**
- * @canon rule-a-signal-stores-a-promise-as-it-is
+ * @canon spec-a-signal-stores-a-promise-as-it-is
  */
 test('a signal written a promise reads back as the plain promise it was given', async () => {
   const [s, setS] = signal<number | Promise<number>>(0)
@@ -82,7 +82,7 @@ test('a signal written a promise reads back as the plain promise it was given', 
 })
 
 /**
- * @canon rule-an-async-node-keeps-its-last-value-while-it-refetches
+ * @canon spec-an-async-node-keeps-its-last-value-while-it-refetches
  */
 test('SWR: while a refetch is pending the prior resolved value stays available via peek', async () => {
   const [s, setS] = signal<number | Promise<number>>(0)
@@ -114,28 +114,28 @@ async function runsAfterWrite<T>(initial: T, next: T): Promise<number> {
 }
 
 /**
- * @canon case-an-equal-committed-signal-write-is-dropped
+ * @canon spec-an-equal-committed-signal-write-is-dropped
  */
 test('writing the same number again re-runs nothing', async () => {
   expect(await runsAfterWrite(1, 1)).toBe(0)
 })
 
 /**
- * @canon case-an-equal-committed-signal-write-is-dropped
+ * @canon spec-an-equal-committed-signal-write-is-dropped
  */
 test('writing NaN over NaN re-runs nothing', async () => {
   expect(await runsAfterWrite(Number.NaN, Number.NaN)).toBe(0)
 })
 
 /**
- * @canon case-an-equal-committed-signal-write-is-dropped
+ * @canon spec-an-equal-committed-signal-write-is-dropped
  */
 test('writing 0 over -0 re-runs nothing', async () => {
   expect(await runsAfterWrite(-0, 0)).toBe(0)
 })
 
 /**
- * @canon case-an-equal-committed-signal-write-is-dropped
+ * @canon spec-an-equal-committed-signal-write-is-dropped
  */
 test('writing the same object again re-runs nothing, and a different object re-runs once', async () => {
   const same = { a: 1 }
@@ -144,7 +144,7 @@ test('writing the same object again re-runs nothing, and a different object re-r
 })
 
 /**
- * @canon case-an-equal-speculative-write-dirties-nothing
+ * @canon spec-an-equal-speculative-write-dirties-nothing
  */
 test('inside an action, writing the value the action already reads recomputes nothing', async () => {
   const { action } = await import('../src/index')

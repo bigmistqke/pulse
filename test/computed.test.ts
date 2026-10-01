@@ -11,7 +11,7 @@ import { createRoot, catchError } from '../src/owner'
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
 
 /**
- * @canon rule-a-read-is-current-without-a-flush
+ * @canon spec-a-read-is-current-without-a-flush
  */
 test('computed derives an initial value from a signal', () => {
   const [count] = signal(2)
@@ -20,7 +20,7 @@ test('computed derives an initial value from a signal', () => {
 })
 
 /**
- * @canon rule-a-read-is-current-without-a-flush
+ * @canon spec-a-read-is-current-without-a-flush
  */
 test('computed is pull-on-read correct after a write', () => {
   const [count, setCount] = signal(2)
@@ -30,7 +30,7 @@ test('computed is pull-on-read correct after a write', () => {
 })
 
 /**
- * @canon rule-a-computed-is-a-pipeline-of-stages
+ * @canon spec-a-computed-is-a-pipeline-of-stages
  */
 test('computed threads a value through a multi-stage pipeline', () => {
   const [n] = signal(3)
@@ -43,7 +43,7 @@ test('computed threads a value through a multi-stage pipeline', () => {
 })
 
 /**
- * @canon rule-a-computed-is-a-pipeline-of-stages
+ * @canon spec-a-computed-is-a-pipeline-of-stages
  */
 test('multi-stage pipeline recomputes on dependency change', () => {
   const [n, setN] = signal(3)
@@ -57,7 +57,7 @@ test('multi-stage pipeline recomputes on dependency change', () => {
 })
 
 /**
- * @canon rule-a-computed-is-a-pipeline-of-stages
+ * @canon spec-a-computed-is-a-pipeline-of-stages
  */
 test('a stage in the middle of the pipeline may also read signals', () => {
   const [base] = signal(10)
@@ -72,7 +72,7 @@ test('a stage in the middle of the pipeline may also read signals', () => {
 })
 
 /**
- * @canon rule-a-pipeline-reads-as-a-promise-while-its-value-came-through-async
+ * @canon spec-a-pipeline-reads-as-a-promise-while-its-value-came-through-async
  */
 test('a pipeline with an async stage reads as a promise before and after it settles', async () => {
   let release!: (v: number) => void
@@ -95,7 +95,7 @@ test('a pipeline with an async stage reads as a promise before and after it sett
 })
 
 /**
- * @canon rule-a-pipeline-reads-as-a-promise-while-its-value-came-through-async
+ * @canon spec-a-pipeline-reads-as-a-promise-while-its-value-came-through-async
  */
 test('a sync final stage fed by an async upstream reads as a Promise, not bare', async () => {
   const c = computed(
@@ -113,7 +113,7 @@ test('a sync final stage fed by an async upstream reads as a Promise, not bare',
 })
 
 /**
- * @canon rule-a-pipeline-reads-as-a-promise-while-its-value-came-through-async
+ * @canon spec-a-pipeline-reads-as-a-promise-while-its-value-came-through-async
  */
 test('a conditionally-async stage flips its read shape honestly across evaluations', async () => {
   const [cond, setCond] = signal(true)
@@ -135,7 +135,7 @@ test('a conditionally-async stage flips its read shape honestly across evaluatio
 })
 
 /**
- * @canon rule-from-yields-what-it-is-given
+ * @canon spec-from-yields-what-it-is-given
  */
 test('a generator stage with yield* read of a settled value runs synchronously', () => {
   const [s] = signal(3)
@@ -147,7 +147,7 @@ test('a generator stage with yield* read of a settled value runs synchronously',
 })
 
 /**
- * @canon case-a-stage-node-resumes-its-paused-generator
+ * @canon spec-a-stage-node-resumes-its-paused-generator
  */
 test('a generator stage suspends on a pending promise, resumes on settle', async () => {
   let release!: (v: number) => void
@@ -163,7 +163,7 @@ test('a generator stage suspends on a pending promise, resumes on settle', async
 })
 
 /**
- * @canon rule-reading-a-computed-again-without-a-change-re-runs-nothing
+ * @canon spec-reading-a-computed-again-without-a-change-re-runs-nothing
  */
 test('cross-stage caching: a sync stage downstream of an unchanged stage is not re-run', () => {
   setScheduler(syncScheduler(flush))
@@ -185,7 +185,7 @@ test('cross-stage caching: a sync stage downstream of an unchanged stage is not 
 })
 
 /**
- * @canon case-a-computed-publishes-only-a-changed-value
+ * @canon spec-a-computed-publishes-only-a-changed-value
  */
 test('a sync stage downstream of a stage that produced an equal value is not re-run', () => {
   setScheduler(syncScheduler(flush))
@@ -210,7 +210,7 @@ test('a sync stage downstream of a stage that produced an equal value is not re-
 })
 
 /**
- * @canon rule-a-rejected-yield-is-thrown-into-the-generator
+ * @canon spec-a-rejected-yield-is-thrown-into-the-generator
  */
 test('a generator stage that try/catches a rejected yield resumes normally', async () => {
   const reason = new Error('boom')
@@ -229,7 +229,7 @@ test('a generator stage that try/catches a rejected yield resumes normally', asy
 })
 
 /**
- * @canon rule-disposing-an-owner-ends-what-it-owns
+ * @canon spec-disposing-an-owner-ends-what-it-owns
  */
 test('owned computed is disposed when its root is disposed', () => {
   setScheduler(syncScheduler(flush))
@@ -249,7 +249,7 @@ test('owned computed is disposed when its root is disposed', () => {
 })
 
 /**
- * @canon rule-an-older-production-never-publishes-over-a-newer-one
+ * @canon spec-an-older-production-never-publishes-over-a-newer-one
  */
 test('stash is discarded if upstream value changes before kick consumes it', async () => {
   const [id, setId] = signal<number>(1)
@@ -286,7 +286,7 @@ test('stash is discarded if upstream value changes before kick consumes it', asy
 })
 
 /**
- * @canon rule-a-catch-error-handler-is-called-for-each-throw-under-it
+ * @canon spec-a-catch-error-handler-is-called-for-each-throw-under-it
  */
 test('a computed created inside catchError routes its throw to the handler', () => {
   const errors: unknown[] = []
@@ -300,7 +300,7 @@ test('a computed created inside catchError routes its throw to the handler', () 
 })
 
 /**
- * @canon rule-a-recovery-clears-the-error
+ * @canon spec-a-recovery-clears-the-error
  */
 test('after a caught throw, the computed is frozen at its previous good value', () => {
   setScheduler(syncScheduler(flush))
@@ -323,7 +323,7 @@ test('after a caught throw, the computed is frozen at its previous good value', 
 })
 
 /**
- * @canon rule-a-recovery-clears-the-error
+ * @canon spec-a-recovery-clears-the-error
  */
 test('a consumer recovers after a computed fails once and later succeeds', async () => {
   const [id, setId] = signal(1)
@@ -361,7 +361,7 @@ test('a consumer recovers after a computed fails once and later succeeds', async
 })
 
 /**
- * @canon rule-an-error-nothing-claims-is-thrown-on-a-first-run
+ * @canon spec-an-error-nothing-claims-is-thrown-on-a-first-run
  */
 test('a computed throw outside any catchError still propagates uncaught', () => {
   const c = computed(() => { throw new Error('uncaught') })
@@ -369,7 +369,7 @@ test('a computed throw outside any catchError still propagates uncaught', () => 
 })
 
 /**
- * @canon rule-a-catch-error-handler-is-called-for-each-throw-under-it
+ * @canon spec-a-catch-error-handler-is-called-for-each-throw-under-it
  */
 test('mid-pipeline throw: stage-N throw freezes pipeline; downstream stage does not see throw', () => {
   setScheduler(syncScheduler(flush))
@@ -399,7 +399,7 @@ test('mid-pipeline throw: stage-N throw freezes pipeline; downstream stage does 
 })
 
 /**
- * @canon rule-a-recovery-clears-the-error
+ * @canon spec-a-recovery-clears-the-error
  */
 test('an unhandled-throw computed throws on every read until a successful re-run clears it', () => {
   setScheduler(syncScheduler(flush))
@@ -426,7 +426,7 @@ test('an unhandled-throw computed throws on every read until a successful re-run
 })
 
 /**
- * @canon rule-a-catch-error-handler-is-called-for-each-throw-under-it
+ * @canon spec-a-catch-error-handler-is-called-for-each-throw-under-it
  */
 test('async stage rejection: rejected promise re-thrown on next r3 invocation (reuse-value path)', async () => {
   setScheduler(syncScheduler(flush))
@@ -457,7 +457,7 @@ test('async stage rejection: rejected promise re-thrown on next r3 invocation (r
 })
 
 /**
- * @canon rule-an-async-computed-refetches-when-a-source-changes
+ * @canon spec-an-async-computed-refetches-when-a-source-changes
  */
 test('an async first stage keeps its dependency tracked across settles', async () => {
   setScheduler(syncScheduler(flush))
@@ -489,7 +489,7 @@ test('an async first stage keeps its dependency tracked across settles', async (
 })
 
 /**
- * @canon rule-an-async-computed-refetches-when-a-source-changes
+ * @canon spec-an-async-computed-refetches-when-a-source-changes
  */
 test('refetch with different resolved value: downstream effect re-runs', async () => {
   setScheduler(syncScheduler(flush))
@@ -523,7 +523,7 @@ test('refetch with different resolved value: downstream effect re-runs', async (
 })
 
 /**
- * @canon case-a-computed-publishes-only-a-changed-value
+ * @canon spec-a-computed-publishes-only-a-changed-value
  */
 test('refetch with same resolved value (Object.is): downstream effect does not re-run', async () => {
   setScheduler(syncScheduler(flush))
@@ -562,7 +562,7 @@ test('refetch with same resolved value (Object.is): downstream effect does not r
 })
 
 /**
- * @canon case-a-computed-publishes-only-a-changed-value
+ * @canon spec-a-computed-publishes-only-a-changed-value
  */
 test('an async stage that settles to -0 after 0 does not re-run the next stage', async () => {
   setScheduler(syncScheduler(flush))
@@ -589,7 +589,7 @@ test('an async stage that settles to -0 after 0 does not re-run the next stage',
 })
 
 /**
- * @canon case-a-computed-publishes-only-a-changed-value
+ * @canon spec-a-computed-publishes-only-a-changed-value
  */
 test('a sync stage fed by an async stage that produces -0 after 0 does not re-run the next stage', async () => {
   setScheduler(syncScheduler(flush))
@@ -617,7 +617,7 @@ test('a sync stage fed by an async stage that produces -0 after 0 does not re-ru
 })
 
 /**
- * @canon case-a-computed-publishes-only-a-changed-value
+ * @canon spec-a-computed-publishes-only-a-changed-value
  */
 test('a stage whose use settles to -0 after 0 does not re-run the next stage', async () => {
   setScheduler(syncScheduler(flush))
@@ -644,7 +644,7 @@ test('a stage whose use settles to -0 after 0 does not re-run the next stage', a
 })
 
 /**
- * @canon rule-an-async-node-keeps-its-last-value-while-it-refetches
+ * @canon spec-an-async-node-keeps-its-last-value-while-it-refetches
  */
 test('stale-while-revalidate: prior value visible during refetch', async () => {
   setScheduler(syncScheduler(flush))
@@ -682,7 +682,7 @@ test('stale-while-revalidate: prior value visible during refetch', async () => {
 })
 
 /**
- * @canon rule-is-pending-reports-an-unsettled-pipeline
+ * @canon spec-is-pending-reports-an-unsettled-pipeline
  */
 test('isPending(computed) true during initial load, false after settle', async () => {
   setScheduler(syncScheduler(flush))
@@ -703,7 +703,7 @@ test('isPending(computed) true during initial load, false after settle', async (
 })
 
 /**
- * @canon rule-is-pending-reports-an-unsettled-pipeline
+ * @canon spec-is-pending-reports-an-unsettled-pipeline
  */
 test('isPending(computed) true during refetch (after first settle)', async () => {
   setScheduler(syncScheduler(flush))
@@ -739,7 +739,7 @@ test('isPending(computed) true during refetch (after first settle)', async () =>
 })
 
 /**
- * @canon rule-a-fresh-promise-each-run-settles-once-per-change
+ * @canon spec-a-fresh-promise-each-run-settles-once-per-change
  */
 test('a stage returning a new .then-chained promise on every call settles without looping', async () => {
   setScheduler(syncScheduler(flush))
@@ -780,7 +780,7 @@ test('a stage returning a new .then-chained promise on every call settles withou
 })
 
 /**
- * @canon rule-an-async-computed-refetches-when-a-source-changes
+ * @canon spec-an-async-computed-refetches-when-a-source-changes
  */
 test('a promise returned by a later stage is settled before it is published', async () => {
   setScheduler(syncScheduler(flush))
@@ -817,7 +817,7 @@ test('a promise returned by a later stage is settled before it is published', as
 })
 
 /**
- * @canon rule-an-older-production-never-publishes-over-a-newer-one
+ * @canon spec-an-older-production-never-publishes-over-a-newer-one
  */
 test('supersession: stale settle of an old promise is ignored', async () => {
   setScheduler(syncScheduler(flush))
@@ -852,7 +852,7 @@ test('supersession: stale settle of an old promise is ignored', async () => {
 })
 
 /**
- * @canon rule-a-computed-is-a-pipeline-of-stages
+ * @canon spec-a-computed-is-a-pipeline-of-stages
  */
 test('a generator stage re-runs when a signal it read changes', async () => {
   setScheduler(syncScheduler(flush))
@@ -880,7 +880,7 @@ test('a generator stage re-runs when a signal it read changes', async () => {
 })
 
 /**
- * @canon rule-is-pending-reports-an-unsettled-pipeline
+ * @canon spec-is-pending-reports-an-unsettled-pipeline
  */
 test('promiseOf(computed) returns the in-flight Promise during refetch', async () => {
   const [id, setId] = signal(1)
@@ -907,8 +907,8 @@ import { describe } from 'vitest'
 
 describe('computed — NotReadyYet absorbed as suspension (Plan B)', () => {
   /**
-   * @canon rule-a-stage-suspended-through-use-is-absorbed
-   * @canon rule-a-use-suspended-stage-reads-as-its-promise-until-it-settles
+   * @canon spec-a-stage-suspended-through-use-is-absorbed
+   * @canon spec-a-use-suspended-stage-reads-as-its-promise-until-it-settles
    */
   test('sync stage body throwing NotReadyYet suspends, then resumes on settle', async () => {
     let resolve!: (v: number) => void
@@ -928,7 +928,7 @@ describe('computed — NotReadyYet absorbed as suspension (Plan B)', () => {
   })
 
   /**
-   * @canon rule-a-stage-suspended-through-use-is-absorbed
+   * @canon spec-a-stage-suspended-through-use-is-absorbed
    */
   test('two-stage pipeline: stage 0 throws NotReadyYet; downstream stage sees the suspension', async () => {
     let resolve!: (v: number) => void
@@ -942,7 +942,7 @@ describe('computed — NotReadyYet absorbed as suspension (Plan B)', () => {
   })
 
   /**
-   * @canon rule-an-async-node-keeps-its-last-value-while-it-refetches
+   * @canon spec-an-async-node-keeps-its-last-value-while-it-refetches
    */
   test('SWR-refetch: stage body throwing NotReadyYet during refetch keeps prior value visible', async () => {
     const [src, setSrc] = signal(1)
@@ -972,7 +972,7 @@ describe('computed — NotReadyYet absorbed as suspension (Plan B)', () => {
 
 
 /**
- * @canon rule-creating-a-derivation-is-not-reading-it
+ * @canon spec-creating-a-derivation-is-not-reading-it
  */
 test('an effect that creates a computed it never reads runs once', async () => {
   const [source] = signal(1)
@@ -992,7 +992,7 @@ test('an effect that creates a computed it never reads runs once', async () => {
 })
 
 /**
- * @canon rule-creating-a-derivation-is-not-reading-it
+ * @canon spec-creating-a-derivation-is-not-reading-it
  */
 test('an effect that creates a computed and reads it runs once', async () => {
   let runs = 0

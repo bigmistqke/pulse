@@ -24,7 +24,7 @@ const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
  */
 
 /**
- * @canon rule-an-action-body-is-speculative-while-pulse-drives-it
+ * @canon spec-an-action-body-is-speculative-while-pulse-drives-it
  */
 test('an async action holds the speculation open across the await and commits on success', async () => {
   const [name, setName] = signal('alice')
@@ -47,7 +47,7 @@ test('an async action holds the speculation open across the await and commits on
 })
 
 /**
- * @canon rule-a-discard-leaves-no-trace
+ * @canon spec-a-discard-leaves-no-trace
  */
 test('an async action rolls back every speculative write when the mutation fails', async () => {
   const [name, setName] = signal('alice')
@@ -68,7 +68,7 @@ test('an async action rolls back every speculative write when the mutation fails
 })
 
 /**
- * @canon rule-an-action-body-is-speculative-while-pulse-drives-it
+ * @canon spec-an-action-body-is-speculative-while-pulse-drives-it
  */
 test('derived state follows the speculation across the await', async () => {
   const [n, setN] = signal(1)
@@ -90,7 +90,7 @@ test('derived state follows the speculation across the await', async () => {
 // ---- async (non-generator) bodies: the common write-then-await shape ----
 
 /**
- * @canon rule-an-action-body-is-speculative-while-pulse-drives-it
+ * @canon spec-an-action-body-is-speculative-while-pulse-drives-it
  */
 test('an async body: the sync prefix is speculative and commits when the mutation resolves', async () => {
   const [name, setName] = signal('alice')
@@ -105,7 +105,7 @@ test('an async body: the sync prefix is speculative and commits when the mutatio
 })
 
 /**
- * @canon rule-a-discard-leaves-no-trace
+ * @canon spec-a-discard-leaves-no-trace
  */
 test('an async body rolls back when the mutation rejects', async () => {
   const [name, setName] = signal('alice')
@@ -184,7 +184,7 @@ test('a discard leaves a write made after an await in place', async () => {
 })
 
 /**
- * @canon rule-sibling-speculations-do-not-see-each-other
+ * @canon spec-sibling-speculations-do-not-see-each-other
  */
 test('two concurrent async actions are isolated from each other', async () => {
   const [a, setA] = signal('a0')
@@ -212,7 +212,7 @@ test('two concurrent async actions are isolated from each other', async () => {
 })
 
 /**
- * @canon rule-overlapping-writes-resolve-by-commit-order
+ * @canon spec-overlapping-writes-resolve-by-commit-order
  */
 test('two actions writing the same signal: the one that commits last wins', async () => {
   const [x, setX] = signal('x0')
@@ -238,7 +238,7 @@ test('two actions writing the same signal: the one that commits last wins', asyn
 })
 
 /**
- * @canon rule-overlapping-writes-resolve-by-commit-order
+ * @canon spec-overlapping-writes-resolve-by-commit-order
  */
 test('an action that writes the value already there still decides it when it commits last', async () => {
   const [x, setX] = signal('x0')
@@ -266,7 +266,7 @@ test('an action that writes the value already there still decides it when it com
 // ---- ActionHandle-specific behaviour ----
 
 /**
- * @canon rule-a-failed-action-is-reported-not-thrown
+ * @canon spec-a-failed-action-is-reported-not-thrown
  */
 test('a sync body that throws does not throw synchronously; the error is reported through error()', async () => {
   let ran = false
@@ -281,7 +281,7 @@ test('a sync body that throws does not throw synchronously; the error is reporte
 })
 
 /**
- * @canon rule-retry-runs-the-action-again-as-a-new-speculation
+ * @canon spec-retry-runs-the-action-again-as-a-new-speculation
  */
 test('retry() re-runs the action from scratch after an error', async () => {
   const [name, setName] = signal('alice')
@@ -310,7 +310,7 @@ test('retry() re-runs the action from scratch after an error', async () => {
 })
 
 /**
- * @canon rule-the-handle-reports-its-newest-attempt
+ * @canon spec-the-handle-reports-its-newest-attempt
  */
 test('settled reflects whichever attempt is current, so reading it again after retry() gives a new promise', async () => {
   let attempt = 0
@@ -336,7 +336,7 @@ test('settled reflects whichever attempt is current, so reading it again after r
 })
 
 /**
- * @canon rule-retry-runs-the-action-again-as-a-new-speculation
+ * @canon spec-retry-runs-the-action-again-as-a-new-speculation
  */
 test('retry() clears error() synchronously, before the new attempt has settled', async () => {
   let attempt = 0
@@ -367,7 +367,7 @@ test('retry() clears error() synchronously, before the new attempt has settled',
 })
 
 /**
- * @canon rule-the-handle-reports-its-newest-attempt
+ * @canon spec-the-handle-reports-its-newest-attempt
  */
 test('a superseded attempt settling later does not overwrite the outcome of a newer one', async () => {
   let callCount = 0
@@ -398,7 +398,7 @@ test('a superseded attempt settling later does not overwrite the outcome of a ne
 })
 
 /**
- * @canon rule-a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller
+ * @canon spec-a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller
  */
 test('action() skips a nearer ErrorScope whose for declines the error, registering with a farther one that accepts', async () => {
   const outerReports: unknown[] = []
@@ -455,7 +455,7 @@ test('action() skips a nearer ErrorScope whose for declines the error, registeri
 })
 
 /**
- * @canon rule-every-root-has-an-error-boundary
+ * @canon spec-every-root-has-an-error-boundary
  */
 test('action() with no explicit <Errored> anywhere still reaches the implicit root, unaffected by candidate collection', async () => {
   const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -474,7 +474,7 @@ test('action() with no explicit <Errored> anywhere still reaches the implicit ro
 })
 
 /**
- * @canon rule-a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller
+ * @canon spec-a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller
  */
 test('a failed action under a catchError calls its handler, and the root boundary beyond it hears nothing', async () => {
   const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -499,7 +499,7 @@ test('a failed action under a catchError calls its handler, and the root boundar
 })
 
 /**
- * @canon rule-a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller
+ * @canon spec-a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller
  */
 test('a catchError whose for declines the error passes a failed action on to the boundary beyond it', async () => {
   const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -523,7 +523,7 @@ test('a catchError whose for declines the error passes a failed action on to the
 })
 
 /**
- * @canon rule-a-failed-action-chooses-its-boundary-again-on-every-failure
+ * @canon spec-a-failed-action-chooses-its-boundary-again-on-every-failure
  */
 test('action() moves a claim to a boundary that now accepts a retry, releasing the one that claimed an earlier, differently-typed error', async () => {
   const outerReports: unknown[] = []
@@ -596,7 +596,7 @@ test('action() moves a claim to a boundary that now accepts a retry, releasing t
 })
 
 /**
- * @canon rule-a-failed-action-chooses-its-boundary-again-on-every-failure
+ * @canon spec-a-failed-action-chooses-its-boundary-again-on-every-failure
  */
 test('action() moves a claim back to a nearer boundary once a retry fails with an error that boundary accepts, even though a farther boundary already claimed an earlier error', async () => {
   const spy = vi.spyOn(console, 'error').mockImplementation(() => {})

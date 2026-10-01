@@ -6,7 +6,7 @@ import { computed, error, peek } from '../src/index'
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
 
 /**
- * @canon case-the-driver-reads-settledness-from-the-promise-map
+ * @canon spec-the-driver-reads-settledness-from-the-promise-map
  */
 test('the driver uses a promise the map records as fulfilled at once, on the first run that sees it', () => {
   // A fresh promise is unknown to the map, so its first run suspends even
@@ -18,7 +18,7 @@ test('the driver uses a promise the map records as fulfilled at once, on the fir
 })
 
 /**
- * @canon rule-a-returned-promise-rejection-skips-the-generators-catch
+ * @canon spec-a-returned-promise-rejection-skips-the-generators-catch
  */
 test("a rejection of a generator stage's returned promise skips its try/catch and parks as the stage error", async () => {
   let caught = false

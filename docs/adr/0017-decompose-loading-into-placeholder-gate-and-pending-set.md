@@ -686,4 +686,4 @@ therefore kept:
 
 ## Note, 2026-10-01
 
-The aggregate no longer counts the whole gate. A commit waiting at the gate is not in flight: it waits on a suspended binding, which the aggregate counts already, or only on the end-of-microtask check. Counting it made a binding that calls `use` and reads `isLoading()` re-run on its own queued commit without end. The aggregate is now a suspended binding, a background refresh, or a first load, as `rule-is-loading-reads-the-nearest-boundary` in `CANON.md` states.
+The aggregate no longer counts the whole gate. A commit waiting at the gate is not in flight: it waits on a suspended binding, which the aggregate counts already, or only on the end-of-microtask check. Counting it made a binding that calls `use` and reads `isLoading()` re-run on its own queued commit without end. The aggregate is now a suspended binding, a background refresh, or a first load, as `spec-is-loading-reads-the-nearest-boundary` in `CANON.md` states.

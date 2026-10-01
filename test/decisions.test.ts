@@ -34,7 +34,7 @@ const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
 afterEach(() => setScheduler(microtaskScheduler(flush)))
 
 /**
- * @canon rule-ambient-context-is-set-for-a-call-and-restored-after
+ * @canon spec-ambient-context-is-set-for-a-call-and-restored-after
  */
 test('the ambient owner and the ambient speculation are both restored after a call that throws', async () => {
   const [n, setN] = signal(0)
@@ -55,7 +55,7 @@ test('the ambient owner and the ambient speculation are both restored after a ca
 })
 
 /**
- * @canon rule-reads-pull-and-consumers-are-pushed
+ * @canon spec-reads-pull-and-consumers-are-pushed
  */
 test('a read is current at once while an effect waits for the batch and runs once for it', async () => {
   const [a, setA] = signal(1)
@@ -72,7 +72,7 @@ test('a read is current at once while an effect waits for the batch and runs onc
 })
 
 /**
- * @canon rule-a-paused-computation-is-re-entered-at-its-pause
+ * @canon spec-a-paused-computation-is-re-entered-at-its-pause
  */
 test('a settle resumes a generator at its pause without re-running the stage before it, and a new input starts over', async () => {
   const [source, setSource] = signal(1)
@@ -102,7 +102,7 @@ test('a settle resumes a generator at its pause without re-running the stage bef
 })
 
 /**
- * @canon rule-the-value-of-an-async-node-is-taken-out-at-the-read-site
+ * @canon spec-the-value-of-an-async-node-is-taken-out-at-the-read-site
  */
 test('pulse never unwraps an async value for its reader, before or after it settles', async () => {
   const c = computed(() => Promise.resolve(5))
@@ -116,7 +116,7 @@ test('pulse never unwraps an async value for its reader, before or after it sett
 })
 
 /**
- * @canon rule-a-lifetime-belongs-to-an-owner
+ * @canon spec-a-lifetime-belongs-to-an-owner
  */
 test('disposing an owner ends its computeds and effects and leaves its signals working', () => {
   setScheduler(syncScheduler(flush))
@@ -144,7 +144,7 @@ test('disposing an owner ends its computeds and effects and leaves its signals w
 })
 
 /**
- * @canon rule-teardown-unwinds
+ * @canon spec-teardown-unwinds
  */
 test('closing runs callbacks newest first, and one that throws stops neither the rest nor the close', () => {
   const order: string[] = []
@@ -163,7 +163,7 @@ test('closing runs callbacks newest first, and one that throws stops neither the
 })
 
 /**
- * @canon rule-error-boundaries-are-sub-owners
+ * @canon spec-error-boundaries-are-sub-owners
  */
 test('an error goes to the boundary above the owner it happened under, not the one whose call is running', () => {
   setScheduler(syncScheduler(flush))
@@ -194,7 +194,7 @@ test('an error goes to the boundary above the owner it happened under, not the o
 })
 
 /**
- * @canon rule-an-error-is-graph-state-not-an-event
+ * @canon spec-an-error-is-graph-state-not-an-event
  */
 test('a failure is held on the node and seen downstream, and a recovery clears it', () => {
   setScheduler(syncScheduler(flush))
@@ -216,7 +216,7 @@ test('a failure is held on the node and seen downstream, and a recovery clears i
 })
 
 /**
- * @canon rule-an-optimistic-value-is-a-signal-variant
+ * @canon spec-an-optimistic-value-is-a-signal-variant
  */
 test('an optimistic value is an ordinary node whose setter only writes a prediction in front of it', async () => {
   const [source, setSource] = signal(1)
@@ -241,7 +241,7 @@ test('an optimistic value is an ordinary node whose setter only writes a predict
 })
 
 /**
- * @canon rule-use-renders-only-a-current-value
+ * @canon spec-use-renders-only-a-current-value
  */
 test('use gives one node\'s current value through each of its states, and throws whenever there is none', async () => {
   const [version, setVersion] = signal(1)
@@ -272,7 +272,7 @@ test('use gives one node\'s current value through each of its states, and throws
 })
 
 /**
- * @canon rule-a-write-to-a-derivation-in-an-action-touches-its-work-only-once-committed
+ * @canon spec-a-write-to-a-derivation-in-an-action-touches-its-work-only-once-committed
  */
 test('a discarded write leaves a derivation\'s reload, its change detection and its value as they were', async () => {
   let resolveLoad: (value: string) => void = () => {}

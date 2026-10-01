@@ -16,7 +16,7 @@ afterEach(() => {
 })
 
 /**
- * @canon rule-a-class-prefix-toggles-one-class-by-truthiness
+ * @canon spec-a-class-prefix-toggles-one-class-by-truthiness
  */
 test('class:name toggles a class based on truthiness', () => {
   createRoot(() => {
@@ -28,7 +28,7 @@ test('class:name toggles a class based on truthiness', () => {
 })
 
 /**
- * @canon rule-a-class-prefix-toggles-one-class-by-truthiness
+ * @canon spec-a-class-prefix-toggles-one-class-by-truthiness
  */
 test('class:name is reactive with a function value', () => {
   createRoot(() => {
@@ -44,7 +44,7 @@ test('class:name is reactive with a function value', () => {
 })
 
 /**
- * @canon rule-a-style-prefix-sets-one-style-property
+ * @canon spec-a-style-prefix-sets-one-style-property
  */
 test('style:name sets a single CSS property', () => {
   createRoot(() => {
@@ -55,7 +55,7 @@ test('style:name sets a single CSS property', () => {
 })
 
 /**
- * @canon rule-a-style-prefix-sets-one-style-property
+ * @canon spec-a-style-prefix-sets-one-style-property
  */
 test('style:name is reactive with a function value', () => {
   createRoot(() => {
@@ -69,7 +69,7 @@ test('style:name is reactive with a function value', () => {
 })
 
 /**
- * @canon rule-a-style-property-is-removed-on-nothing
+ * @canon spec-a-style-property-is-removed-on-nothing
  */
 test('style:name removes the property on nullish/false value', () => {
   createRoot(() => {

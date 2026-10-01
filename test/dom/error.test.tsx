@@ -41,7 +41,7 @@ const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
  * entry and the fallback renders once.
  */
 /**
- * @canon rule-a-boundary-shows-its-fallback-exactly-while-something-under-it-is-failed
+ * @canon spec-a-boundary-shows-its-fallback-exactly-while-something-under-it-is-failed
  */
 test('one rejection renders the fallback once, however many times the binding re-runs', async () => {
   const target = document.createElement('section')
@@ -74,7 +74,7 @@ test('one rejection renders the fallback once, however many times the binding re
  *  it is failed — so when the error clears on its own, it returns to the subtree
  *  with no reset() call at all. */
 /**
- * @canon rule-a-boundary-shows-its-fallback-exactly-while-something-under-it-is-failed
+ * @canon spec-a-boundary-shows-its-fallback-exactly-while-something-under-it-is-failed
  */
 test('the boundary unlatches itself when the error clears', async () => {
   const target = document.createElement('section')
@@ -107,7 +107,7 @@ test('the boundary unlatches itself when the error clears', async () => {
 /** The collection is a set of failed bindings. It empties only when ALL of them
  *  recover. */
 /**
- * @canon rule-a-boundary-shows-its-fallback-exactly-while-something-under-it-is-failed
+ * @canon spec-a-boundary-shows-its-fallback-exactly-while-something-under-it-is-failed
  */
 test('two failed siblings render one fallback, which clears only when both recover', async () => {
   const target = document.createElement('section')
@@ -155,7 +155,7 @@ test('two failed siblings render one fallback, which clears only when both recov
  *  nearest one wins, so a `catchError` INSIDE an `<Errored>` intercepts first and the
  *  boundary never activates. */
 /**
- * @canon rule-catch-error-and-errored-are-peers-in-one-walk
+ * @canon spec-catch-error-and-errored-are-peers-in-one-walk
  */
 test('a catchError nested inside <Errored> wins, and the boundary never activates', async () => {
   const target = document.createElement('section')
@@ -188,7 +188,7 @@ test('a catchError nested inside <Errored> wins, and the boundary never activate
 /** Suspension is not an error. A pending read routes to `<Loading>` and must never
  *  reach `<Errored>`. */
 /**
- * @canon rule-suspension-is-not-a-failure
+ * @canon spec-suspension-is-not-a-failure
  */
 test('a pending read reaches <Loading>, never <Errored>', async () => {
   const target = document.createElement('section')
@@ -223,7 +223,7 @@ test('a pending read reaches <Loading>, never <Errored>', async () => {
  *  own: reset() must clear the parked error on the node that failed and recompute
  *  it — even though that node was created outside the boundary entirely. */
 /**
- * @canon rule-reset-recomputes-the-failed-source-at-the-root-of-its-chain
+ * @canon spec-reset-recomputes-the-failed-source-at-the-root-of-its-chain
  */
 test('reset() retries with unchanged inputs', async () => {
   const target = document.createElement('section')
@@ -264,7 +264,7 @@ test('reset() retries with unchanged inputs', async () => {
  *  would leave the real source parked and the retry would fail identically, so
  *  reset() walks the upstream chain to the root failed stage. */
 /**
- * @canon rule-reset-recomputes-the-failed-source-at-the-root-of-its-chain
+ * @canon spec-reset-recomputes-the-failed-source-at-the-root-of-its-chain
  */
 test('reset() recomputes the root failed stage of a pipeline, not the leaf', async () => {
   const target = document.createElement('section')
@@ -310,7 +310,7 @@ test('reset() recomputes the root failed stage of a pipeline, not the leaf', asy
 /** A binding that threw a plain error has no failed node behind it (`source` is
  *  null). reset() simply re-runs the binding. */
 /**
- * @canon rule-reset-reruns-a-binding-that-threw-a-plain-error
+ * @canon spec-reset-reruns-a-binding-that-threw-a-plain-error
  */
 test('reset() re-runs a binding that threw a plain error', () => {
   const target = document.createElement('section')
@@ -362,7 +362,7 @@ test('reset() re-runs a binding that threw a plain error', () => {
  * `reset()` must not recompute the computed the first effect happened to leave behind.
  */
 /**
- * @canon rule-a-report-names-only-a-source-its-own-binding-read
+ * @canon spec-a-report-names-only-a-source-its-own-binding-read
  */
 test('a stale error source from a swallowed, unboundaried effect does not leak into an unrelated <Errored> reset', async () => {
   const target = document.createElement('section')
@@ -440,7 +440,7 @@ test('a stale error source from a swallowed, unboundaried effect does not leak i
  * state. Clear-on-entry does not depend on a throw happening at all.
  */
 /**
- * @canon rule-a-report-names-only-a-source-its-own-binding-read
+ * @canon spec-a-report-names-only-a-source-its-own-binding-read
  */
 test('a source marked and swallowed by the effect body itself (no throw reaches singleArgEffect) does not leak into an unrelated <Errored> reset', async () => {
   const target = document.createElement('section')
@@ -506,8 +506,8 @@ test('a source marked and swallowed by the effect body itself (no throw reaches 
 })
 
 /**
- * @canon rule-a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller
- * @canon rule-an-errored-reset-retries-a-failed-action
+ * @canon spec-a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller
+ * @canon spec-an-errored-reset-retries-a-failed-action
  */
 test('a failed action registers with the nearest <Errored> boundary, and its retry button re-runs it', async () => {
   const target = document.createElement('section')
@@ -573,7 +573,7 @@ test('a failed action registers with the nearest <Errored> boundary, and its ret
 })
 
 /**
- * @canon rule-a-failed-action-reports-after-its-calling-owner-is-disposed
+ * @canon spec-a-failed-action-reports-after-its-calling-owner-is-disposed
  */
 test('a mutation triggered from a reference-keyed row still reaches <Errored>, even though its own write recreates that row', async () => {
   // The row-recycling bug this design was fixed for: the mutation's own
@@ -654,7 +654,7 @@ test('a mutation triggered from a reference-keyed row still reaches <Errored>, e
 })
 
 /**
- * @canon rule-a-failed-action-reports-after-its-calling-owner-is-disposed
+ * @canon spec-a-failed-action-reports-after-its-calling-owner-is-disposed
  */
 test('an action that fails after its owning row unmounted (but the boundary is still mounted) still reaches the boundary', async () => {
   // The counterpart to the reference-keyed-row test above, stated directly:
@@ -722,7 +722,7 @@ test('an action that fails after its owning row unmounted (but the boundary is s
 })
 
 /**
- * @canon rule-a-failed-action-whose-boundary-is-gone-reports-to-the-next-one-up
+ * @canon spec-a-failed-action-whose-boundary-is-gone-reports-to-the-next-one-up
  */
 test('an action that fails after its <Errored> boundary itself unmounted escalates to the implicit root instead of registering a stale entry', async () => {
   const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -797,7 +797,7 @@ test('an action that fails after its <Errored> boundary itself unmounted escalat
 })
 
 /**
- * @canon rule-a-boundary-without-a-fallback-swaps-nothing
+ * @canon spec-a-boundary-without-a-fallback-swaps-nothing
  */
 test('<Errored> without a fallback keeps its children mounted through an error', async () => {
   const target = document.createElement('section')
@@ -838,7 +838,7 @@ test('<Errored> without a fallback keeps its children mounted through an error',
 })
 
 /**
- * @canon case-use-errored-returns-accessors-to-the-nearest-boundary
+ * @canon spec-use-errored-returns-accessors-to-the-nearest-boundary
  */
 test('useErrored() reflects the nearest boundary reactively, with nothing swapped', async () => {
   const target = document.createElement('section')
@@ -868,7 +868,7 @@ test('useErrored() reflects the nearest boundary reactively, with nothing swappe
 })
 
 /**
- * @canon case-use-errored-retry-performs-the-boundarys-reset
+ * @canon spec-use-errored-retry-performs-the-boundarys-reset
  */
 test('useErrored().retry retries every failed report, the same operation reset() performs', async () => {
   const target = document.createElement('section')
@@ -905,7 +905,7 @@ test('useErrored().retry retries every failed report, the same operation reset()
 })
 
 /**
- * @canon rule-with-no-owner-the-boundary-state-is-inert
+ * @canon spec-with-no-owner-the-boundary-state-is-inert
  */
 test('useErrored() called with no owner at all returns a safe, always-inactive state', () => {
   const state = useErrored()
@@ -915,7 +915,7 @@ test('useErrored() called with no owner at all returns a safe, always-inactive s
 })
 
 /**
- * @canon case-is-errored-returns-the-current-state-or-undefined
+ * @canon spec-is-errored-returns-the-current-state-or-undefined
  */
 test('isErrored() reflects the nearest boundary, read fresh each call', async () => {
   const target = document.createElement('section')
@@ -955,7 +955,7 @@ test('isErrored() reflects the nearest boundary, read fresh each call', async ()
 })
 
 /**
- * @canon case-is-errored-retry-performs-the-boundarys-reset
+ * @canon spec-is-errored-retry-performs-the-boundarys-reset
  */
 test('isErrored().retry retries every failed report, the same operation reset() performs', async () => {
   const target = document.createElement('section')
@@ -1002,14 +1002,14 @@ test('isErrored().retry retries every failed report, the same operation reset() 
 })
 
 /**
- * @canon rule-with-no-owner-the-boundary-state-is-inert
+ * @canon spec-with-no-owner-the-boundary-state-is-inert
  */
 test('isErrored() called with no owner at all returns undefined', () => {
   expect(isErrored()).toBeUndefined()
 })
 
 /**
- * @canon case-errored-error-renders-only-while-the-boundary-is-failed
+ * @canon spec-errored-error-renders-only-while-the-boundary-is-failed
  */
 test('Errored.Error renders nothing while the boundary is healthy, and the error UI once it fails', async () => {
   const target = document.createElement('section')
@@ -1041,7 +1041,7 @@ test('Errored.Error renders nothing while the boundary is healthy, and the error
 })
 
 /**
- * @canon rule-errored-error-builds-its-content-once-per-failure
+ * @canon spec-errored-error-builds-its-content-once-per-failure
  */
 test('Errored.Error disposes what its render prop constructed when the error clears', async () => {
   const target = document.createElement('section')
@@ -1090,7 +1090,7 @@ test('Errored.Error disposes what its render prop constructed when the error cle
 })
 
 /**
- * @canon case-errored-error-retry-performs-the-boundarys-reset
+ * @canon spec-errored-error-retry-performs-the-boundarys-reset
  */
 test('Errored.Error\'s retry() clears the error, the same as useErrored().retry()', async () => {
   const target = document.createElement('section')
@@ -1135,7 +1135,7 @@ test('Errored.Error\'s retry() clears the error, the same as useErrored().retry(
 })
 
 /**
- * @canon rule-errored-error-builds-its-content-once-per-failure
+ * @canon spec-errored-error-builds-its-content-once-per-failure
  */
 test('Errored.Error does not reconstruct its content while the boundary stays active, even if the underlying error changes', async () => {
   const target = document.createElement('section')
@@ -1185,7 +1185,7 @@ test('Errored.Error does not reconstruct its content while the boundary stays ac
 })
 
 /**
- * @canon rule-every-root-has-an-error-boundary
+ * @canon spec-every-root-has-an-error-boundary
  */
 test('a computed error with no explicit <Errored> anywhere still registers with the implicit root boundary, and still logs', async () => {
   const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -1203,7 +1203,7 @@ test('a computed error with no explicit <Errored> anywhere still registers with 
 })
 
 /**
- * @canon rule-use-errored-without-an-errored-reads-the-roots-boundary
+ * @canon spec-use-errored-without-an-errored-reads-the-roots-boundary
  */
 test('useErrored() with no explicit <Errored> reports the implicit root boundary, aggregating unrelated errors', async () => {
   const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
@@ -1242,7 +1242,7 @@ test('useErrored() with no explicit <Errored> reports the implicit root boundary
 })
 
 /**
- * @canon rule-a-boundary-whose-for-declines-passes-the-error-on
+ * @canon spec-a-boundary-whose-for-declines-passes-the-error-on
  */
 test('<Errored> with a declining for lets a computed rejection propagate to a farther, accepting <Errored>', async () => {
   const target = document.createElement('section')
@@ -1276,7 +1276,7 @@ test('<Errored> with a declining for lets a computed rejection propagate to a fa
 })
 
 /**
- * @canon rule-the-boundary-is-chosen-again-for-every-error
+ * @canon spec-the-boundary-is-chosen-again-for-every-error
  */
 test('a computed that re-fails with a different error type re-routes to the boundary that accepts it, not the one that claimed its earlier error', async () => {
   const target = document.createElement('section')
@@ -1325,7 +1325,7 @@ test('a computed that re-fails with a different error type re-routes to the boun
 })
 
 /**
- * @canon rule-a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller
+ * @canon spec-a-failed-action-reports-to-the-nearest-accepting-boundary-above-its-caller
  */
 test('action() skips a nearer <Errored> whose for declines the error, and registers with a farther one that accepts', async () => {
   const target = document.createElement('section')
@@ -1375,7 +1375,7 @@ test('action() skips a nearer <Errored> whose for declines the error, and regist
 })
 
 /**
- * @canon rule-a-failed-action-reports-after-its-calling-owner-is-disposed
+ * @canon spec-a-failed-action-reports-after-its-calling-owner-is-disposed
  */
 test('a mutation triggered from a reference-keyed row still reaches a filtered <Errored>, even though its own write recreates that row', async () => {
   const target = document.createElement('section')
@@ -1445,7 +1445,7 @@ test('a mutation triggered from a reference-keyed row still reaches a filtered <
 })
 
 /**
- * @canon rule-a-predicate-narrows-what-a-reader-sees-not-which-boundary-it-reads
+ * @canon spec-a-predicate-narrows-what-a-reader-sees-not-which-boundary-it-reads
  */
 test('useErrored(predicate) finds a match that is not the first-registered report, under one unfiltered boundary', async () => {
   const target = document.createElement('section')
@@ -1499,7 +1499,7 @@ test('useErrored(predicate) finds a match that is not the first-registered repor
 })
 
 /**
- * @canon rule-a-predicate-narrows-what-a-reader-sees-not-which-boundary-it-reads
+ * @canon spec-a-predicate-narrows-what-a-reader-sees-not-which-boundary-it-reads
  */
 test('useErrored(predicate).retry() retries only matching reports, leaving a non-matching one still active', async () => {
   const target = document.createElement('section')
@@ -1560,7 +1560,7 @@ test('useErrored(predicate).retry() retries only matching reports, leaving a non
 })
 
 /**
- * @canon rule-a-predicate-narrows-what-a-reader-sees-not-which-boundary-it-reads
+ * @canon spec-a-predicate-narrows-what-a-reader-sees-not-which-boundary-it-reads
  */
 test("Errored.Error's for prop narrows what it displays to reports matching it", async () => {
   const target = document.createElement('section')
@@ -1619,7 +1619,7 @@ test("Errored.Error's for prop narrows what it displays to reports matching it",
 // this one deliberately makes none after the click, so the framework's own
 // writer-side scheduling is what has to drive the update.
 /**
- * @canon rule-an-error-write-schedules-its-own-flush
+ * @canon spec-an-error-write-schedules-its-own-flush
  */
 test('an action rejection reaches Errored.Error with no manual flush (boundary drives its own write)', async () => {
   const target = document.createElement('section')
@@ -1668,7 +1668,7 @@ test('an action rejection reaches Errored.Error with no manual flush (boundary d
 // `read` branch, which is what a real UI does — actually depends on the write
 // having requested one.
 /**
- * @canon rule-an-error-write-schedules-its-own-flush
+ * @canon spec-an-error-write-schedules-its-own-flush
  */
 test('action().error reaches a binding that displays it, with no manual flush', async () => {
   const target = document.createElement('section')
@@ -1705,7 +1705,7 @@ test('action().error reaches a binding that displays it, with no manual flush', 
 // src/owner.ts) does not cover this path — `makeErrorCell`'s write has to
 // request the flush itself.
 /**
- * @canon rule-an-error-write-schedules-its-own-flush
+ * @canon spec-an-error-write-schedules-its-own-flush
  */
 test('action().retry() clears a displayed error with no manual flush', async () => {
   const target = document.createElement('section')
@@ -1746,7 +1746,7 @@ test('action().retry() clears a displayed error with no manual flush', async () 
 // so without ambient reporting a subtree that reads exclusively through it
 // would never reach an <Errored> at all. Nothing here throws.
 /**
- * @canon rule-a-tolerant-read-reports-a-failure-to-the-boundary
+ * @canon spec-a-tolerant-read-reports-a-failure-to-the-boundary
  */
 test('a failed source reaches <Errored> through latest(), with nothing throwing', async () => {
   const target = document.createElement('section')
@@ -1786,7 +1786,7 @@ test('a failed source reaches <Errored> through latest(), with nothing throwing'
 // binding subscribed to that node's error state by reading error(s) inside
 // latest(), so it re-runs and reports its own recovery with no kick of its own.
 /**
- * @canon rule-reset-recomputes-the-failed-source-at-the-root-of-its-chain
+ * @canon spec-reset-recomputes-the-failed-source-at-the-root-of-its-chain
  */
 test('resetting an ambiently-reported error retries the failed source', async () => {
   const target = document.createElement('section')

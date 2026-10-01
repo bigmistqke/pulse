@@ -17,7 +17,7 @@ afterEach(() => {
 })
 
 /**
- * @canon rule-switch-renders-the-first-truthy-match
+ * @canon spec-switch-renders-the-first-truthy-match
  */
 test('first truthy Match wins', () => {
   const target = document.createElement('section')
@@ -37,7 +37,7 @@ test('first truthy Match wins', () => {
 })
 
 /**
- * @canon rule-switch-renders-the-first-truthy-match
+ * @canon spec-switch-renders-the-first-truthy-match
  */
 test('no Match truthy → fallback', () => {
   const target = document.createElement('section')
@@ -56,7 +56,7 @@ test('no Match truthy → fallback', () => {
 })
 
 /**
- * @canon rule-switch-renders-the-first-truthy-match
+ * @canon spec-switch-renders-the-first-truthy-match
  */
 test('non-Match children inside Switch are ignored', () => {
   const target = document.createElement('section')
@@ -75,7 +75,7 @@ test('non-Match children inside Switch are ignored', () => {
 })
 
 /**
- * @canon rule-switch-renders-the-first-truthy-match
+ * @canon spec-switch-renders-the-first-truthy-match
  */
 test('Match function child receives narrowed value', () => {
   const target = document.createElement('section')
@@ -94,7 +94,7 @@ test('Match function child receives narrowed value', () => {
 })
 
 /**
- * @canon case-switch-rebuilds-only-when-the-winning-match-changes
+ * @canon spec-switch-rebuilds-only-when-the-winning-match-changes
  */
 test('winner change disposes old branch sub-owner', () => {
   const target = document.createElement('section')
@@ -129,7 +129,7 @@ test('winner change disposes old branch sub-owner', () => {
 })
 
 /**
- * @canon case-switch-rebuilds-only-when-the-winning-match-changes
+ * @canon spec-switch-rebuilds-only-when-the-winning-match-changes
  */
 test('disposing surrounding owner disposes active branch', () => {
   const target = document.createElement('section')
@@ -152,7 +152,7 @@ test('disposing surrounding owner disposes active branch', () => {
 })
 
 /**
- * @canon rule-a-pending-condition-reads-as-falsy
+ * @canon spec-a-pending-condition-reads-as-falsy
  */
 test('a Match whose when is a pending promise is skipped', () => {
   const target = document.createElement('section')
@@ -172,7 +172,7 @@ test('a Match whose when is a pending promise is skipped', () => {
 })
 
 /**
- * @canon case-switch-rebuilds-only-when-the-winning-match-changes
+ * @canon spec-switch-rebuilds-only-when-the-winning-match-changes
  */
 test('a re-evaluation that picks the same Match keeps its branch without rebuilding it', () => {
   const target = document.createElement('section')

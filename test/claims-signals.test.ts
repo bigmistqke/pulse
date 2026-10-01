@@ -6,7 +6,7 @@ const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
 afterEach(() => setScheduler(microtaskScheduler(flush)))
 
 /**
- * @canon rule-several-writes-in-one-tick-re-run-an-effect-once
+ * @canon spec-several-writes-in-one-tick-re-run-an-effect-once
  */
 test('three writes in one tick re-run an effect once, after the tick', async () => {
   const [n, setN] = signal(0)
@@ -27,7 +27,7 @@ test('three writes in one tick re-run an effect once, after the tick', async () 
 })
 
 /**
- * @canon rule-several-writes-in-one-tick-re-run-an-effect-once
+ * @canon spec-several-writes-in-one-tick-re-run-an-effect-once
  */
 test('a read between two writes in one tick does not re-run the effect early', async () => {
   const [n, setN] = signal(0)
@@ -47,7 +47,7 @@ test('a read between two writes in one tick does not re-run the effect early', a
 })
 
 /**
- * @canon rule-a-promise-settling-requests-a-flush-from-the-active-scheduler
+ * @canon spec-a-promise-settling-requests-a-flush-from-the-active-scheduler
  */
 test('a promise settling asks the active scheduler for the flush that re-runs its readers', async () => {
   let requests = 0
@@ -78,7 +78,7 @@ test('a promise settling asks the active scheduler for the flush that re-runs it
 })
 
 /**
- * @canon rule-a-run-replaces-its-dependencies-with-what-it-read
+ * @canon spec-a-run-replaces-its-dependencies-with-what-it-read
  */
 test('a source read only under a condition stops re-running the computed once the condition flips', () => {
   setScheduler(syncScheduler(flush))

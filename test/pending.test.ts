@@ -7,7 +7,7 @@ import { computed } from '../src/computed'
 
 describe('pending tracker — basics', () => {
   /**
-   * @canon rule-pending-is-asked-and-answered-directly
+   * @canon spec-pending-is-asked-and-answered-directly
    */
   test('isPending is false for a plain signal, called fresh (not an accessor)', () => {
     const [s] = signal(42)
@@ -15,7 +15,7 @@ describe('pending tracker — basics', () => {
   })
 
   /**
-   * @canon rule-pending-is-asked-and-answered-directly
+   * @canon spec-pending-is-asked-and-answered-directly
    */
   test('promiseOf is null for a plain signal, called fresh (not an accessor)', () => {
     const [s] = signal(42)
@@ -25,7 +25,7 @@ describe('pending tracker — basics', () => {
 
 describe('pending tracker — value-as-promise fallback', () => {
   /**
-   * @canon rule-a-signals-pending-state-is-the-state-of-the-promise-it-holds
+   * @canon spec-a-signals-pending-state-is-the-state-of-the-promise-it-holds
    */
   test('isPending true for a signal holding a pending promise', () => {
     const [s] = signal(new Promise(() => {}))
@@ -33,7 +33,7 @@ describe('pending tracker — value-as-promise fallback', () => {
   })
 
   /**
-   * @canon rule-a-signals-pending-state-is-the-state-of-the-promise-it-holds
+   * @canon spec-a-signals-pending-state-is-the-state-of-the-promise-it-holds
    */
   test('isPending false for a signal holding a resolved promise (after track)', async () => {
     const p = Promise.resolve('x')
@@ -43,7 +43,7 @@ describe('pending tracker — value-as-promise fallback', () => {
   })
 
   /**
-   * @canon rule-a-signals-pending-state-is-the-state-of-the-promise-it-holds
+   * @canon spec-a-signals-pending-state-is-the-state-of-the-promise-it-holds
    */
   test('promiseOf returns the pending promise for a signal holding one', () => {
     const p = new Promise<number>(() => {})
@@ -54,7 +54,7 @@ describe('pending tracker — value-as-promise fallback', () => {
 
 describe('pending tracker — pipeline-OR walk', () => {
   /**
-   * @canon rule-pending-follows-where-a-value-came-from
+   * @canon spec-pending-follows-where-a-value-came-from
    */
   test('isPending true on downstream when only upstream is pending', () => {
     const [downPending] = signal(false)
@@ -74,7 +74,7 @@ describe('pending tracker — pipeline-OR walk', () => {
   })
 
   /**
-   * @canon rule-pending-follows-where-a-value-came-from
+   * @canon spec-pending-follows-where-a-value-came-from
    */
   test('promiseOf walks upstream when local is null', () => {
     const upP = Promise.resolve('x')
@@ -92,7 +92,7 @@ describe('pending tracker — pipeline-OR walk', () => {
 
 describe('pending tracker — computed integration', () => {
   /**
-   * @canon rule-is-pending-reports-an-unsettled-pipeline
+   * @canon spec-is-pending-reports-an-unsettled-pipeline
    */
   test('isPending(asyncComputed) true during initial load, false after settle', async () => {
     let resolve!: (v: number) => void
@@ -107,7 +107,7 @@ describe('pending tracker — computed integration', () => {
   })
 
   /**
-   * @canon rule-pending-follows-where-a-value-came-from
+   * @canon spec-pending-follows-where-a-value-came-from
    */
   test('isPending walks across pipeline stages', async () => {
     let resolve!: (v: number) => void

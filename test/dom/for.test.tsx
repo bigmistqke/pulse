@@ -17,7 +17,7 @@ afterEach(() => {
 })
 
 /**
- * @canon rule-for-renders-its-fallback-when-there-are-no-rows
+ * @canon spec-for-renders-its-fallback-when-there-are-no-rows
  */
 test('renders rows in order', () => {
   const target = document.createElement('section')
@@ -33,7 +33,7 @@ test('renders rows in order', () => {
 })
 
 /**
- * @canon rule-for-renders-its-fallback-when-there-are-no-rows
+ * @canon spec-for-renders-its-fallback-when-there-are-no-rows
  */
 test('empty array → fallback rendered', () => {
   const target = document.createElement('section')
@@ -48,7 +48,7 @@ test('empty array → fallback rendered', () => {
 })
 
 /**
- * @canon rule-list-rows-are-keyed-by-reference
+ * @canon spec-list-rows-are-keyed-by-reference
  */
 test('adding items mounts new DOM at the right position', () => {
   const target = document.createElement('section')
@@ -68,7 +68,7 @@ test('adding items mounts new DOM at the right position', () => {
 })
 
 /**
- * @canon case-map-array-builds-each-item-once-under-its-own-owner
+ * @canon spec-map-array-builds-each-item-once-under-its-own-owner
  */
 test('removing items fires per-row onCleanup', () => {
   const target = document.createElement('section')
@@ -92,7 +92,7 @@ test('removing items fires per-row onCleanup', () => {
 })
 
 /**
- * @canon rule-list-rows-are-keyed-by-reference
+ * @canon spec-list-rows-are-keyed-by-reference
  */
 test('reorder: same DOM node identities, repositioned', () => {
   const target = document.createElement('section')
@@ -114,7 +114,7 @@ test('reorder: same DOM node identities, repositioned', () => {
 })
 
 /**
- * @canon rule-a-pending-list-reads-as-empty
+ * @canon spec-a-pending-list-reads-as-empty
  */
 test('pending Promise<T[]> → fallback rendered', () => {
   const target = document.createElement('section')
@@ -130,7 +130,7 @@ test('pending Promise<T[]> → fallback rendered', () => {
 })
 
 /**
- * @canon rule-a-row-index-follows-its-position
+ * @canon spec-a-row-index-follows-its-position
  */
 test('index accessor is reactive: rendered DOM updates on reorder', () => {
   const target = document.createElement('section')

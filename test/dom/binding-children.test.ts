@@ -16,7 +16,7 @@ afterEach(() => {
 })
 
 /**
- * @canon rule-a-function-child-is-a-reactive-hole
+ * @canon spec-a-function-child-is-a-reactive-hole
  */
 test('function child renders the current value as text', () => {
   createRoot(() => {
@@ -28,7 +28,7 @@ test('function child renders the current value as text', () => {
 })
 
 /**
- * @canon rule-a-function-child-is-a-reactive-hole
+ * @canon spec-a-function-child-is-a-reactive-hole
  */
 test('function child re-renders when its signal changes', () => {
   createRoot(() => {
@@ -41,7 +41,7 @@ test('function child re-renders when its signal changes', () => {
 })
 
 /**
- * @canon rule-a-function-child-is-a-reactive-hole
+ * @canon spec-a-function-child-is-a-reactive-hole
  */
 test('function child replaces previous DOM each run', () => {
   createRoot(() => {
@@ -55,7 +55,7 @@ test('function child replaces previous DOM each run', () => {
 })
 
 /**
- * @canon rule-a-function-child-returns-anything-a-static-child-may-be
+ * @canon spec-a-function-child-returns-anything-a-static-child-may-be
  */
 test('function child can return a DOM node', () => {
   createRoot(() => {
@@ -73,7 +73,7 @@ test('function child can return a DOM node', () => {
 })
 
 /**
- * @canon rule-a-function-childs-static-siblings-keep-their-place
+ * @canon spec-a-function-childs-static-siblings-keep-their-place
  */
 test('function child preserves marker order for static siblings', () => {
   createRoot(() => {
@@ -87,7 +87,7 @@ test('function child preserves marker order for static siblings', () => {
 })
 
 /**
- * @canon case-each-run-of-a-reactive-child-owns-what-it-creates
+ * @canon spec-each-run-of-a-reactive-child-owns-what-it-creates
  */
 test('nested reactive child does not leak the inner effect on outer re-run', () => {
   createRoot(() => {
@@ -118,7 +118,7 @@ test('nested reactive child does not leak the inner effect on outer re-run', () 
 })
 
 /**
- * @canon rule-a-function-child-returns-anything-a-static-child-may-be
+ * @canon spec-a-function-child-returns-anything-a-static-child-may-be
  */
 test('a function child whose result is a function renders that function as a reactive child', () => {
   const [label, setLabel] = signal('first')

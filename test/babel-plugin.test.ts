@@ -25,7 +25,7 @@ function transform(source: string): string {
 }
 
 /**
- * @canon rule-a-dynamic-prop-becomes-a-getter
+ * @canon spec-a-dynamic-prop-becomes-a-getter
  */
 test('converts a dynamic component prop to a getter', () => {
   const code = transform('<Foo a={count()} b={todo.text} c={draft} d={x + y} e={`${count()}`} />;')
@@ -37,7 +37,7 @@ test('converts a dynamic component prop to a getter', () => {
 })
 
 /**
- * @canon rule-a-dynamic-prop-becomes-a-getter
+ * @canon spec-a-dynamic-prop-becomes-a-getter
  */
 test('converts a dynamic DOM attribute-like prop to a getter, same as a component', () => {
   const code = transform('<div a={count()} b={todo.text} />;')
@@ -46,7 +46,7 @@ test('converts a dynamic DOM attribute-like prop to a getter, same as a componen
 })
 
 /**
- * @canon exception-a-literal-or-function-prop-stays-as-written
+ * @canon spec-a-literal-or-function-prop-stays-as-written
  */
 test('leaves a literal prop value untouched (no getter)', () => {
   const code = transform('<Foo a={5} b={"x"} c={true} d={null} />;')
@@ -61,7 +61,7 @@ test('leaves a literal prop value untouched (no getter)', () => {
 })
 
 /**
- * @canon exception-a-literal-or-function-prop-stays-as-written
+ * @canon spec-a-literal-or-function-prop-stays-as-written
  */
 test('leaves an existing function/arrow expression prop value untouched (no getter)', () => {
   const code = transform('<Foo onSelect={() => bar()} />;')
@@ -70,7 +70,7 @@ test('leaves an existing function/arrow expression prop value untouched (no gett
 })
 
 /**
- * @canon exception-ref-and-on-props-stay-as-written
+ * @canon spec-ref-and-on-props-stay-as-written
  */
 test('never converts ref or an on:-namespaced attribute to a getter, even for a bare identifier value', () => {
   const code = transform('<input ref={setup} on:click={handleClick} on:input={handleInput} />;')
@@ -83,7 +83,7 @@ test('never converts ref or an on:-namespaced attribute to a getter, even for a 
 })
 
 /**
- * @canon rule-a-dynamic-prop-becomes-a-getter
+ * @canon spec-a-dynamic-prop-becomes-a-getter
  */
 test('converts a dynamic attr: value to a getter, same as every other binding kind (only ref/on: are excluded)', () => {
   const code = transform('<div attr:data-x={v} />;')
@@ -91,7 +91,7 @@ test('converts a dynamic attr: value to a getter, same as every other binding ki
 })
 
 /**
- * @canon rule-a-namespaced-prop-compiles-to-a-string-key
+ * @canon spec-a-namespaced-prop-compiles-to-a-string-key
  */
 test('a namespaced attribute compiles to a plain string key', () => {
   const code = transform('<div on:click={handler} />;')
@@ -99,7 +99,7 @@ test('a namespaced attribute compiles to a plain string key', () => {
 })
 
 /**
- * @canon rule-a-spread-merges-descriptors-not-values
+ * @canon spec-a-spread-merges-descriptors-not-values
  */
 test('spread: compiles to a mergeProps(...) call instead of a native object spread', () => {
   const code = transform('<Foo a={x} {...rest} b={y} {...more} c={z} />;')
@@ -117,7 +117,7 @@ test('spread: compiles to a mergeProps(...) call instead of a native object spre
 })
 
 /**
- * @canon rule-a-spread-merges-descriptors-not-values
+ * @canon spec-a-spread-merges-descriptors-not-values
  */
 test('spread: a lone spread with no other props becomes mergeProps(source)', () => {
   const code = transform('<Foo {...rest} />;')
@@ -125,7 +125,7 @@ test('spread: a lone spread with no other props becomes mergeProps(source)', () 
 })
 
 /**
- * @canon rule-a-spread-merges-descriptors-not-values
+ * @canon spec-a-spread-merges-descriptors-not-values
  */
 test('spread: reuses a single mergeProps import across multiple spread call sites in one file', () => {
   const code = transform('function A() { return <Foo {...a}/> } function B() { return <Bar {...b}/> }')
@@ -134,7 +134,7 @@ test('spread: reuses a single mergeProps import across multiple spread call site
 })
 
 /**
- * @canon rule-a-dom-child-is-one-thunk-per-dynamic-child
+ * @canon spec-a-dom-child-is-one-thunk-per-dynamic-child
  */
 test('DOM tag children: a single dynamic child is thunk-wrapped, not converted to a getter', () => {
   const code = transform('<div>{count()}</div>;')
@@ -143,7 +143,7 @@ test('DOM tag children: a single dynamic child is thunk-wrapped, not converted t
 })
 
 /**
- * @canon rule-a-static-dom-child-is-left-as-written
+ * @canon spec-a-static-dom-child-is-left-as-written
  */
 test('DOM tag children: a literal or function-expression child is left untouched', () => {
   const code = transform('<div>{5}</div>;')
@@ -154,7 +154,7 @@ test('DOM tag children: a literal or function-expression child is left untouched
 })
 
 /**
- * @canon rule-a-dom-child-is-one-thunk-per-dynamic-child
+ * @canon spec-a-dom-child-is-one-thunk-per-dynamic-child
  */
 test('DOM tag children: multiple dynamic children are wrapped INDIVIDUALLY, not as one array-thunk', () => {
   const code = transform('<div>{a}{b}</div>;')
@@ -162,7 +162,7 @@ test('DOM tag children: multiple dynamic children are wrapped INDIVIDUALLY, not 
 })
 
 /**
- * @canon rule-a-static-dom-child-is-left-as-written
+ * @canon spec-a-static-dom-child-is-left-as-written
  */
 test('DOM tag children: a nested static JSX element is never thunk-wrapped, even though it compiles to a CallExpression', () => {
   const code = transform('<div><span>hi</span></div>;')
@@ -171,7 +171,7 @@ test('DOM tag children: a nested static JSX element is never thunk-wrapped, even
 })
 
 /**
- * @canon rule-a-dom-child-is-one-thunk-per-dynamic-child
+ * @canon spec-a-dom-child-is-one-thunk-per-dynamic-child
  */
 test('DOM tag children: a nested JSX element mixed with a dynamic sibling only wraps the dynamic one', () => {
   const code = transform('<div><span>{count()}</span><span>b</span></div>;')
@@ -182,7 +182,7 @@ test('DOM tag children: a nested JSX element mixed with a dynamic sibling only w
 })
 
 /**
- * @canon rule-component-children-become-one-getter
+ * @canon spec-component-children-become-one-getter
  */
 test('component children: the whole value becomes ONE getter, not per-element wrapping', () => {
   const code = transform('<Foo>{a}{b}</Foo>;')
@@ -190,7 +190,7 @@ test('component children: the whole value becomes ONE getter, not per-element wr
 })
 
 /**
- * @canon rule-component-children-become-one-getter
+ * @canon spec-component-children-become-one-getter
  */
 test('bare (unbraced) JSX-element child of a component compiles identically to the braced form', () => {
   const braced = transform('<Loading>{<TodoList/>}</Loading>;')
@@ -200,7 +200,7 @@ test('bare (unbraced) JSX-element child of a component compiles identically to t
 })
 
 /**
- * @canon rule-a-dom-child-is-one-thunk-per-dynamic-child
+ * @canon spec-a-dom-child-is-one-thunk-per-dynamic-child
  */
 test('Fragment children behave like DOM tag children (thunk-wrapped), not like a component', () => {
   const code = transform('<Loading><>{a}{b}</></Loading>;')
@@ -208,7 +208,7 @@ test('Fragment children behave like DOM tag children (thunk-wrapped), not like a
 })
 
 /**
- * @canon rule-component-children-become-one-getter
+ * @canon spec-component-children-become-one-getter
  */
 test('a member-expression tag (Foo.Bar) is treated as a component: children becomes a getter', () => {
   const code = transform('<Foo.Bar><Baz/></Foo.Bar>;')
@@ -216,7 +216,7 @@ test('a member-expression tag (Foo.Bar) is treated as a component: children beco
 })
 
 /**
- * @canon rule-a-dynamic-prop-becomes-a-getter
+ * @canon spec-a-dynamic-prop-becomes-a-getter
  */
 test('wraps identically whether the tag is a DOM element or a component, for non-children props', () => {
   const code = transform('<Foo c={count()} />; <div c={count()} />;')

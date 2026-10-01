@@ -15,7 +15,7 @@ afterEach(() => {
 })
 
 /**
- * @canon rule-a-function-child-is-a-reactive-hole
+ * @canon spec-a-function-child-is-a-reactive-hole
  */
 test('JSX renders an element with reactive child', () => {
   createRoot(() => {
@@ -29,8 +29,8 @@ test('JSX renders an element with reactive child', () => {
 })
 
 /**
- * @canon rule-an-event-prop-adds-a-listener-until-its-owner-is-disposed
- * @canon rule-a-class-prefix-toggles-one-class-by-truthiness
+ * @canon spec-an-event-prop-adds-a-listener-until-its-owner-is-disposed
+ * @canon spec-a-class-prefix-toggles-one-class-by-truthiness
  */
 test('JSX renders nested element with on: and class:', () => {
   let clicked = 0
@@ -51,7 +51,7 @@ test('JSX renders nested element with on: and class:', () => {
 })
 
 /**
- * @canon rule-a-fragment-is-its-children-as-an-array
+ * @canon spec-a-fragment-is-its-children-as-an-array
  */
 test('JSX Fragment groups siblings', () => {
   createRoot(() => {

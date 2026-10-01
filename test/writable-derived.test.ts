@@ -9,7 +9,7 @@ import { effect } from '../src/effect'
 import { flush, microtaskScheduler, setScheduler, syncScheduler } from '../src/scheduler'
 
 /**
- * @canon rule-a-write-replaces-a-derived-value-without-rerunning-it
+ * @canon spec-a-write-replaces-a-derived-value-without-rerunning-it
  */
 test('W2: a write replaces the value and the body does not re-run', () => {
   let runs = 0
@@ -26,7 +26,7 @@ test('W2: a write replaces the value and the body does not re-run', () => {
 })
 
 /**
- * @canon rule-an-update-function-receives-the-last-resolved-value
+ * @canon spec-an-update-function-receives-the-last-resolved-value
  */
 test('W2: an update function receives the last resolved value', () => {
   const [list, setList] = signal(() => ['a'])
@@ -36,7 +36,7 @@ test('W2: an update function receives the last resolved value', () => {
 })
 
 /**
- * @canon rule-an-update-function-sees-the-value-a-sync-derivation-produced-at-creation
+ * @canon spec-an-update-function-sees-the-value-a-sync-derivation-produced-at-creation
  */
 test('W3: an update function receives the value an eagerly-run derivation produced', () => {
   let seen: unknown = 'not called'
@@ -50,7 +50,7 @@ test('W3: an update function receives the value an eagerly-run derivation produc
 })
 
 /**
- * @canon rule-an-update-function-sees-the-value-a-sync-derivation-produced-at-creation
+ * @canon spec-an-update-function-sees-the-value-a-sync-derivation-produced-at-creation
  */
 test('an update function sees the created value also for a derivation created inside a running computation', () => {
   const [source] = signal(1)
@@ -69,7 +69,7 @@ test('an update function sees the created value also for a derivation created in
 })
 
 /**
- * @canon rule-a-derivation-runs-when-it-is-created
+ * @canon spec-a-derivation-runs-when-it-is-created
  */
 test('a derivation created outside every computation runs at once', () => {
   let runs = 0
@@ -81,7 +81,7 @@ test('a derivation created outside every computation runs at once', () => {
 })
 
 /**
- * @canon rule-a-derivation-runs-when-it-is-created
+ * @canon spec-a-derivation-runs-when-it-is-created
  */
 test('a derivation created inside a running computation that has read something runs at once', () => {
   const [source] = signal(1)
@@ -101,7 +101,7 @@ test('a derivation created inside a running computation that has read something 
 })
 
 /**
- * @canon rule-an-update-function-receives-the-last-resolved-value
+ * @canon spec-an-update-function-receives-the-last-resolved-value
  */
 test('W3: an update function receives undefined while nothing has resolved yet', () => {
   let seen: unknown = 'not called'
@@ -116,7 +116,7 @@ test('W3: an update function receives undefined while nothing has resolved yet',
 })
 
 /**
- * @canon rule-writes-in-one-tick-chain-their-update-functions
+ * @canon spec-writes-in-one-tick-chain-their-update-functions
  */
 test('W21: two writes in one tick chain, and the last one wins', () => {
   const [list, setList] = signal(() => ['a'])
@@ -127,7 +127,7 @@ test('W21: two writes in one tick chain, and the last one wins', () => {
 })
 
 /**
- * @canon rule-a-signal-given-stages-is-a-writable-derivation
+ * @canon spec-a-signal-given-stages-is-a-writable-derivation
  */
 test('the value form still works and is unchanged', () => {
   const [count, setCount] = signal(0)
@@ -138,7 +138,7 @@ test('the value form still works and is unchanged', () => {
 })
 
 /**
- * @canon rule-a-signal-given-stages-is-a-writable-derivation
+ * @canon spec-a-signal-given-stages-is-a-writable-derivation
  */
 test('a write into a multi-stage pipeline lands on the output', () => {
   const [n, setN] = signal(
@@ -151,7 +151,7 @@ test('a write into a multi-stage pipeline lands on the output', () => {
 })
 
 /**
- * @canon rule-a-write-keeps-a-pipelines-colour
+ * @canon spec-a-write-keeps-a-pipelines-colour
  */
 test('a bare write into an asynchronously coloured stage keeps the read a promise', async () => {
   let resolveList: (v: string[]) => void = () => {}
@@ -175,7 +175,7 @@ test('a bare write into an asynchronously coloured stage keeps the read a promis
 })
 
 /**
- * @canon rule-a-write-keeps-a-pipelines-colour
+ * @canon spec-a-write-keeps-a-pipelines-colour
  */
 test('a write into a synchronously coloured stage does not introduce a promise', () => {
   const [n, setN] = signal(() => 1)
@@ -185,7 +185,7 @@ test('a write into a synchronously coloured stage does not introduce a promise',
 })
 
 /**
- * @canon rule-a-generator-stage-is-asynchronous-only-when-it-suspends
+ * @canon spec-a-generator-stage-is-asynchronous-only-when-it-suspends
  */
 test('a generator stage that never suspends publishes its value bare', () => {
   let runs = 0
@@ -208,7 +208,7 @@ test('a generator stage that never suspends publishes its value bare', () => {
 })
 
 /**
- * @canon rule-a-generator-stage-is-asynchronous-only-when-it-suspends
+ * @canon spec-a-generator-stage-is-asynchronous-only-when-it-suspends
  */
 test('a generator stage colours its read by what it actually reads, not by being a generator', async () => {
   const [syncSource] = signal(() => 5)
@@ -235,7 +235,7 @@ test('a generator stage colours its read by what it actually reads, not by being
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
 
 /**
- * @canon rule-a-construction-default-seeds-only-the-tolerant-read
+ * @canon spec-a-construction-default-seeds-only-the-tolerant-read
  */
 test('signal(fn, default): peek() reports the default before the first resolution', () => {
   const [todos] = signal(function* () {
@@ -245,7 +245,7 @@ test('signal(fn, default): peek() reports the default before the first resolutio
 })
 
 /**
- * @canon rule-a-construction-default-seeds-only-the-tolerant-read
+ * @canon spec-a-construction-default-seeds-only-the-tolerant-read
  */
 test('signal(fn, default): peek() reports the real value once resolved, not the default', async () => {
   let resolveList: (v: string[]) => void = () => {}
@@ -259,7 +259,7 @@ test('signal(fn, default): peek() reports the real value once resolved, not the 
 })
 
 /**
- * @canon rule-a-construction-default-leaves-the-raw-read-a-promise
+ * @canon spec-a-construction-default-leaves-the-raw-read-a-promise
  */
 test('signal(fn, default) does not change the raw read — still a promise while pending', () => {
   const [todos] = signal(function* () {
@@ -272,7 +272,7 @@ test('signal(fn, default) does not change the raw read — still a promise while
 })
 
 /**
- * @canon rule-a-construction-default-removes-undefined-from-the-types
+ * @canon spec-a-construction-default-removes-undefined-from-the-types
  */
 test('signal(fn, default): peek(todos) needs no second argument to type as non-optional (compile-time)', () => {
   // This is mostly a typecheck-only assertion — the `const … : T = …` lines
@@ -297,7 +297,7 @@ test('signal(fn, default): peek(todos) needs no second argument to type as non-o
 })
 
 /**
- * @canon rule-a-construction-default-seeds-only-the-tolerant-read
+ * @canon spec-a-construction-default-seeds-only-the-tolerant-read
  */
 test('signal(fn, default): an update function sees the default in place of undefined before the first resolution', () => {
   let seen: unknown = 'not called'
@@ -312,7 +312,7 @@ test('signal(fn, default): an update function sees the default in place of undef
 })
 
 /**
- * @canon rule-a-construction-default-seeds-only-the-tolerant-read
+ * @canon spec-a-construction-default-seeds-only-the-tolerant-read
  */
 test('signal(fn, default): an update function still sees the real resolved value once one exists, not the default', async () => {
   const [todos, setTodos] = signal(function* () {
@@ -329,7 +329,7 @@ test('signal(fn, default): an update function still sees the real resolved value
 })
 
 /**
- * @canon rule-a-construction-default-removes-undefined-from-the-types
+ * @canon spec-a-construction-default-removes-undefined-from-the-types
  */
 test('signal(fn, default): an update function needs no ?? default to type as non-optional (compile-time)', () => {
   // This is mostly a typecheck-only assertion — the `const … : T = …` lines
@@ -357,7 +357,7 @@ test('signal(fn, default): an update function needs no ?? default to type as non
 })
 
 /**
- * @canon rule-a-write-abandons-the-run-in-progress
+ * @canon spec-a-write-abandons-the-run-in-progress
  */
 test('W1: a write abandons the fetch in flight and it never publishes', async () => {
   let resolveList: (v: string[]) => void = () => {}
@@ -389,7 +389,7 @@ test('W1: a write abandons the fetch in flight and it never publishes', async ()
 })
 
 /**
- * @canon rule-abandoning-a-paused-stage-runs-its-cleanups-after-the-write
+ * @canon spec-abandoning-a-paused-stage-runs-its-cleanups-after-the-write
  */
 test('W13: abandoning a paused stage runs its cleanups', async () => {
   const aborted: string[] = []
@@ -406,7 +406,7 @@ test('W13: abandoning a paused stage runs its cleanups', async () => {
 })
 
 /**
- * @canon rule-abandoning-a-paused-stage-runs-its-cleanups-after-the-write
+ * @canon spec-abandoning-a-paused-stage-runs-its-cleanups-after-the-write
  */
 test('a cleanup fired by a write sees the value that was written', () => {
   const seen: unknown[] = []
@@ -420,7 +420,7 @@ test('a cleanup fired by a write sees the value that was written', () => {
 })
 
 /**
- * @canon rule-a-write-withdraws-a-recompute-queued-in-the-same-tick
+ * @canon spec-a-write-withdraws-a-recompute-queued-in-the-same-tick
  */
 test('W19: invalidating then writing in one tick makes no request at all', async () => {
   let requests = 0
@@ -444,7 +444,7 @@ test('W19: invalidating then writing in one tick makes no request at all', async
 })
 
 /**
- * @canon rule-a-write-withdraws-a-recompute-queued-in-the-same-tick
+ * @canon spec-a-write-withdraws-a-recompute-queued-in-the-same-tick
  */
 test('W19: invalidating then writing with an update function also makes no request', async () => {
   let requests = 0
@@ -467,7 +467,7 @@ test('W19: invalidating then writing with an update function also makes no reque
 })
 
 /**
- * @canon rule-a-dependency-change-after-a-write-takes-over
+ * @canon spec-a-dependency-change-after-a-write-takes-over
  */
 test('W20: writing then invalidating in one tick lets the request win', async () => {
   let requests = 0
@@ -490,7 +490,7 @@ test('W20: writing then invalidating in one tick lets the request win', async ()
 })
 
 /**
- * @canon rule-a-write-abandons-the-run-in-progress
+ * @canon spec-a-write-abandons-the-run-in-progress
  */
 test('W9: a write abandons a fetch that is in a middle stage', async () => {
   let resolveList: (v: string[]) => void = () => {}
@@ -513,7 +513,7 @@ test('W9: a write abandons a fetch that is in a middle stage', async () => {
 })
 
 /**
- * @canon rule-an-abandoned-stage-restarts-when-the-pipeline-is-next-pulled
+ * @canon spec-an-abandoned-stage-restarts-when-the-pipeline-is-next-pulled
  */
 test('W10: a stage whose request was abandoned refetches when the tail next needs it', async () => {
   let requests = 0
@@ -563,8 +563,8 @@ test('W10: a stage whose request was abandoned refetches when the tail next need
 })
 
 /**
- * @canon rule-an-abandoned-stage-restarts-when-the-pipeline-is-next-pulled
- * @canon rule-the-written-value-stays-visible-while-the-derivation-reloads
+ * @canon spec-an-abandoned-stage-restarts-when-the-pipeline-is-next-pulled
+ * @canon spec-the-written-value-stays-visible-while-the-derivation-reloads
  */
 test('W11: a later change to the abandoned stage own dependency restarts it', async () => {
   let requests = 0
@@ -601,7 +601,7 @@ test('W11: a later change to the abandoned stage own dependency restarts it', as
 })
 
 /**
- * @canon rule-a-write-abandons-the-run-in-progress
+ * @canon spec-a-write-abandons-the-run-in-progress
  */
 test('W8: a write behaves the same when the fetch is in the tail', async () => {
   let resolveList: (v: string[]) => void = () => {}
@@ -623,7 +623,7 @@ test('W8: a write behaves the same when the fetch is in the tail', async () => {
 })
 
 /**
- * @canon rule-a-write-abandons-the-run-in-progress
+ * @canon spec-a-write-abandons-the-run-in-progress
  */
 test('W12: a write abandons every stage that has work, and resuming reissues both', async () => {
   let sessionRequests = 0
@@ -666,7 +666,7 @@ test('W12: a write abandons every stage that has work, and resuming reissues bot
 })
 
 /**
- * @canon rule-a-write-clears-a-parked-failure
+ * @canon spec-a-write-clears-a-parked-failure
  */
 test('W5: a write clears a parked error on a single stage', async () => {
   const [version, setVersion] = signal(1)
@@ -684,7 +684,7 @@ test('W5: a write clears a parked error on a single stage', async () => {
 })
 
 /**
- * @canon rule-a-write-clears-a-parked-failure
+ * @canon spec-a-write-clears-a-parked-failure
  */
 test('W5: a write clears an error parked on an earlier stage', async () => {
   const [version, setVersion] = signal(1)
@@ -705,7 +705,7 @@ test('W5: a write clears an error parked on an earlier stage', async () => {
 })
 
 /**
- * @canon rule-a-write-clears-a-parked-failure
+ * @canon spec-a-write-clears-a-parked-failure
  */
 test('W5: a write clears the error through more than one never-resolved stage', async () => {
   // A regression test. An earlier version of the error-clearing fix adopted
@@ -735,8 +735,8 @@ test('W5: a write clears the error through more than one never-resolved stage', 
 })
 
 /**
- * @canon rule-a-written-promise-is-published-like-a-produced-one
- * @canon rule-a-written-promise-leaves-the-prior-value-to-the-tolerant-read
+ * @canon spec-a-written-promise-is-published-like-a-produced-one
+ * @canon spec-a-written-promise-leaves-the-prior-value-to-the-tolerant-read
  */
 test('W6: a written promise reports as pending and then resolves', async () => {
   const [todos, setTodos] = signal(function* () {
@@ -758,7 +758,7 @@ test('W6: a written promise reports as pending and then resolves', async () => {
 })
 
 /**
- * @canon rule-an-update-function-receives-the-last-resolved-value
+ * @canon spec-an-update-function-receives-the-last-resolved-value
  */
 test('W6: an update function sees the value from before a written promise settles', async () => {
   const [todos, setTodos] = signal(function* () {
@@ -776,7 +776,7 @@ test('W6: an update function sees the value from before a written promise settle
 })
 
 /**
- * @canon rule-a-dependency-change-after-a-write-takes-over
+ * @canon spec-a-dependency-change-after-a-write-takes-over
  */
 test('W7: a dependency change supersedes a written promise that has not settled', async () => {
   const [version, setVersion] = signal(1)
@@ -801,8 +801,8 @@ test('W7: a dependency change supersedes a written promise that has not settled'
 })
 
 /**
- * @canon rule-a-written-promise-is-published-like-a-produced-one
- * @canon rule-a-written-promise-leaves-the-prior-value-to-the-tolerant-read
+ * @canon spec-a-written-promise-is-published-like-a-produced-one
+ * @canon spec-a-written-promise-leaves-the-prior-value-to-the-tolerant-read
  */
 test('W6: a rejected written promise parks as an error', async () => {
   const [todos, setTodos] = signal(function* () {
@@ -817,7 +817,7 @@ test('W6: a rejected written promise parks as an error', async () => {
 })
 
 /**
- * @canon rule-a-speculative-write-stays-out-of-committed-state
+ * @canon spec-a-speculative-write-stays-out-of-committed-state
  */
 test('W14: a write inside an action is invisible until it commits', async () => {
   const [todos, setTodos] = signal(function* () {
@@ -837,7 +837,7 @@ test('W14: a write inside an action is invisible until it commits', async () => 
 })
 
 /**
- * @canon rule-a-write-to-a-derivation-cancels-only-once-committed
+ * @canon spec-a-write-to-a-derivation-cancels-only-once-committed
  */
 test('W15: a discarded action leaves the reload alive', async () => {
   let resolveList: (v: string[]) => void = () => {}
@@ -870,7 +870,7 @@ test('W15: a discarded action leaves the reload alive', async () => {
 })
 
 /**
- * @canon rule-a-write-to-a-derivation-cancels-only-once-committed
+ * @canon spec-a-write-to-a-derivation-cancels-only-once-committed
  */
 test('W16: cancelling waits until the value reaches the committed world', async () => {
   let resolveList: (v: string[]) => void = () => {}
@@ -898,7 +898,7 @@ test('W16: cancelling waits until the value reaches the committed world', async 
 })
 
 /**
- * @canon rule-at-commit-a-write-replaces-what-the-derivation-published-meanwhile
+ * @canon spec-at-commit-a-write-replaces-what-the-derivation-published-meanwhile
  */
 test('W17: a reload that lands while an action is open is replaced at commit', async () => {
   let resolveList: (v: string[]) => void = () => {}
@@ -930,7 +930,7 @@ test('W17: a reload that lands while an action is open is replaced at commit', a
 })
 
 /**
- * @canon rule-a-write-to-a-derivation-cancels-only-once-committed
+ * @canon spec-a-write-to-a-derivation-cancels-only-once-committed
  */
 test('a queued recompute survives a write inside a discarded action', async () => {
   // A regression test for the withdrawal loop's scope gate. Withdrawing a
@@ -966,7 +966,7 @@ test('a queued recompute survives a write inside a discarded action', async () =
 })
 
 /**
- * @canon rule-a-promise-written-inside-an-action-starts-no-recompute
+ * @canon spec-a-promise-written-inside-an-action-starts-no-recompute
  */
 test('writing a promise inside an action does not trigger a fresh recompute', async () => {
   // Covers the isPromise(value) branch of publishValue under the same
@@ -1000,7 +1000,7 @@ test('writing a promise inside an action does not trigger a fresh recompute', as
 })
 
 /**
- * @canon rule-a-write-from-inside-the-derivation-abandons-its-own-run-without-raising
+ * @canon spec-a-write-from-inside-the-derivation-abandons-its-own-run-without-raising
  */
 test('W22: a write from inside the derivation own body does not raise', async () => {
   // A write here cancels every stage's run, including this one's own — the
@@ -1032,8 +1032,8 @@ test('W22: a write from inside the derivation own body does not raise', async ()
 })
 
 /**
- * @canon rule-a-dependency-change-after-a-write-takes-over
- * @canon rule-the-written-value-stays-visible-while-the-derivation-reloads
+ * @canon spec-a-dependency-change-after-a-write-takes-over
+ * @canon spec-the-written-value-stays-visible-while-the-derivation-reloads
  */
 test('W4: a dependency change after a write takes the derivation back over', async () => {
   const [version, setVersion] = signal(1)
@@ -1053,7 +1053,7 @@ test('W4: a dependency change after a write takes the derivation back over', asy
 })
 
 /**
- * @canon rule-an-abandoned-stage-restarts-when-the-pipeline-is-next-pulled
+ * @canon spec-an-abandoned-stage-restarts-when-the-pipeline-is-next-pulled
  */
 test('a read from inside an effect while an earlier stage is waiting to reload', async () => {
   // Rewritten from the brief's original, which asserted the write survives
@@ -1110,7 +1110,7 @@ test('a read from inside an effect while an earlier stage is waiting to reload',
 })
 
 /**
- * @canon rule-a-write-to-a-derivation-moves-its-change-detection-only-once-committed
+ * @canon spec-a-write-to-a-derivation-moves-its-change-detection-only-once-committed
  */
 test('a discarded action does not leave the change gate describing a rolled-back value', async () => {
   // The write inside the action (7) has to equal what a LATER, genuine
@@ -1146,7 +1146,7 @@ test('a discarded action does not leave the change gate describing a rolled-back
 })
 
 /**
- * @canon rule-an-update-function-that-throws-cancels-nothing
+ * @canon spec-an-update-function-that-throws-cancels-nothing
  */
 test('an update function that throws leaves a queued run intact', async () => {
   // Found during the final whole-branch review, not by any scenario: at the
@@ -1182,7 +1182,7 @@ test('an update function that throws leaves a queued run intact', async () => {
 })
 
 /**
- * @canon case-a-computed-publishes-only-a-changed-value
+ * @canon spec-a-computed-publishes-only-a-changed-value
  */
 test('a written promise that settles to -0 over 0 is not published again', async () => {
   setScheduler(syncScheduler(flush))

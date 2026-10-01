@@ -15,7 +15,7 @@ beforeEach(() => setScheduler(syncScheduler(flush)))
 afterEach(() => setScheduler(microtaskScheduler(flush)))
 
 /**
- * @canon rule-list-rows-are-keyed-by-reference
+ * @canon spec-list-rows-are-keyed-by-reference
  */
 test('initial run maps each item in order', () => {
   createRoot(() => {
@@ -26,7 +26,7 @@ test('initial run maps each item in order', () => {
 })
 
 /**
- * @canon case-map-array-builds-each-item-once-under-its-own-owner
+ * @canon spec-map-array-builds-each-item-once-under-its-own-owner
  */
 test('reuses entries when same references appear again', () => {
   createRoot(() => {
@@ -44,7 +44,7 @@ test('reuses entries when same references appear again', () => {
 })
 
 /**
- * @canon case-map-array-builds-each-item-once-under-its-own-owner
+ * @canon spec-map-array-builds-each-item-once-under-its-own-owner
  */
 test('creates entries for newly added items', () => {
   createRoot(() => {
@@ -62,7 +62,7 @@ test('creates entries for newly added items', () => {
 })
 
 /**
- * @canon case-map-array-builds-each-item-once-under-its-own-owner
+ * @canon spec-map-array-builds-each-item-once-under-its-own-owner
  */
 test('disposes orphan entries when items leave', () => {
   createRoot(() => {
@@ -83,8 +83,8 @@ test('disposes orphan entries when items leave', () => {
 })
 
 /**
- * @canon rule-list-rows-are-keyed-by-reference
- * @canon rule-a-row-index-follows-its-position
+ * @canon spec-list-rows-are-keyed-by-reference
+ * @canon spec-a-row-index-follows-its-position
  */
 test('output is in current array order, entries reused across reorder, index updates', () => {
   createRoot(() => {
@@ -113,7 +113,7 @@ test('output is in current array order, entries reused across reorder, index upd
 })
 
 /**
- * @canon case-map-array-builds-each-item-once-under-its-own-owner
+ * @canon spec-map-array-builds-each-item-once-under-its-own-owner
  */
 test('mapper runs under per-item sub-owner; nested effect disposes when item leaves', () => {
   createRoot(() => {
@@ -138,7 +138,7 @@ test('mapper runs under per-item sub-owner; nested effect disposes when item lea
 })
 
 /**
- * @canon rule-a-pending-list-reads-as-empty
+ * @canon spec-a-pending-list-reads-as-empty
  */
 test('pending Promise<T[]> coerces to empty', () => {
   createRoot(() => {
@@ -150,7 +150,7 @@ test('pending Promise<T[]> coerces to empty', () => {
 })
 
 /**
- * @canon case-map-array-builds-each-item-once-under-its-own-owner
+ * @canon spec-map-array-builds-each-item-once-under-its-own-owner
  */
 test('parent owner dispose cascades to all entry sub-owners', () => {
   let cleanups = 0
@@ -169,7 +169,7 @@ test('parent owner dispose cascades to all entry sub-owners', () => {
 })
 
 /**
- * @canon rule-list-rows-are-keyed-by-reference
+ * @canon spec-list-rows-are-keyed-by-reference
  */
 test('different-reference same-shape items: treated as different', () => {
   createRoot(() => {
@@ -186,7 +186,7 @@ test('different-reference same-shape items: treated as different', () => {
 })
 
 /**
- * @canon case-map-array-builds-each-item-once-under-its-own-owner
+ * @canon spec-map-array-builds-each-item-once-under-its-own-owner
  */
 test('empty array → non-empty creates entries; non-empty → empty disposes all', () => {
   let cleanups = 0

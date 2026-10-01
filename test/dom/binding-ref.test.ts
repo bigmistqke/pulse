@@ -5,7 +5,7 @@ import { createRoot } from '../../src/index'
 afterEach(() => { document.body.innerHTML = '' })
 
 /**
- * @canon rule-a-ref-is-called-once-with-its-element
+ * @canon spec-a-ref-is-called-once-with-its-element
  */
 test('ref receives the mounted element', () => {
   let captured: HTMLElement | null = null
@@ -17,7 +17,7 @@ test('ref receives the mounted element', () => {
 })
 
 /**
- * @canon rule-a-ref-is-called-once-with-its-element
+ * @canon spec-a-ref-is-called-once-with-its-element
  */
 test('a ref function is invoked once with its element, not re-run as a reactive binding', () => {
   // The spec says ref is not reactive. The handler is the function itself,

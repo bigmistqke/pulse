@@ -16,7 +16,7 @@ afterEach(() => {
 })
 
 /**
- * @canon rule-a-bare-or-attr-prop-sets-the-attribute
+ * @canon spec-a-bare-or-attr-prop-sets-the-attribute
  */
 test('attr:name explicitly sets the attribute', () => {
   createRoot(() => {
@@ -27,7 +27,7 @@ test('attr:name explicitly sets the attribute', () => {
 })
 
 /**
- * @canon rule-a-bare-or-attr-prop-sets-the-attribute
+ * @canon spec-a-bare-or-attr-prop-sets-the-attribute
  */
 test('default (bare) prop with function value is reactive', () => {
   createRoot(() => {
@@ -41,7 +41,7 @@ test('default (bare) prop with function value is reactive', () => {
 })
 
 /**
- * @canon rule-an-attribute-is-removed-on-nothing
+ * @canon spec-an-attribute-is-removed-on-nothing
  */
 test('reactive attr is removed when value goes null/false', () => {
   createRoot(() => {
@@ -57,7 +57,7 @@ test('reactive attr is removed when value goes null/false', () => {
 })
 
 /**
- * @canon rule-a-bare-or-attr-prop-sets-the-attribute
+ * @canon spec-a-bare-or-attr-prop-sets-the-attribute
  */
 test('attr: with function value is reactive', () => {
   createRoot(() => {

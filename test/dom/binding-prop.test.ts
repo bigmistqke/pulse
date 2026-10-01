@@ -16,7 +16,7 @@ afterEach(() => {
 })
 
 /**
- * @canon rule-a-prop-prefix-sets-the-dom-property
+ * @canon spec-a-prop-prefix-sets-the-dom-property
  */
 test('prop:value sets the DOM property, not the attribute', () => {
   createRoot(() => {
@@ -28,7 +28,7 @@ test('prop:value sets the DOM property, not the attribute', () => {
 })
 
 /**
- * @canon rule-a-prop-prefix-sets-the-dom-property
+ * @canon spec-a-prop-prefix-sets-the-dom-property
  */
 test('prop:disabled toggles the boolean property correctly', () => {
   createRoot(() => {
@@ -39,7 +39,7 @@ test('prop:disabled toggles the boolean property correctly', () => {
 })
 
 /**
- * @canon rule-a-prop-prefix-sets-the-dom-property
+ * @canon spec-a-prop-prefix-sets-the-dom-property
  */
 test('prop: with function value is reactive', () => {
   createRoot(() => {

@@ -31,7 +31,7 @@ const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
  */
 
 /**
- * @canon case-a-child-binding-leaves-the-pending-set-when-it-fails
+ * @canon spec-a-child-binding-leaves-the-pending-set-when-it-fails
  */
 test('Loading wrapping Errored: a rejecting computed renders the error fallback, not a stuck spinner', async () => {
   const target = document.createElement('section')
@@ -63,7 +63,7 @@ test('Loading wrapping Errored: a rejecting computed renders the error fallback,
 })
 
 /**
- * @canon case-a-child-binding-leaves-the-pending-set-when-it-fails
+ * @canon spec-a-child-binding-leaves-the-pending-set-when-it-fails
  */
 test('Errored wrapping Loading: a rejecting computed renders the error fallback and useLoading() returns to false', async () => {
   const target = document.createElement('section')
@@ -99,8 +99,8 @@ test('Errored wrapping Loading: a rejecting computed renders the error fallback 
 })
 
 /**
- * @canon case-a-child-binding-leaves-the-pending-set-when-it-fails
- * @canon rule-a-catch-error-handler-is-called-for-each-throw-under-it
+ * @canon spec-a-child-binding-leaves-the-pending-set-when-it-fails
+ * @canon spec-a-catch-error-handler-is-called-for-each-throw-under-it
  */
 test('Loading with catchError (no Errored): the rejection is caught and the loading fallback clears', async () => {
   const target = document.createElement('section')
@@ -139,7 +139,7 @@ test('Loading with catchError (no Errored): the rejection is caught and the load
 })
 
 /**
- * @canon case-a-child-binding-leaves-the-pending-set-when-it-fails
+ * @canon spec-a-child-binding-leaves-the-pending-set-when-it-fails
  */
 test('a healthy sibling under the same Loading is not held hostage by a failed sibling', async () => {
   const target = document.createElement('section')
@@ -181,7 +181,7 @@ test('a healthy sibling under the same Loading is not held hostage by a failed s
 })
 
 /**
- * @canon case-a-reactive-prop-leaves-the-pending-set-when-it-fails
+ * @canon spec-a-reactive-prop-leaves-the-pending-set-when-it-fails
  */
 test('a reactive prop that fails under Loading does not pin the boundary', async () => {
   const target = document.createElement('section')
@@ -213,7 +213,7 @@ test('a reactive prop that fails under Loading does not pin the boundary', async
 })
 
 /**
- * @canon case-a-staged-effect-leaves-the-pending-set-when-it-fails
+ * @canon spec-a-staged-effect-leaves-the-pending-set-when-it-fails
  */
 test('a staged effect whose pipeline rejects under Loading does not pin the boundary', async () => {
   const target = document.createElement('section')

@@ -14,7 +14,7 @@ import {
 afterEach(() => setScheduler(microtaskScheduler(flush)))
 
 /**
- * @canon rule-a-catch-error-handler-is-called-for-each-throw-under-it
+ * @canon spec-a-catch-error-handler-is-called-for-each-throw-under-it
  */
 test('end-to-end: signal -> throwing computed -> effect -> catchError catches and user observes via signal', () => {
   setScheduler(syncScheduler(flush))
@@ -60,7 +60,7 @@ test('end-to-end: signal -> throwing computed -> effect -> catchError catches an
 })
 
 /**
- * @canon rule-an-error-nothing-claims-is-thrown-on-a-first-run
+ * @canon spec-an-error-nothing-claims-is-thrown-on-a-first-run
  */
 test('uncaught throw still propagates outside any catchError', () => {
   setScheduler(syncScheduler(flush))
@@ -70,7 +70,7 @@ test('uncaught throw still propagates outside any catchError', () => {
 })
 
 /**
- * @canon rule-an-error-nothing-claims-on-a-re-run-is-logged
+ * @canon spec-an-error-nothing-claims-on-a-re-run-is-logged
  */
 test('outside any root, an unclaimed error during a re-run is logged, not thrown at the writer', () => {
   setScheduler(syncScheduler(flush))

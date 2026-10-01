@@ -5,7 +5,7 @@ import { computed, peek, from, signal, use, type PipelineRead, type Resolved } f
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
 
 /**
- * @canon rule-an-async-node-reads-as-a-plain-promise
+ * @canon spec-an-async-node-reads-as-a-plain-promise
  */
 test('end-to-end: signal -> sync stage -> async stage -> generator stage', async () => {
   const [id] = signal(1)
@@ -29,7 +29,7 @@ test('end-to-end: signal -> sync stage -> async stage -> generator stage', async
 })
 
 /**
- * @canon rule-an-async-node-keeps-its-last-value-while-it-refetches
+ * @canon spec-an-async-node-keeps-its-last-value-while-it-refetches
  */
 test('pipeline re-runs when its signal input changes', async () => {
   const [id, setId] = signal(1)
@@ -52,7 +52,7 @@ test('pipeline re-runs when its signal input changes', async () => {
 })
 
 /**
- * @canon case-resolved-unwraps-what-a-stage-receives
+ * @canon spec-resolved-unwraps-what-a-stage-receives
  */
 test('Resolved<T> type unwraps signals, promises, and generators (compile-time)', () => {
   // This is a typecheck-only assertion — runtime is irrelevant.
@@ -66,7 +66,7 @@ test('Resolved<T> type unwraps signals, promises, and generators (compile-time)'
 })
 
 /**
- * @canon case-pipeline-read-colours-by-the-stages-that-can-be-async
+ * @canon spec-pipeline-read-colours-by-the-stages-that-can-be-async
  */
 test('PipelineRead keeps async colour honestly (compile-time)', () => {
   // Each `const … : T = value` line is the compile-time assertion — a wrong type
@@ -92,7 +92,7 @@ test('PipelineRead keeps async colour honestly (compile-time)', () => {
 })
 
 /**
- * @canon case-a-generator-stage-is-coloured-by-what-it-reads
+ * @canon spec-a-generator-stage-is-coloured-by-what-it-reads
  */
 test('PipelineRead colours a generator stage by what it actually yields, not by being a generator (compile-time)', () => {
   // Three shapes of `function*` stage, colour derived from their `yield*

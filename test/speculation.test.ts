@@ -2,7 +2,7 @@ import { expect, test } from 'vitest'
 import { action, committed, computed, signal } from '../src/index'
 
 /**
- * @canon rule-a-speculative-write-stays-out-of-committed-state
+ * @canon spec-a-speculative-write-stays-out-of-committed-state
  */
 test('a speculative write is visible to a normal read but NOT to committed', () => {
   const [name, setName] = signal('alice')
@@ -17,7 +17,7 @@ test('a speculative write is visible to a normal read but NOT to committed', () 
 })
 
 /**
- * @canon rule-a-discard-leaves-no-trace
+ * @canon spec-a-discard-leaves-no-trace
  */
 test('a discarded action leaves committed state untouched and the write vanishes', () => {
   const [name, setName] = signal('alice')
@@ -35,7 +35,7 @@ test('a discarded action leaves committed state untouched and the write vanishes
 })
 
 /**
- * @canon rule-a-commit-promotes-every-write-at-once
+ * @canon spec-a-commit-promotes-every-write-at-once
  */
 test('a computed sees a speculative write commit through', () => {
   const [n, setN] = signal(1)
@@ -50,7 +50,7 @@ test('a computed sees a speculative write commit through', () => {
 })
 
 /**
- * @canon rule-a-speculation-reads-its-own-writes
+ * @canon spec-a-speculation-reads-its-own-writes
  */
 test('a computed derives from the speculative value inside an action', () => {
   const [n, setN] = signal(1)
@@ -65,7 +65,7 @@ test('a computed derives from the speculative value inside an action', () => {
 })
 
 /**
- * @canon rule-a-discard-drops-what-was-derived-from-its-writes
+ * @canon spec-a-discard-drops-what-was-derived-from-its-writes
  */
 test('a discarded action leaves derived state untouched', () => {
   const [n, setN] = signal(1)
@@ -83,7 +83,7 @@ test('a discarded action leaves derived state untouched', () => {
 })
 
 /**
- * @canon rule-a-speculation-reads-its-own-writes
+ * @canon spec-a-speculation-reads-its-own-writes
  */
 test('a multi-stage pipeline derives through the speculation', () => {
   const [n, setN] = signal(1)
@@ -101,7 +101,7 @@ test('a multi-stage pipeline derives through the speculation', () => {
 })
 
 /**
- * @canon rule-a-speculation-reads-its-own-writes
+ * @canon spec-a-speculation-reads-its-own-writes
  */
 test('a speculative write propagates through a chain of separate computeds', () => {
   const [a, setA] = signal(1)
@@ -121,7 +121,7 @@ test('a speculative write propagates through a chain of separate computeds', () 
 })
 
 /**
- * @canon rule-a-discard-drops-what-was-derived-from-its-writes
+ * @canon spec-a-discard-drops-what-was-derived-from-its-writes
  */
 test('a discarded action rolls back a transitively-derived value', () => {
   const [a, setA] = signal(1)
@@ -141,7 +141,7 @@ test('a discarded action rolls back a transitively-derived value', () => {
 })
 
 /**
- * @canon rule-a-speculation-reads-its-own-writes
+ * @canon spec-a-speculation-reads-its-own-writes
  */
 test('a speculative write propagates through a longer computed chain', () => {
   const [a, setA] = signal(1)
@@ -158,7 +158,7 @@ test('a speculative write propagates through a longer computed chain', () => {
 })
 
 /**
- * @canon rule-outside-a-speculation-a-write-commits-at-once
+ * @canon spec-outside-a-speculation-a-write-commits-at-once
  */
 test('committed outside any speculation is just the current value', () => {
   const [n, setN] = signal(1)

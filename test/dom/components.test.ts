@@ -16,7 +16,7 @@ afterEach(() => {
 })
 
 /**
- * @canon rule-a-function-tag-is-called-once-with-its-props
+ * @canon spec-a-function-tag-is-called-once-with-its-props
  */
 test('a function tag is invoked once with props', () => {
   const Greeting = (props: { name: string }) =>
@@ -30,7 +30,7 @@ test('a function tag is invoked once with props', () => {
 })
 
 /**
- * @canon rule-a-function-tag-is-called-once-with-its-props
+ * @canon spec-a-function-tag-is-called-once-with-its-props
  */
 test('a function tag receives children via props.children', () => {
   const Box = (props: { children: unknown }) =>
@@ -44,7 +44,7 @@ test('a function tag receives children via props.children', () => {
 })
 
 /**
- * @canon rule-a-function-child-is-a-reactive-hole
+ * @canon spec-a-function-child-is-a-reactive-hole
  */
 test('components compose with reactive children', () => {
   const Label = (props: { value: () => unknown }) =>
@@ -60,7 +60,7 @@ test('components compose with reactive children', () => {
 })
 
 /**
- * @canon rule-a-fragment-is-its-children-as-an-array
+ * @canon spec-a-fragment-is-its-children-as-an-array
  */
 test('Fragment returns children as an array', () => {
   createRoot(() => {
@@ -71,7 +71,7 @@ test('Fragment returns children as an array', () => {
 })
 
 /**
- * @canon rule-a-fragment-is-its-children-as-an-array
+ * @canon spec-a-fragment-is-its-children-as-an-array
  */
 test('Fragment composed inside an element flattens', () => {
   createRoot(() => {

@@ -19,7 +19,7 @@ const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
 afterEach(() => setScheduler(microtaskScheduler(flush)))
 
 /**
- * @canon rule-an-effect-runs-at-creation-and-after-each-change
+ * @canon spec-an-effect-runs-at-creation-and-after-each-change
  */
 test('effect runs once immediately on creation', () => {
   setScheduler(syncScheduler(flush))
@@ -30,7 +30,7 @@ test('effect runs once immediately on creation', () => {
 })
 
 /**
- * @canon rule-an-effect-runs-at-creation-and-after-each-change
+ * @canon spec-an-effect-runs-at-creation-and-after-each-change
  */
 test('effect re-runs when a dependency changes', () => {
   setScheduler(syncScheduler(flush))
@@ -43,7 +43,7 @@ test('effect re-runs when a dependency changes', () => {
 })
 
 /**
- * @canon rule-an-effects-cleanups-run-before-its-next-run
+ * @canon spec-an-effects-cleanups-run-before-its-next-run
  */
 test('onCleanup runs before an effect re-runs', () => {
   setScheduler(syncScheduler(flush))
@@ -60,7 +60,7 @@ test('onCleanup runs before an effect re-runs', () => {
 })
 
 /**
- * @canon rule-a-suspended-effect-re-runs-when-its-promise-settles
+ * @canon spec-a-suspended-effect-re-runs-when-its-promise-settles
  */
 test('an effect using a pending promise suspends, then runs when it settles', async () => {
   setScheduler(syncScheduler(flush))
@@ -75,7 +75,7 @@ test('an effect using a pending promise suspends, then runs when it settles', as
 })
 
 /**
- * @canon rule-a-suspended-effect-re-runs-when-its-promise-settles
+ * @canon spec-a-suspended-effect-re-runs-when-its-promise-settles
  */
 test('an effect re-runs when a signal it uses is set to a new promise', async () => {
   setScheduler(syncScheduler(flush))
@@ -90,7 +90,7 @@ test('an effect re-runs when a signal it uses is set to a new promise', async ()
 })
 
 /**
- * @canon rule-an-error-nothing-claims-is-thrown-on-a-first-run
+ * @canon spec-an-error-nothing-claims-is-thrown-on-a-first-run
  */
 test('a genuine (non-NotReadyYet) error thrown in an effect is not swallowed', () => {
   setScheduler(syncScheduler(flush))
@@ -100,7 +100,7 @@ test('a genuine (non-NotReadyYet) error thrown in an effect is not swallowed', (
 })
 
 /**
- * @canon rule-an-effect-is-disposed-with-its-owner
+ * @canon spec-an-effect-is-disposed-with-its-owner
  */
 test('owned effect is disposed when its root is disposed', () => {
   setScheduler(syncScheduler(flush))
@@ -118,7 +118,7 @@ test('owned effect is disposed when its root is disposed', () => {
 })
 
 /**
- * @canon rule-an-effects-cleanups-run-before-its-next-run
+ * @canon spec-an-effects-cleanups-run-before-its-next-run
  */
 test('onCleanup inside an effect body registers per-run (r3 behaviour), not on the owner', () => {
   setScheduler(syncScheduler(flush))
@@ -137,7 +137,7 @@ test('onCleanup inside an effect body registers per-run (r3 behaviour), not on t
 })
 
 /**
- * @canon rule-a-real-error-in-an-effect-goes-to-the-nearest-handler
+ * @canon spec-a-real-error-in-an-effect-goes-to-the-nearest-handler
  */
 test('an effect created inside catchError routes its throw to the handler', () => {
   setScheduler(syncScheduler(flush))
@@ -150,7 +150,7 @@ test('an effect created inside catchError routes its throw to the handler', () =
 })
 
 /**
- * @canon rule-an-error-nothing-claims-is-thrown-on-a-first-run
+ * @canon spec-an-error-nothing-claims-is-thrown-on-a-first-run
  */
 test('an effect created outside any catchError still propagates uncaught (Plan 2a behaviour preserved)', () => {
   setScheduler(syncScheduler(flush))
@@ -160,7 +160,7 @@ test('an effect created outside any catchError still propagates uncaught (Plan 2
 })
 
 /**
- * @canon rule-a-real-error-in-an-effect-goes-to-the-nearest-handler
+ * @canon spec-a-real-error-in-an-effect-goes-to-the-nearest-handler
  */
 test('an effect re-throwing after a signal change routes the new throw too', () => {
   setScheduler(syncScheduler(flush))
@@ -181,7 +181,7 @@ test('an effect re-throwing after a signal change routes the new throw too', () 
 })
 
 /**
- * @canon rule-a-suspension-is-reported-to-the-nearest-boundary
+ * @canon spec-a-suspension-is-reported-to-the-nearest-boundary
  */
 test('effect that suspends increments nearest pending boundary scope', async () => {
   setScheduler(syncScheduler(flush))
@@ -215,7 +215,7 @@ test('effect that suspends increments nearest pending boundary scope', async () 
 })
 
 /**
- * @canon rule-a-disposed-binding-releases-its-boundary
+ * @canon spec-a-disposed-binding-releases-its-boundary
  */
 test('effect disposal while pending unregisters from the pending boundary scope', () => {
   setScheduler(syncScheduler(flush))
@@ -246,7 +246,7 @@ test('effect disposal while pending unregisters from the pending boundary scope'
 })
 
 /**
- * @canon rule-a-suspension-is-reported-to-the-nearest-boundary
+ * @canon spec-a-suspension-is-reported-to-the-nearest-boundary
  */
 test('effect that never suspends does not touch the pending boundary scope', () => {
   setScheduler(syncScheduler(flush))
@@ -276,7 +276,7 @@ test('effect that never suspends does not touch the pending boundary scope', () 
 const settle = () => new Promise<void>((resolve) => setTimeout(resolve))
 
 /**
- * @canon rule-a-speculation-refuses-to-create-an-effect
+ * @canon spec-a-speculation-refuses-to-create-an-effect
  */
 test('creating an effect inside an action throws, and the action fails with nothing leaked', async () => {
   const [n, setN] = signal(1)
@@ -297,7 +297,7 @@ test('creating an effect inside an action throws, and the action fails with noth
 })
 
 /**
- * @canon rule-a-speculation-refuses-to-create-an-effect
+ * @canon spec-a-speculation-refuses-to-create-an-effect
  */
 test('a staged effect inside an action is refused too', async () => {
   const [n] = signal(1)
@@ -316,7 +316,7 @@ test('a staged effect inside an action is refused too', async () => {
 })
 
 /**
- * @canon rule-a-speculation-refuses-to-create-an-effect
+ * @canon spec-a-speculation-refuses-to-create-an-effect
  */
 test('an effect created after a generator action resumes is refused', async () => {
   const [n, setN] = signal(1)
@@ -336,7 +336,7 @@ test('an effect created after a generator action resumes is refused', async () =
 })
 
 /**
- * @canon rule-a-speculation-refuses-to-create-an-effect
+ * @canon spec-a-speculation-refuses-to-create-an-effect
  */
 test('an effect created once the action has closed follows its sources normally', async () => {
   const [n, setN] = signal(1)
@@ -356,7 +356,7 @@ test('an effect created once the action has closed follows its sources normally'
 })
 
 /**
- * @canon rule-an-effect-runs-at-creation-and-after-each-change
+ * @canon spec-an-effect-runs-at-creation-and-after-each-change
  */
 test('an effect created inside a running effect that has read something runs at once', () => {
   const [source] = signal(1)
@@ -375,7 +375,7 @@ test('an effect created inside a running effect that has read something runs at 
 })
 
 /**
- * @canon rule-creating-a-derivation-is-not-reading-it
+ * @canon spec-creating-a-derivation-is-not-reading-it
  */
 test('an effect that creates an effect runs once for it', async () => {
   const [source] = signal(1)

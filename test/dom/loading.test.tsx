@@ -31,7 +31,7 @@ afterEach(() => {
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
 
 /**
- * @canon rule-a-boundary-shows-initial-until-its-first-load
+ * @canon spec-a-boundary-shows-initial-until-its-first-load
  */
 test('synchronous loaded thunk renders immediately; pending stays false', () => {
   const target = document.createElement('section')
@@ -45,7 +45,7 @@ test('synchronous loaded thunk renders immediately; pending stays false', () => 
 })
 
 /**
- * @canon rule-a-boundary-shows-initial-until-its-first-load
+ * @canon spec-a-boundary-shows-initial-until-its-first-load
  */
 test('pending use() initially renders `initial`', () => {
   const target = document.createElement('section')
@@ -64,7 +64,7 @@ test('pending use() initially renders `initial`', () => {
 })
 
 /**
- * @canon rule-a-boundary-shows-initial-until-its-first-load
+ * @canon spec-a-boundary-shows-initial-until-its-first-load
  */
 test('pending use() with no initial → renders fallback', () => {
   const target = document.createElement('section')
@@ -83,7 +83,7 @@ test('pending use() with no initial → renders fallback', () => {
 })
 
 /**
- * @canon rule-use-suspends-only-the-binding-that-reads-it
+ * @canon spec-use-suspends-only-the-binding-that-reads-it
  */
 test('pending use() with neither: the one pending binding still shows nothing (its own commit is still withheld)', () => {
   const target = document.createElement('section')
@@ -98,7 +98,7 @@ test('pending use() with neither: the one pending binding still shows nothing (i
 })
 
 /**
- * @canon rule-a-boundary-without-placeholders-swaps-nothing
+ * @canon spec-a-boundary-without-placeholders-swaps-nothing
  */
 test('pending use() with neither initial nor fallback → the rest of the subtree still renders', () => {
   const target = document.createElement('section')
@@ -126,7 +126,7 @@ test('pending use() with neither initial nor fallback → the rest of the subtre
 })
 
 /**
- * @canon rule-a-boundary-shows-initial-until-its-first-load
+ * @canon spec-a-boundary-shows-initial-until-its-first-load
  */
 test('settled → loaded subtree rendered', async () => {
   const target = document.createElement('section')
@@ -150,7 +150,7 @@ test('settled → loaded subtree rendered', async () => {
 })
 
 /**
- * @canon rule-after-its-first-load-a-boundary-shows-fallback-or-holds
+ * @canon spec-after-its-first-load-a-boundary-shows-fallback-or-holds
  */
 test('subsequent pending with fallback → renders fallback', async () => {
   const target = document.createElement('section')
@@ -184,7 +184,7 @@ test('subsequent pending with fallback → renders fallback', async () => {
 })
 
 /**
- * @canon rule-after-its-first-load-a-boundary-shows-fallback-or-holds
+ * @canon spec-after-its-first-load-a-boundary-shows-fallback-or-holds
  */
 test('subsequent pending without fallback → holds prior loaded subtree', async () => {
   const target = document.createElement('section')
@@ -212,7 +212,7 @@ test('subsequent pending without fallback → holds prior loaded subtree', async
 })
 
 /**
- * @canon rule-a-boundary-shows-initial-until-its-first-load
+ * @canon spec-a-boundary-shows-initial-until-its-first-load
  */
 test('two pending bindings: both must settle before loaded slot mounts', async () => {
   const target = document.createElement('section')
@@ -247,7 +247,7 @@ test('two pending bindings: both must settle before loaded slot mounts', async (
 })
 
 /**
- * @canon rule-is-loading-reads-the-nearest-boundary
+ * @canon spec-is-loading-reads-the-nearest-boundary
  */
 test('useLoading() inside subtree reflects pending state', async () => {
   const target = document.createElement('section')
@@ -292,7 +292,7 @@ test('useLoading() inside subtree reflects pending state', async () => {
 })
 
 /**
- * @canon rule-a-loading-boundary-does-not-catch-a-real-error
+ * @canon spec-a-loading-boundary-does-not-catch-a-real-error
  */
 test('non-NotReadyYet error in a binding inside Loading propagates to catchError', () => {
   const target = document.createElement('section')
@@ -326,7 +326,7 @@ test('non-NotReadyYet error in a binding inside Loading propagates to catchError
 })
 
 /**
- * @canon rule-a-suspension-is-reported-to-the-nearest-boundary
+ * @canon spec-a-suspension-is-reported-to-the-nearest-boundary
  */
 test('nested Loading: inner pending registers only with inner', async () => {
   const target = document.createElement('section')
@@ -366,7 +366,7 @@ test('nested Loading: inner pending registers only with inner', async () => {
 })
 
 /**
- * @canon rule-a-boundary-is-disposed-with-its-owner
+ * @canon spec-a-boundary-is-disposed-with-its-owner
  */
 test('disposing surrounding owner cascades to Loading', () => {
   const target = document.createElement('section')
@@ -389,7 +389,7 @@ test('disposing surrounding owner cascades to Loading', () => {
 })
 
 /**
- * @canon rule-loading-is-false-outside-any-boundary
+ * @canon spec-loading-is-false-outside-any-boundary
  */
 test('useLoading() outside any Loading returns constant-false accessor', () => {
   const target = document.createElement('section')
@@ -410,7 +410,7 @@ test('useLoading() outside any Loading returns constant-false accessor', () => {
 })
 
 /**
- * @canon rule-is-loading-reads-the-nearest-boundary
+ * @canon spec-is-loading-reads-the-nearest-boundary
  */
 test('isLoading() inside subtree reflects pending state, read fresh each call', async () => {
   const target = document.createElement('section')
@@ -454,7 +454,7 @@ test('isLoading() inside subtree reflects pending state, read fresh each call', 
 })
 
 /**
- * @canon rule-loading-is-false-outside-any-boundary
+ * @canon spec-loading-is-false-outside-any-boundary
  */
 test('isLoading() outside any Loading returns false', () => {
   const target = document.createElement('section')
@@ -473,7 +473,7 @@ test('isLoading() outside any Loading returns false', () => {
 })
 
 /**
- * @canon rule-a-boundary-shows-initial-until-its-first-load
+ * @canon spec-a-boundary-shows-initial-until-its-first-load
  */
 test('rapidly swapping a pending source keeps the boundary on initial', async () => {
   const target = document.createElement('section')
@@ -518,7 +518,7 @@ test('rapidly swapping a pending source keeps the boundary on initial', async ()
 // read must never reopen a boundary's fallback on remount, even while its
 // background refresh is still in flight — see docs/adr/0014-use-latest-composed-on-latest.md.
 /**
- * @canon rule-use-latest-returns-the-last-resolved-value-during-a-refetch
+ * @canon spec-use-latest-returns-the-last-resolved-value-during-a-refetch
  */
 test('use.latest() holds prior across a Loading boundary remount, even while a background refresh is in flight', async () => {
   const target = document.createElement('section')
@@ -574,7 +574,7 @@ test('use.latest() holds prior across a Loading boundary remount, even while a b
 })
 
 /**
- * @canon rule-peek-reports-nothing
+ * @canon spec-peek-reports-nothing
  */
 test('a bare peek() read never registers with the enclosing Loading boundary', async () => {
   const target = document.createElement('section')
@@ -625,7 +625,7 @@ test('a bare peek() read never registers with the enclosing Loading boundary', a
 })
 
 /**
- * @canon rule-latest-reports-loading-without-waiting
+ * @canon spec-latest-reports-loading-without-waiting
  */
 test('a bare latest() read drives initial on first load, then holds prior across a refresh', async () => {
   const target = document.createElement('section')
@@ -683,7 +683,7 @@ test('a bare latest() read drives initial on first load, then holds prior across
 })
 
 /**
- * @canon rule-use-latest-reports-a-refresh-to-its-boundary
+ * @canon spec-use-latest-reports-a-refresh-to-its-boundary
  */
 test('a use.latest() read reports a background refresh to its boundary while showing the prior value', async () => {
   const target = document.createElement('section')
@@ -733,7 +733,7 @@ test('a use.latest() read reports a background refresh to its boundary while sho
 // finished. Without that distinction a signal(fn, default) would silently lose
 // its placeholder, since latest() would always have a value to hand back.
 /**
- * @canon rule-a-seeded-source-still-counts-as-a-first-load
+ * @canon spec-a-seeded-source-still-counts-as-a-first-load
  */
 test('a seeded source still gets its initial placeholder on first load', async () => {
   const target = document.createElement('section')
@@ -766,7 +766,7 @@ test('a seeded source still gets its initial placeholder on first load', async (
 })
 
 /**
- * @canon rule-is-loading-reads-the-nearest-boundary
+ * @canon spec-is-loading-reads-the-nearest-boundary
  */
 test('a binding that calls use and reads isLoading, with nothing in flight, runs once and is not loading', async () => {
   const [ready] = signal('ready')

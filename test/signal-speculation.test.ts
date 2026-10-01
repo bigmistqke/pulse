@@ -3,7 +3,7 @@ import { signal } from '../src/signal'
 import { action, committed } from '../src/scope'
 
 /**
- * @canon rule-a-commit-promotes-every-write-at-once
+ * @canon spec-a-commit-promotes-every-write-at-once
  */
 test('an action commits a public signal write', () => {
   const [count, setCount] = signal(0)
@@ -12,7 +12,7 @@ test('an action commits a public signal write', () => {
 })
 
 /**
- * @canon rule-a-discard-leaves-no-trace
+ * @canon spec-a-discard-leaves-no-trace
  */
 test('an action discards a public signal write on throw (rollback)', () => {
   const [count, setCount] = signal(0)
@@ -24,8 +24,8 @@ test('an action discards a public signal write on throw (rollback)', () => {
 })
 
 /**
- * @canon rule-a-speculative-write-stays-out-of-committed-state
- * @canon rule-a-speculation-reads-its-own-writes
+ * @canon spec-a-speculative-write-stays-out-of-committed-state
+ * @canon spec-a-speculation-reads-its-own-writes
  */
 test('a public signal write inside an action is isolated from committed state until commit', () => {
   const [count, setCount] = signal(0)
@@ -42,7 +42,7 @@ test('a public signal write inside an action is isolated from committed state un
 })
 
 /**
- * @canon rule-an-update-function-inside-a-speculation-sees-its-earlier-writes
+ * @canon spec-an-update-function-inside-a-speculation-sees-its-earlier-writes
  */
 test('the updater form reads the scope-appropriate previous value', () => {
   const [count, setCount] = signal(10)

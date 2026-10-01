@@ -16,7 +16,7 @@ function gate<T = void>() {
 }
 
 /**
- * @canon exception-a-prediction-shows-outside-its-action
+ * @canon spec-a-prediction-shows-outside-its-action
  */
 test('a consumer sees the overlay value while the action is in flight', async () => {
   const [value] = signal('saved')
@@ -33,7 +33,7 @@ test('a consumer sees the overlay value while the action is in flight', async ()
 })
 
 /**
- * @canon rule-a-prediction-sits-in-front-of-its-derivation
+ * @canon spec-a-prediction-sits-in-front-of-its-derivation
  */
 test('the wrapped signal reads canonical truth, not the overlay', async () => {
   const [value] = signal('saved')
@@ -50,7 +50,7 @@ test('the wrapped signal reads canonical truth, not the overlay', async () => {
 })
 
 /**
- * @canon rule-a-prediction-expires-with-its-action
+ * @canon spec-a-prediction-expires-with-its-action
  */
 test('a discarded action reverts the overlay to the prior value', async () => {
   const [value] = signal('saved')
@@ -69,7 +69,7 @@ test('a discarded action reverts the overlay to the prior value', async () => {
 })
 
 /**
- * @canon rule-after-a-commit-only-what-the-action-wrote-to-the-source-remains
+ * @canon spec-after-a-commit-only-what-the-action-wrote-to-the-source-remains
  */
 test('a committed action settles through to the canonical value', async () => {
   const [value, setValue] = signal('saved')
@@ -88,7 +88,7 @@ test('a committed action settles through to the canonical value', async () => {
 })
 
 /**
- * @canon rule-after-a-commit-only-what-the-action-wrote-to-the-source-remains
+ * @canon spec-after-a-commit-only-what-the-action-wrote-to-the-source-remains
  */
 test('committing does not flash the prior value through the overlay reader', async () => {
   setScheduler(syncScheduler(flush))
@@ -116,7 +116,7 @@ test('committing does not flash the prior value through the overlay reader', asy
 })
 
 /**
- * @canon rule-is-optimistic-is-true-while-a-prediction-is-live
+ * @canon spec-is-optimistic-is-true-while-a-prediction-is-live
  */
 test('isOptimistic reflects whether an overlay is live', async () => {
   const [value] = signal('x')
@@ -134,7 +134,7 @@ test('isOptimistic reflects whether an overlay is live', async () => {
 })
 
 /**
- * @canon exception-a-prediction-shows-outside-its-action
+ * @canon spec-a-prediction-shows-outside-its-action
  */
 test('two concurrent actions show the most recent write and clean up independently', async () => {
   const [value] = signal('base')
@@ -159,7 +159,7 @@ test('two concurrent actions show the most recent write and clean up independent
 })
 
 /**
- * @canon rule-speculation-only-calls-refuse-to-run-outside-one
+ * @canon spec-speculation-only-calls-refuse-to-run-outside-one
  */
 test('setOptimisticValue throws when called with no active speculative scope', () => {
   const [value] = signal('x')
@@ -174,7 +174,7 @@ test('setOptimisticValue throws when called with no active speculative scope', (
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
 
 /**
- * @canon rule-an-optimistic-value-is-read-like-any-node
+ * @canon spec-an-optimistic-value-is-read-like-any-node
  */
 test('a use() read through the optimistic node suspends until the source resolves', async () => {
   const [source] = signal(() => Promise.resolve('loaded'))
@@ -188,7 +188,7 @@ test('a use() read through the optimistic node suspends until the source resolve
 })
 
 /**
- * @canon rule-a-live-prediction-reports-neither-pending-nor-failed
+ * @canon spec-a-live-prediction-reports-neither-pending-nor-failed
  */
 test('a live prediction stops the node reporting pending, so a use() read shows it', async () => {
   const first = gate<string>()
@@ -224,8 +224,8 @@ test('a live prediction stops the node reporting pending, so a use() read shows 
 })
 
 /**
- * @canon rule-an-optimistic-value-is-read-like-any-node
- * @canon rule-resetting-an-optimistic-error-retries-its-source
+ * @canon spec-an-optimistic-value-is-read-like-any-node
+ * @canon spec-resetting-an-optimistic-error-retries-its-source
  */
 test('a failed source reports through the optimistic node, and a retry resets that source', async () => {
   let failing = true
@@ -246,7 +246,7 @@ test('a failed source reports through the optimistic node, and a retry resets th
 })
 
 /**
- * @canon rule-a-live-prediction-reports-neither-pending-nor-failed
+ * @canon spec-a-live-prediction-reports-neither-pending-nor-failed
  */
 test('a live prediction also masks a failed source', async () => {
   let failing = true
@@ -271,7 +271,7 @@ test('a live prediction also masks a failed source', async () => {
 })
 
 /**
- * @canon rule-after-a-commit-only-what-the-action-wrote-to-the-source-remains
+ * @canon spec-after-a-commit-only-what-the-action-wrote-to-the-source-remains
  */
 test('a recipe that produces its own value needs no separate source', async () => {
   const [view, setView, isOptimistic] = optimistic(() => Promise.resolve(['a']))
@@ -295,7 +295,7 @@ test('a recipe that produces its own value needs no separate source', async () =
 })
 
 /**
- * @canon rule-an-optimistic-fallback-seeds-the-tolerant-read
+ * @canon spec-an-optimistic-fallback-seeds-the-tolerant-read
  */
 test('a construction-time fallback seeds the tolerant read', () => {
   const [view] = optimistic(() => new Promise<string[]>(() => {}), [] as string[])
@@ -304,7 +304,7 @@ test('a construction-time fallback seeds the tolerant read', () => {
 })
 
 /**
- * @canon rule-pending-follows-where-a-value-came-from
+ * @canon spec-pending-follows-where-a-value-came-from
  */
 test('a background refresh of a wrapped node is reported through the optimistic node', async () => {
   const first = gate<string>()
@@ -338,8 +338,8 @@ test('a background refresh of a wrapped node is reported through the optimistic 
 // wrote it. Neither of these held while a layer was written INTO the node.
 
 /**
- * @canon rule-sibling-speculations-do-not-see-each-other
- * @canon rule-a-reader-in-an-action-sees-the-predictions-of-its-own-chain
+ * @canon spec-sibling-speculations-do-not-see-each-other
+ * @canon spec-a-reader-in-an-action-sees-the-predictions-of-its-own-chain
  */
 test('an action reads back its own prediction, and a sibling action does not', async () => {
   const [source] = signal(() => Promise.resolve(['saved'] as string[]), [] as string[])
@@ -373,7 +373,7 @@ test('an action reads back its own prediction, and a sibling action does not', a
 })
 
 /**
- * @canon rule-an-update-function-never-builds-on-another-actions-prediction
+ * @canon spec-an-update-function-never-builds-on-another-actions-prediction
  */
 test('a refused action does not leave its prediction inside a later action layer', async () => {
   const [source] = signal(() => Promise.resolve(['saved'] as string[]), [] as string[])
@@ -405,7 +405,7 @@ test('a refused action does not leave its prediction inside a later action layer
 })
 
 /**
- * @canon rule-a-prediction-sits-in-front-of-its-derivation
+ * @canon spec-a-prediction-sits-in-front-of-its-derivation
  */
 test('a source that changes while a prediction is live does not overwrite it', async () => {
   const [n, setN] = signal(0)
@@ -432,7 +432,7 @@ test('a source that changes while a prediction is live does not overwrite it', a
 })
 
 /**
- * @canon rule-a-prediction-sits-in-front-of-its-derivation
+ * @canon spec-a-prediction-sits-in-front-of-its-derivation
  */
 test('the derivation keeps following its sources while a prediction hides it', async () => {
   const [n, setN] = signal(0)

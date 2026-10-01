@@ -3,7 +3,7 @@ import { peek } from '../src/async'
 import { signal } from '../src/signal'
 
 /**
- * @canon rule-peek-returns-the-last-resolved-value
+ * @canon spec-peek-returns-the-last-resolved-value
  */
 test('peek of a plain (non-promise) signal returns the value itself', () => {
   const [n] = signal(5)

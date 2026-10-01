@@ -16,7 +16,7 @@ const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
  */
 
 /**
- * @canon rule-peek-never-throws-for-a-failed-node
+ * @canon spec-peek-never-throws-for-a-failed-node
  */
 test('a failed refetch keeps the stale value readable through peek', async () => {
   const [id, setId] = signal(1)
@@ -41,7 +41,7 @@ test('a failed refetch keeps the stale value readable through peek', async () =>
 })
 
 /**
- * @canon rule-error-returns-the-failure-of-a-node-or-anything-upstream
+ * @canon spec-error-returns-the-failure-of-a-node-or-anything-upstream
  */
 test('error() reports the error, and null while healthy', async () => {
   const [id, setId] = signal(1)
@@ -62,7 +62,7 @@ test('error() reports the error, and null while healthy', async () => {
 })
 
 /**
- * @canon rule-use-throws-a-parked-error
+ * @canon spec-use-throws-a-parked-error
  */
 test('use() still throws on error — the fatal read is unchanged', async () => {
   const c = computed(() => Promise.reject(new Error('boom')))
@@ -76,7 +76,7 @@ test('use() still throws on error — the fatal read is unchanged', async () => 
 })
 
 /**
- * @canon rule-peek-never-throws-for-a-failed-node
+ * @canon spec-peek-never-throws-for-a-failed-node
  */
 test('peek returns undefined (not a throw) when a node fails with no prior value', async () => {
   const c = computed(() => Promise.reject(new Error('boom')))
@@ -91,7 +91,7 @@ test('peek returns undefined (not a throw) when a node fails with no prior value
 })
 
 /**
- * @canon rule-a-recovery-clears-the-error
+ * @canon spec-a-recovery-clears-the-error
  */
 test('a recovery clears the error', async () => {
   const [id, setId] = signal(1)
@@ -113,7 +113,7 @@ test('a recovery clears the error', async () => {
 })
 
 /**
- * @canon rule-error-returns-the-failure-of-a-node-or-anything-upstream
+ * @canon spec-error-returns-the-failure-of-a-node-or-anything-upstream
  */
 test('error propagates downstream along the pipeline', async () => {
   const c = computed(

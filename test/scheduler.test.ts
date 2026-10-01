@@ -9,7 +9,7 @@ import {
 import { signal } from '../src/signal'
 
 /**
- * @canon rule-one-scheduler-flushes-every-consumer
+ * @canon spec-one-scheduler-flushes-every-consumer
  */
 test('syncScheduler flushes immediately on request', () => {
   let flushes = 0
@@ -22,7 +22,7 @@ test('syncScheduler flushes immediately on request', () => {
 })
 
 /**
- * @canon rule-one-scheduler-flushes-every-consumer
+ * @canon spec-one-scheduler-flushes-every-consumer
  */
 test('microtaskScheduler batches requests into a single flush', async () => {
   let flushes = 0
@@ -37,7 +37,7 @@ test('microtaskScheduler batches requests into a single flush', async () => {
 })
 
 /**
- * @canon rule-one-scheduler-flushes-every-consumer
+ * @canon spec-one-scheduler-flushes-every-consumer
  */
 test('setter requests a flush from the active scheduler', () => {
   let requests = 0

@@ -2,7 +2,7 @@ import { expect, test, vi } from 'vitest'
 import { action, catchError, createRoot, from } from '../src/index'
 
 /**
- * @canon rule-a-throwing-handler-passes-a-failed-action-on-with-the-handlers-error
+ * @canon spec-a-throwing-handler-passes-a-failed-action-on-with-the-handlers-error
  */
 test('a catchError handler that throws passes a failed action on, and the boundary beyond receives the handler error', async () => {
   const spy = vi.spyOn(console, 'error').mockImplementation(() => {})

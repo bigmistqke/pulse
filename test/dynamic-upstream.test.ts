@@ -13,7 +13,7 @@ const settle = () => new Promise<void>((r) => setTimeout(r, 20))
 
 describe('a tolerant read carries loading state into its reader', () => {
   /**
-   * @canon rule-a-tolerant-read-carries-loading-state-into-its-reader
+   * @canon spec-a-tolerant-read-carries-loading-state-into-its-reader
    */
   test('a reader of a first-loading source reports pending, and holds no value of its own', async () => {
     let release!: (v: number) => void
@@ -37,7 +37,7 @@ describe('a tolerant read carries loading state into its reader', () => {
   })
 
   /**
-   * @canon rule-a-tolerant-read-carries-loading-state-into-its-reader
+   * @canon spec-a-tolerant-read-carries-loading-state-into-its-reader
    */
   test('a refresh reports through the reader while the reader still shows the prior value', async () => {
     // Note what this does NOT rely on: the reader does re-run here, because a
@@ -78,8 +78,8 @@ describe('a tolerant read carries loading state into its reader', () => {
   })
 
   /**
-   * @canon rule-a-read-through-peek-carries-no-pending-state-into-its-reader
-   * @canon rule-a-computed-reading-through-peek-still-follows-its-source
+   * @canon spec-a-read-through-peek-carries-no-pending-state-into-its-reader
+   * @canon spec-a-computed-reading-through-peek-still-follows-its-source
    */
   test('peek does not carry it — that is the difference between peek and latest outside a binding', async () => {
     let release!: (v: number) => void
@@ -100,7 +100,7 @@ describe('a tolerant read carries loading state into its reader', () => {
   })
 
   /**
-   * @canon rule-a-tolerant-read-carries-loading-state-into-its-reader
+   * @canon spec-a-tolerant-read-carries-loading-state-into-its-reader
    */
   test('use carries it too, so a settled read that later refreshes is reported', async () => {
     const [page, setPage] = signal(0)
@@ -127,7 +127,7 @@ describe('a tolerant read carries loading state into its reader', () => {
   })
 
   /**
-   * @canon rule-a-tolerant-read-carries-loading-state-into-its-reader
+   * @canon spec-a-tolerant-read-carries-loading-state-into-its-reader
    */
   test('it composes through a chain of readers', async () => {
     let release!: (v: number) => void

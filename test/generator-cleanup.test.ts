@@ -10,7 +10,7 @@ const ticks = async (n: number) => {
 }
 
 /**
- * @canon rule-oncleanup-in-a-generator-stage-belongs-to-the-generator
+ * @canon spec-oncleanup-in-a-generator-stage-belongs-to-the-generator
  */
 test('onCleanup before a pause does not fire when the generator resumes', async () => {
   const events: string[] = []
@@ -33,7 +33,7 @@ test('onCleanup before a pause does not fire when the generator resumes', async 
 })
 
 /**
- * @canon rule-oncleanup-in-a-generator-stage-belongs-to-the-generator
+ * @canon spec-oncleanup-in-a-generator-stage-belongs-to-the-generator
  */
 test('onCleanup fires when the generator completes', async () => {
   let cleaned = 0
@@ -53,7 +53,7 @@ test('onCleanup fires when the generator completes', async () => {
 })
 
 /**
- * @canon rule-oncleanup-in-a-generator-stage-belongs-to-the-generator
+ * @canon spec-oncleanup-in-a-generator-stage-belongs-to-the-generator
  */
 test('onCleanup fires when the generator is discarded on a dependency change', async () => {
   const [a, setA] = signal(1)
@@ -80,7 +80,7 @@ test('onCleanup fires when the generator is discarded on a dependency change', a
 })
 
 /**
- * @canon rule-oncleanup-in-a-generator-stage-belongs-to-the-generator
+ * @canon spec-oncleanup-in-a-generator-stage-belongs-to-the-generator
  */
 test('onCleanup fires when the owner is disposed while paused', async () => {
   let cleaned = 0
@@ -105,7 +105,7 @@ test('onCleanup fires when the owner is disposed while paused', async () => {
 })
 
 /**
- * @canon case-generator-cleanups-run-newest-first-after-its-finally-blocks
+ * @canon spec-generator-cleanups-run-newest-first-after-its-finally-blocks
  */
 test('cleanups run most recently registered first, after finally blocks', async () => {
   const [a, setA] = signal(1)
@@ -135,7 +135,7 @@ test('cleanups run most recently registered first, after finally blocks', async 
 })
 
 /**
- * @canon rule-oncleanup-in-a-generator-stage-belongs-to-the-generator
+ * @canon spec-oncleanup-in-a-generator-stage-belongs-to-the-generator
  */
 test('onCleanup fires when a generator completes without ever pausing', () => {
   // A generator stage whose body never yields anything async runs to
@@ -153,7 +153,7 @@ test('onCleanup fires when a generator completes without ever pausing', () => {
 })
 
 /**
- * @canon rule-oncleanup-in-a-generator-stage-belongs-to-the-generator
+ * @canon spec-oncleanup-in-a-generator-stage-belongs-to-the-generator
  */
 test('onCleanup fires when a generator throws without ever pausing', () => {
   // Same gap as above, but for a generator that throws synchronously instead
@@ -171,7 +171,7 @@ test('onCleanup fires when a generator throws without ever pausing', () => {
 })
 
 /**
- * @canon rule-oncleanup-in-a-sync-stage-runs-before-its-next-run
+ * @canon spec-oncleanup-in-a-sync-stage-runs-before-its-next-run
  */
 test('onCleanup outside a generator stage is unchanged', async () => {
   // A sync stage re-runs from the top, so per-run cleanup is still the right
@@ -192,7 +192,7 @@ test('onCleanup outside a generator stage is unchanged', async () => {
 })
 
 /**
- * @canon case-generator-cleanups-run-newest-first-after-its-finally-blocks
+ * @canon spec-generator-cleanups-run-newest-first-after-its-finally-blocks
  */
 test('a generator cleanup that throws does not stop the cleanups registered before it', async () => {
   const events: string[] = []

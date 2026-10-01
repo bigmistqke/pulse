@@ -4,7 +4,7 @@ import { h } from '../../src/dom/h'
 afterEach(() => { document.body.innerHTML = '' })
 
 /**
- * @canon rule-h-creates-the-element-directly
+ * @canon spec-h-creates-the-element-directly
  */
 test('h creates an element with no children or props', () => {
   const el = h('div', null) as HTMLElement
@@ -14,7 +14,7 @@ test('h creates an element with no children or props', () => {
 })
 
 /**
- * @canon rule-a-bare-or-attr-prop-sets-the-attribute
+ * @canon spec-a-bare-or-attr-prop-sets-the-attribute
  */
 test('h sets primitive props as attributes', () => {
   const el = h('div', { id: 'x', 'data-n': '5' }) as HTMLElement
@@ -23,7 +23,7 @@ test('h sets primitive props as attributes', () => {
 })
 
 /**
- * @canon rule-an-attribute-is-removed-on-nothing
+ * @canon spec-an-attribute-is-removed-on-nothing
  */
 test('h skips null/undefined/false attribute values', () => {
   const el = h('div', { a: null, b: undefined, c: false }) as HTMLElement
@@ -31,7 +31,7 @@ test('h skips null/undefined/false attribute values', () => {
 })
 
 /**
- * @canon rule-a-static-child-is-inserted-by-its-kind
+ * @canon spec-a-static-child-is-inserted-by-its-kind
  */
 test('h inserts primitive children as text', () => {
   const el = h('div', null, 'hello', 42, ' world') as HTMLElement
@@ -39,7 +39,7 @@ test('h inserts primitive children as text', () => {
 })
 
 /**
- * @canon rule-a-static-child-is-inserted-by-its-kind
+ * @canon spec-a-static-child-is-inserted-by-its-kind
  */
 test('h skips null/undefined/boolean children', () => {
   const el = h('div', null, null, undefined, true, false, 'x') as HTMLElement
@@ -47,7 +47,7 @@ test('h skips null/undefined/boolean children', () => {
 })
 
 /**
- * @canon rule-a-static-child-is-inserted-by-its-kind
+ * @canon spec-a-static-child-is-inserted-by-its-kind
  */
 test('h inserts DOM node children as-is', () => {
   const span = document.createElement('span')
@@ -57,7 +57,7 @@ test('h inserts DOM node children as-is', () => {
 })
 
 /**
- * @canon rule-a-static-child-is-inserted-by-its-kind
+ * @canon spec-a-static-child-is-inserted-by-its-kind
  */
 test('h flattens array children', () => {
   const el = h('div', null, ['a', 'b', 'c']) as HTMLElement
@@ -65,7 +65,7 @@ test('h flattens array children', () => {
 })
 
 /**
- * @canon rule-a-static-child-is-inserted-by-its-kind
+ * @canon spec-a-static-child-is-inserted-by-its-kind
  */
 test('h flattens nested arrays', () => {
   const el = h('div', null, ['a', ['b', ['c', 'd']]]) as HTMLElement
@@ -73,7 +73,7 @@ test('h flattens nested arrays', () => {
 })
 
 /**
- * @canon rule-a-static-child-is-inserted-by-its-kind
+ * @canon spec-a-static-child-is-inserted-by-its-kind
  */
 test('h preserves order of mixed children', () => {
   const span = document.createElement('span')

@@ -12,7 +12,7 @@ afterEach(() => {
 })
 
 /**
- * @canon rule-a-boundary-flushes-ready-commits-together
+ * @canon spec-a-boundary-flushes-ready-commits-together
  */
 test('scope gathers and flushes atomically: two throwing → both succeed → one flush', () => {
   const target = document.createElement('section')
@@ -59,7 +59,7 @@ test('scope gathers and flushes atomically: two throwing → both succeed → on
 })
 
 /**
- * @canon rule-a-boundary-flushes-ready-commits-together
+ * @canon spec-a-boundary-flushes-ready-commits-together
  */
 test('idle reports do not flush but contribute to pending while throwing', () => {
   const target = document.createElement('section')
@@ -97,7 +97,7 @@ test('idle reports do not flush but contribute to pending while throwing', () =>
 })
 
 /**
- * @canon rule-a-boundary-flushes-ready-commits-together
+ * @canon spec-a-boundary-flushes-ready-commits-together
  */
 test('unregister removes the binding from both sets', () => {
   const target = document.createElement('section')
@@ -129,7 +129,7 @@ test('unregister removes the binding from both sets', () => {
 })
 
 /**
- * @canon case-a-reactive-child-that-called-use-waits-for-the-gate
+ * @canon spec-a-reactive-child-that-called-use-waits-for-the-gate
  */
 test('two reactive children inside <Loading> commit atomically when their promises settle at different ticks', async () => {
   const target = document.createElement('section')
@@ -195,7 +195,7 @@ test('two reactive children inside <Loading> commit atomically when their promis
 
 // Part A: Task 4 test — reactive class binding defers its commit when a sibling use is still pending
 /**
- * @canon case-a-reactive-prop-that-called-use-waits-for-the-gate
+ * @canon spec-a-reactive-prop-that-called-use-waits-for-the-gate
  */
 test('reactive class binding commit defers under <Loading> until gate opens', async () => {
   const target = document.createElement('section')
@@ -275,7 +275,7 @@ test('reactive class binding commit defers under <Loading> until gate opens', as
 
 // Part B: Task 3 regression — reactive child unmounted while throwing releases its controller
 /**
- * @canon rule-a-disposed-binding-releases-its-boundary
+ * @canon spec-a-disposed-binding-releases-its-boundary
  */
 test('reactive child unmounted while throwing releases its controller (does not block boundary)', async () => {
   const target = document.createElement('section')
@@ -318,7 +318,7 @@ test('reactive child unmounted while throwing releases its controller (does not 
 // A binding that calls use(signal) — even without throwing — defers its DOM
 // commit until the boundary gate opens, so it moves atomically with siblings.
 /**
- * @canon case-a-reactive-child-that-called-use-waits-for-the-gate
+ * @canon spec-a-reactive-child-that-called-use-waits-for-the-gate
  */
 test('use(plainSignal) inside <Loading> defers commit when sibling is pending', async () => {
   const target = document.createElement('section')
@@ -382,7 +382,7 @@ test('use(plainSignal) inside <Loading> defers commit when sibling is pending', 
 })
 
 /**
- * @canon rule-use-latest-enrols-the-binding-in-its-boundarys-gate
+ * @canon spec-use-latest-enrols-the-binding-in-its-boundarys-gate
  */
 test('use.latest(plainSignal) inside <Loading> defers its commit while a sibling is pending', async () => {
   const target = document.createElement('section')
@@ -434,7 +434,7 @@ test('use.latest(plainSignal) inside <Loading> defers its commit while a sibling
 
 // Task 5.5: bindings that do NOT call use() are unaffected and commit immediately.
 /**
- * @canon rule-a-read-without-use-commits-at-once
+ * @canon spec-a-read-without-use-commits-at-once
  */
 test('binding without use() inside <Loading> commits immediately regardless of boundary pending state', async () => {
   const target = document.createElement('section')
@@ -479,7 +479,7 @@ test('binding without use() inside <Loading> commits immediately regardless of b
 })
 
 /**
- * @canon case-a-hole-holds-new-content-that-is-not-ready
+ * @canon spec-a-hole-holds-new-content-that-is-not-ready
  */
 test('a binding mounted inside a pending <Loading> shows its value once the boundary settles', async () => {
   const target = document.createElement('section')
@@ -540,7 +540,7 @@ test('a binding mounted inside a pending <Loading> shows its value once the boun
 })
 
 /**
- * @canon case-a-hole-holds-new-content-that-is-not-ready
+ * @canon spec-a-hole-holds-new-content-that-is-not-ready
  */
 test('mid-flight mount without fallback: the new structure lands together with its content', async () => {
   const target = document.createElement('section')
@@ -586,7 +586,7 @@ test('mid-flight mount without fallback: the new structure lands together with i
 })
 
 /**
- * @canon case-a-replaced-held-commit-releases-the-gate
+ * @canon spec-a-replaced-held-commit-releases-the-gate
  */
 test('a held branch replaced before its content loads is discarded, and does not hold the gate', async () => {
   const target = document.createElement('section')
@@ -627,7 +627,7 @@ test('a held branch replaced before its content loads is discarded, and does not
 })
 
 /**
- * @canon case-a-hole-under-a-nested-boundary-does-not-hold
+ * @canon spec-a-hole-under-a-nested-boundary-does-not-hold
  */
 test('content under a nested boundary does not hold the outer structure', async () => {
   const target = document.createElement('section')
@@ -665,7 +665,7 @@ test('content under a nested boundary does not hold the outer structure', async 
 })
 
 /**
- * @canon case-a-held-commit-places-its-nodes-only-when-it-lands
+ * @canon spec-a-held-commit-places-its-nodes-only-when-it-lands
  */
 test('a For row whose content is pending lands together with it', async () => {
   const target = document.createElement('section')
@@ -703,7 +703,7 @@ test('a For row whose content is pending lands together with it', async () => {
 })
 
 /**
- * @canon rule-a-disposed-binding-releases-its-boundary
+ * @canon spec-a-disposed-binding-releases-its-boundary
  */
 test('deferred non-throwing use() binding: unmount before gate opens does not NPE', async () => {
   const target = document.createElement('section')
@@ -792,7 +792,7 @@ test('deferred non-throwing use() binding: unmount before gate opens does not NP
 })
 
 /**
- * @canon case-a-queued-commit-is-checked-again-at-the-end-of-the-microtask
+ * @canon spec-a-queued-commit-is-checked-again-at-the-end-of-the-microtask
  */
 test('coherent transitions: use(plainSignal) + sibling computed-going-pending in same flush — commit must defer', async () => {
   const target = document.createElement('section')
@@ -857,7 +857,7 @@ test('coherent transitions: use(plainSignal) + sibling computed-going-pending in
 })
 
 /**
- * @canon rule-use-keeps-the-binding-subscribed-while-suspended
+ * @canon spec-use-keeps-the-binding-subscribed-while-suspended
  */
 test('use(computed) inside binding: single-stage Promise computed propagates new value after refetch', async () => {
   const target = document.createElement('section')
@@ -911,7 +911,7 @@ test('use(computed) inside binding: single-stage Promise computed propagates new
 })
 
 /**
- * @canon rule-use-keeps-the-binding-subscribed-while-suspended
+ * @canon spec-use-keeps-the-binding-subscribed-while-suspended
  */
 test('use(computed) inside binding: two-stage pipeline (async + sync map) propagates after refetch — regression for r3 auto-dispose-on-zero-subs', async () => {
   const target = document.createElement('section')
@@ -973,7 +973,7 @@ test('use(computed) inside binding: two-stage pipeline (async + sync map) propag
 // Fragment branch resolve its children into real nodes immediately, the same
 // way the DOM-tag branch already did - see src/dom/h.ts.
 /**
- * @canon rule-a-lookup-from-a-fragment-child-starts-where-the-fragment-was-built
+ * @canon spec-a-lookup-from-a-fragment-child-starts-where-the-fragment-was-built
  */
 test('top-level component inside Loading reaches scope via useLoading()', async () => {
   const target = document.createElement('section')
@@ -1040,7 +1040,7 @@ test('top-level component inside Loading reaches scope via useLoading()', async 
 })
 
 /**
- * @canon case-a-suspended-prop-does-not-hold-the-structure
+ * @canon spec-a-suspended-prop-does-not-hold-the-structure
  */
 test('an element whose reactive prop suspends mounts at once, and only the prop waits', async () => {
   const target = document.createElement('section')

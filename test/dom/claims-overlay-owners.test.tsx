@@ -14,7 +14,7 @@ afterEach(() => {
 })
 
 /**
- * @canon case-a-reactive-child-without-an-owner-warns
+ * @canon spec-a-reactive-child-without-an-owner-warns
  */
 test('a function child that a Fragment tagged with an owner does not warn when inserted outside every owner', () => {
   const [count] = signal(1)
@@ -30,7 +30,7 @@ test('a function child that a Fragment tagged with an owner does not warn when i
 })
 
 /**
- * @canon case-a-prop-binding-or-listener-without-an-owner-warns
+ * @canon spec-a-prop-binding-or-listener-without-an-owner-warns
  */
 test('a ref outside every owner does not warn', () => {
   let element: Element | null = null
