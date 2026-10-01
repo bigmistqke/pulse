@@ -120,4 +120,31 @@ describe('pending tracker — computed integration', () => {
     await new Promise((r) => queueMicrotask(() => r(undefined)))
     expect(isPending(downstream)).toBe(false)
   })
+
+  /**
+   * A known defect, https://github.com/bigmistqke/pulse/issues/1: a plain read
+   * of a refreshing node hands back its earlier, settled promise, so the reader
+   * does not report the refresh. Drop `.fails` once that is fixed.
+   *
+   * @canon spec-pending-follows-where-a-value-came-from
+   */
+  test.fails('a computed reading an async node with a plain call is pending while that node refreshes', async () => {
+    const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
+    const [n, setN] = signal(1)
+    const todos = computed(async () => {
+      const v = n()
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      return [v]
+    })
+    const reader = computed(() => todos())
+    reader()
+    for (let i = 0; i < 10; i++) await tick()
+    expect(isPending(reader)).toBe(false)
+
+    setN(2)
+    reader()
+    await tick()
+    expect(isPending(todos)).toBe(true)
+    expect(isPending(reader)).toBe(true)
+  })
 })

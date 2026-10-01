@@ -16,6 +16,8 @@ This document is the project. It holds the theory of pulse: why it is the way it
 - [`@term computed`](#term-computed) — A derivation without a setter, made with `computed`.
 - [`@term pipeline`](#term-pipeline) — The ordered stages of a derivation, each taking the value the stage before it produced.
 - [`@term stage`](#term-stage) — One function in a pipeline: a sync function, an async function, or a generator function.
+- [`@term optimistic-value`](#term-optimistic-value) — A derivation whose setter writes a prediction instead of a value, made with `optimistic`.
+- [`@term prediction`](#term-prediction) — A value that an action writes through an optimistic setter, shown in front of the derivation's own value.
 - [`@term owner`](#term-owner) — A node in the tree of lifetimes, to which reactive nodes, cleanups and other owners belong.
 - [`@term boundary`](#term-boundary) — A loading boundary or an error boundary.
 - [`@term loading-boundary`](#term-loading-boundary) — The owner a `<Loading>` component creates to gather the pending state of the bindings beneath it.
@@ -47,7 +49,7 @@ This document is the project. It holds the theory of pulse: why it is the way it
     - [`@spec use-latest-enrols-the-binding-in-its-boundarys-gate`](#spec-use-latest-enrols-the-binding-in-its-boundarys-gate) — A binding that called `use.latest(x)` commits through its boundary's gate: while a sibling binding of the boundary is suspended, its commit waits, even when `use.latest(x)` returned a value.
     - [`@spec the-jsx-runtime-builds-every-element-with-h`](#spec-the-jsx-runtime-builds-every-element-with-h) — The JSX runtime's `jsx`, `jsxs` and `jsxDEV` build every element with `h`. A component receives its props object as it is, `children` included and getters intact. A DOM tag or a `Fragment` receives its children as separate arguments and the rest of its props with their getters intact.
     - [`@spec an-optimistic-value-is-a-signal-variant`](#spec-an-optimistic-value-is-a-signal-variant) — `optimistic(...stages)` builds the same pipeline `computed` and `signal` build, and returns an ordinary node. Only its setter differs: it writes a prediction rather than a value.
-      - [`@spec an-optimistic-value-is-read-like-any-node`](#spec-an-optimistic-value-is-read-like-any-node) — The accessor of an optimistic value is an ordinary node. Every read verb applies to it, and the pending and failed state of what its recipe reads reaches the read site through it.
+      - [`@spec an-optimistic-value-is-read-like-any-node`](#spec-an-optimistic-value-is-read-like-any-node) — The accessor of an [optimistic value](#term-optimistic-value) is an ordinary node. Every read verb applies to it, and the pending and failed state of what its recipe reads reaches the read site through it.
       - [`@spec an-optimistic-fallback-seeds-the-tolerant-read`](#spec-an-optimistic-fallback-seeds-the-tolerant-read) — A fallback passed when an optimistic value is created is what `peek` and `latest` return before the source has resolved.
   - [`@spec ambient-context-is-set-for-a-call-and-restored-after`](#spec-ambient-context-is-set-for-a-call-and-restored-after) — Ambient context, such as the current owner, is set for the duration of one call and restored when that call ends, however it ends.
     - [`@spec there-is-no-ambient-owner-outside-every-root`](#spec-there-is-no-ambient-owner-outside-every-root) — Outside every root, `getOwner()` returns null, also after a root has run and after it has been disposed.
@@ -368,7 +370,7 @@ This document is the project. It holds the theory of pulse: why it is the way it
   - [`@spec a-failed-action-is-reported-not-thrown`](#spec-a-failed-action-is-reported-not-thrown) — An action whose body fails is discarded, and the error is reported through its handle. The caller never receives a throw or a rejection.
   - [`@spec a-speculation-announces-how-it-closed`](#spec-a-speculation-announces-how-it-closed) — A callback registered with `onSettled` fires once when its speculation closes, and is told whether the speculation committed or was discarded.
   - [`@spec a-speculation-refuses-to-create-an-effect`](#spec-a-speculation-refuses-to-create-an-effect) — Creating an effect inside a speculation throws. That includes a JSX binding, which is an effect. The throw fails the action like any other error in its body.
-  - [`@spec a-prediction-expires-with-its-action`](#spec-a-prediction-expires-with-its-action) — A prediction is dropped when the action that wrote it closes, whether it commits or is discarded. After a discard the prior value shows again.
+  - [`@spec a-prediction-expires-with-its-action`](#spec-a-prediction-expires-with-its-action) — A [prediction](#term-prediction) is dropped when the action that wrote it closes, whether it commits or is discarded. After a discard the prior value shows again.
     - [`@spec an-expired-prediction-reveals-the-most-recent-one-still-live`](#spec-an-expired-prediction-reveals-the-most-recent-one-still-live) — When a prediction expires, readers outside every action see the most recent prediction still live, or the derivation's value when none is.
   - [`@spec after-a-commit-only-what-the-action-wrote-to-the-source-remains`](#spec-after-a-commit-only-what-the-action-wrote-to-the-source-remains) — When the action that wrote a prediction commits, the prediction's reader shows the source's value: the action's own committed write when it wrote the source, and the source's earlier value when it did not. The prior value does not show in between.
   - [`@spec a-prediction-sits-in-front-of-its-derivation`](#spec-a-prediction-sits-in-front-of-its-derivation) — A prediction is a layer in front of the derivation, never written into it. The derivation keeps following its sources underneath, and shows through when the last layer drops. The accessor the optimistic value wraps keeps reading the canonical value throughout.
@@ -431,6 +433,18 @@ _Avoid_: memo, derived signal
 ### @term stage
 
 > One function in a pipeline: a sync function, an async function, or a generator function.
+
+### @term optimistic-value
+
+> A derivation whose setter writes a prediction instead of a value, made with `optimistic`.
+
+_Avoid_: optimistic signal
+
+### @term prediction
+
+> A value that an action writes through an optimistic setter, shown in front of the derivation's own value.
+
+_Avoid_: layer, guess
 
 ### @term owner
 
@@ -660,7 +674,7 @@ The decision is [ADR 0016](docs/adr/0016-optimistic-as-a-signal-variant.md).
 
 ##### @spec an-optimistic-value-is-read-like-any-node
 
-> The accessor of an optimistic value is an ordinary node. Every read verb applies to it, and the pending and failed state of what its recipe reads reaches the read site through it.
+> The accessor of an [optimistic value](#term-optimistic-value) is an ordinary node. Every read verb applies to it, and the pending and failed state of what its recipe reads reaches the read site through it.
 
 This follows because a new form is added only where composing is awkward: an optimistic value is a signal variant, so the existing read verbs serve it instead of a read API of its own.
 
@@ -2994,7 +3008,7 @@ An effect pushes values out of the reactive graph: into the DOM, a log, the netw
 
 ### @spec a-prediction-expires-with-its-action
 
-> A prediction is dropped when the action that wrote it closes, whether it commits or is discarded. After a discard the prior value shows again.
+> A [prediction](#term-prediction) is dropped when the action that wrote it closes, whether it commits or is discarded. After a discard the prior value shows again.
 
 Derives from: [`spec-an-optimistic-value-is-a-signal-variant`](#spec-an-optimistic-value-is-a-signal-variant)
 

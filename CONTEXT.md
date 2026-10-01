@@ -27,46 +27,7 @@ For the full comparative analysis against Solid 2.x, see
 
 ## Language
 
-Terms are moving into the `## Terms` section of [`CANON.md`](CANON.md#terms), where each one is a definition and its behaviour lives in specs. Moved so far: present, accessor, signal, derivation, computed, pipeline, stage, owner, boundary, loading boundary, error boundary, scheduler, control flow, component.
-
-**Optimistic**:
-A Signal with a different write discipline, created as
-`const [value, setValue, isOptimistic] = optimistic(...stages)`. The pipeline
-is built exactly the way `computed(...)` and `signal(...)` build one, so the
-accessor is an ordinary node and the read verb is chosen at the read site:
-`use(value)`, `latest(value)`, `peek(value)`, `isPending(value)`,
-`error(value)`. Only the setter differs. An ordinary setter's write is isolated
-to the enclosing action, promoted when it commits, gone if it is discarded, and
-it stands once promoted. An optimistic setter writes a Layer in front of the
-derivation instead: it leaks out (a reader outside every action sees the top of
-the layer stack, so the prediction is on screen at once), it stays scoped
-inside (a reader inside an action sees the nearest layer up its own scope
-chain, and otherwise the derivation itself — one action never reads another's
-guess), and it expires with the action on both the commit and the discard face.
-A prediction that turned out right survives only because the action also wrote
-the canonical source the pipeline reads. Because layers sit in front of the
-derivation rather than being written into it, a source that resolves or changes
-while a prediction is live updates underneath it and shows through when the
-last layer drops — nothing is overwritten, so nothing has to be reverted. While
-any layer is live the node reports neither pending nor failed: a prediction is
-on screen, so nothing should suspend behind it or swap it for an error.
-Wrapping an existing node (`optimistic(todos)`) registers this node as
-downstream of it, so a refresh of that node is reported through this one and a
-boundary's retry resets it. See
-[ADR 0016](docs/adr/0016-optimistic-as-a-signal-variant.md).
-_Avoid_: overlay (say Layer), override.
-
-**Layer**:
-One entry in an Optimistic's stack — a predicted value, keyed by the Scope of
-the action that wrote it. Display is last-write-wins: the top of the stack is
-what an outside reader sees, so a second action's prediction hides a first
-action's until one of them closes. Each action's layer is dropped by its own
-settle, so an early-committing action cannot wipe a later one's live
-prediction. An update function's `prev` is this action's own layer if it has
-one, and otherwise the derivation's last resolved value read at committed
-level — never another action's prediction, so a prediction can always be
-withdrawn by the action that made it.
-_Avoid_: overlay, override, optimistic value (ambiguous with the accessor).
+Terms are moving into the `## Terms` section of [`CANON.md`](CANON.md#terms), where each one is a definition and its behaviour lives in specs. Moved so far: present, accessor, signal, derivation, computed, pipeline, stage, owner, boundary, loading boundary, error boundary, scheduler, control flow, component, optimistic value, prediction.
 
 **Pipeline re-entry**:
 Conceptually, **pipelines are delimited continuations split at user-chosen
