@@ -636,14 +636,14 @@ function treeOf(
           out.push(paint('90', sill) + paint(SAID, clip(said, sill.length)));
         }
         // The derivation edges nesting cannot show: the unit's further
-        // parents, as "also". References are reading aids, not part of the
+        // parents, each after an arrow. References are reading aids, not part of the
         // derivation graph, so the tree leaves them out. A parent in another
         // document keeps its file name.
         const own = links.get(`${rel}#${row.id}`) ?? [];
         for (const link of own.filter(l => l.derives)) {
           const [doc, id] = link.target.split('#');
           const label = doc === rel ? prose(id) : `${doc}#${id}`;
-          out.push(paint('90', `${sill}╌ also `) + paint(HUE[kindOf(id) ?? 'case-'], label));
+          out.push(paint('90', `${sill}→ `) + paint(HUE[kindOf(id) ?? 'case-'], label));
         }
       }
       if (row.el) walk(row.el, under);
