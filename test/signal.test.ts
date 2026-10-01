@@ -35,7 +35,7 @@ test('signal works with non-number values', () => {
 })
 
 /**
- * @canon rule-a-signal-reads-back-its-last-write
+ * @canon rule-an-update-function-on-a-signal-receives-its-current-value
  */
 test('setter supports updater function', () => {
   const [count, setCount] = signal(0)

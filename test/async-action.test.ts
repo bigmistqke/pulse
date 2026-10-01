@@ -217,7 +217,7 @@ test('a sync body that throws does not throw synchronously; the error is reporte
 })
 
 /**
- * @canon rule-the-handle-reports-its-newest-attempt
+ * @canon rule-retry-runs-the-action-again-as-a-new-speculation
  */
 test('retry() re-runs the action from scratch after an error', async () => {
   const [name, setName] = signal('alice')
@@ -272,7 +272,7 @@ test('settled reflects whichever attempt is current, so reading it again after r
 })
 
 /**
- * @canon rule-the-handle-reports-its-newest-attempt
+ * @canon rule-retry-runs-the-action-again-as-a-new-speculation
  */
 test('retry() clears error() synchronously, before the new attempt has settled', async () => {
   let attempt = 0

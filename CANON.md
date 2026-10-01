@@ -17,7 +17,8 @@ The canon was written backwards from the existing tests and documents, and descr
     - [`@exception a-throwing-run-keeps-dependencies-it-did-not-reread`](#exception-a-throwing-run-keeps-dependencies-it-did-not-reread) — A computed whose run throws partway stays subscribed to sources it read in an earlier run but not in the throwing one. A later change to such a source re-runs it.
 - [`@axiom reads-pull-and-consumers-are-pushed`](#axiom-reads-pull-and-consumers-are-pushed) — A read always returns the value consistent with every write so far, synchronously. Consumers with side effects are re-run in batches, and the batching is invisible to reads.
   - [`@rule a-read-is-current-without-a-flush`](#rule-a-read-is-current-without-a-flush) — Reading a signal or a computed returns the value consistent with the latest writes, whether or not the scheduler has flushed since. A computed read outside any reactive context recomputes on the spot when a source changed.
-  - [`@rule a-signal-reads-back-its-last-write`](#rule-a-signal-reads-back-its-last-write) — A signal returns its initial value until it is written, and afterwards the last value written. An update function receives the current value.
+  - [`@rule a-signal-reads-back-its-last-write`](#rule-a-signal-reads-back-its-last-write) — A signal returns its initial value until it is written, and afterwards the last value written.
+  - [`@rule an-update-function-on-a-signal-receives-its-current-value`](#rule-an-update-function-on-a-signal-receives-its-current-value) — A signal's setter given a function calls it with the signal's current value and writes what it returns.
   - [`@rule an-effect-runs-at-creation-and-after-each-change`](#rule-an-effect-runs-at-creation-and-after-each-change) — An effect runs once when it is created, and again after each change to a source it read.
   - [`@rule several-writes-in-one-tick-re-run-an-effect-once`](#rule-several-writes-in-one-tick-re-run-an-effect-once) — Under the default scheduler, an effect does not re-run between a write and the end of the tick. Several writes in one tick re-run it once, with the last value.
   - [`@rule a-promise-settling-requests-a-flush-from-the-active-scheduler`](#rule-a-promise-settling-requests-a-flush-from-the-active-scheduler) — When a promise a node is waiting on settles, pulse asks the active scheduler for a flush, the same way a write does. The readers re-run in that flush.
@@ -67,7 +68,8 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule a-write-clears-a-parked-failure`](#rule-a-write-clears-a-parked-failure) — A write to a derivation holding a parked failure clears the failure, whichever stage of the pipeline it was parked on.
   - [`@rule an-update-function-that-throws-cancels-nothing`](#rule-an-update-function-that-throws-cancels-nothing) — If an update function throws, the write does not happen, and a recompute that was queued before it still runs.
   - [`@rule a-written-promise-is-published-like-a-produced-one`](#rule-a-written-promise-is-published-like-a-produced-one) — A promise written into a derivation is its value: pending until it settles, then the resolved value, or a parked failure if it rejects.
-  - [`@rule the-handle-reports-its-newest-attempt`](#rule-the-handle-reports-its-newest-attempt) — `retry()` runs the action's body again from the start as a new speculation. It clears `error()` at once, `settled` becomes a new promise for the new attempt, and the handle reports only the newest attempt: an older attempt that settles after a newer one started changes nothing.
+  - [`@rule the-handle-reports-its-newest-attempt`](#rule-the-handle-reports-its-newest-attempt) — An action's handle reports only its newest attempt: `settled` is a promise for that attempt, and an older attempt that settles after a newer one started changes nothing.
+  - [`@rule retry-runs-the-action-again-as-a-new-speculation`](#rule-retry-runs-the-action-again-as-a-new-speculation) — `retry()` runs the action's body again from the start as a new speculation, and clears `error()` at once, before the new attempt has settled.
 - [`@axiom async-is-acknowledged-not-hidden`](#axiom-async-is-acknowledged-not-hidden) — A value that has a future says so. An async node reads as a promise, and unwrapping it is an explicit act at the read site.
   - [`@rule an-async-node-reads-as-a-plain-promise`](#rule-an-async-node-reads-as-a-plain-promise) — An async signal or computed reads as a plain `Promise`, before it settles and after. It never turns into its bare value on settle.
   - [`@rule the-read-type-carries-the-async-colour`](#rule-the-read-type-carries-the-async-colour) — A computed's read type is a `Promise` exactly where a stage can make it one, and a stage's input type is its upstream's value with the colour removed.
@@ -423,9 +425,15 @@ This follows because a read always returns the value consistent with every write
 
 ### @rule a-signal-reads-back-its-last-write
 
-> A signal returns its initial value until it is written, and afterwards the last value written. An update function receives the current value.
+> A signal returns its initial value until it is written, and afterwards the last value written.
 
 This follows because a read returns the value consistent with every write so far: for a signal, that is the last value written, or the initial value before any write.
+
+### @rule an-update-function-on-a-signal-receives-its-current-value
+
+> A signal's setter given a function calls it with the signal's current value and writes what it returns.
+
+Also derives from [`rule-a-signal-reads-back-its-last-write`](#rule-a-signal-reads-back-its-last-write). This follows because a read returns the value consistent with every write so far, and an update function builds on the value a read would return at the moment of the write.
 
 ### @rule an-effect-runs-at-creation-and-after-each-change
 
@@ -745,9 +753,15 @@ Also derives from [`axiom-async-is-acknowledged-not-hidden`](#axiom-async-is-ack
 
 ### @rule the-handle-reports-its-newest-attempt
 
-> `retry()` runs the action's body again from the start as a new speculation. It clears `error()` at once, `settled` becomes a new promise for the new attempt, and the handle reports only the newest attempt: an older attempt that settles after a newer one started changes nothing.
+> An action's handle reports only its newest attempt: `settled` is a promise for that attempt, and an older attempt that settles after a newer one started changes nothing.
 
 Also derives from [`axiom-a-speculation-commits-or-is-discarded-whole`](#axiom-a-speculation-commits-or-is-discarded-whole). This follows because each attempt is a speculation of its own, and a production started earlier never publishes over a later one: an older attempt settling after a newer one started changes nothing.
+
+### @rule retry-runs-the-action-again-as-a-new-speculation
+
+> `retry()` runs the action's body again from the start as a new speculation, and clears `error()` at once, before the new attempt has settled.
+
+Also derives from [`axiom-a-speculation-commits-or-is-discarded-whole`](#axiom-a-speculation-commits-or-is-discarded-whole). This follows because the failed attempt was discarded whole and cannot be resumed, so a retry is a new production from the start, and the newest production has not failed.
 
 ## Part 2 — Async values
 
