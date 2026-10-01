@@ -18,22 +18,22 @@ The canon was written backwards from the existing tests and documents, and descr
 - [`@axiom reads-pull-and-consumers-are-pushed`](#axiom-reads-pull-and-consumers-are-pushed) — A read always returns the value consistent with every write so far, synchronously. Consumers with side effects are re-run in batches, and the batching is invisible to reads.
   - [`@rule a-read-is-current-without-a-flush`](#rule-a-read-is-current-without-a-flush) — Reading a signal or a computed returns the value consistent with the latest writes, whether or not the scheduler has flushed since. A computed read outside any reactive context recomputes on the spot when a source changed.
   - [`@rule a-signal-reads-back-its-last-write`](#rule-a-signal-reads-back-its-last-write) — A signal returns its initial value until it is written, and afterwards the last value written. An update function receives the current value.
+  - [`@rule an-effect-runs-at-creation-and-after-each-change`](#rule-an-effect-runs-at-creation-and-after-each-change) — An effect runs once when it is created, and again after each change to a source it read.
   - [`@rule several-writes-in-one-tick-re-run-an-effect-once`](#rule-several-writes-in-one-tick-re-run-an-effect-once) — Under the default scheduler, an effect does not re-run between a write and the end of the tick. Several writes in one tick re-run it once, with the last value.
   - [`@rule a-promise-settling-requests-a-flush-from-the-active-scheduler`](#rule-a-promise-settling-requests-a-flush-from-the-active-scheduler) — When a promise a node is waiting on settles, pulse asks the active scheduler for a flush, the same way a write does. The readers re-run in that flush.
   - [`@rule an-error-write-schedules-its-own-flush`](#rule-an-error-write-schedules-its-own-flush) — A write to error state — a boundary's report collection, or an action's error — requests a flush itself, so its readers update without any other write happening.
-  - [`@rule an-effect-runs-at-creation-and-after-each-change`](#rule-an-effect-runs-at-creation-and-after-each-change) — An effect runs once when it is created, and again after each change to a source it read.
+  - [`@rule an-async-computed-refetches-when-a-source-changes`](#rule-an-async-computed-refetches-when-a-source-changes) — An async stage keeps following the sources it read after its promise settles, and runs again when one of them changes. A consumer then receives the new resolved value.
+  - [`@rule a-settled-promise-is-used-at-once-the-next-time-a-stage-runs`](#rule-a-settled-promise-is-used-at-once-the-next-time-a-stage-runs) — A promise that a stage saw pending, and that has settled since, is used at once the next time the stage runs. It does not suspend the stage again.
+  - [`@rule writes-in-one-tick-chain-their-update-functions`](#rule-writes-in-one-tick-chain-their-update-functions) — Two writes in the same tick chain: the second update function receives the value the first one produced, and the last write is what the derivation holds.
+  - [`@rule an-abandoned-stage-restarts-when-the-pipeline-is-next-pulled`](#rule-an-abandoned-stage-restarts-when-the-pipeline-is-next-pulled) — A stage whose run a write abandoned is left needing recomputation, not clean. When anything next pulls the pipeline up to date, that stage runs again and makes a fresh request.
+  - [`@rule abandoning-a-paused-stage-runs-its-cleanups-after-the-write`](#rule-abandoning-a-paused-stage-runs-its-cleanups-after-the-write) — When a write abandons a paused generator stage, the cleanups that stage registered run, and they already see the written value.
+  - [`@rule use-keeps-the-binding-subscribed-while-suspended`](#rule-use-keeps-the-binding-subscribed-while-suspended) — `use(x)` reads its source before checking whether it is pending, so a suspended binding stays subscribed and sees every later value, through every stage of a pipeline.
+  - [`@rule a-computed-reading-through-peek-still-follows-its-source`](#rule-a-computed-reading-through-peek-still-follows-its-source) — A computed that reads a source through `peek` still re-runs when the source changes or settles, and converges to the source's value. `peek` suppresses only the loading report, not the dependency.
   - [`@rule speculative-derivation-is-pulled-on-read`](#rule-speculative-derivation-is-pulled-on-read) — Under a speculation, a computed is recomputed when it is read, into a slot of that scope, and a write only marks the affected slots dirty.
     - [`@case a-speculative-read-recomputes-into-a-slot-of-its-scope`](#case-a-speculative-read-recomputes-into-a-slot-of-its-scope) — `scope.ts` `readValue`.
     - [`@case a-speculative-write-dirties-what-derives-from-it`](#case-a-speculative-write-dirties-what-derives-from-it) — `scope.ts` `invalidateDownstream`.
     - [`@case a-slot-caches-undefined-like-any-value`](#case-a-slot-caches-undefined-like-any-value) — `scope.ts` `DIRTY`.
     - [`@case a-recompute-replaces-its-links`](#case-a-recompute-replaces-its-links) — `scope.ts` `resetSlotDeps`.
-  - [`@rule abandoning-a-paused-stage-runs-its-cleanups-after-the-write`](#rule-abandoning-a-paused-stage-runs-its-cleanups-after-the-write) — When a write abandons a paused generator stage, the cleanups that stage registered run, and they already see the written value.
-  - [`@rule an-abandoned-stage-restarts-when-the-pipeline-is-next-pulled`](#rule-an-abandoned-stage-restarts-when-the-pipeline-is-next-pulled) — A stage whose run a write abandoned is left needing recomputation, not clean. When anything next pulls the pipeline up to date, that stage runs again and makes a fresh request.
-  - [`@rule an-async-computed-refetches-when-a-source-changes`](#rule-an-async-computed-refetches-when-a-source-changes) — An async stage keeps following the sources it read after its promise settles, and runs again when one of them changes. A consumer then receives the new resolved value.
-  - [`@rule writes-in-one-tick-chain-their-update-functions`](#rule-writes-in-one-tick-chain-their-update-functions) — Two writes in the same tick chain: the second update function receives the value the first one produced, and the last write is what the derivation holds.
-  - [`@rule a-settled-promise-is-used-at-once-the-next-time-a-stage-runs`](#rule-a-settled-promise-is-used-at-once-the-next-time-a-stage-runs) — A promise that a stage saw pending, and that has settled since, is used at once the next time the stage runs. It does not suspend the stage again.
-  - [`@rule use-keeps-the-binding-subscribed-while-suspended`](#rule-use-keeps-the-binding-subscribed-while-suspended) — `use(x)` reads its source before checking whether it is pending, so a suspended binding stays subscribed and sees every later value, through every stage of a pipeline.
-  - [`@rule a-computed-reading-through-peek-still-follows-its-source`](#rule-a-computed-reading-through-peek-still-follows-its-source) — A computed that reads a source through `peek` still re-runs when the source changes or settles, and converges to the source's value. `peek` suppresses only the loading report, not the dependency.
 - [`@axiom one-mechanism-carries-every-change-to-a-consumer`](#axiom-one-mechanism-carries-every-change-to-a-consumer) — Every change reaches a consumer through one scheduler, and the host can replace it.
   - [`@rule one-scheduler-flushes-every-consumer`](#rule-one-scheduler-flushes-every-consumer) — Every write asks one injectable scheduler for a flush. The default scheduler batches every request made in one tick into a single flush on a microtask; the synchronous scheduler flushes on each request.
 - [`@axiom a-consumer-re-runs-only-for-a-real-change`](#axiom-a-consumer-re-runs-only-for-a-real-change) — A consumer re-runs only when something it read actually changed.
@@ -41,14 +41,14 @@ The canon was written backwards from the existing tests and documents, and descr
     - [`@case a-computed-publishes-only-a-changed-value`](#case-a-computed-publishes-only-a-changed-value) — `computed.ts` `makeStageNode`.
     - [`@case an-equal-committed-signal-write-is-dropped`](#case-an-equal-committed-signal-write-is-dropped) — `scope.ts` `writeValue`.
 - [`@axiom compose-rather-than-proliferate`](#axiom-compose-rather-than-proliferate) — A small set of primitives covers the use cases. A new form is added only where composing the existing ones is awkward for a common case.
+  - [`@rule a-computed-is-a-pipeline-of-stages`](#rule-a-computed-is-a-pipeline-of-stages) — `computed(s0, s1, …)` threads each stage's resolved value into the next. Any stage may read signals, and a stage re-runs only when its input or one of its own reads changes.
   - [`@rule a-computed-has-no-setter`](#rule-a-computed-has-no-setter) — `computed` returns an accessor and nothing to write with. A derivation that can also be written is made with `signal`.
   - [`@rule a-signal-given-stages-is-a-writable-derivation`](#rule-a-signal-given-stages-is-a-writable-derivation) — `signal(s0, s1, …)` builds the same pipeline `computed` builds and adds a setter, whose write lands on the output of the last stage. `signal(value)` given a value that is not a function stays a plain signal.
-  - [`@rule an-optimistic-value-is-read-like-any-node`](#rule-an-optimistic-value-is-read-like-any-node) — The accessor of an optimistic value is an ordinary node. Every read verb applies to it, and the pending and failed state of what its recipe reads reaches the read site through it.
   - [`@rule a-staged-effect-is-a-pipeline-ending-in-a-commit`](#rule-a-staged-effect-is-a-pipeline-ending-in-a-commit) — `effect([stage0, …, stageN], commit)` runs the same pipeline a computed runs, and passes the final stage's resolved value to `commit`. It commits again whenever the pipeline produces a new value, and skips a value `Object.is`-equal to the one it last committed.
+  - [`@rule an-optimistic-value-is-read-like-any-node`](#rule-an-optimistic-value-is-read-like-any-node) — The accessor of an optimistic value is an ordinary node. Every read verb applies to it, and the pending and failed state of what its recipe reads reaches the read site through it.
   - [`@rule an-optimistic-fallback-seeds-the-tolerant-read`](#rule-an-optimistic-fallback-seeds-the-tolerant-read) — A fallback passed when an optimistic value is created is what `peek` and `latest` return before the source has resolved.
   - [`@rule use-latest-throws-only-before-the-first-value`](#rule-use-latest-throws-only-before-the-first-value) — `use.latest(x)` throws `NotReadyYet` only while nothing has ever resolved for `x`, carrying `promiseOf(x)`, exactly as `use` would. After that it returns the last resolved value during a refetch, reports the refresh ambiently, and still enrols the binding in its boundary's gate.
   - [`@rule the-jsx-runtime-builds-every-element-with-h`](#rule-the-jsx-runtime-builds-every-element-with-h) — The JSX runtime's `jsx`, `jsxs` and `jsxDEV` build every element with `h`. A component receives its props object as it is, `children` included and getters intact. A DOM tag or a `Fragment` receives its children as separate arguments and the rest of its props with their getters intact.
-  - [`@rule a-computed-is-a-pipeline-of-stages`](#rule-a-computed-is-a-pipeline-of-stages) — `computed(s0, s1, …)` threads each stage's resolved value into the next. Any stage may read signals, and a stage re-runs only when its input or one of its own reads changes.
 - [`@axiom a-derivation-runs-when-it-is-created`](#axiom-a-derivation-runs-when-it-is-created) — A derivation produces its value when it is created, not when it is first read.
   - [`@rule an-update-function-sees-the-value-a-sync-derivation-produced-at-creation`](#rule-an-update-function-sees-the-value-a-sync-derivation-produced-at-creation) — A derivation runs when it is created. An update function on a sync derivation therefore receives the value that first run produced, even before any write. An async derivation that suspended has produced nothing yet.
 - [`@axiom the-latest-production-wins`](#axiom-the-latest-production-wins) — A derived value shows whatever produced it last — a dependency change or a direct write — and a production that was started earlier never publishes over a later one.
@@ -68,33 +68,33 @@ The canon was written backwards from the existing tests and documents, and descr
     - [`@case pipeline-read-colours-by-the-stages-that-can-be-async`](#case-pipeline-read-colours-by-the-stages-that-can-be-async) — `async.ts` `PipelineRead`.
     - [`@case a-generator-stage-is-coloured-by-what-it-reads`](#case-a-generator-stage-is-coloured-by-what-it-reads) — `async.ts` `PipelineRead`.
     - [`@case resolved-unwraps-what-a-stage-receives`](#case-resolved-unwraps-what-a-stage-receives) — `async.ts` `Resolved`.
+  - [`@rule a-pipeline-reads-as-a-promise-while-its-value-came-through-async`](#rule-a-pipeline-reads-as-a-promise-while-its-value-came-through-async) — The raw read of a pipeline is a promise when its current value was produced through an asynchronous stage, and bare otherwise. A write never changes that colour.
+  - [`@rule a-generator-stage-is-asynchronous-only-when-it-suspends`](#rule-a-generator-stage-is-asynchronous-only-when-it-suspends) — A generator stage counts as an asynchronous stage only when it actually suspended on a pending promise. One that ran to completion without suspending publishes its value bare.
+  - [`@rule a-use-suspended-stage-reads-as-its-promise-until-it-settles`](#rule-a-use-suspended-stage-reads-as-its-promise-until-it-settles) — While a sync stage that suspended through `use` waits on a first load, the pipeline reads as the promise in flight. Once that promise settles, the sync stage publishes its bare value.
   - [`@rule a-promise-carries-its-state-in-one-weakmap`](#rule-a-promise-carries-its-state-in-one-weakmap) — The status, value, rejection reason and stale prior of a promise live in one `WeakMap` keyed on the promise. The promise itself carries nothing extra.
     - [`@case track-seeds-the-stale-prior`](#case-track-seeds-the-stale-prior) — `async.ts` `track`.
     - [`@case a-published-result-reads-fulfilled-at-once`](#case-a-published-result-reads-fulfilled-at-once) — `async.ts` `resolvedPromise`.
     - [`@case the-driver-reads-settledness-from-the-promise-map`](#case-the-driver-reads-settledness-from-the-promise-map) — `driver.ts` `runStage`.
+  - [`@rule use-treats-a-promise-it-has-not-seen-settle-as-pending`](#rule-use-treats-a-promise-it-has-not-seen-settle-as-pending) — A promise whose settle `use` has not yet recorded is pending to it, even when the promise has already settled: the first `use` of `Promise.resolve(7)` throws `NotReadyYet`. Once the settle is recorded, `use` returns the value synchronously.
   - [`@rule a-signal-stores-a-promise-as-it-is`](#rule-a-signal-stores-a-promise-as-it-is) — A signal holding a promise stores the promise itself, not its result. Writing a new promise re-runs its consumers; the promise settling is not a write.
   - [`@rule from-yields-what-it-is-given`](#rule-from-yields-what-it-is-given) — `yield* from(x)` yields a plain value or a promise as it is, and calls a signal's accessor so the read is tracked. It does not look at pending state.
-  - [`@rule a-pipeline-reads-as-a-promise-while-its-value-came-through-async`](#rule-a-pipeline-reads-as-a-promise-while-its-value-came-through-async) — The raw read of a pipeline is a promise when its current value was produced through an asynchronous stage, and bare otherwise. A write never changes that colour.
-  - [`@rule a-generator-stage-is-asynchronous-only-when-it-suspends`](#rule-a-generator-stage-is-asynchronous-only-when-it-suspends) — A generator stage counts as an asynchronous stage only when it actually suspended on a pending promise. One that ran to completion without suspending publishes its value bare.
-  - [`@rule a-use-suspended-stage-reads-as-its-promise-until-it-settles`](#rule-a-use-suspended-stage-reads-as-its-promise-until-it-settles) — While a sync stage that suspended through `use` waits on a first load, the pipeline reads as the promise in flight. Once that promise settles, the sync stage publishes its bare value.
-  - [`@rule a-construction-default-seeds-only-the-tolerant-read`](#rule-a-construction-default-seeds-only-the-tolerant-read) — `signal(fn, default)` makes `peek` return `default` until the derivation first resolves, and an update function receive `default` in place of `undefined`. The raw read stays a pending promise.
   - [`@rule a-stage-result-is-settled-before-it-is-passed-on`](#rule-a-stage-result-is-settled-before-it-is-passed-on) — Each value a stage returns or a generator yields is settled before it is used. A plain value or a fulfilled promise is used at once, and a pending promise suspends the stage on that promise.
+  - [`@rule a-construction-default-seeds-only-the-tolerant-read`](#rule-a-construction-default-seeds-only-the-tolerant-read) — `signal(fn, default)` makes `peek` return `default` until the derivation first resolves, and an update function receive `default` in place of `undefined`. The raw read stays a pending promise.
   - [`@rule pending-follows-where-a-value-came-from`](#rule-pending-follows-where-a-value-came-from) — A node is pending when any stage upstream of it is pending, or when a source its value was read from is. `promiseOf` returns the nearest promise in flight along the same path.
   - [`@rule is-pending-reports-an-unsettled-pipeline`](#rule-is-pending-reports-an-unsettled-pipeline) — `isPending(c)` is true while any stage of the pipeline is waiting on a promise, on the first load and during a refetch, and `promiseOf(c)` returns that promise. Both clear when it settles.
-  - [`@rule use-treats-a-promise-it-has-not-seen-settle-as-pending`](#rule-use-treats-a-promise-it-has-not-seen-settle-as-pending) — A promise whose settle `use` has not yet recorded is pending to it, even when the promise has already settled: the first `use` of `Promise.resolve(7)` throws `NotReadyYet`. Once the settle is recorded, `use` returns the value synchronously.
 - [`@axiom code-that-builds-on-a-value-receives-it-resolved`](#axiom-code-that-builds-on-a-value-receives-it-resolved) — Code that computes a new value from an earlier one is handed that value resolved, never as a promise.
   - [`@rule an-update-function-receives-the-last-resolved-value`](#rule-an-update-function-receives-the-last-resolved-value) — An update function on a writable derivation receives the last value that actually resolved, never a promise, and `undefined` when nothing has resolved yet.
 - [`@axiom plain-reads-are-honest`](#axiom-plain-reads-are-honest) — A read reports what is there. Whether a value is still pending, or has failed, is a separate question asked through its own verb.
   - [`@rule peek-returns-the-last-resolved-value-and-never-throws`](#rule-peek-returns-the-last-resolved-value-and-never-throws) — `peek(x)` returns the most recent resolved value of `x`, or `undefined` when it never resolved. It never throws, not even for a failed node.
   - [`@rule peek-returns-a-given-fallback-until-a-value-resolves`](#rule-peek-returns-a-given-fallback-until-a-value-resolves) — `peek(x, fallback)` returns `fallback` wherever `peek(x)` would return `undefined`: before the first resolution, and after a rejection when nothing resolved before it. Once a value has resolved, it returns that value.
+  - [`@rule a-construction-default-removes-undefined-from-the-types`](#rule-a-construction-default-removes-undefined-from-the-types) — With a construction default given, the types of `peek` and of an update function's argument leave out `undefined`, so neither needs a check.
   - [`@rule an-async-node-keeps-its-last-value-while-it-refetches`](#rule-an-async-node-keeps-its-last-value-while-it-refetches) — When an async node's inputs change, its last resolved value stays readable until the new one settles: `peek` returns it, `use` keeps delivering it to a consumer that already has it, and the node reports the refetch as pending.
   - [`@rule a-written-promise-leaves-the-prior-value-to-the-tolerant-read`](#rule-a-written-promise-leaves-the-prior-value-to-the-tolerant-read) — While a written promise is pending, and after it rejects, the tolerant read returns the value from before the write.
+  - [`@rule from-yields-the-stale-value-during-a-refetch`](#rule-from-yields-the-stale-value-during-a-refetch) — During a refetch, `yield* from(c)` on a computed yields the stale value its accessor returns, not the promise in flight.
   - [`@rule pending-is-asked-and-answered-directly`](#rule-pending-is-asked-and-answered-directly) — `isPending(x)` and `promiseOf(x)` answer whether `x` has a promise in flight, and which one, as plain values called fresh at each read site.
   - [`@rule a-signals-pending-state-is-the-state-of-the-promise-it-holds`](#rule-a-signals-pending-state-is-the-state-of-the-promise-it-holds) — A signal holding a plain value is never pending, and its `promiseOf` is `null`. A signal holding a promise is pending until that promise settles, and `promiseOf` returns it while it is.
-  - [`@rule from-yields-the-stale-value-during-a-refetch`](#rule-from-yields-the-stale-value-during-a-refetch) — During a refetch, `yield* from(c)` on a computed yields the stale value its accessor returns, not the promise in flight.
-  - [`@rule a-construction-default-removes-undefined-from-the-types`](#rule-a-construction-default-removes-undefined-from-the-types) — With a construction default given, the types of `peek` and of an update function's argument leave out `undefined`, so neither needs a check.
-  - [`@rule a-seeded-source-still-counts-as-a-first-load`](#rule-a-seeded-source-still-counts-as-a-first-load) — A source given a construction default is on its first load until it genuinely resolves. A `latest` read of it during that time drives the boundary's first-load placeholder, although the read has a value to return.
   - [`@rule a-tolerant-read-carries-loading-state-into-its-reader`](#rule-a-tolerant-read-carries-loading-state-into-its-reader) — A computed that read a pending source through `latest` or `use` reports pending, and hands out that source's promise through `promiseOf`, until the source settles — even though it holds a value of its own. A read through `peek` carries nothing.
+  - [`@rule a-seeded-source-still-counts-as-a-first-load`](#rule-a-seeded-source-still-counts-as-a-first-load) — A source given a construction default is on its first load until it genuinely resolves. A `latest` read of it during that time drives the boundary's first-load placeholder, although the read has a value to return.
   - [`@rule a-live-prediction-reports-neither-pending-nor-failed`](#rule-a-live-prediction-reports-neither-pending-nor-failed) — While a prediction is live, the optimistic node reports neither pending nor failed, and `use` returns the prediction. The source underneath keeps reporting its own state, and when the last layer drops the node reports that state again, a masked failure included.
 - [`@axiom a-paused-computation-is-re-entered-at-its-pause`](#axiom-a-paused-computation-is-re-entered-at-its-pause) — Pulse re-enters a paused computation at the finest point it can: a stage boundary with a new input, a generator stage at its pause, and anything else from the top of its body. Work done before that point runs again only when an input it read has changed.
   - [`@rule a-resumed-generator-does-not-rerun-code-before-its-pause`](#rule-a-resumed-generator-does-not-rerun-code-before-its-pause) — A generator stage that paused on a pending value is resumed with that value when it settles. The code before the pause does not run again.
@@ -111,29 +111,31 @@ The canon was written backwards from the existing tests and documents, and descr
     - [`@case a-stage-node-discards-a-generator-whose-input-changed`](#case-a-stage-node-discards-a-generator-whose-input-changed) — `computed.ts` `makeStageNode`.
   - [`@rule a-reset-discards-a-paused-generator`](#rule-a-reset-discards-a-paused-generator) — When a boundary resets the error a stage parked, a generator that the stage has paused since is discarded, and the stage runs a fresh one.
   - [`@rule oncleanup-in-a-generator-stage-belongs-to-the-generator`](#rule-oncleanup-in-a-generator-stage-belongs-to-the-generator) — An `onCleanup` called inside a generator stage registers on the generator, not on the run. It fires when the generator ends: by completing, by throwing, or by being discarded.
+  - [`@rule a-rejected-yield-is-thrown-into-the-generator`](#rule-a-rejected-yield-is-thrown-into-the-generator) — A yielded promise that rejects is thrown into the generator at its yield, where a `try`/`catch` can handle it. Uncaught, it leaves the stage as an error.
   - [`@rule a-returned-promise-is-the-result-not-a-pause`](#rule-a-returned-promise-is-the-result-not-a-pause) — A generator stage that returns a promise has finished. The promise is its result: the stage publishes what it fulfils to, and parks the reason if it rejects.
   - [`@rule a-stage-that-returned-a-promise-stays-reactive`](#rule-a-stage-that-returned-a-promise-stays-reactive) — A generator stage that returned a promise keeps no generator, so a change to a source it read runs it again from the top.
   - [`@rule a-returned-promise-rejection-skips-the-generators-catch`](#rule-a-returned-promise-rejection-skips-the-generators-catch) — When the promise a generator stage returned rejects, the generator's `try`/`catch` does not see it: the body has already ended. The stage parks the rejection as its error.
   - [`@rule use-inside-a-generator-stage-restarts-the-stage`](#rule-use-inside-a-generator-stage-restarts-the-stage) — A `use` that throws inside a generator stage suspends the stage like a sync stage: the generator is dropped, and the body runs again from the top when the promise settles.
-  - [`@rule a-fresh-promise-each-run-settles-once-per-change`](#rule-a-fresh-promise-each-run-settles-once-per-change) — A stage that returns a new promise on every run, such as a `.then`-chained one, settles once per change and does not loop.
   - [`@rule a-stage-suspended-through-use-is-absorbed`](#rule-a-stage-suspended-through-use-is-absorbed) — A sync stage whose body throws `NotReadyYet` through `use` suspends like an async stage, reports pending, and runs again when the promise settles.
-  - [`@rule a-rejected-yield-is-thrown-into-the-generator`](#rule-a-rejected-yield-is-thrown-into-the-generator) — A yielded promise that rejects is thrown into the generator at its yield, where a `try`/`catch` can handle it. Uncaught, it leaves the stage as an error.
   - [`@rule a-suspended-effect-re-runs-when-its-promise-settles`](#rule-a-suspended-effect-re-runs-when-its-promise-settles) — An effect whose body suspends on `use(x)` holds its body, and runs it again from the top once the promise it suspended on settles. When its source is written with a new pending promise, it suspends again and re-runs when that one settles.
+  - [`@rule a-fresh-promise-each-run-settles-once-per-change`](#rule-a-fresh-promise-each-run-settles-once-per-change) — A stage that returns a new promise on every run, such as a `.then`-chained one, settles once per change and does not loop.
 - [`@axiom waiting-on-a-promise-twice-is-waiting-once`](#axiom-waiting-on-a-promise-twice-is-waiting-once) — Waiting on the same promise again adds nothing: what waits on a promise is attached to it once.
   - [`@rule repeated-use-of-one-pending-promise-adds-no-listener`](#rule-repeated-use-of-one-pending-promise-adds-no-listener) — A stage body that hits `use` on the same still-pending promise on several runs attaches one settle listener to that promise, not one per run.
 - [`@axiom a-lifetime-belongs-to-an-owner`](#axiom-a-lifetime-belongs-to-an-owner) — Every reactive node lives as long as the owner it was created under. Disposing an owner ends everything beneath it. Plain data has no owner and no lifetime. Each run of a computation is a lifetime of its own, ended when the next run starts, and a root's lifetime is held by the code that created it.
   - [`@rule createroot-starts-a-new-owner-tree`](#rule-createroot-starts-a-new-owner-tree) — `createRoot` runs its body at once under a new root owner, and returns what the body returns. The body receives the root's `dispose` function.
+  - [`@rule a-root-is-never-owned-by-an-enclosing-root`](#rule-a-root-is-never-owned-by-an-enclosing-root) — A root created inside another root has no parent. Disposing the outer root leaves it alive, and only its own `dispose` ends it.
   - [`@rule disposing-an-owner-ends-what-it-owns`](#rule-disposing-an-owner-ends-what-it-owns) — Disposing an owner stops the effects and computeds created under it and runs its cleanups. Signals created under it keep working.
   - [`@rule dispose-runs-once`](#rule-dispose-runs-once) — Disposing an owner a second time does nothing: its cleanups do not run again, and nothing throws.
   - [`@rule a-disposed-owner-cannot-be-entered`](#rule-a-disposed-owner-cannot-be-entered) — `runWithOwner` with an owner that has been disposed throws.
   - [`@rule an-owner-disposes-its-children-before-its-own-cleanups`](#rule-an-owner-disposes-its-children-before-its-own-cleanups) — When an owner is disposed, the effects, computeds and sub-owners it owns are disposed first, the most recently created first, and the owner's own `onCleanup` callbacks run after them.
+  - [`@rule an-effect-is-disposed-with-its-owner`](#rule-an-effect-is-disposed-with-its-owner) — An effect created under an owner stops running when that owner is disposed, and a staged effect fires no further commits.
+  - [`@rule an-effects-cleanups-run-before-its-next-run`](#rule-an-effects-cleanups-run-before-its-next-run) — A cleanup registered with `onCleanup` inside an effect's body belongs to that run. It runs before the effect's next run, not when the owner is disposed.
+  - [`@rule oncleanup-in-a-sync-stage-runs-before-its-next-run`](#rule-oncleanup-in-a-sync-stage-runs-before-its-next-run) — Inside a sync stage, `onCleanup` keeps its usual meaning: the cleanup runs before the stage's next run.
+  - [`@rule disposing-its-owner-discards-a-paused-generator`](#rule-disposing-its-owner-discards-a-paused-generator) — Disposing the owner of a stage discards the generator it has paused, so the generator's `finally` blocks run.
   - [`@rule a-catch-error-sub-owner-is-disposed-with-its-parent`](#rule-a-catch-error-sub-owner-is-disposed-with-its-parent) — Disposing the owner a `catchError` was called under disposes its sub-owner, and stops what was created inside it.
   - [`@rule catch-error-refuses-a-disposed-owner`](#rule-catch-error-refuses-a-disposed-owner) — Calling `catchError` inside an owner that has been disposed throws.
-  - [`@rule an-effect-is-disposed-with-its-owner`](#rule-an-effect-is-disposed-with-its-owner) — An effect created under an owner stops running when that owner is disposed, and a staged effect fires no further commits.
-  - [`@rule disposing-its-owner-discards-a-paused-generator`](#rule-disposing-its-owner-discards-a-paused-generator) — Disposing the owner of a stage discards the generator it has paused, so the generator's `finally` blocks run.
-  - [`@rule a-disposed-binding-releases-its-boundary`](#rule-a-disposed-binding-releases-its-boundary) — A binding or effect that is disposed while suspended stops holding its boundary, and a commit it had queued never runs.
   - [`@rule a-boundary-is-disposed-with-its-owner`](#rule-a-boundary-is-disposed-with-its-owner) — A boundary is owned by the owner it is created in, and disposing that owner disposes the boundary and everything inside it.
-  - [`@rule a-fragment-child-belongs-to-the-owner-the-fragment-was-built-in`](#rule-a-fragment-child-belongs-to-the-owner-the-fragment-was-built-in) — A function child of a `Fragment` belongs wholly to the owner that was ambient when the `Fragment` was built, wherever the array is inserted later: the binding itself, each run of it, and everything a run creates. Disposing that owner stops the binding, and disposing the owner where the array was inserted does not. A child inserted after its owner was disposed binds nothing. A lookup from inside the child, such as `useLoading()`, starts from that owner.
+  - [`@rule a-disposed-binding-releases-its-boundary`](#rule-a-disposed-binding-releases-its-boundary) — A binding or effect that is disposed while suspended stops holding its boundary, and a commit it had queued never runs.
   - [`@rule render-returns-a-dispose-that-removes-what-it-mounted`](#rule-render-returns-a-dispose-that-removes-what-it-mounted) — `render(component, target)` inserts what the component returns into `target` and returns a `dispose`. Disposing removes every node that render added and tears down everything created during the component.
   - [`@rule a-component-that-throws-during-render-leaves-nothing-behind`](#rule-a-component-that-throws-during-render-leaves-nothing-behind) — When the component throws while `render` is running it, `render` disposes the root it opened before the error escapes.
   - [`@rule what-a-hole-builds-lives-under-its-own-owner-until-it-leaves`](#rule-what-a-hole-builds-lives-under-its-own-owner-until-it-leaves) — Content that a hole, a branch or a list row builds is built once, under a sub-owner of its own. That sub-owner is disposed when the content leaves, or when the surrounding owner is disposed.
@@ -141,10 +143,8 @@ The canon was written backwards from the existing tests and documents, and descr
     - [`@case show-rebuilds-only-when-truthiness-flips`](#case-show-rebuilds-only-when-truthiness-flips) — `show.ts` `Show`.
     - [`@case switch-rebuilds-only-when-the-winning-match-changes`](#case-switch-rebuilds-only-when-the-winning-match-changes) — `switch.ts` `Switch`.
     - [`@case map-array-builds-each-item-once-under-its-own-owner`](#case-map-array-builds-each-item-once-under-its-own-owner) — `map-array.ts` `mapArray`.
+  - [`@rule a-fragment-child-belongs-to-the-owner-the-fragment-was-built-in`](#rule-a-fragment-child-belongs-to-the-owner-the-fragment-was-built-in) — A function child of a `Fragment` belongs wholly to the owner that was ambient when the `Fragment` was built, wherever the array is inserted later: the binding itself, each run of it, and everything a run creates. Disposing that owner stops the binding, and disposing the owner where the array was inserted does not. A child inserted after its owner was disposed binds nothing. A lookup from inside the child, such as `useLoading()`, starts from that owner.
   - [`@rule an-event-prop-adds-a-listener-until-its-owner-is-disposed`](#rule-an-event-prop-adds-a-listener-until-its-owner-is-disposed) — An `on:name` prop adds its function as a listener for the event `name`, and removes it when the owner ambient at binding time is disposed.
-  - [`@rule an-effects-cleanups-run-before-its-next-run`](#rule-an-effects-cleanups-run-before-its-next-run) — A cleanup registered with `onCleanup` inside an effect's body belongs to that run. It runs before the effect's next run, not when the owner is disposed.
-  - [`@rule oncleanup-in-a-sync-stage-runs-before-its-next-run`](#rule-oncleanup-in-a-sync-stage-runs-before-its-next-run) — Inside a sync stage, `onCleanup` keeps its usual meaning: the cleanup runs before the stage's next run.
-  - [`@rule a-root-is-never-owned-by-an-enclosing-root`](#rule-a-root-is-never-owned-by-an-enclosing-root) — A root created inside another root has no parent. Disposing the outer root leaves it alive, and only its own `dispose` ends it.
 - [`@axiom a-missing-owner-is-reported-where-it-leaks-the-page`](#axiom-a-missing-owner-is-reported-where-it-leaks-the-page) — A missing owner is reported where it keeps part of the page alive, and only there.
   - [`@rule a-dom-binding-without-an-owner-warns`](#rule-a-dom-binding-without-an-owner-warns) — A reactive DOM binding or an event listener created with no owner still works, but warns once that it will never be disposed. Inside an owner, nothing warns.
     - [`@case a-reactive-child-without-an-owner-warns`](#case-a-reactive-child-without-an-owner-warns) — `bindings.ts` `insertChild`.
@@ -281,6 +281,8 @@ The canon was written backwards from the existing tests and documents, and descr
 - [`@axiom a-component-runs-once-and-reactivity-lives-in-its-holes`](#axiom-a-component-runs-once-and-reactivity-lives-in-its-holes) — A component function runs once. What changes afterwards changes inside the holes it returned — reactive children and reactive props — never by running the component again.
   - [`@rule a-function-tag-is-called-once-with-its-props`](#rule-a-function-tag-is-called-once-with-its-props) — A function tag is called once, with its props. Children passed to `h` after the props arrive on `props.children`.
   - [`@rule a-function-child-is-a-reactive-hole`](#rule-a-function-child-is-a-reactive-hole) — A function in a child position is a binding. It runs in its own effect, and its result, which may be anything a static child may be, replaces whatever sits between the binding's two marker comments each time something it read changes.
+  - [`@rule a-boundary-builds-its-children-once-up-front`](#rule-a-boundary-builds-its-children-once-up-front) — A boundary builds its children once, when it is created, inside its own owner, whether it then displays them or a placeholder. Settling, and every later swap between the placeholder and the subtree, shows the subtree already built and runs no component again.
+  - [`@rule errored-error-builds-its-content-once-per-failure`](#rule-errored-error-builds-its-content-once-per-failure) — `<Errored.Error>` builds its content when the boundary becomes failed, keeps it while the boundary stays failed, and disposes it when the boundary recovers.
   - [`@rule a-ref-is-called-once-with-its-element`](#rule-a-ref-is-called-once-with-its-element) — A `ref` prop is not a hole. Its function is called once, with the element, when the element is created.
   - [`@rule show-renders-its-children-when-truthy-and-its-fallback-otherwise`](#rule-show-renders-its-children-when-truthy-and-its-fallback-otherwise) — `Show` renders its children while `when` is truthy and its `fallback` while it is falsy. A function child is called with the truthy value.
   - [`@rule switch-renders-the-first-truthy-match`](#rule-switch-renders-the-first-truthy-match) — `Switch` renders the children of the first `Match`, in written order, whose `when` is truthy, and its `fallback` when none is. A function child is called with the truthy value. Children of a `Switch` that are not `Match` elements are ignored.
@@ -292,8 +294,6 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule a-spread-merges-descriptors-not-values`](#rule-a-spread-merges-descriptors-not-values) — A props object that contains a spread is compiled to a `mergeProps` call over its segments, so a getter in a spread source stays a getter. One `mergeProps` import is added per file, however many spreads it has.
   - [`@rule a-dom-child-is-one-thunk-per-dynamic-child`](#rule-a-dom-child-is-one-thunk-per-dynamic-child) — On a DOM element or a Fragment, each dynamic child becomes its own thunk, never a getter. A literal, a function expression, or a nested JSX element stays as written.
   - [`@rule component-children-become-one-getter`](#rule-component-children-become-one-getter) — On a component, the children become one getter over the whole value, and are not wrapped child by child. A component is any tag that is neither a string nor `Fragment`, a member expression such as `Foo.Bar` included, and a bare JSX-element child compiles exactly like the braced form.
-  - [`@rule errored-error-builds-its-content-once-per-failure`](#rule-errored-error-builds-its-content-once-per-failure) — `<Errored.Error>` builds its content when the boundary becomes failed, keeps it while the boundary stays failed, and disposes it when the boundary recovers.
-  - [`@rule a-boundary-builds-its-children-once-up-front`](#rule-a-boundary-builds-its-children-once-up-front) — A boundary builds its children once, when it is created, inside its own owner, whether it then displays them or a placeholder. Settling, and every later swap between the placeholder and the subtree, shows the subtree already built and runs no component again.
 - [`@axiom a-prop-says-how-it-reaches-the-dom`](#axiom-a-prop-says-how-it-reaches-the-dom) — How a prop reaches the DOM is written at the prop, by its prefix, and never inferred from its name or its value.
   - [`@rule a-prop-prefix-sets-the-dom-property`](#rule-a-prop-prefix-sets-the-dom-property) — A `prop:name` prop assigns the element's DOM property `name` instead of an attribute, and a function value keeps the property following it.
   - [`@rule a-class-prefix-toggles-one-class-by-truthiness`](#rule-a-class-prefix-toggles-one-class-by-truthiness) — A `class:name` prop adds the class `name` while its value is truthy and removes it while it is falsy, and a function value keeps the class following it.
@@ -387,6 +387,12 @@ This follows because a read always returns the value consistent with every write
 
 This follows because a read returns the value consistent with every write so far: for a signal, that is the last value written, or the initial value before any write.
 
+### @rule an-effect-runs-at-creation-and-after-each-change
+
+> An effect runs once when it is created, and again after each change to a source it read.
+
+This follows because consumers are re-run after each change to what they read: an effect learns what it reads only by running, so it runs once at creation.
+
 ### @rule several-writes-in-one-tick-re-run-an-effect-once
 
 > Under the default scheduler, an effect does not re-run between a write and the end of the tick. Several writes in one tick re-run it once, with the last value.
@@ -407,11 +413,51 @@ A settlement is not a write, but it reaches consumers through the same single pa
 
 Also derives from [`axiom-an-error-is-graph-state-not-an-event`](#axiom-an-error-is-graph-state-not-an-event). This follows because consumers are re-run after each write, and a failure is state held on the graph: error state is a value consumers read, so a write to it requests a flush like any other write.
 
-### @rule an-effect-runs-at-creation-and-after-each-change
+### @rule an-async-computed-refetches-when-a-source-changes
 
-> An effect runs once when it is created, and again after each change to a source it read.
+> An async stage keeps following the sources it read after its promise settles, and runs again when one of them changes. A consumer then receives the new resolved value.
 
-This follows because consumers are re-run after each change to what they read: an effect learns what it reads only by running, so it runs once at creation.
+Also derives from [`axiom-async-is-acknowledged-not-hidden`](#axiom-async-is-acknowledged-not-hidden). This follows because a read must be consistent with every write so far, and an async node is still a node of the graph: when a source of an async stage changes, the stage runs again, settled promise or not.
+
+### @rule a-settled-promise-is-used-at-once-the-next-time-a-stage-runs
+
+> A promise that a stage saw pending, and that has settled since, is used at once the next time the stage runs. It does not suspend the stage again.
+
+Also derives from [`rule-a-promise-carries-its-state-in-one-weakmap`](#rule-a-promise-carries-its-state-in-one-weakmap). This follows because a promise's settled state is recorded where pulse can read it synchronously, and a read returns the current value synchronously: a settled promise's result is current, so the stage uses it at once.
+
+### @rule writes-in-one-tick-chain-their-update-functions
+
+> Two writes in the same tick chain: the second update function receives the value the first one produced, and the last write is what the derivation holds.
+
+Also derives from [`rule-an-update-function-receives-the-last-resolved-value`](#rule-an-update-function-receives-the-last-resolved-value). This follows because an update function receives the derivation's current value, and a read returns the value consistent with every write so far, synchronously: the second update function therefore sees the first write's value.
+
+### @rule an-abandoned-stage-restarts-when-the-pipeline-is-next-pulled
+
+> A stage whose run a write abandoned is left needing recomputation, not clean. When anything next pulls the pipeline up to date, that stage runs again and makes a fresh request.
+
+Also derives from [`rule-a-write-abandons-the-run-in-progress`](#rule-a-write-abandons-the-run-in-progress). This follows because a write abandons the stage's run, and a read must be consistent with every write so far: the abandoned stage has no value for the current input, so the next pull runs it again.
+
+A stage left clean would keep serving data for an input the pipeline has already moved past.
+
+### @rule abandoning-a-paused-stage-runs-its-cleanups-after-the-write
+
+> When a write abandons a paused generator stage, the cleanups that stage registered run, and they already see the written value.
+
+Also derives from [`rule-a-write-abandons-the-run-in-progress`](#rule-a-write-abandons-the-run-in-progress) and [`rule-oncleanup-in-a-generator-stage-belongs-to-the-generator`](#rule-oncleanup-in-a-generator-stage-belongs-to-the-generator). This follows because a write abandons the paused run, a generator's cleanups run when it ends, and a read returns the value consistent with every write so far: the cleanups run after the write, so they read it.
+
+### @rule use-keeps-the-binding-subscribed-while-suspended
+
+> `use(x)` reads its source before checking whether it is pending, so a suspended binding stays subscribed and sees every later value, through every stage of a pipeline.
+
+This follows because consumers are re-run when what they read changes: a suspended binding has read its source, so the subscription must survive the throw, or a later value could never reach it.
+
+Without the read, r3 would drop the dependency edge on the throw, and a source with no subscriber left would be disposed, so a later refetch would never reach the binding.
+
+### @rule a-computed-reading-through-peek-still-follows-its-source
+
+> A computed that reads a source through `peek` still re-runs when the source changes or settles, and converges to the source's value. `peek` suppresses only the loading report, not the dependency.
+
+This follows because a read always returns the value consistent with every write so far: `peek` is a read, so the computed depends on its source like any reader and converges when it changes or settles.
 
 ### @rule speculative-derivation-is-pulled-on-read
 
@@ -444,52 +490,6 @@ A dirty slot is marked with its own symbol, not with `undefined`, so a recipe th
 > `scope.ts` `resetSlotDeps`.
 
 Before a slot is recomputed, its existing links are removed from their sources, so links do not pile up across recomputes.
-
-### @rule abandoning-a-paused-stage-runs-its-cleanups-after-the-write
-
-> When a write abandons a paused generator stage, the cleanups that stage registered run, and they already see the written value.
-
-Also derives from [`rule-a-write-abandons-the-run-in-progress`](#rule-a-write-abandons-the-run-in-progress) and [`rule-oncleanup-in-a-generator-stage-belongs-to-the-generator`](#rule-oncleanup-in-a-generator-stage-belongs-to-the-generator). This follows because a write abandons the paused run, a generator's cleanups run when it ends, and a read returns the value consistent with every write so far: the cleanups run after the write, so they read it.
-
-### @rule an-abandoned-stage-restarts-when-the-pipeline-is-next-pulled
-
-> A stage whose run a write abandoned is left needing recomputation, not clean. When anything next pulls the pipeline up to date, that stage runs again and makes a fresh request.
-
-Also derives from [`rule-a-write-abandons-the-run-in-progress`](#rule-a-write-abandons-the-run-in-progress). This follows because a write abandons the stage's run, and a read must be consistent with every write so far: the abandoned stage has no value for the current input, so the next pull runs it again.
-
-A stage left clean would keep serving data for an input the pipeline has already moved past.
-
-### @rule an-async-computed-refetches-when-a-source-changes
-
-> An async stage keeps following the sources it read after its promise settles, and runs again when one of them changes. A consumer then receives the new resolved value.
-
-Also derives from [`axiom-async-is-acknowledged-not-hidden`](#axiom-async-is-acknowledged-not-hidden). This follows because a read must be consistent with every write so far, and an async node is still a node of the graph: when a source of an async stage changes, the stage runs again, settled promise or not.
-
-### @rule writes-in-one-tick-chain-their-update-functions
-
-> Two writes in the same tick chain: the second update function receives the value the first one produced, and the last write is what the derivation holds.
-
-Also derives from [`rule-an-update-function-receives-the-last-resolved-value`](#rule-an-update-function-receives-the-last-resolved-value). This follows because an update function receives the derivation's current value, and a read returns the value consistent with every write so far, synchronously: the second update function therefore sees the first write's value.
-
-### @rule a-settled-promise-is-used-at-once-the-next-time-a-stage-runs
-
-> A promise that a stage saw pending, and that has settled since, is used at once the next time the stage runs. It does not suspend the stage again.
-
-Also derives from [`rule-a-promise-carries-its-state-in-one-weakmap`](#rule-a-promise-carries-its-state-in-one-weakmap). This follows because a promise's settled state is recorded where pulse can read it synchronously, and a read returns the current value synchronously: a settled promise's result is current, so the stage uses it at once.
-
-### @rule use-keeps-the-binding-subscribed-while-suspended
-
-> `use(x)` reads its source before checking whether it is pending, so a suspended binding stays subscribed and sees every later value, through every stage of a pipeline.
-
-This follows because consumers are re-run when what they read changes: a suspended binding has read its source, so the subscription must survive the throw, or a later value could never reach it.
-
-Without the read, r3 would drop the dependency edge on the throw, and a source with no subscriber left would be disposed, so a later refetch would never reach the binding.
-
-### @rule a-computed-reading-through-peek-still-follows-its-source
-
-> A computed that reads a source through `peek` still re-runs when the source changes or settles, and converges to the source's value. `peek` suppresses only the loading report, not the dependency.
-
-This follows because a read always returns the value consistent with every write so far: `peek` is a read, so the computed depends on its source like any reader and converges when it changes or settles.
 
 ## @axiom one-mechanism-carries-every-change-to-a-consumer
 
@@ -533,6 +533,14 @@ A committed write to a signal that equals its current value is dropped. The equa
 
 The principle is [P5 in the exploration record](docs/pulse/framings.md#p5--compose-dont-proliferate-in-either-direction). It rejects both a separate primitive per use case and a refusal on principle to add sugar that earns its keep.
 
+### @rule a-computed-is-a-pipeline-of-stages
+
+> `computed(s0, s1, …)` threads each stage's resolved value into the next. Any stage may read signals, and a stage re-runs only when its input or one of its own reads changes.
+
+Also derives from [`axiom-a-paused-computation-is-re-entered-at-its-pause`](#axiom-a-paused-computation-is-re-entered-at-its-pause). This follows because a computed is composed of stages rather than being a primitive per shape, and a paused computation is re-entered at a stage boundary: a stage runs again only when its input or its own reads changed.
+
+So a stage downstream of a stage whose value did not change is not re-run, and reading the computed again without a change re-runs nothing.
+
 ### @rule a-computed-has-no-setter
 
 > `computed` returns an accessor and nothing to write with. A derivation that can also be written is made with `signal`.
@@ -545,14 +553,6 @@ Also derives from [`rule-a-signal-given-stages-is-a-writable-derivation`](#rule-
 
 This follows because a small set of primitives covers the use cases: a writable derivation is the signal and the pipeline composed, not a separate primitive.
 
-### @rule an-optimistic-value-is-read-like-any-node
-
-> The accessor of an optimistic value is an ordinary node. Every read verb applies to it, and the pending and failed state of what its recipe reads reaches the read site through it.
-
-This follows because a new form is added only where composing is awkward: an optimistic value is a signal variant, so the existing read verbs serve it instead of a read API of its own.
-
-So `use` on it suspends until the source resolves, and a failed source is reported by `error()` on the optimistic node while `peek` still does not throw. The decision is [ADR 0016](docs/adr/0016-optimistic-as-a-signal-variant.md).
-
 ### @rule a-staged-effect-is-a-pipeline-ending-in-a-commit
 
 > `effect([stage0, …, stageN], commit)` runs the same pipeline a computed runs, and passes the final stage's resolved value to `commit`. It commits again whenever the pipeline produces a new value, and skips a value `Object.is`-equal to the one it last committed.
@@ -560,6 +560,14 @@ So `use` on it suspends until the source resolves, and a failed source is report
 This follows because a small set of primitives covers the use cases: a staged effect reuses the computed's pipeline and adds only the commit, instead of a second pipeline mechanism.
 
 Stages may be sync or async; an async stage's resolved value is what reaches `commit`.
+
+### @rule an-optimistic-value-is-read-like-any-node
+
+> The accessor of an optimistic value is an ordinary node. Every read verb applies to it, and the pending and failed state of what its recipe reads reaches the read site through it.
+
+This follows because a new form is added only where composing is awkward: an optimistic value is a signal variant, so the existing read verbs serve it instead of a read API of its own.
+
+So `use` on it suspends until the source resolves, and a failed source is reported by `error()` on the optimistic node while `peek` still does not throw. The decision is [ADR 0016](docs/adr/0016-optimistic-as-a-signal-variant.md).
 
 ### @rule an-optimistic-fallback-seeds-the-tolerant-read
 
@@ -582,14 +590,6 @@ Once settled it returns the same value `use` does. During a refetch `use(x)` thr
 This follows because a small set of primitives covers the use cases: the JSX runtime adds no second way to build elements, so every element goes through `h`, with props passed as they are.
 
 So what holds for `h` holds for JSX.
-
-### @rule a-computed-is-a-pipeline-of-stages
-
-> `computed(s0, s1, …)` threads each stage's resolved value into the next. Any stage may read signals, and a stage re-runs only when its input or one of its own reads changes.
-
-Also derives from [`axiom-a-paused-computation-is-re-entered-at-its-pause`](#axiom-a-paused-computation-is-re-entered-at-its-pause). This follows because a computed is composed of stages rather than being a primitive per shape, and a paused computation is re-entered at a stage boundary: a stage runs again only when its input or its own reads changed.
-
-So a stage downstream of a stage whose value did not change is not re-run, and reading the computed again without a change re-runs nothing.
 
 ## @axiom a-derivation-runs-when-it-is-created
 
@@ -719,6 +719,26 @@ A generator stage is coloured by what its `yield* from(…)` calls read, not by 
 
 `Resolved<T>` removes the colour from what a stage receives: a signal gives its value, a promise what it fulfils to, and a generator what it returns.
 
+### @rule a-pipeline-reads-as-a-promise-while-its-value-came-through-async
+
+> The raw read of a pipeline is a promise when its current value was produced through an asynchronous stage, and bare otherwise. A write never changes that colour.
+
+This follows because a value that has a future says so, and the colour stays visible through every stage: a value produced through an async stage reads as a promise however late in the pipeline.
+
+A sync last stage fed by an async stage therefore still reads as a promise, and a stage that is async on one evaluation and sync on the next flips its read shape each time, even when the value is the same.
+
+### @rule a-generator-stage-is-asynchronous-only-when-it-suspends
+
+> A generator stage counts as an asynchronous stage only when it actually suspended on a pending promise. One that ran to completion without suspending publishes its value bare.
+
+This follows because a value says so only when it has a future: a generator that ran to completion without waiting produced a value with no future, so it is published bare.
+
+### @rule a-use-suspended-stage-reads-as-its-promise-until-it-settles
+
+> While a sync stage that suspended through `use` waits on a first load, the pipeline reads as the promise in flight. Once that promise settles, the sync stage publishes its bare value.
+
+Also derives from [`rule-a-stage-suspended-through-use-is-absorbed`](#rule-a-stage-suspended-through-use-is-absorbed). This follows because a sync stage that suspends through `use` waits on a promise, and a value that has a future says so: until that promise settles, the pipeline's value is the promise in flight.
+
 ### @rule a-promise-carries-its-state-in-one-weakmap
 
 > The status, value, rejection reason and stale prior of a promise live in one `WeakMap` keyed on the promise. The promise itself carries nothing extra.
@@ -743,6 +763,14 @@ The promise pulse publishes when an async stage settles is recorded fulfilled th
 
 The driver decides whether a returned or yielded promise has settled by reading the same map. Read state and the driver's memory of settled promises are one mechanism: a promise the map records as fulfilled is used at once, even on the first run that sees it.
 
+### @rule use-treats-a-promise-it-has-not-seen-settle-as-pending
+
+> A promise whose settle `use` has not yet recorded is pending to it, even when the promise has already settled: the first `use` of `Promise.resolve(7)` throws `NotReadyYet`. Once the settle is recorded, `use` returns the value synchronously.
+
+Also derives from [`rule-a-promise-carries-its-state-in-one-weakmap`](#rule-a-promise-carries-its-state-in-one-weakmap). This follows because an async value is read through its recorded state, and a promise carries its state only in pulse's map, which records it as pending when first seen: until the settle is recorded, `use` sees pending.
+
+A promise carries no readable state of its own. Its state is recorded when its settle callback runs, which is always at least a microtask after the promise is first seen.
+
 ### @rule a-signal-stores-a-promise-as-it-is
 
 > A signal holding a promise stores the promise itself, not its result. Writing a new promise re-runs its consumers; the promise settling is not a write.
@@ -759,25 +787,13 @@ This follows because unwrapping is an explicit act at the read site: `from` only
 
 What happens to the yielded value next is [the driver settling it](#rule-a-stage-result-is-settled-before-it-is-passed-on).
 
-### @rule a-pipeline-reads-as-a-promise-while-its-value-came-through-async
+### @rule a-stage-result-is-settled-before-it-is-passed-on
 
-> The raw read of a pipeline is a promise when its current value was produced through an asynchronous stage, and bare otherwise. A write never changes that colour.
+> Each value a stage returns or a generator yields is settled before it is used. A plain value or a fulfilled promise is used at once, and a pending promise suspends the stage on that promise.
 
-This follows because a value that has a future says so, and the colour stays visible through every stage: a value produced through an async stage reads as a promise however late in the pipeline.
+This follows because a stage's input is its upstream's value with the colour removed, unwrapped explicitly: the driver must settle a returned or yielded promise before passing its value on.
 
-A sync last stage fed by an async stage therefore still reads as a promise, and a stage that is async on one evaluation and sync on the next flips its read shape each time, even when the value is the same.
-
-### @rule a-generator-stage-is-asynchronous-only-when-it-suspends
-
-> A generator stage counts as an asynchronous stage only when it actually suspended on a pending promise. One that ran to completion without suspending publishes its value bare.
-
-This follows because a value says so only when it has a future: a generator that ran to completion without waiting produced a value with no future, so it is published bare.
-
-### @rule a-use-suspended-stage-reads-as-its-promise-until-it-settles
-
-> While a sync stage that suspended through `use` waits on a first load, the pipeline reads as the promise in flight. Once that promise settles, the sync stage publishes its bare value.
-
-Also derives from [`rule-a-stage-suspended-through-use-is-absorbed`](#rule-a-stage-suspended-through-use-is-absorbed). This follows because a sync stage that suspends through `use` waits on a promise, and a value that has a future says so: until that promise settles, the pipeline's value is the promise in flight.
+An async stage suspends on the promise it returns, like any other pending promise.
 
 ### @rule a-construction-default-seeds-only-the-tolerant-read
 
@@ -786,14 +802,6 @@ Also derives from [`rule-a-stage-suspended-through-use-is-absorbed`](#rule-a-sta
 Also derives from [`axiom-plain-reads-are-honest`](#axiom-plain-reads-are-honest). This follows because an async node reads as a promise until it settles, and a tolerant read reports what is there: a default may stand in where nothing is there, but never for the raw read, which would hide the future.
 
 Once a real value has resolved, both see it instead of the default.
-
-### @rule a-stage-result-is-settled-before-it-is-passed-on
-
-> Each value a stage returns or a generator yields is settled before it is used. A plain value or a fulfilled promise is used at once, and a pending promise suspends the stage on that promise.
-
-This follows because a stage's input is its upstream's value with the colour removed, unwrapped explicitly: the driver must settle a returned or yielded promise before passing its value on.
-
-An async stage suspends on the promise it returns, like any other pending promise.
 
 ### @rule pending-follows-where-a-value-came-from
 
@@ -810,14 +818,6 @@ The walk follows two chains: the static pipeline, stage by stage, and the source
 Also derives from [`axiom-plain-reads-are-honest`](#axiom-plain-reads-are-honest) and [`rule-pending-follows-where-a-value-came-from`](#rule-pending-follows-where-a-value-came-from). This follows because pending follows where a value came from, a value with a future says so, and pending is its own question: while any stage waits on a promise, `isPending` reports the pipeline as pending.
 
 A stage that reads another node as its input reports that node's pending state as well, as [the pending walk](#rule-pending-follows-where-a-value-came-from) states.
-
-### @rule use-treats-a-promise-it-has-not-seen-settle-as-pending
-
-> A promise whose settle `use` has not yet recorded is pending to it, even when the promise has already settled: the first `use` of `Promise.resolve(7)` throws `NotReadyYet`. Once the settle is recorded, `use` returns the value synchronously.
-
-Also derives from [`rule-a-promise-carries-its-state-in-one-weakmap`](#rule-a-promise-carries-its-state-in-one-weakmap). This follows because an async value is read through its recorded state, and a promise carries its state only in pulse's map, which records it as pending when first seen: until the settle is recorded, `use` sees pending.
-
-A promise carries no readable state of its own. Its state is recorded when its settle callback runs, which is always at least a microtask after the promise is first seen.
 
 ## @axiom code-that-builds-on-a-value-receives-it-resolved
 
@@ -855,6 +855,12 @@ This follows because a tolerant read reports what is there and never raises: whe
 
 A fallback given when `x` was constructed works the same way, as [the construction default](#rule-a-construction-default-seeds-only-the-tolerant-read) states.
 
+### @rule a-construction-default-removes-undefined-from-the-types
+
+> With a construction default given, the types of `peek` and of an update function's argument leave out `undefined`, so neither needs a check.
+
+Also derives from [`rule-a-construction-default-seeds-only-the-tolerant-read`](#rule-a-construction-default-seeds-only-the-tolerant-read). This follows because a read reports what is there, and a construction default fills the tolerant read and the update function's argument: with one given, `undefined` is never there, so their types leave it out.
+
 ### @rule an-async-node-keeps-its-last-value-while-it-refetches
 
 > When an async node's inputs change, its last resolved value stays readable until the new one settles: `peek` returns it, `use` keeps delivering it to a consumer that already has it, and the node reports the refetch as pending.
@@ -869,6 +875,12 @@ This is stale-while-revalidate.
 
 Also derives from [`rule-a-written-promise-is-published-like-a-produced-one`](#rule-a-written-promise-is-published-like-a-produced-one). This follows because a written promise is published like a produced one, and a read reports what is there: while it is pending or after it rejects it has no value, so the value from before the write is there.
 
+### @rule from-yields-the-stale-value-during-a-refetch
+
+> During a refetch, `yield* from(c)` on a computed yields the stale value its accessor returns, not the promise in flight.
+
+Also derives from [`rule-an-async-node-keeps-its-last-value-while-it-refetches`](#rule-an-async-node-keeps-its-last-value-while-it-refetches) and [`rule-from-yields-what-it-is-given`](#rule-from-yields-what-it-is-given). This follows because `from` yields what the accessor returns, and during a refetch a node keeps its last resolved value readable, since a read reports what is there: `from` yields that stale value.
+
 ### @rule pending-is-asked-and-answered-directly
 
 > `isPending(x)` and `promiseOf(x)` answer whether `x` has a promise in flight, and which one, as plain values called fresh at each read site.
@@ -881,17 +893,13 @@ This follows because whether a value is pending is a separate question asked thr
 
 This follows because pending is a question about what is there: a signal holding a plain value has nothing in flight, and one holding a promise is in flight until that promise settles.
 
-### @rule from-yields-the-stale-value-during-a-refetch
+### @rule a-tolerant-read-carries-loading-state-into-its-reader
 
-> During a refetch, `yield* from(c)` on a computed yields the stale value its accessor returns, not the promise in flight.
+> A computed that read a pending source through `latest` or `use` reports pending, and hands out that source's promise through `promiseOf`, until the source settles — even though it holds a value of its own. A read through `peek` carries nothing.
 
-Also derives from [`rule-an-async-node-keeps-its-last-value-while-it-refetches`](#rule-an-async-node-keeps-its-last-value-while-it-refetches) and [`rule-from-yields-what-it-is-given`](#rule-from-yields-what-it-is-given). This follows because `from` yields what the accessor returns, and during a refetch a node keeps its last resolved value readable, since a read reports what is there: `from` yields that stale value.
+Also derives from [`rule-pending-follows-where-a-value-came-from`](#rule-pending-follows-where-a-value-came-from). This follows because pending is answered truthfully, and a node is pending when a source its value was read from is: a computed reading a pending source through `latest` or `use` reports pending.
 
-### @rule a-construction-default-removes-undefined-from-the-types
-
-> With a construction default given, the types of `peek` and of an update function's argument leave out `undefined`, so neither needs a check.
-
-Also derives from [`rule-a-construction-default-seeds-only-the-tolerant-read`](#rule-a-construction-default-seeds-only-the-tolerant-read). This follows because a read reports what is there, and a construction default fills the tolerant read and the update function's argument: with one given, `undefined` is never there, so their types leave it out.
+The state composes through a chain of such readers, since a reader that reports pending is itself a pending source to the next one. It survives the reader re-running during a refresh, because the reader reads the source again and records it again.
 
 ### @rule a-seeded-source-still-counts-as-a-first-load
 
@@ -900,14 +908,6 @@ Also derives from [`rule-a-construction-default-seeds-only-the-tolerant-read`](#
 Also derives from [`rule-latest-reports-loading-without-waiting`](#rule-latest-reports-loading-without-waiting). This follows because pending is answered by what is there, and `latest` reports a first load to its boundary: a construction default is a value to display, not a resolution, so the read still reports a first load.
 
 Whether a source has resolved is tracked separately from whether it has a value to report. The default says what to display meanwhile, not that the fetch has finished.
-
-### @rule a-tolerant-read-carries-loading-state-into-its-reader
-
-> A computed that read a pending source through `latest` or `use` reports pending, and hands out that source's promise through `promiseOf`, until the source settles — even though it holds a value of its own. A read through `peek` carries nothing.
-
-Also derives from [`rule-pending-follows-where-a-value-came-from`](#rule-pending-follows-where-a-value-came-from). This follows because pending is answered truthfully, and a node is pending when a source its value was read from is: a computed reading a pending source through `latest` or `use` reports pending.
-
-The state composes through a chain of such readers, since a reader that reports pending is itself a pending source to the next one. It survives the reader re-running during a refresh, because the reader reads the source again and records it again.
 
 ### @rule a-live-prediction-reports-neither-pending-nor-failed
 
@@ -1011,6 +1011,12 @@ This follows because a generator stage's continuation runs forward across its pa
 
 A resume is not the end of the generator, so the cleanup does not fire then.
 
+### @rule a-rejected-yield-is-thrown-into-the-generator
+
+> A yielded promise that rejects is thrown into the generator at its yield, where a `try`/`catch` can handle it. Uncaught, it leaves the stage as an error.
+
+This follows because a generator stage is re-entered at its pause with the settled outcome: a rejection is that outcome, and a generator receives a failure at its pause by having it thrown there.
+
 ### @rule a-returned-promise-is-the-result-not-a-pause
 
 > A generator stage that returns a promise has finished. The promise is its result: the stage publishes what it fulfils to, and parks the reason if it rejects.
@@ -1035,23 +1041,11 @@ Also derives from [`rule-a-returned-promise-is-the-result-not-a-pause`](#rule-a-
 
 This follows because a body that suspends by throwing through `use` cannot be resumed at all, and runs again from the top: that holds inside a generator stage too.
 
-### @rule a-fresh-promise-each-run-settles-once-per-change
-
-> A stage that returns a new promise on every run, such as a `.then`-chained one, settles once per change and does not loop.
-
-Also derives from [`rule-a-signal-stores-a-promise-as-it-is`](#rule-a-signal-stores-a-promise-as-it-is). This follows because work runs again only when an input it read has changed, and a promise settling is not a write: a stage returning a fresh promise therefore runs once per change, not once per settlement.
-
 ### @rule a-stage-suspended-through-use-is-absorbed
 
 > A sync stage whose body throws `NotReadyYet` through `use` suspends like an async stage, reports pending, and runs again when the promise settles.
 
 This follows because a body that suspends by throwing through `use` cannot be resumed, so it runs again from the top: the stage waits on the promise and reruns when it settles.
-
-### @rule a-rejected-yield-is-thrown-into-the-generator
-
-> A yielded promise that rejects is thrown into the generator at its yield, where a `try`/`catch` can handle it. Uncaught, it leaves the stage as an error.
-
-This follows because a generator stage is re-entered at its pause with the settled outcome: a rejection is that outcome, and a generator receives a failure at its pause by having it thrown there.
 
 ### @rule a-suspended-effect-re-runs-when-its-promise-settles
 
@@ -1060,6 +1054,12 @@ This follows because a generator stage is re-entered at its pause with the settl
 This follows because a body that suspends by throwing cannot be resumed and runs again from the top: the effect is held, and runs from the top once the promise it suspended on settles.
 
 The re-run is keyed on the promise the effect suspended on.
+
+### @rule a-fresh-promise-each-run-settles-once-per-change
+
+> A stage that returns a new promise on every run, such as a `.then`-chained one, settles once per change and does not loop.
+
+Also derives from [`rule-a-signal-stores-a-promise-as-it-is`](#rule-a-signal-stores-a-promise-as-it-is). This follows because work runs again only when an input it read has changed, and a promise settling is not a write: a stage returning a fresh promise therefore runs once per change, not once per settlement.
 
 ## @axiom waiting-on-a-promise-twice-is-waiting-once
 
@@ -1093,6 +1093,14 @@ Also derives from [`axiom-ambient-context-is-set-for-a-call-and-restored-after`]
 
 Inside the body, `getOwner()` is that root.
 
+### @rule a-root-is-never-owned-by-an-enclosing-root
+
+> A root created inside another root has no parent. Disposing the outer root leaves it alive, and only its own `dispose` ends it.
+
+This follows because a root's lifetime is held by the code that created it: an enclosing root disposing it would end a lifetime its creator holds.
+
+Nesting a `createRoot` does not link the two trees, so nothing walks from the inner root to the outer one.
+
 ### @rule disposing-an-owner-ends-what-it-owns
 
 > Disposing an owner stops the effects and computeds created under it and runs its cleanups. Signals created under it keep working.
@@ -1121,6 +1129,30 @@ Code run under a disposed owner would register nodes and cleanups that nothing w
 
 Also derives from [`axiom-teardown-unwinds`](#axiom-teardown-unwinds). This follows because a-lifetime-belongs-to-an-owner says what lives beneath an owner ends inside the owner's lifetime, before its own cleanups, and teardown-unwinds says the children go newest first.
 
+### @rule an-effect-is-disposed-with-its-owner
+
+> An effect created under an owner stops running when that owner is disposed, and a staged effect fires no further commits.
+
+This follows because every reactive node lives as long as the owner it was created under: an effect is such a node, so disposing its owner ends it.
+
+### @rule an-effects-cleanups-run-before-its-next-run
+
+> A cleanup registered with `onCleanup` inside an effect's body belongs to that run. It runs before the effect's next run, not when the owner is disposed.
+
+This follows because each run of a computation is a lifetime of its own: a cleanup an effect's run registered ends with that run, which is when the next run starts.
+
+### @rule oncleanup-in-a-sync-stage-runs-before-its-next-run
+
+> Inside a sync stage, `onCleanup` keeps its usual meaning: the cleanup runs before the stage's next run.
+
+This follows because each run of a computation is a lifetime of its own: a sync stage's run ends when the next one starts, and its cleanup runs then.
+
+### @rule disposing-its-owner-discards-a-paused-generator
+
+> Disposing the owner of a stage discards the generator it has paused, so the generator's `finally` blocks run.
+
+Also derives from [`rule-a-discarded-generator-is-closed-with-return`](#rule-a-discarded-generator-is-closed-with-return). This follows because disposing an owner ends everything beneath it, and a discarded generator is closed with `return`: a stage's paused generator ends with its owner, and its `finally` blocks run.
+
 ### @rule a-catch-error-sub-owner-is-disposed-with-its-parent
 
 > Disposing the owner a `catchError` was called under disposes its sub-owner, and stops what was created inside it.
@@ -1135,17 +1167,11 @@ Also derives from [`rule-a-disposed-owner-cannot-be-entered`](#rule-a-disposed-o
 
 Nodes created there would never be disposed, the same reason [a disposed owner cannot be entered](#rule-a-disposed-owner-cannot-be-entered).
 
-### @rule an-effect-is-disposed-with-its-owner
+### @rule a-boundary-is-disposed-with-its-owner
 
-> An effect created under an owner stops running when that owner is disposed, and a staged effect fires no further commits.
+> A boundary is owned by the owner it is created in, and disposing that owner disposes the boundary and everything inside it.
 
-This follows because every reactive node lives as long as the owner it was created under: an effect is such a node, so disposing its owner ends it.
-
-### @rule disposing-its-owner-discards-a-paused-generator
-
-> Disposing the owner of a stage discards the generator it has paused, so the generator's `finally` blocks run.
-
-Also derives from [`rule-a-discarded-generator-is-closed-with-return`](#rule-a-discarded-generator-is-closed-with-return). This follows because disposing an owner ends everything beneath it, and a discarded generator is closed with `return`: a stage's paused generator ends with its owner, and its `finally` blocks run.
+This follows because every reactive node lives as long as the owner it was created under: a boundary is created under its owner, so disposing that owner disposes the boundary and its contents.
 
 ### @rule a-disposed-binding-releases-its-boundary
 
@@ -1154,20 +1180,6 @@ Also derives from [`rule-a-discarded-generator-is-closed-with-return`](#rule-a-d
 Also derives from [`axiom-a-boundary-wraps-what-it-coordinates`](#axiom-a-boundary-wraps-what-it-coordinates). This follows because disposing an owner ends everything beneath it, and a boundary coordinates only the bindings inside it: a disposed binding is no longer one of them, so it stops holding the gate.
 
 A suspended branch that is unmounted therefore cannot keep its siblings waiting.
-
-### @rule a-boundary-is-disposed-with-its-owner
-
-> A boundary is owned by the owner it is created in, and disposing that owner disposes the boundary and everything inside it.
-
-This follows because every reactive node lives as long as the owner it was created under: a boundary is created under its owner, so disposing that owner disposes the boundary and its contents.
-
-### @rule a-fragment-child-belongs-to-the-owner-the-fragment-was-built-in
-
-> A function child of a `Fragment` belongs wholly to the owner that was ambient when the `Fragment` was built, wherever the array is inserted later: the binding itself, each run of it, and everything a run creates. Disposing that owner stops the binding, and disposing the owner where the array was inserted does not. A child inserted after its owner was disposed binds nothing. A lookup from inside the child, such as `useLoading()`, starts from that owner.
-
-Also derives from [`rule-a-fragment-is-its-children-as-an-array`](#rule-a-fragment-is-its-children-as-an-array). This follows because a node lives as long as the owner it was created under, and a Fragment hands its children on unresolved: the child was written under the Fragment's owner, so its binding belongs there.
-
-The `Fragment` returns its children unresolved, so the call that inserts them can run under a different owner, or none. The owner is recorded against the function itself when the `Fragment` is built.
 
 ### @rule render-returns-a-dispose-that-removes-what-it-mounted
 
@@ -1217,6 +1229,14 @@ The winning `Match`'s position among the `Switch`'s children is the key, not the
 
 The mapper runs once per new item, under a sub-owner for that item. An item still present on the next run keeps its entry and its sub-owner. An item that is gone has its sub-owner disposed, and disposing the owner around the list disposes every row.
 
+### @rule a-fragment-child-belongs-to-the-owner-the-fragment-was-built-in
+
+> A function child of a `Fragment` belongs wholly to the owner that was ambient when the `Fragment` was built, wherever the array is inserted later: the binding itself, each run of it, and everything a run creates. Disposing that owner stops the binding, and disposing the owner where the array was inserted does not. A child inserted after its owner was disposed binds nothing. A lookup from inside the child, such as `useLoading()`, starts from that owner.
+
+Also derives from [`rule-a-fragment-is-its-children-as-an-array`](#rule-a-fragment-is-its-children-as-an-array). This follows because a node lives as long as the owner it was created under, and a Fragment hands its children on unresolved: the child was written under the Fragment's owner, so its binding belongs there.
+
+The `Fragment` returns its children unresolved, so the call that inserts them can run under a different owner, or none. The owner is recorded against the function itself when the `Fragment` is built.
+
 ### @rule an-event-prop-adds-a-listener-until-its-owner-is-disposed
 
 > An `on:name` prop adds its function as a listener for the event `name`, and removes it when the owner ambient at binding time is disposed.
@@ -1224,26 +1244,6 @@ The mapper runs once per new item, under a sub-owner for that item. An item stil
 This follows because what is set up under an owner lives as long as that owner: the listener is added under the owner ambient at binding time, so disposing that owner removes it.
 
 An event prop is not a hole: its function is the listener, not a value to follow.
-
-### @rule an-effects-cleanups-run-before-its-next-run
-
-> A cleanup registered with `onCleanup` inside an effect's body belongs to that run. It runs before the effect's next run, not when the owner is disposed.
-
-This follows because each run of a computation is a lifetime of its own: a cleanup an effect's run registered ends with that run, which is when the next run starts.
-
-### @rule oncleanup-in-a-sync-stage-runs-before-its-next-run
-
-> Inside a sync stage, `onCleanup` keeps its usual meaning: the cleanup runs before the stage's next run.
-
-This follows because each run of a computation is a lifetime of its own: a sync stage's run ends when the next one starts, and its cleanup runs then.
-
-### @rule a-root-is-never-owned-by-an-enclosing-root
-
-> A root created inside another root has no parent. Disposing the outer root leaves it alive, and only its own `dispose` ends it.
-
-This follows because a root's lifetime is held by the code that created it: an enclosing root disposing it would end a lifetime its creator holds.
-
-Nesting a `createRoot` does not link the two trees, so nothing walks from the inner root to the outer one.
 
 ## @axiom a-missing-owner-is-reported-where-it-leaks-the-page
 
@@ -2175,6 +2175,21 @@ This follows because what changes after a component ran changes inside its holes
 
 The markers keep the binding's place, so static siblings on either side stay where they are.
 
+### @rule a-boundary-builds-its-children-once-up-front
+
+> A boundary builds its children once, when it is created, inside its own owner, whether it then displays them or a placeholder. Settling, and every later swap between the placeholder and the subtree, shows the subtree already built and runs no component again.
+
+Also derives from [`axiom-a-boundary-wraps-what-it-coordinates`](#axiom-a-boundary-wraps-what-it-coordinates). This follows because a component runs once, and a boundary only chooses what its region shows: it cannot rebuild its children per display, so it builds them once and swaps what is shown.
+
+Building the children is what starts the work the boundary waits for, so it cannot wait for the display to choose them.
+### @rule errored-error-builds-its-content-once-per-failure
+
+> `<Errored.Error>` builds its content when the boundary becomes failed, keeps it while the boundary stays failed, and disposes it when the boundary recovers.
+
+Also derives from [`axiom-a-lifetime-belongs-to-an-owner`](#axiom-a-lifetime-belongs-to-an-owner). This follows because a-component-runs-once-and-reactivity-lives-in-its-holes builds content once, so a new first error rebuilds nothing, and a-lifetime-belongs-to-an-owner ends that content with the owner disposed when the boundary recovers.
+
+A change in which error is first, while the boundary stays failed, does not rebuild the content.
+
 ### @rule a-ref-is-called-once-with-its-element
 
 > A `ref` prop is not a hole. Its function is called once, with the element, when the element is created.
@@ -2253,21 +2268,6 @@ This follows because a component runs once and reads its props where it uses the
 
 A component reads `props.children` like any other prop, so the children are deferred until the component reads them.
 
-### @rule errored-error-builds-its-content-once-per-failure
-
-> `<Errored.Error>` builds its content when the boundary becomes failed, keeps it while the boundary stays failed, and disposes it when the boundary recovers.
-
-Also derives from [`axiom-a-lifetime-belongs-to-an-owner`](#axiom-a-lifetime-belongs-to-an-owner). This follows because a-component-runs-once-and-reactivity-lives-in-its-holes builds content once, so a new first error rebuilds nothing, and a-lifetime-belongs-to-an-owner ends that content with the owner disposed when the boundary recovers.
-
-A change in which error is first, while the boundary stays failed, does not rebuild the content.
-
-### @rule a-boundary-builds-its-children-once-up-front
-
-> A boundary builds its children once, when it is created, inside its own owner, whether it then displays them or a placeholder. Settling, and every later swap between the placeholder and the subtree, shows the subtree already built and runs no component again.
-
-Also derives from [`axiom-a-boundary-wraps-what-it-coordinates`](#axiom-a-boundary-wraps-what-it-coordinates). This follows because a component runs once, and a boundary only chooses what its region shows: it cannot rebuild its children per display, so it builds them once and swaps what is shown.
-
-Building the children is what starts the work the boundary waits for, so it cannot wait for the display to choose them.
 ## @axiom a-prop-says-how-it-reaches-the-dom
 
 > How a prop reaches the DOM is written at the prop, by its prefix, and never inferred from its name or its value.
