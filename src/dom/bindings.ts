@@ -32,23 +32,16 @@ export function tagChildOwner(child: () => unknown, owner: Owner | null): void {
 }
 
 /**
- * Wrap a reactive `apply(value)` binding in the compute/commit split. The
- * effect body evaluates `read()` (which may throw NotReadyYet), then either
- * commits via `apply(value)` immediately (no Loading scope) or defers via
- * `scope.report({status: 'ready', commit})`. On throw, reports 'throwing'
- * and re-throws so the effect's outer machinery re-runs on settle.
- */
-/**
  * Per-binding intake for AMBIENT error reports — an error a `latest()` read
  * observed on a source that degraded to its last good value rather than
- * throwing. The throw path has its own reporting (in `effect.ts`); this is the
- * other half, so a subtree that reads exclusively through `latest()` still
- * participates in `<Errored>` (ADR 0015).
+ * throwing. The throw path has its own reporting, in `bindingEffect` in
+ * `effect.ts`; this is the other half, so a subtree that reads exclusively
+ * through `latest()` still participates in `<Errored>` (ADR 0015).
  *
  * The controller is persistent across re-runs, so one failed source that makes
  * this binding re-run several times stays ONE entry in the boundary's
- * collection — the same property `effect.ts`'s error controller relies on. It
- * is re-targeted if a different boundary accepts the error (a retry can fail
+ * collection — the same property `bindingEffect`'s error controller relies on.
+ * It is re-targeted if a different boundary accepts the error (a retry can fail
  * with a different type than the attempt that made the first claim), and
  * cleared to `idle` on any run that observes no error, which is what lets the
  * boundary unlatch when the source recovers.
@@ -120,6 +113,13 @@ function reportPendingReads(
   }
 }
 
+/**
+ * Wrap a reactive `apply(value)` binding in the compute/commit split. The
+ * effect body evaluates `read()` (which may throw NotReadyYet), then either
+ * commits via `apply(value)` immediately (no Loading scope) or defers via
+ * `scope.report({status: 'ready', commit})`. On throw, reports 'throwing'
+ * and re-throws so the effect's outer machinery re-runs on settle.
+ */
 function reactiveCommit<T>(
   parentOwner: Owner | null,
   read: () => T,
