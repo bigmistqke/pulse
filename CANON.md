@@ -35,14 +35,13 @@ This document is the project. It holds the theory of pulse: why it is the way it
     - [`@spec an-optimistic-value-is-a-signal-variant`](#spec-an-optimistic-value-is-a-signal-variant) — `optimistic(...stages)` builds the same pipeline `computed` and `signal` build, and returns an ordinary node. Only its setter differs: it writes a prediction rather than a value.
       - [`@spec an-optimistic-value-is-read-like-any-node`](#spec-an-optimistic-value-is-read-like-any-node) — The accessor of an optimistic value is an ordinary node. Every read verb applies to it, and the pending and failed state of what its recipe reads reaches the read site through it.
       - [`@spec an-optimistic-fallback-seeds-the-tolerant-read`](#spec-an-optimistic-fallback-seeds-the-tolerant-read) — A fallback passed when an optimistic value is created is what `peek` and `latest` return before the source has resolved.
-  - [`@axiom pulse-uses-the-languages-meaning-where-it-has-one`](#axiom-pulse-uses-the-languages-meaning-where-it-has-one) — Where JavaScript or the DOM already gives a construct a meaning, pulse gives its own form of that construct the same meaning.
   - [`@spec ambient-context-is-set-for-a-call-and-restored-after`](#spec-ambient-context-is-set-for-a-call-and-restored-after) — Ambient context, such as the current owner, is set for the duration of one call and restored when that call ends, however it ends.
     - [`@spec there-is-no-ambient-owner-outside-every-root`](#spec-there-is-no-ambient-owner-outside-every-root) — Outside every root, `getOwner()` returns null, also after a root has run and after it has been disposed.
     - [`@spec runwithowner-restores-the-previous-owner`](#spec-runwithowner-restores-the-previous-owner) — `runWithOwner` makes its owner ambient for the call, `null` included, and restores the previous owner when the call returns or throws.
     - [`@spec an-action-body-is-speculative-while-pulse-drives-it`](#spec-an-action-body-is-speculative-while-pulse-drives-it) — An action's body writes speculatively for as long as pulse is running it: the whole of a sync body, every resume of a generator body, and the synchronous prefix of an async body. A write after `yield*` in a generator body is still speculative, and so is a derivation read there.
       - [`@exception a-write-after-an-await-escapes-the-speculation`](#exception-a-write-after-an-await-escapes-the-speculation) — In an async body, a write after the first `await` is not a write of the speculation. It lands in committed state at once, where every reader sees it before the action settles. When the action commits, its own earlier writes to the same node replace it; when the action is discarded, it stays.
     - [`@spec an-event-handler-runs-under-the-owner-it-was-bound-in`](#spec-an-event-handler-runs-under-the-owner-it-was-bound-in) — An event handler runs with the owner that was ambient when its element was built, so an `onCleanup` called inside the handler attaches to that owner and runs when it is disposed.
-- [`@axiom reading-is-not-a-discipline`](#axiom-reading-is-not-a-discipline) — A read gives a correct answer without the reader first learning a discipline: no flush to wait for, no state to check before reading, and code that computes a new value from an earlier one is handed that value, not a promise to unwrap.
+- [`@axiom code-sees-the-present`](#axiom-code-sees-the-present) — State always has a present, and any code that looks at it sees that present: everything written so far, with nothing still on its way.
   - [`@spec reads-pull-and-consumers-are-pushed`](#spec-reads-pull-and-consumers-are-pushed) — A read always returns the value consistent with every write so far, synchronously. Consumers with side effects are re-run in batches, and the batching is invisible to reads.
     - [`@spec a-read-is-current-without-a-flush`](#spec-a-read-is-current-without-a-flush) — Reading a signal or a computed returns the value consistent with the latest writes, whether or not the scheduler has flushed since. A computed read outside any reactive context recomputes on the spot when a source changed.
     - [`@spec a-signal-reads-back-its-last-write`](#spec-a-signal-reads-back-its-last-write) — A signal returns its initial value until it is written, and afterwards the last value written.
@@ -584,14 +583,6 @@ Derives from: [`spec-a-construction-default-seeds-only-the-tolerant-read`](#spec
 
 This follows because an optimistic value is a signal variant rather than a separate primitive, and a construction default seeds only the tolerant read: its fallback is that same default, with the same effect.
 
-### @axiom pulse-uses-the-languages-meaning-where-it-has-one
-
-> Where JavaScript or the DOM already gives a construct a meaning, pulse gives its own form of that construct the same meaning.
-
-This narrows the axiom above to meaning: a conditional, a list mapping or an element already means something in the language, so pulse's reactive form of it reuses that meaning rather than defining a second one.
-
-This holds where the code states a value. Where it states a condition, such as a boolean in a child position, the condition is not content, as [the spec on static children](#spec-a-static-child-is-inserted-by-its-kind) says.
-
 ### @spec ambient-context-is-set-for-a-call-and-restored-after
 
 > Ambient context, such as the current owner, is set for the duration of one call and restored when that call ends, however it ends.
@@ -642,11 +633,11 @@ This follows because ambient context is set for one call, and what a call create
 
 A DOM event fires outside any owner, so without this the handler would run with none.
 
-## @axiom reading-is-not-a-discipline
+## @axiom code-sees-the-present
 
-> A read gives a correct answer without the reader first learning a discipline: no flush to wait for, no state to check before reading, and code that computes a new value from an earlier one is handed that value, not a promise to unwrap.
+> State always has a present, and any code that looks at it sees that present: everything written so far, with nothing still on its way.
 
-Two principles of the exploration record end on the same sentence. [P3](docs/pulse/framings.md#p3--plain-reads-are-honest) rejects any design where reading a value is a discipline to learn, and [P6](docs/pulse/framings.md#p6--pull-driven-reads-push-driven-consumers-no-explicit-flush) rejects any design where a reader must flush, await or close a batch first: reading is not a discipline. Taking the value out of a promise at a read site is not such a discipline: it is a choice the reader states, as [the spec on the read site](#spec-the-value-of-an-async-node-is-taken-out-at-the-read-site) says.
+Two principles of the exploration record lead here. [P3](docs/pulse/framings.md#p3--plain-reads-are-honest) rejects any design where seeing the present needs care to do safely. [P6](docs/pulse/framings.md#p6--pull-driven-reads-push-driven-consumers-no-explicit-flush) rejects any design where a reader must flush, await or close a batch first. Taking the value out of a promise at a read site does not hide the present. The reader states that choice, as [the spec on the read site](#spec-the-value-of-an-async-node-is-taken-out-at-the-read-site) says.
 
 ### @spec reads-pull-and-consumers-are-pushed
 
@@ -654,7 +645,7 @@ Two principles of the exploration record end on the same sentence. [P3](docs/pul
 
 Derives from: [`axiom-only-what-changed-runs-again`](#axiom-only-what-changed-runs-again)
 
-This follows because reading is not a discipline, so a read is current without waiting for anything, while a consumer with side effects can wait: running consumers in batches costs readers nothing, and runs each consumer once for several changes, as only what changed running again asks.
+This follows because code sees the present, so a read is current without waiting for anything, while a consumer with side effects can wait: running consumers in batches costs readers nothing, and runs each consumer once for several changes, as only what changed running again asks.
 
 Invalidation spreads through the graph when a value is written, and a computed recomputes when it is read. Only consumers with side effects wait for a flush. It plays out [P6 in the exploration record](docs/pulse/framings.md#p6--pull-driven-reads-push-driven-consumers-no-explicit-flush), and the scheduler decision is [ADR 0001](docs/adr/0001-unified-injected-scheduler.md).
 
@@ -796,7 +787,7 @@ r3 puts off the first run of a computed created inside a running computation tha
 
 > An update function on a writable derivation receives the last value that actually resolved, never a promise, and `undefined` when nothing has resolved yet.
 
-This follows because code that computes a new value from an earlier one is handed that value, not a promise: an update function computes from the derivation's value, so it is handed the last resolved one, not a promise in flight.
+This follows because code sees the present: an update function computes from the derivation's present value, so it is handed the last resolved one, not a promise of a value still on its way.
 
 A written promise has not resolved while it is pending, so an update function called then receives the value from before it.
 
@@ -1364,9 +1355,7 @@ The function is called as a callback, never read as a reactive value, even when 
 
 > `Show` renders its children while `when` is truthy and its `fallback` while it is falsy. A function child is called with the truthy value.
 
-Derives from: [`axiom-pulse-uses-the-languages-meaning-where-it-has-one`](#axiom-pulse-uses-the-languages-meaning-where-it-has-one)
-
-This follows because `Show` is the reactive form of a conditional expression, so it uses the language's meaning of one, truthiness included, and because it runs once and changes only inside its hole: a change of `when` swaps the hole's content, never re-running `Show`.
+This follows because `Show` runs once and changes only inside its hole: a change of `when` swaps the hole's content, never re-running `Show`.
 
 A non-function child is rendered as it is.
 
@@ -1374,17 +1363,13 @@ A non-function child is rendered as it is.
 
 > `Switch` renders the children of the first `Match`, in written order, whose `when` is truthy, and its `fallback` when none is. A function child is called with the truthy value. Children of a `Switch` that are not `Match` elements are ignored.
 
-Derives from: [`axiom-pulse-uses-the-languages-meaning-where-it-has-one`](#axiom-pulse-uses-the-languages-meaning-where-it-has-one)
-
-This follows because `Switch` is the reactive form of an `if` and `else if` chain, so the first truthy `when` in written order wins, as it would in the language, and because it runs once and changes only inside its hole: a change swaps the hole's content, never re-running `Switch`.
+This follows because `Switch` runs once and changes only inside its hole: a change swaps the hole's content, never re-running `Switch`.
 
 #### @spec for-renders-its-fallback-when-there-are-no-rows
 
 > `For` renders one row per item, in the list's order, and renders its `fallback` when the list is empty.
 
-Derives from: [`axiom-pulse-uses-the-languages-meaning-where-it-has-one`](#axiom-pulse-uses-the-languages-meaning-where-it-has-one)
-
-This follows because `For` is the reactive form of mapping a list, so it renders one row per item in the list's order, and because it runs once and changes only inside its hole: a changed list changes only the hole, or shows the fallback when there is no row.
+This follows because `For` runs once and changes only inside its hole: a changed list changes only the hole, or shows the fallback when there is no row.
 
 #### @spec a-row-index-follows-its-position
 
@@ -1480,9 +1465,7 @@ The [README](README.md) states it as "fine-grained, no VDOM": JSX compiles to di
 
 > `h` with a string tag creates that element with `document.createElement`, and gives it only the attributes and children it was passed.
 
-Derives from: [`axiom-pulse-uses-the-languages-meaning-where-it-has-one`](#axiom-pulse-uses-the-languages-meaning-where-it-has-one)
-
-This follows because JSX produces real DOM through direct DOM operations, and an element already has a meaning in the DOM: `h` with a string tag is `document.createElement`, with nothing added that it was not given.
+This follows because JSX produces real DOM through direct DOM operations: `h` with a string tag is `document.createElement`, with nothing added that it was not given.
 
 #### @spec a-static-child-is-inserted-by-its-kind
 
@@ -2072,9 +2055,7 @@ This follows because a prop says how it reaches the DOM: `prop:` says "set the D
 
 > A `class:name` prop adds the class `name` while its value is truthy and removes it while it is falsy, and a function value keeps the class following it.
 
-Derives from: [`axiom-pulse-uses-the-languages-meaning-where-it-has-one`](#axiom-pulse-uses-the-languages-meaning-where-it-has-one)
-
-This follows because a prop says how it reaches the DOM: `class:name` says "this one class", so only that class is toggled, and by truthiness, which is the language's meaning of a condition.
+This follows because a prop says how it reaches the DOM: `class:name` says "this one class", so only that class is toggled.
 
 #### @spec a-style-prefix-sets-one-style-property
 
