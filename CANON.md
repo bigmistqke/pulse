@@ -216,18 +216,24 @@ The canon was written backwards from the existing tests and documents, and descr
     - [`@case a-child-binding-leaves-the-pending-set-when-it-fails`](#case-a-child-binding-leaves-the-pending-set-when-it-fails) — `bindings.ts` `insertChild`.
     - [`@case a-reactive-prop-leaves-the-pending-set-when-it-fails`](#case-a-reactive-prop-leaves-the-pending-set-when-it-fails) — `bindings.ts` `reactiveCommit`.
     - [`@case a-staged-effect-leaves-the-pending-set-when-it-fails`](#case-a-staged-effect-leaves-the-pending-set-when-it-fails) — `effect.ts` `stagedEffect`.
-  - [`@rule a-boundary-shows-its-fallback-exactly-while-something-under-it-is-failed`](#rule-a-boundary-shows-its-fallback-exactly-while-something-under-it-is-failed) — An `<Errored>` with a fallback shows it while at least one binding under it is failed, and shows its children again as soon as none is, with no reset.
+  - [`@rule a-boundary-shows-its-fallback-exactly-while-something-under-it-is-failed`](#rule-a-boundary-shows-its-fallback-exactly-while-something-under-it-is-failed) — An `<Errored>` with a fallback shows it while at least one binding under it is failed, and shows its children again as soon as none is, with no reset. One rejection renders the fallback once, however many times the failing binding re-runs.
   - [`@rule a-boundary-without-a-fallback-swaps-nothing`](#rule-a-boundary-without-a-fallback-swaps-nothing) — An `<Errored>` without a fallback keeps its children mounted through an error. Its state is still readable from below.
   - [`@rule a-boundary-holds-one-report-per-failed-binding`](#rule-a-boundary-holds-one-report-per-failed-binding) — An error boundary holds one report per currently failed binding, in the order the bindings first failed. A binding that reports again replaces its own entry, and a binding that recovers or goes away removes it.
   - [`@rule an-identical-report-publishes-nothing-new`](#rule-an-identical-report-publishes-nothing-new) — A binding that reports the identical error again does not make the boundary publish a new collection of reports.
-  - [`@rule a-boundarys-state-can-be-read-without-swapping`](#rule-a-boundarys-state-can-be-read-without-swapping) — The nearest boundary's state is readable from below without swapping anything: `useErrored()` returns accessors, `isErrored()` returns the current state or `undefined`, and `<Errored.Error>` renders its content only while the boundary is failed.
+  - [`@rule a-boundarys-state-can-be-read-without-swapping`](#rule-a-boundarys-state-can-be-read-without-swapping) — The nearest boundary's state is readable from below without swapping anything.
+    - [`@case use-errored-returns-accessors-to-the-nearest-boundary`](#case-use-errored-returns-accessors-to-the-nearest-boundary) — `dom/error.ts` `useErrored`.
+    - [`@case is-errored-returns-the-current-state-or-undefined`](#case-is-errored-returns-the-current-state-or-undefined) — `dom/error.ts` `isErrored`.
+    - [`@case errored-error-renders-only-while-the-boundary-is-failed`](#case-errored-error-renders-only-while-the-boundary-is-failed) — `dom/error.ts` `Errored.Error`.
 - [`@axiom a-reset-re-attempts-the-work-where-it-failed`](#axiom-a-reset-re-attempts-the-work-where-it-failed) — Resetting a boundary re-attempts the work behind each failure it holds, at the point where that failure started.
   - [`@rule reset-uses-the-latest-retry-a-binding-reported`](#rule-reset-uses-the-latest-retry-a-binding-reported) — A boundary's reset calls the retry from each binding's most recent report, even when that report did not change the published collection.
   - [`@rule reset-recomputes-the-failed-source-at-the-root-of-its-chain`](#rule-reset-recomputes-the-failed-source-at-the-root-of-its-chain) — When a failed binding read a failed node, reset clears the error at the deepest failed stage of that node's chain and recomputes it, even with unchanged inputs. This holds whether the binding read the node with `use`, which threw, or through a tolerant read, which reported the failure ambiently.
   - [`@rule resetting-an-optimistic-error-retries-its-source`](#rule-resetting-an-optimistic-error-retries-its-source) — Resetting the error of an optimistic value, as an error boundary's retry does, recomputes the failed source it wraps.
   - [`@rule reset-reruns-a-binding-that-threw-a-plain-error`](#rule-reset-reruns-a-binding-that-threw-a-plain-error) — When a binding threw an error that no failed node stands behind, reset re-runs that binding.
   - [`@rule an-errored-reset-retries-a-failed-action`](#rule-an-errored-reset-retries-a-failed-action) — An `<Errored>` boundary holding a failed action's report retries that action when it resets: its reset calls the action's own `retry()`.
-  - [`@rule every-retry-affordance-performs-the-boundarys-reset`](#rule-every-retry-affordance-performs-the-boundarys-reset) — The `retry` of `useErrored()`, of `isErrored()` and of `<Errored.Error>` performs the same operation as the fallback's `reset`: it retries every failed report the boundary holds.
+  - [`@rule every-retry-affordance-performs-the-boundarys-reset`](#rule-every-retry-affordance-performs-the-boundarys-reset) — Every `retry` that reads a boundary's state from below performs the same operation as the fallback's `reset`: it retries every failed report the boundary holds.
+    - [`@case use-errored-retry-performs-the-boundarys-reset`](#case-use-errored-retry-performs-the-boundarys-reset) — `dom/error.ts` `useErrored`.
+    - [`@case is-errored-retry-performs-the-boundarys-reset`](#case-is-errored-retry-performs-the-boundarys-reset) — `dom/error.ts` `isErrored`.
+    - [`@case errored-error-retry-performs-the-boundarys-reset`](#case-errored-error-retry-performs-the-boundarys-reset) — `dom/error.ts` `Errored.Error`.
   - [`@rule a-report-names-only-a-source-its-own-binding-read`](#rule-a-report-names-only-a-source-its-own-binding-read) — A binding's report names a failed node as its source only if that binding read it. A source left behind by an unrelated binding never reaches another boundary's reset.
 - [`@axiom a-boundary-shows-its-oldest-failure-first`](#axiom-a-boundary-shows-its-oldest-failure-first) — A boundary presents the failure that has stood longest first.
   - [`@rule error-and-active-describe-the-first-report`](#rule-error-and-active-describe-the-first-report) — A boundary's `error()` and `active()` describe its first report. A change to a report other than the first does not notify a reader of `error()` or `active()`.
@@ -1742,11 +1748,11 @@ A staged effect whose pipeline rejects reports idle, and leaves the `<Loading>` 
 
 ### @rule a-boundary-shows-its-fallback-exactly-while-something-under-it-is-failed
 
-> An `<Errored>` with a fallback shows it while at least one binding under it is failed, and shows its children again as soon as none is, with no reset.
+> An `<Errored>` with a fallback shows it while at least one binding under it is failed, and shows its children again as soon as none is, with no reset. One rejection renders the fallback once, however many times the failing binding re-runs.
 
 This follows because an-error-is-graph-state-not-an-event says a boundary shows failure state and does not count throws: its fallback follows whether anything under it is failed now, not how often something threw.
 
-One rejection renders the fallback once, however many times the failing binding re-runs. Two failed bindings show one fallback, which clears only when both have recovered. The boundary is a selection over current state, not a latch.
+Two failed bindings show one fallback, which clears only when both have recovered. The boundary is a selection over current state, not a latch.
 
 ### @rule a-boundary-without-a-fallback-swaps-nothing
 
@@ -1768,9 +1774,27 @@ Also derives from [`rule-an-equal-value-does-not-propagate`](#rule-an-equal-valu
 
 ### @rule a-boundarys-state-can-be-read-without-swapping
 
-> The nearest boundary's state is readable from below without swapping anything: `useErrored()` returns accessors, `isErrored()` returns the current state or `undefined`, and `<Errored.Error>` renders its content only while the boundary is failed.
+> The nearest boundary's state is readable from below without swapping anything.
 
 This follows because an-error-is-graph-state-not-an-event says a boundary shows failure state: that state is a value in its own right, so it can be read from below without the fallback showing it.
+
+#### @case use-errored-returns-accessors-to-the-nearest-boundary
+
+> `dom/error.ts` `useErrored`.
+
+`useErrored()` returns accessors that follow the nearest boundary's state reactively, and nothing is swapped.
+
+#### @case is-errored-returns-the-current-state-or-undefined
+
+> `dom/error.ts` `isErrored`.
+
+`isErrored()` returns the nearest boundary's state at the moment of the call, read afresh each time, or `undefined` while it is healthy.
+
+#### @case errored-error-renders-only-while-the-boundary-is-failed
+
+> `dom/error.ts` `Errored.Error`.
+
+`<Errored.Error>` renders nothing while the boundary is healthy, and its content once the boundary fails.
 
 ## @axiom a-reset-re-attempts-the-work-where-it-failed
 
@@ -1814,9 +1838,27 @@ This follows because a reset re-attempts the work behind each failure: a failed 
 
 ### @rule every-retry-affordance-performs-the-boundarys-reset
 
-> The `retry` of `useErrored()`, of `isErrored()` and of `<Errored.Error>` performs the same operation as the fallback's `reset`: it retries every failed report the boundary holds.
+> Every `retry` that reads a boundary's state from below performs the same operation as the fallback's `reset`: it retries every failed report the boundary holds.
 
 Also derives from [`axiom-compose-rather-than-proliferate`](#axiom-compose-rather-than-proliferate). This follows because a reset re-attempts the work behind each failure the boundary holds, and a new form is added only where composing is awkward: each retry affordance is that reset, not a separate retry operation.
+
+#### @case use-errored-retry-performs-the-boundarys-reset
+
+> `dom/error.ts` `useErrored`.
+
+The `retry` on the object `useErrored()` returns calls the boundary's `reset`, or `resetMatching` when a predicate narrows it.
+
+#### @case is-errored-retry-performs-the-boundarys-reset
+
+> `dom/error.ts` `isErrored`.
+
+The `retry` on the state `isErrored()` returns calls the boundary's `reset`, or `resetMatching` when a predicate narrows it.
+
+#### @case errored-error-retry-performs-the-boundarys-reset
+
+> `dom/error.ts` `Errored.Error`.
+
+The `retry` passed to `<Errored.Error>`'s children is the one `isErrored()` returns, so it clears the boundary's error the same way.
 
 ### @rule a-report-names-only-a-source-its-own-binding-read
 

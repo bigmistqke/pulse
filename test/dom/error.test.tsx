@@ -838,7 +838,7 @@ test('<Errored> without a fallback keeps its children mounted through an error',
 })
 
 /**
- * @canon rule-a-boundarys-state-can-be-read-without-swapping
+ * @canon case-use-errored-returns-accessors-to-the-nearest-boundary
  */
 test('useErrored() reflects the nearest boundary reactively, with nothing swapped', async () => {
   const target = document.createElement('section')
@@ -868,7 +868,7 @@ test('useErrored() reflects the nearest boundary reactively, with nothing swappe
 })
 
 /**
- * @canon rule-every-retry-affordance-performs-the-boundarys-reset
+ * @canon case-use-errored-retry-performs-the-boundarys-reset
  */
 test('useErrored().retry retries every failed report, the same operation reset() performs', async () => {
   const target = document.createElement('section')
@@ -915,7 +915,7 @@ test('useErrored() called with no owner at all returns a safe, always-inactive s
 })
 
 /**
- * @canon rule-a-boundarys-state-can-be-read-without-swapping
+ * @canon case-is-errored-returns-the-current-state-or-undefined
  */
 test('isErrored() reflects the nearest boundary, read fresh each call', async () => {
   const target = document.createElement('section')
@@ -955,7 +955,7 @@ test('isErrored() reflects the nearest boundary, read fresh each call', async ()
 })
 
 /**
- * @canon rule-every-retry-affordance-performs-the-boundarys-reset
+ * @canon case-is-errored-retry-performs-the-boundarys-reset
  */
 test('isErrored().retry retries every failed report, the same operation reset() performs', async () => {
   const target = document.createElement('section')
@@ -1009,7 +1009,7 @@ test('isErrored() called with no owner at all returns undefined', () => {
 })
 
 /**
- * @canon rule-a-boundarys-state-can-be-read-without-swapping
+ * @canon case-errored-error-renders-only-while-the-boundary-is-failed
  */
 test('Errored.Error renders nothing while the boundary is healthy, and the error UI once it fails', async () => {
   const target = document.createElement('section')
@@ -1090,7 +1090,7 @@ test('Errored.Error disposes what its render prop constructed when the error cle
 })
 
 /**
- * @canon rule-every-retry-affordance-performs-the-boundarys-reset
+ * @canon case-errored-error-retry-performs-the-boundarys-reset
  */
 test('Errored.Error\'s retry() clears the error, the same as useErrored().retry()', async () => {
   const target = document.createElement('section')
