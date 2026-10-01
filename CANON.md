@@ -45,10 +45,10 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule a-signal-given-stages-is-a-writable-derivation`](#rule-a-signal-given-stages-is-a-writable-derivation) — `signal(s0, s1, …)` builds the same pipeline `computed` builds and adds a setter, whose write lands on the output of the last stage. `signal(value)` given a value that is not a function stays a plain signal.
   - [`@rule an-optimistic-value-is-read-like-any-node`](#rule-an-optimistic-value-is-read-like-any-node) — The accessor of an optimistic value is an ordinary node. Every read verb applies to it, and the pending and failed state of what its recipe reads reaches the read site through it.
   - [`@rule a-staged-effect-is-a-pipeline-ending-in-a-commit`](#rule-a-staged-effect-is-a-pipeline-ending-in-a-commit) — `effect([stage0, …, stageN], commit)` runs the same pipeline a computed runs, and passes the final stage's resolved value to `commit`. It commits again whenever the pipeline produces a new value, and skips a value `Object.is`-equal to the one it last committed.
-  - [`@rule every-retry-affordance-performs-the-boundarys-reset`](#rule-every-retry-affordance-performs-the-boundarys-reset) — The `retry` of `useErrored()`, of `isErrored()` and of `<Errored.Error>` performs the same operation as the fallback's `reset`: it retries every failed report the boundary holds.
   - [`@rule an-optimistic-fallback-seeds-the-tolerant-read`](#rule-an-optimistic-fallback-seeds-the-tolerant-read) — A fallback passed when an optimistic value is created is what `peek` and `latest` return before the source has resolved.
   - [`@rule use-latest-throws-only-before-the-first-value`](#rule-use-latest-throws-only-before-the-first-value) — `use.latest(x)` throws `NotReadyYet` only while nothing has ever resolved for `x`, carrying `promiseOf(x)`, exactly as `use` would. After that it returns the last resolved value during a refetch, reports the refresh ambiently, and still enrols the binding in its boundary's gate.
   - [`@rule the-jsx-runtime-builds-every-element-with-h`](#rule-the-jsx-runtime-builds-every-element-with-h) — The JSX runtime's `jsx`, `jsxs` and `jsxDEV` build every element with `h`. A component receives its props object as it is, `children` included and getters intact. A DOM tag or a `Fragment` receives its children as separate arguments and the rest of its props with their getters intact.
+  - [`@rule a-computed-is-a-pipeline-of-stages`](#rule-a-computed-is-a-pipeline-of-stages) — `computed(s0, s1, …)` threads each stage's resolved value into the next. Any stage may read signals, and a stage re-runs only when its input or one of its own reads changes.
 - [`@axiom a-derivation-runs-when-it-is-created`](#axiom-a-derivation-runs-when-it-is-created) — A derivation produces its value when it is created, not when it is first read.
   - [`@rule an-update-function-sees-the-value-a-sync-derivation-produced-at-creation`](#rule-an-update-function-sees-the-value-a-sync-derivation-produced-at-creation) — A derivation runs when it is created. An update function on a sync derivation therefore receives the value that first run produced, even before any write. An async derivation that suspended has produced nothing yet.
 - [`@axiom the-latest-production-wins`](#axiom-the-latest-production-wins) — A derived value shows whatever produced it last — a dependency change or a direct write — and a production that was started earlier never publishes over a later one.
@@ -115,7 +115,6 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule a-stage-that-returned-a-promise-stays-reactive`](#rule-a-stage-that-returned-a-promise-stays-reactive) — A generator stage that returned a promise keeps no generator, so a change to a source it read runs it again from the top.
   - [`@rule a-returned-promise-rejection-skips-the-generators-catch`](#rule-a-returned-promise-rejection-skips-the-generators-catch) — When the promise a generator stage returned rejects, the generator's `try`/`catch` does not see it: the body has already ended. The stage parks the rejection as its error.
   - [`@rule use-inside-a-generator-stage-restarts-the-stage`](#rule-use-inside-a-generator-stage-restarts-the-stage) — A `use` that throws inside a generator stage suspends the stage like a sync stage: the generator is dropped, and the body runs again from the top when the promise settles.
-  - [`@rule a-computed-is-a-pipeline-of-stages`](#rule-a-computed-is-a-pipeline-of-stages) — `computed(s0, s1, …)` threads each stage's resolved value into the next. Any stage may read signals, and a stage re-runs only when its input or one of its own reads changes.
   - [`@rule a-fresh-promise-each-run-settles-once-per-change`](#rule-a-fresh-promise-each-run-settles-once-per-change) — A stage that returns a new promise on every run, such as a `.then`-chained one, settles once per change and does not loop.
   - [`@rule a-stage-suspended-through-use-is-absorbed`](#rule-a-stage-suspended-through-use-is-absorbed) — A sync stage whose body throws `NotReadyYet` through `use` suspends like an async stage, reports pending, and runs again when the promise settles.
   - [`@rule a-rejected-yield-is-thrown-into-the-generator`](#rule-a-rejected-yield-is-thrown-into-the-generator) — A yielded promise that rejects is thrown into the generator at its yield, where a `try`/`catch` can handle it. Uncaught, it leaves the stage as an error.
@@ -203,6 +202,8 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule resetting-an-optimistic-error-retries-its-source`](#rule-resetting-an-optimistic-error-retries-its-source) — Resetting the error of an optimistic value, as an error boundary's retry does, recomputes the failed source it wraps.
   - [`@rule reset-reruns-a-binding-that-threw-a-plain-error`](#rule-reset-reruns-a-binding-that-threw-a-plain-error) — When a binding threw an error that no failed node stands behind, reset re-runs that binding.
   - [`@rule an-errored-reset-retries-a-failed-action`](#rule-an-errored-reset-retries-a-failed-action) — An `<Errored>` boundary holding a failed action's report retries that action when it resets: its reset calls the action's own `retry()`.
+  - [`@rule every-retry-affordance-performs-the-boundarys-reset`](#rule-every-retry-affordance-performs-the-boundarys-reset) — The `retry` of `useErrored()`, of `isErrored()` and of `<Errored.Error>` performs the same operation as the fallback's `reset`: it retries every failed report the boundary holds.
+  - [`@rule a-report-names-only-a-source-its-own-binding-read`](#rule-a-report-names-only-a-source-its-own-binding-read) — A binding's report names a failed node as its source only if that binding read it. A source left behind by an unrelated binding never reaches another boundary's reset.
 - [`@axiom a-boundary-shows-its-oldest-failure-first`](#axiom-a-boundary-shows-its-oldest-failure-first) — A boundary presents the failure that has stood longest first.
   - [`@rule error-and-active-describe-the-first-report`](#rule-error-and-active-describe-the-first-report) — A boundary's `error()` and `active()` describe its first report. A change to a report other than the first does not notify a reader of `error()` or `active()`.
 - [`@axiom the-read-verb-decides-what-renders-and-what-waits`](#axiom-the-read-verb-decides-what-renders-and-what-waits) — The verb a binding reads with decides what the binding renders and whether it waits for its neighbours. Everything else in the loading lifecycle is reported ambiently, from the reads the binding makes.
@@ -269,7 +270,6 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule an-update-function-never-builds-on-another-actions-prediction`](#rule-an-update-function-never-builds-on-another-actions-prediction) — The previous value an optimistic setter's update function receives is never another action's prediction: it is the action's own prediction, or else the derivation's value.
   - [`@rule nesting-makes-actions-share-fate`](#rule-nesting-makes-actions-share-fate) — A nested action commits into its parent, not into committed state. Its writes reach committed state only if the parent commits, and its discard does not discard the parent.
   - [`@rule overlapping-writes-resolve-by-commit-order`](#rule-overlapping-writes-resolve-by-commit-order) — When two sibling actions write the same node, the one that commits last decides its committed value.
-  - [`@rule a-report-names-only-a-source-its-own-binding-read`](#rule-a-report-names-only-a-source-its-own-binding-read) — A binding's report names a failed node as its source only if that binding read it. A source left behind by an unrelated binding never reaches another boundary's reset.
   - [`@rule a-speculative-write-reaches-only-consumers-in-its-chain`](#rule-a-speculative-write-reaches-only-consumers-in-its-chain) — A write in a scope invalidates only the consumers whose scope has the writing scope in its chain, and only where no nearer scope has its own slot for the written node.
     - [`@case chain-match-decides-whether-a-write-reaches-a-link`](#case-chain-match-decides-whether-a-write-reaches-a-link) — `scope.ts` `chainMatch`.
     - [`@case a-link-is-indexed-on-its-source-and-held-by-its-scope`](#case-a-link-is-indexed-on-its-source-and-held-by-its-scope) — `scope.ts` `linkEdge`.
@@ -561,12 +561,6 @@ This follows because a small set of primitives covers the use cases: a staged ef
 
 Stages may be sync or async; an async stage's resolved value is what reaches `commit`.
 
-### @rule every-retry-affordance-performs-the-boundarys-reset
-
-> The `retry` of `useErrored()`, of `isErrored()` and of `<Errored.Error>` performs the same operation as the fallback's `reset`: it retries every failed report the boundary holds.
-
-This follows because compose-rather-than-proliferate says a new form is added only where composing is awkward: each retry affordance is the boundary's existing reset, not a separate retry operation.
-
 ### @rule an-optimistic-fallback-seeds-the-tolerant-read
 
 > A fallback passed when an optimistic value is created is what `peek` and `latest` return before the source has resolved.
@@ -588,6 +582,14 @@ Once settled it returns the same value `use` does. During a refetch `use(x)` thr
 This follows because a small set of primitives covers the use cases: the JSX runtime adds no second way to build elements, so every element goes through `h`, with props passed as they are.
 
 So what holds for `h` holds for JSX.
+
+### @rule a-computed-is-a-pipeline-of-stages
+
+> `computed(s0, s1, …)` threads each stage's resolved value into the next. Any stage may read signals, and a stage re-runs only when its input or one of its own reads changes.
+
+Also derives from [`axiom-a-paused-computation-is-re-entered-at-its-pause`](#axiom-a-paused-computation-is-re-entered-at-its-pause). This follows because a computed is composed of stages rather than being a primitive per shape, and a paused computation is re-entered at a stage boundary: a stage runs again only when its input or its own reads changed.
+
+So a stage downstream of a stage whose value did not change is not re-run, and reading the computed again without a change re-runs nothing.
 
 ## @axiom a-derivation-runs-when-it-is-created
 
@@ -1032,14 +1034,6 @@ Also derives from [`rule-a-returned-promise-is-the-result-not-a-pause`](#rule-a-
 > A `use` that throws inside a generator stage suspends the stage like a sync stage: the generator is dropped, and the body runs again from the top when the promise settles.
 
 This follows because a body that suspends by throwing through `use` cannot be resumed at all, and runs again from the top: that holds inside a generator stage too.
-
-### @rule a-computed-is-a-pipeline-of-stages
-
-> `computed(s0, s1, …)` threads each stage's resolved value into the next. Any stage may read signals, and a stage re-runs only when its input or one of its own reads changes.
-
-Also derives from [`axiom-compose-rather-than-proliferate`](#axiom-compose-rather-than-proliferate). This follows because a computed is composed of stages rather than being a primitive per shape, and a paused computation is re-entered at a stage boundary: a stage runs again only when its input or its own reads changed.
-
-So a stage downstream of a stage whose value did not change is not re-run, and reading the computed again without a change re-runs nothing.
 
 ### @rule a-fresh-promise-each-run-settles-once-per-change
 
@@ -1635,6 +1629,20 @@ This follows because a reset re-attempts the work where the failure started: a p
 
 This follows because a reset re-attempts the work behind each failure: a failed action's work is its body, which its own `retry()` runs again.
 
+### @rule every-retry-affordance-performs-the-boundarys-reset
+
+> The `retry` of `useErrored()`, of `isErrored()` and of `<Errored.Error>` performs the same operation as the fallback's `reset`: it retries every failed report the boundary holds.
+
+Also derives from [`axiom-compose-rather-than-proliferate`](#axiom-compose-rather-than-proliferate). This follows because a reset re-attempts the work behind each failure the boundary holds, and a new form is added only where composing is awkward: each retry affordance is that reset, not a separate retry operation.
+
+### @rule a-report-names-only-a-source-its-own-binding-read
+
+> A binding's report names a failed node as its source only if that binding read it. A source left behind by an unrelated binding never reaches another boundary's reset.
+
+Also derives from [`axiom-flows-share-fate-only-where-the-code-says-so`](#axiom-flows-share-fate-only-where-the-code-says-so). This follows because a reset re-attempts the work behind the failures its boundary holds, and flows are coupled only where the code couples them: a reset must not recompute a source that an unrelated binding failed on.
+
+An effect with no boundary above it, whose failure was swallowed, or which caught the throw itself, leaves nothing that a later, unrelated reset could recompute.
+
 ## @axiom a-boundary-shows-its-oldest-failure-first
 
 > A boundary presents the failure that has stood longest first.
@@ -2088,14 +2096,6 @@ Nesting is how code couples two actions on purpose.
 Also derives from [`rule-a-commit-promotes-every-write-at-once`](#rule-a-commit-promotes-every-write-at-once). This follows because uncoupled flows are isolated, so nothing merges their writes, and a commit promotes its writes to committed state: the commit that comes last is the value that remains.
 
 Neither action sees the other's write, and nothing merges them. Each commit promotes its own value, so the order of commits decides, not the order of writes.
-
-### @rule a-report-names-only-a-source-its-own-binding-read
-
-> A binding's report names a failed node as its source only if that binding read it. A source left behind by an unrelated binding never reaches another boundary's reset.
-
-This follows because flows-share-fate-only-where-the-code-says-so says flows are coupled only where the code couples them: a reset must not recompute a source that an unrelated binding failed on.
-
-An effect with no boundary above it, whose failure was swallowed, or which caught the throw itself, leaves nothing that a later, unrelated reset could recompute.
 
 ### @rule a-speculative-write-reaches-only-consumers-in-its-chain
 
