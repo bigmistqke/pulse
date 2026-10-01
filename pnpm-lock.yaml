@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       r3:
-        specifier: github:bigmistqke/r3#b1d23b8947f161975d0a54460f8acf5760ad9278
-        version: https://codeload.github.com/bigmistqke/r3/tar.gz/b1d23b8947f161975d0a54460f8acf5760ad9278
+        specifier: github:bigmistqke/r3#411cd5d451ed00c419d00f9f26b15c6a4731ab0c
+        version: https://codeload.github.com/bigmistqke/r3/tar.gz/411cd5d451ed00c419d00f9f26b15c6a4731ab0c
     devDependencies:
       '@babel/core':
         specifier: ^8.0.1
@@ -1312,8 +1312,8 @@ packages:
   quansync@1.0.0:
     resolution: {integrity: sha512-5xZacEEufv3HSTPQuchrvV6soaiACMFnq1H8wkVioctoH3TRha9Sz66lOxRwPK/qZj7HPiSveih9yAyh98gvqA==}
 
-  r3@https://codeload.github.com/bigmistqke/r3/tar.gz/b1d23b8947f161975d0a54460f8acf5760ad9278:
-    resolution: {gitHosted: true, integrity: sha512-pZW0aITK/ZDCrkq+UcerBLYttuS4H/kWDFPmXoTmrMRqww4oFAQeEJTaIgSkfEOQo9FBDwSs1fbA6ZQF9uO7iQ==, tarball: https://codeload.github.com/bigmistqke/r3/tar.gz/b1d23b8947f161975d0a54460f8acf5760ad9278}
+  r3@https://codeload.github.com/bigmistqke/r3/tar.gz/411cd5d451ed00c419d00f9f26b15c6a4731ab0c:
+    resolution: {gitHosted: true, integrity: sha512-0cgRh/q6glFW/aUdUdym9Jdb9INj4j4UBAEwdnTIZFgC5jlu565yU6IEO1HQKgOqL/G9U+Qq0wA2gyUbF0aCOQ==, tarball: https://codeload.github.com/bigmistqke/r3/tar.gz/411cd5d451ed00c419d00f9f26b15c6a4731ab0c}
     version: 0.0.1
 
   react-is@17.0.2:
@@ -2624,7 +2624,7 @@ snapshots:
 
   quansync@1.0.0: {}
 
-  r3@https://codeload.github.com/bigmistqke/r3/tar.gz/b1d23b8947f161975d0a54460f8acf5760ad9278: {}
+  r3@https://codeload.github.com/bigmistqke/r3/tar.gz/411cd5d451ed00c419d00f9f26b15c6a4731ab0c: {}
 
   react-is@17.0.2: {}
 
