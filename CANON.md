@@ -105,7 +105,8 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule from-yields-the-stale-value-during-a-refetch`](#rule-from-yields-the-stale-value-during-a-refetch) — During a refetch, `yield* from(c)` on a computed yields the stale value its accessor returns, not the promise in flight.
   - [`@rule pending-is-asked-and-answered-directly`](#rule-pending-is-asked-and-answered-directly) — `isPending(x)` and `promiseOf(x)` answer whether `x` has a promise in flight, and which one, as plain values called fresh at each read site.
   - [`@rule a-signals-pending-state-is-the-state-of-the-promise-it-holds`](#rule-a-signals-pending-state-is-the-state-of-the-promise-it-holds) — A signal holding a plain value is never pending, and its `promiseOf` is `null`. A signal holding a promise is pending until that promise settles, and `promiseOf` returns it while it is.
-  - [`@rule a-tolerant-read-carries-loading-state-into-its-reader`](#rule-a-tolerant-read-carries-loading-state-into-its-reader) — A computed that read a pending source through `latest` or `use` reports pending, and hands out that source's promise through `promiseOf`, until the source settles — even though it holds a value of its own. A read through `peek` carries nothing.
+  - [`@rule a-tolerant-read-carries-loading-state-into-its-reader`](#rule-a-tolerant-read-carries-loading-state-into-its-reader) — A computed that read a pending source through `latest` or `use` reports pending, and hands out that source's promise through `promiseOf`, until the source settles, even though it holds a value of its own. The state composes through a chain of such readers, and survives the reader re-running during a refresh.
+  - [`@rule a-read-through-peek-carries-no-pending-state-into-its-reader`](#rule-a-read-through-peek-carries-no-pending-state-into-its-reader) — A computed that read a pending source only through `peek` does not report pending because of it.
   - [`@rule a-seeded-source-still-counts-as-a-first-load`](#rule-a-seeded-source-still-counts-as-a-first-load) — A source given a construction default is on its first load until it genuinely resolves. A `latest` read of it during that time drives the boundary's first-load placeholder, although the read has a value to return.
   - [`@rule a-live-prediction-reports-neither-pending-nor-failed`](#rule-a-live-prediction-reports-neither-pending-nor-failed) — While a prediction is live, the optimistic node reports neither pending nor failed, and `use` returns the prediction. The source underneath keeps reporting its own state, and when the last layer drops the node reports that state again, a masked failure included.
 - [`@axiom a-paused-computation-is-re-entered-at-its-pause`](#axiom-a-paused-computation-is-re-entered-at-its-pause) — Pulse re-enters a paused computation at the finest point it can: a stage boundary with a new input, a generator stage at its pause, and anything else from the top of its body. Work done before that point runs again only when an input it read has changed.
@@ -198,7 +199,8 @@ The canon was written backwards from the existing tests and documents, and descr
 - [`@axiom catch-error-is-the-callers-try-and-catch`](#axiom-catch-error-is-the-callers-try-and-catch) — `catchError` is the caller's `try` and `catch`: it hears each throw that reaches it, and a throw on the caller's own stack goes no further than the handlers on that stack.
   - [`@rule a-throw-from-a-catch-error-body-reaches-only-catch-error-handlers`](#rule-a-throw-from-a-catch-error-body-reaches-only-catch-error-handlers) — A synchronous throw from a `catchError` body is routed only to `catchError` handlers, never to an `<Errored>` or a root's boundary. When none accepts it, it is thrown to the caller.
   - [`@rule a-catch-error-handler-is-called-for-each-throw-under-it`](#rule-a-catch-error-handler-is-called-for-each-throw-under-it) — A `catchError` handler is called for each throw that reaches it, from its body and from any node created under it, on the first run and on later re-runs.
-  - [`@rule an-error-nothing-claims-is-thrown-on-a-first-run`](#rule-an-error-nothing-claims-is-thrown-on-a-first-run) — Outside any root, an error from a node that no boundary claims is thrown to the caller when it happens during the node's first run. During a later re-run it is logged to the console instead.
+  - [`@rule an-error-nothing-claims-is-thrown-on-a-first-run`](#rule-an-error-nothing-claims-is-thrown-on-a-first-run) — Outside any root, an error from a node that no boundary claims is thrown to the caller when it happens during the node's first run.
+  - [`@rule an-error-nothing-claims-on-a-re-run-is-logged`](#rule-an-error-nothing-claims-on-a-re-run-is-logged) — Outside any root, an error from a node that no boundary claims is logged to the console when it happens during a later re-run, and is not thrown at the writer whose write caused the re-run.
 - [`@axiom every-failure-in-a-root-is-held`](#axiom-every-failure-in-a-root-is-held) — Every failure inside a root is held by some boundary: none is lost, and none is thrown at a writer that did not cause it.
   - [`@rule every-root-has-an-error-boundary`](#rule-every-root-has-an-error-boundary) — `createRoot` installs an error boundary on the root owner. It claims every error no nearer boundary claims, and tracks it like any other boundary.
   - [`@rule the-roots-boundary-logs-every-failed-report`](#rule-the-roots-boundary-logs-every-failed-report) — The root's error boundary logs each failed report it receives to the console with `console.error`, a repeated report of the same error included.
@@ -274,7 +276,8 @@ The canon was written backwards from the existing tests and documents, and descr
     - [`@exception a-prediction-shows-outside-its-action`](#exception-a-prediction-shows-outside-its-action) — A write through an optimistic setter is shown to readers outside every action while its action is open. While several actions have predictions live, readers outside every action see the most recent one.
   - [`@rule a-speculation-reads-its-own-writes`](#rule-a-speculation-reads-its-own-writes) — Inside a speculation, every read sees the speculation's writes, directly and through any number of derivations, chains of computeds and pipeline stages included.
   - [`@rule an-update-function-inside-a-speculation-sees-its-earlier-writes`](#rule-an-update-function-inside-a-speculation-sees-its-earlier-writes) — An update function called inside a speculation receives as its previous value the speculation's own latest write, or the committed value when the speculation has not written yet.
-  - [`@rule a-commit-promotes-every-write-at-once`](#rule-a-commit-promotes-every-write-at-once) — When a speculation commits, all of its writes reach committed state together, and a committed consumer sees them as one change, not one change per write.
+  - [`@rule a-commit-promotes-every-write-at-once`](#rule-a-commit-promotes-every-write-at-once) — When a speculation commits, all of its writes reach committed state together.
+  - [`@rule a-commit-reaches-a-committed-consumer-as-one-change`](#rule-a-commit-reaches-a-committed-consumer-as-one-change) — A committed consumer sees a speculation's commit as one change, and re-runs once for it, where the same writes made outside a speculation reach it one by one.
   - [`@rule a-discard-leaves-no-trace`](#rule-a-discard-leaves-no-trace) — When a speculation is discarded, its writes vanish, and committed state is as if it never ran.
   - [`@rule a-discard-drops-what-was-derived-from-its-writes`](#rule-a-discard-drops-what-was-derived-from-its-writes) — When a speculation is discarded, every value derived from its writes vanishes with it, at any depth of derivation, and a read afterwards sees the value derived from committed state.
   - [`@rule a-failed-action-is-reported-not-thrown`](#rule-a-failed-action-is-reported-not-thrown) — An action whose body fails is discarded, and the error is reported through its handle. The caller never receives a throw or a rejection.
@@ -996,11 +999,17 @@ This follows because pending is a question about what is there: a signal holding
 
 ### @rule a-tolerant-read-carries-loading-state-into-its-reader
 
-> A computed that read a pending source through `latest` or `use` reports pending, and hands out that source's promise through `promiseOf`, until the source settles — even though it holds a value of its own. A read through `peek` carries nothing.
+> A computed that read a pending source through `latest` or `use` reports pending, and hands out that source's promise through `promiseOf`, until the source settles, even though it holds a value of its own. The state composes through a chain of such readers, and survives the reader re-running during a refresh.
 
 Also derives from [`rule-pending-follows-where-a-value-came-from`](#rule-pending-follows-where-a-value-came-from). This follows because pending is answered truthfully, and a node is pending when a source its value was read from is: a computed reading a pending source through `latest` or `use` reports pending.
 
-The state composes through a chain of such readers, since a reader that reports pending is itself a pending source to the next one. It survives the reader re-running during a refresh, because the reader reads the source again and records it again.
+A reader that reports pending is itself a pending source to the next one, which is why the state composes. A reader that re-runs during a refresh reads the source again and records it again, which is why the state survives.
+
+### @rule a-read-through-peek-carries-no-pending-state-into-its-reader
+
+> A computed that read a pending source only through `peek` does not report pending because of it.
+
+Also derives from [`rule-peek-reports-nothing`](#rule-peek-reports-nothing). This follows because `peek` is the verb that takes part in nothing: it does not report to a boundary, and for the same reason it does not make its reader pending.
 
 ### @rule a-seeded-source-still-counts-as-a-first-load
 
@@ -1620,11 +1629,17 @@ A handler is a callback, not a collection. One rejection can re-run the reading 
 
 ### @rule an-error-nothing-claims-is-thrown-on-a-first-run
 
-> Outside any root, an error from a node that no boundary claims is thrown to the caller when it happens during the node's first run. During a later re-run it is logged to the console instead.
+> Outside any root, an error from a node that no boundary claims is thrown to the caller when it happens during the node's first run.
 
-This follows because a throw on the caller's stack belongs to the caller: a node's first run happens on the stack of the code that created it, so an error nothing claims is thrown there, while a later re-run happens on a writer's stack the error does not belong to.
+This follows because a throw on the caller's stack belongs to the caller: a node's first run happens on the stack of the code that created it, so an error nothing claims is thrown there.
 
 Inside a root this never happens, because [the root's own boundary](#rule-every-root-has-an-error-boundary) claims whatever nothing nearer does.
+
+### @rule an-error-nothing-claims-on-a-re-run-is-logged
+
+> Outside any root, an error from a node that no boundary claims is logged to the console when it happens during a later re-run, and is not thrown at the writer whose write caused the re-run.
+
+This follows because a throw on the caller's stack belongs to the caller: a re-run happens on the stack of a writer the error does not belong to, so it is not thrown there.
 
 ## @axiom every-failure-in-a-root-is-held
 
@@ -2124,9 +2139,15 @@ Also derives from [`rule-a-speculation-reads-its-own-writes`](#rule-a-speculatio
 
 ### @rule a-commit-promotes-every-write-at-once
 
-> When a speculation commits, all of its writes reach committed state together, and a committed consumer sees them as one change, not one change per write.
+> When a speculation commits, all of its writes reach committed state together.
 
 This follows because a speculation commits as one unit: its writes reach committed state together, so a committed consumer sees one change and never a state with only some of them.
+
+### @rule a-commit-reaches-a-committed-consumer-as-one-change
+
+> A committed consumer sees a speculation's commit as one change, and re-runs once for it, where the same writes made outside a speculation reach it one by one.
+
+Also derives from [`rule-a-commit-promotes-every-write-at-once`](#rule-a-commit-promotes-every-write-at-once). This follows because a speculation commits as one unit: a consumer that saw its writes one by one would see a state with only some of them.
 
 ### @rule a-discard-leaves-no-trace
 
@@ -2551,7 +2572,7 @@ An object already has an identity, so no key function is needed to give it one, 
 
 This follows because an item is its reference: the same object in a new position is the same row, moved with its state, and a different object is a new row, whatever its contents.
 
-A row is its item: the same object in a new position is the same row, moved, with its state kept. No key function is needed because the item already has an identity.
+No key function is needed because the item already has an identity.
 ## @axiom a-missing-value-sets-nothing
 
 > A missing value sets nothing: `null`, `undefined` and `false` leave nothing in the DOM.

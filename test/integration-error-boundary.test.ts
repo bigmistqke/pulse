@@ -70,7 +70,7 @@ test('uncaught throw still propagates outside any catchError', () => {
 })
 
 /**
- * @canon rule-an-error-nothing-claims-is-thrown-on-a-first-run
+ * @canon rule-an-error-nothing-claims-on-a-re-run-is-logged
  */
 test('outside any root, an unclaimed error during a re-run is logged, not thrown at the writer', () => {
   setScheduler(syncScheduler(flush))

@@ -5,7 +5,7 @@ import { flush, microtaskScheduler, setScheduler, syncScheduler } from '../src/s
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
 
 /**
- * @canon rule-a-commit-promotes-every-write-at-once
+ * @canon rule-a-commit-reaches-a-committed-consumer-as-one-change
  */
 test('a commit reaches a committed consumer as one change, where the same writes made outside an action reach it one by one', () => {
   setScheduler(syncScheduler(flush))
