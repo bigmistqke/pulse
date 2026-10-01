@@ -531,7 +531,8 @@ function treeOf(
   file: string,
   testsPer: Map<string, number>,
   gapsOnly: boolean,
-  verbose: boolean
+  verbose: boolean,
+  links: Map<string, Array<{ target: string; derives: boolean }>> = new Map()
 ): string {
   const rel = relative(ROOT, file);
   const src = readFileSync(file, 'utf8');
@@ -628,11 +629,20 @@ function treeOf(
       const under = prefix + (last ? '   ' : '│  ');
       if (verbose) {
         const said = row.el?.statement ?? cellStatements.get(row.id);
+        // Indented past the tag so the claim sits under the stem it belongs
+        // to rather than under the @kind, which is the same word every time.
+        const sill = under + ' '.repeat(tag.length + 1);
         if (said) {
-          // Indented past the tag so the claim sits under the stem it belongs
-          // to rather than under the @kind, which is the same word every time.
-          const sill = under + ' '.repeat(tag.length + 1);
           out.push(paint('90', sill) + paint(SAID, clip(said, sill.length)));
+        }
+        // The edges nesting cannot show: further parents first, then
+        // references. A link into another document keeps its file name.
+        const own = links.get(`${rel}#${row.id}`) ?? [];
+        for (const link of [...own.filter(l => l.derives), ...own.filter(l => !l.derives)]) {
+          const [doc, id] = link.target.split('#');
+          const label = doc === rel ? prose(id) : `${doc}#${id}`;
+          const verb = link.derives ? 'also derives from' : 'refers to';
+          out.push(paint('90', `${sill}╌ ${verb} `) + paint(HUE[kindOf(id) ?? 'case-'], label));
         }
       }
       if (row.el) walk(row.el, under);
@@ -723,6 +733,7 @@ const idsOf = (() => {
 type FindingName =
   | 'freelancing'
   | 'misnested'
+  | 'cycle'
   | 'rot'
   | 'dead'
   | 'missing-rule'
@@ -737,6 +748,7 @@ type FindingName =
 const MEANING: Record<FindingName, string> = {
   freelancing: 'claim-bearing unit with no upward citation',
   misnested: 'unit nested inside a kind it may not cite',
+  cycle: 'units whose citations lead back to themselves — a derivation must not depend on itself',
   rot: 'citation whose anchor does not resolve',
   dead: 'unit nothing cites',
   'missing-rule': 'test citing an axiom rather than a rule',
@@ -768,6 +780,12 @@ interface Analysis {
   written: string[];
   /** How many tests pin each unit, by `<doc>#<id>`; absent means none. */
   testsPer: Map<string, number>;
+  /**
+   * Every unit a unit links to, by `<doc>#<id>`, and whether the link is a
+   * further parent (it sits in the unit's "Also derives from" sentence) or a
+   * reference. Further parents and nesting together are the derivation graph.
+   */
+  links: Map<string, Array<{ target: string; derives: boolean }>>;
 }
 
 /**
@@ -781,6 +799,7 @@ function analyse(write: boolean): Analysis {
   const findings: Record<FindingName, string[]> = {
     freelancing: [],
     misnested: [],
+    cycle: [],
     rot: [],
     dead: [],
     'missing-rule': [],
@@ -817,6 +836,33 @@ function analyse(write: boolean): Analysis {
 
   const testsPer = new Map<string, number>();
 
+  /**
+   * The derivation graph, by `<doc>#<id>`: every unit's citations, its nesting
+   * parent and its explicit links alike. A cycle in it is a derivation that
+   * depends on itself, which no ordering of the canon can resolve.
+   */
+  const edges = new Map<string, Set<string>>();
+  const links = new Map<string, Array<{ target: string; derives: boolean }>>();
+  const addEdge = (into: Map<string, Set<string>>, from: string, to: string): void => {
+    const set = into.get(from) ?? new Set<string>();
+    set.add(to);
+    into.set(from, set);
+  };
+  /**
+   * Whether the link at `at` names a further parent: it sits in a sentence
+   * that opens "Also derives from", up to that sentence's end. Every other
+   * link is a reference, which cites but does not derive, so a reference back
+   * to a unit that derives from this one is not a cycle.
+   */
+  const DERIVES = /^Also derives from\b/;
+  const namesParent = (src: string, at: number): boolean => {
+    const lineStart = src.lastIndexOf('\n', at - 1) + 1;
+    const line = src.slice(lineStart);
+    if (!DERIVES.test(line)) return false;
+    const sentenceEnd = line.search(/\.(\s|$)/);
+    return sentenceEnd === -1 || at - lineStart < sentenceEnd;
+  };
+
   const written: string[] = [];
 
   // -------------------------------------------------------------------------
@@ -829,6 +875,7 @@ function analyse(write: boolean): Analysis {
       continue;
     }
     const { withId, anchors } = scanFile(file);
+    const docSource = readFileSync(file, 'utf8');
 
     if (rel.endsWith('.md')) {
       for (const m of readFileSync(file, 'utf8').matchAll(OVERFULL_HEADING)) {
@@ -861,6 +908,7 @@ function analyse(write: boolean): Analysis {
       if (!parentKind) continue;
       if (kindOf(el.id) === 'case-') holdsCases.add(`${rel}#${el.parent}`);
       units.get(`${rel}#${el.id}`)?.cites.add(parentKind);
+      addEdge(edges, `${rel}#${el.id}`, `${rel}#${el.parent}`);
       citedTargets.add(`${rel}#${el.parent}`);
 
       // Nesting is a citation, so sitting somewhere a unit may not cite is
@@ -908,6 +956,17 @@ function analyse(write: boolean): Analysis {
       const targetKind = kindOf(frag);
       if (owner?.id && targetKind)
         units.get(`${rel}#${owner.id}`)?.cites.add(targetKind);
+      if (owner?.id && kindOf(owner.id) && targetKind) {
+        const from = `${rel}#${owner.id}`;
+        const to = `${targetRel}#${frag}`;
+        if (from !== to) {
+          const derives = namesParent(docSource, a.at);
+          if (derives) addEdge(edges, from, to);
+          const list = links.get(from) ?? [];
+          if (!list.some(l => l.target === to)) list.push({ target: to, derives });
+          links.set(from, list);
+        }
+      }
     }
   }
 
@@ -957,6 +1016,30 @@ function analyse(write: boolean): Analysis {
         }
       }
     }
+  }
+
+  // cycle — a derivation that depends on itself. Each cycle is reported once,
+  // by the order it is first walked into.
+  {
+    const state = new Map<string, 'open' | 'done'>();
+    const reported = new Set<string>();
+    const walk = (node: string, path: string[]): void => {
+      state.set(node, 'open');
+      for (const next of edges.get(node) ?? []) {
+        if (state.get(next) === 'open') {
+          const loop = [...path.slice(path.indexOf(next)), next];
+          const key = [...loop.slice(0, -1)].sort().join(' ');
+          if (!reported.has(key)) {
+            reported.add(key);
+            findings.cycle.push(loop.map(k => k.split('#')[1]).join(' → '));
+          }
+        } else if (!state.has(next)) {
+          walk(next, [...path, next]);
+        }
+      }
+      state.set(node, 'done');
+    };
+    for (const node of edges.keys()) if (!state.has(node)) walk(node, [node]);
   }
 
   // freelancing — a claim-bearing unit with no upward citation
@@ -1299,7 +1382,7 @@ function analyse(write: boolean): Analysis {
     }
   }
 
-  return { findings, units, suites: enforcedFiles.size, written, testsPer };
+  return { findings, units, suites: enforcedFiles.size, written, testsPer, links };
 }
 
 // ---------------------------------------------------------------------------
@@ -1321,7 +1404,7 @@ Usage:
 
 Options for tree:
   --gaps          only the branches leading to a claim no test pins
-  -v, --verbose   what each unit claims, under its stem
+  -v, --verbose   what each unit claims, and the units it links to, under its stem
   --suspect [n]   rules with no cases carrying n or more tests (default 4)
 
 The protocol is SKILL.md, beside this file. The scope is the "canon" field of
@@ -1383,14 +1466,14 @@ function tree(options: {
   verbose: boolean;
   suspect: number | undefined;
 }): void {
-  const { testsPer } = analyse(false);
+  const { testsPer, links } = analyse(false);
   for (const doc of DOCS) {
     const file = join(ROOT, doc);
     if (!existsSync(file)) continue;
     console.log(
       options.suspect !== undefined
         ? suspectsOf(file, testsPer, options.suspect)
-        : treeOf(file, testsPer, options.gaps, options.verbose)
+        : treeOf(file, testsPer, options.gaps, options.verbose, links)
     );
   }
 }
