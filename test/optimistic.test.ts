@@ -338,6 +338,7 @@ test('a background refresh of a wrapped node is reported through the optimistic 
 
 /**
  * @canon rule-sibling-speculations-do-not-see-each-other
+ * @canon rule-a-reader-in-an-action-sees-the-predictions-of-its-own-chain
  */
 test('an action reads back its own prediction, and a sibling action does not', async () => {
   const [source] = signal(() => Promise.resolve(['saved'] as string[]), [] as string[])
@@ -371,7 +372,7 @@ test('an action reads back its own prediction, and a sibling action does not', a
 })
 
 /**
- * @canon rule-sibling-speculations-do-not-see-each-other
+ * @canon rule-an-update-function-never-builds-on-another-actions-prediction
  */
 test('a refused action does not leave its prediction inside a later action layer', async () => {
   const [source] = signal(() => Promise.resolve(['saved'] as string[]), [] as string[])

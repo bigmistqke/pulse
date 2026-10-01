@@ -911,7 +911,7 @@ test('a queued recompute survives a write inside a discarded action', async () =
 })
 
 /**
- * @canon rule-a-write-to-a-derivation-cancels-only-once-committed
+ * @canon rule-a-promise-written-inside-an-action-starts-no-recompute
  */
 test('writing a promise inside an action does not trigger a fresh recompute', async () => {
   // Covers the isPromise(value) branch of publishValue under the same
