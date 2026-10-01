@@ -368,7 +368,7 @@ test('a cleanup fired by a write sees the value that was written', () => {
 })
 
 /**
- * @canon rule-a-write-abandons-the-run-in-progress
+ * @canon rule-a-write-withdraws-a-recompute-queued-in-the-same-tick
  */
 test('W19: invalidating then writing in one tick makes no request at all', async () => {
   let requests = 0
@@ -392,7 +392,7 @@ test('W19: invalidating then writing in one tick makes no request at all', async
 })
 
 /**
- * @canon rule-a-write-abandons-the-run-in-progress
+ * @canon rule-a-write-withdraws-a-recompute-queued-in-the-same-tick
  */
 test('W19: invalidating then writing with an update function also makes no request', async () => {
   let requests = 0

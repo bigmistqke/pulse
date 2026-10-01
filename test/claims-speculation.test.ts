@@ -29,7 +29,7 @@ test('a commit reaches a committed consumer as one change, where the same writes
 })
 
 /**
- * @canon rule-a-prediction-expires-with-its-action
+ * @canon rule-after-a-commit-only-what-the-action-wrote-to-the-source-remains
  */
 test('a prediction does not survive a commit of an action that did not write its source', async () => {
   const [value] = signal('saved')

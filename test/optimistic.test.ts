@@ -69,7 +69,7 @@ test('a discarded action reverts the overlay to the prior value', async () => {
 })
 
 /**
- * @canon rule-a-prediction-expires-with-its-action
+ * @canon rule-after-a-commit-only-what-the-action-wrote-to-the-source-remains
  */
 test('a committed action settles through to the canonical value', async () => {
   const [value, setValue] = signal('saved')
@@ -88,7 +88,7 @@ test('a committed action settles through to the canonical value', async () => {
 })
 
 /**
- * @canon rule-a-prediction-expires-with-its-action
+ * @canon rule-after-a-commit-only-what-the-action-wrote-to-the-source-remains
  */
 test('committing does not flash the prior value through the overlay reader', async () => {
   setScheduler(syncScheduler(flush))
@@ -116,7 +116,7 @@ test('committing does not flash the prior value through the overlay reader', asy
 })
 
 /**
- * @canon rule-a-prediction-expires-with-its-action
+ * @canon rule-is-optimistic-is-true-while-a-prediction-is-live
  */
 test('isOptimistic reflects whether an overlay is live', async () => {
   const [value] = signal('x')
@@ -271,7 +271,7 @@ test('a live prediction also masks a failed source', async () => {
 })
 
 /**
- * @canon rule-a-prediction-expires-with-its-action
+ * @canon rule-after-a-commit-only-what-the-action-wrote-to-the-source-remains
  */
 test('a recipe that produces its own value needs no separate source', async () => {
   const [view, setView, isOptimistic] = optimistic(() => Promise.resolve(['a']))

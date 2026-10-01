@@ -56,7 +56,8 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule an-update-function-sees-the-value-a-sync-derivation-produced-at-creation`](#rule-an-update-function-sees-the-value-a-sync-derivation-produced-at-creation) — A derivation runs when it is created. An update function on a sync derivation therefore receives the value that first run produced, even before any write. An async derivation that suspended has produced nothing yet.
 - [`@axiom the-latest-production-wins`](#axiom-the-latest-production-wins) — A derived value shows whatever produced it last — a dependency change or a direct write — and a production that was started earlier never publishes over a later one.
   - [`@rule a-write-replaces-a-derived-value-without-rerunning-it`](#rule-a-write-replaces-a-derived-value-without-rerunning-it) — A write to a writable derivation replaces its value at once, and the body does not run again because of it.
-  - [`@rule a-write-abandons-the-run-in-progress`](#rule-a-write-abandons-the-run-in-progress) — A write abandons every stage's run in progress — a fetch in flight, a paused generator, or a recompute queued in the same tick — and the abandoned run never publishes.
+  - [`@rule a-write-abandons-the-run-in-progress`](#rule-a-write-abandons-the-run-in-progress) — A write abandons every stage's run in progress, a fetch in flight or a paused generator, in whichever stage it is, and the abandoned run never publishes.
+  - [`@rule a-write-withdraws-a-recompute-queued-in-the-same-tick`](#rule-a-write-withdraws-a-recompute-queued-in-the-same-tick) — A recompute queued earlier in the same tick as a write is withdrawn before it starts, so it makes no request, also when the write is an update function.
   - [`@rule a-write-from-inside-the-derivation-abandons-its-own-run-without-raising`](#rule-a-write-from-inside-the-derivation-abandons-its-own-run-without-raising) — A write made from inside the derivation's own body abandons that run without raising, and the cleanups the run registered still run.
   - [`@rule a-dependency-change-after-a-write-takes-over`](#rule-a-dependency-change-after-a-write-takes-over) — When a source the derivation reads changes after a write, the derivation runs again and its result replaces the written value.
   - [`@rule the-written-value-stays-visible-while-the-derivation-reloads`](#rule-the-written-value-stays-visible-while-the-derivation-reloads) — While the run started by a dependency change is in flight, the derivation keeps showing the written value, and reports the reload as pending.
@@ -93,6 +94,7 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule peek-keeps-the-last-resolved-value-while-a-newer-promise-is-pending`](#rule-peek-keeps-the-last-resolved-value-while-a-newer-promise-is-pending) — While a newer promise for `x` is pending, `peek(x)` keeps returning the value that resolved before it.
   - [`@rule peek-never-throws-for-a-failed-node`](#rule-peek-never-throws-for-a-failed-node) — `peek(x)` on a failed node returns the last value that resolved before the failure, or `undefined` when none did. It never throws.
   - [`@rule peek-returns-a-given-fallback-until-a-value-resolves`](#rule-peek-returns-a-given-fallback-until-a-value-resolves) — `peek(x, fallback)` returns `fallback` wherever `peek(x)` would return `undefined`: before the first resolution, and after a rejection when nothing resolved before it. Once a value has resolved, it returns that value.
+  - [`@rule is-optimistic-is-true-while-a-prediction-is-live`](#rule-is-optimistic-is-true-while-a-prediction-is-live) — The `isOptimistic` accessor returned by `optimistic` reads true while a prediction is live, and false before any prediction and once the action that wrote it has closed.
   - [`@rule a-construction-default-removes-undefined-from-the-types`](#rule-a-construction-default-removes-undefined-from-the-types) — With a construction default given, the types of `peek` and of an update function's argument leave out `undefined`, so neither needs a check.
   - [`@rule an-async-node-keeps-its-last-value-while-it-refetches`](#rule-an-async-node-keeps-its-last-value-while-it-refetches) — When an async node's inputs change, its last resolved value stays readable until the new one settles: `peek` returns it, `use` keeps delivering it to a consumer that already has it, and the node reports the refetch as pending.
   - [`@rule a-written-promise-leaves-the-prior-value-to-the-tolerant-read`](#rule-a-written-promise-leaves-the-prior-value-to-the-tolerant-read) — While a written promise is pending, and after it rejects, the tolerant read returns the value from before the write.
@@ -234,7 +236,10 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule latest-reports-loading-without-waiting`](#rule-latest-reports-loading-without-waiting) — `latest(x)` returns the last resolved value, never throws, and never makes the binding wait. While `x` is pending it reports the load to the nearest boundary: a first load drives the boundary's first-load placeholder, and a refresh drives `isLoading()` only.
   - [`@rule a-tolerant-read-reports-a-failure-to-the-boundary`](#rule-a-tolerant-read-reports-a-failure-to-the-boundary) — A binding that reads a failed node through `latest` reports the failure to the nearest accepting error boundary, though nothing throws, and reports its recovery when a later run sees no error.
   - [`@rule peek-reports-nothing`](#rule-peek-reports-nothing) — `peek(x)` returns the last resolved value and reports nothing to any boundary, neither a first load nor a refresh.
-  - [`@rule settled-waits-until-every-input-is-fresh`](#rule-settled-waits-until-every-input-is-fresh) — `yield* settled([…])` suspends until every input's promise in flight has settled, then returns all the fresh values together. An input that has already settled, a raw promise included, is not waited on, and a rejected input throws.
+  - [`@rule settled-waits-until-every-input-is-fresh`](#rule-settled-waits-until-every-input-is-fresh) — `yield* settled([…])` suspends until every input's promise in flight has settled, then returns all the fresh values together, so a consumer never sees a frame where one input is new and another is stale.
+  - [`@rule settled-does-not-wait-on-an-input-that-has-settled`](#rule-settled-does-not-wait-on-an-input-that-has-settled) — `settled` does not suspend for an input that has already settled, a raw promise included. A run whose inputs have all settled returns at once, so a stage fed an already-settled raw promise converges instead of suspending on every run.
+  - [`@rule settled-throws-a-rejected-input`](#rule-settled-throws-a-rejected-input) — When an input of `settled` has rejected, `yield* settled([…])` throws its reason instead of returning a value for it.
+  - [`@rule settled-waits-again-when-an-input-refetches`](#rule-settled-waits-again-when-an-input-refetches) — When an input of `settled` refetches, the stage waits on that input's promise in flight, found through `promiseOf`, not on the stale value its accessor returns, and publishes the new combination only once it has settled.
   - [`@rule use-enrols-the-binding-in-its-boundarys-gate`](#rule-use-enrols-the-binding-in-its-boundarys-gate) — A binding that called `use(x)` during its run commits through its boundary's gate. While any binding of the boundary is suspended, its commit waits, and it lands in the same pass as the others.
     - [`@case a-reactive-child-that-called-use-waits-for-the-gate`](#case-a-reactive-child-that-called-use-waits-for-the-gate) — `bindings.ts` `insertChild`.
     - [`@case a-reactive-prop-that-called-use-waits-for-the-gate`](#case-a-reactive-prop-that-called-use-waits-for-the-gate) — `bindings.ts` `bindProp`.
@@ -271,7 +276,8 @@ The canon was written backwards from the existing tests and documents, and descr
   - [`@rule a-failed-action-is-reported-not-thrown`](#rule-a-failed-action-is-reported-not-thrown) — An action whose body fails is discarded, and the error is reported through its handle. The caller never receives a throw or a rejection.
   - [`@rule a-speculation-announces-how-it-closed`](#rule-a-speculation-announces-how-it-closed) — A callback registered with `onSettled` fires once when its speculation closes, and is told whether the speculation committed or was discarded.
   - [`@rule a-speculation-refuses-to-create-an-effect`](#rule-a-speculation-refuses-to-create-an-effect) — Creating an effect inside a speculation throws. That includes a JSX binding, which is an effect. The throw fails the action like any other error in its body.
-  - [`@rule a-prediction-expires-with-its-action`](#rule-a-prediction-expires-with-its-action) — A prediction is dropped when the action that wrote it closes, whether it commits or is discarded. After a discard the prior value shows again. After a commit the prediction survives only as far as the action also wrote the source it stands in front of: when the action did not, the source's value shows again.
+  - [`@rule a-prediction-expires-with-its-action`](#rule-a-prediction-expires-with-its-action) — A prediction is dropped when the action that wrote it closes, whether it commits or is discarded. After a discard the prior value shows again.
+  - [`@rule after-a-commit-only-what-the-action-wrote-to-the-source-remains`](#rule-after-a-commit-only-what-the-action-wrote-to-the-source-remains) — When the action that wrote a prediction commits, the prediction's reader shows the source's value: the action's own committed write when it wrote the source, and the source's earlier value when it did not. The prior value does not show in between.
   - [`@rule a-prediction-sits-in-front-of-its-derivation`](#rule-a-prediction-sits-in-front-of-its-derivation) — A prediction is a layer in front of the derivation, never written into it. The derivation keeps following its sources underneath, and shows through when the last layer drops. The accessor the optimistic value wraps keeps reading the canonical value throughout.
   - [`@rule a-write-to-a-derivation-cancels-only-once-committed`](#rule-a-write-to-a-derivation-cancels-only-once-committed) — A write to a derivation made inside an action abandons the derivation's run in progress only when the write reaches committed state. At commit, the written value replaces anything the derivation published while the action was open.
   - [`@rule a-write-to-a-derivation-moves-its-change-detection-only-once-committed`](#rule-a-write-to-a-derivation-moves-its-change-detection-only-once-committed) — A write to a derivation made inside an action updates the record the derivation compares its next result against only when the write reaches committed state. After a discard, the derivation compares against the value it last committed.
@@ -299,7 +305,7 @@ The canon was written backwards from the existing tests and documents, and descr
     - [`@case a-write-fires-only-the-links-that-match`](#case-a-write-fires-only-the-links-that-match) — `scope.ts` `edgesToFire`.
 - [`@axiom jsx-builds-real-dom-directly`](#axiom-jsx-builds-real-dom-directly) — JSX produces real DOM nodes through direct DOM operations. There is no virtual tree and nothing is diffed.
   - [`@rule h-creates-the-element-directly`](#rule-h-creates-the-element-directly) — `h` with a string tag creates that element with `document.createElement`, and gives it only the attributes and children it was passed.
-  - [`@rule a-static-child-is-inserted-by-its-kind`](#rule-a-static-child-is-inserted-by-its-kind) — A static child is inserted according to its kind: a string or number as a text node, a DOM node as itself, an array by inserting each item in order, and `null`, `undefined` or a boolean as nothing.
+  - [`@rule a-static-child-is-inserted-by-its-kind`](#rule-a-static-child-is-inserted-by-its-kind) — A static child is inserted according to its kind: a string or number as a text node, a DOM node as itself, an array by inserting each item in order with nested arrays flattened to any depth, and `null`, `undefined` or a boolean as nothing. Children of mixed kinds keep their written order.
   - [`@rule a-fragment-is-its-children-as-an-array`](#rule-a-fragment-is-its-children-as-an-array) — `Fragment` returns its children as an array, and an element that receives that array inserts each item in place.
 - [`@axiom a-component-runs-once-and-reactivity-lives-in-its-holes`](#axiom-a-component-runs-once-and-reactivity-lives-in-its-holes) — A component function runs once. What changes afterwards changes inside the holes it returned — reactive children and reactive props — never by running the component again.
   - [`@rule a-function-tag-is-called-once-with-its-props`](#rule-a-function-tag-is-called-once-with-its-props) — A function tag is called once, with its props. Children passed to `h` after the props arrive on `props.children`.
@@ -317,9 +323,11 @@ The canon was written backwards from the existing tests and documents, and descr
     - [`@exception a-literal-or-function-prop-stays-as-written`](#exception-a-literal-or-function-prop-stays-as-written) — A prop whose value is a literal, or a function or arrow expression, is not converted to a getter.
     - [`@exception ref-and-on-props-stay-as-written`](#exception-ref-and-on-props-stay-as-written) — A `ref` prop and an `on:`-prefixed prop are never converted to a getter, whatever their value.
   - [`@rule a-spread-merges-descriptors-not-values`](#rule-a-spread-merges-descriptors-not-values) — A props object that contains a spread is compiled to a `mergeProps` call over its segments, so a getter in a spread source stays a getter. One `mergeProps` import is added per file, however many spreads it has.
-  - [`@rule a-dom-child-is-one-thunk-per-dynamic-child`](#rule-a-dom-child-is-one-thunk-per-dynamic-child) — On a DOM element or a Fragment, each dynamic child becomes its own thunk, never a getter. A literal, a function expression, or a nested JSX element stays as written.
+  - [`@rule a-dom-child-is-one-thunk-per-dynamic-child`](#rule-a-dom-child-is-one-thunk-per-dynamic-child) — On a DOM element or a Fragment, each dynamic child becomes its own thunk, never a getter.
+  - [`@rule a-static-dom-child-is-left-as-written`](#rule-a-static-dom-child-is-left-as-written) — On a DOM element or a Fragment, a literal child, a function expression, and a nested JSX element are left as written, also beside a dynamic sibling that is wrapped.
   - [`@rule component-children-become-one-getter`](#rule-component-children-become-one-getter) — On a component, the children become one getter over the whole value, and are not wrapped child by child. A component is any tag that is neither a string nor `Fragment`, a member expression such as `Foo.Bar` included, and a bare JSX-element child compiles exactly like the braced form.
 - [`@axiom a-prop-says-how-it-reaches-the-dom`](#axiom-a-prop-says-how-it-reaches-the-dom) — How a prop reaches the DOM is written at the prop, by its prefix, and never inferred from its name or its value.
+  - [`@rule a-bare-or-attr-prop-sets-the-attribute`](#rule-a-bare-or-attr-prop-sets-the-attribute) — A prop with no prefix, or with the `attr:` prefix, sets the attribute of that name, and a function value keeps the attribute following it.
   - [`@rule a-prop-prefix-sets-the-dom-property`](#rule-a-prop-prefix-sets-the-dom-property) — A `prop:name` prop assigns the element's DOM property `name` instead of an attribute, and a function value keeps the property following it.
   - [`@rule a-class-prefix-toggles-one-class-by-truthiness`](#rule-a-class-prefix-toggles-one-class-by-truthiness) — A `class:name` prop adds the class `name` while its value is truthy and removes it while it is falsy, and a function value keeps the class following it.
   - [`@rule a-style-prefix-sets-one-style-property`](#rule-a-style-prefix-sets-one-style-property) — A `style:name` prop sets the style property `name`. A value of `null`, `undefined` or `false` removes the property, and a function value keeps it following the value.
@@ -327,7 +335,7 @@ The canon was written backwards from the existing tests and documents, and descr
 - [`@axiom an-item-is-its-reference`](#axiom-an-item-is-its-reference) — An item is its reference: pulse never compares contents to decide that two values are the same item.
   - [`@rule list-rows-are-keyed-by-reference`](#rule-list-rows-are-keyed-by-reference) — A list row belongs to an item by strict reference. The same reference keeps its row, its mapped output and its DOM nodes in the new order. A different reference gets a new row even when its contents are equal.
 - [`@axiom a-missing-value-sets-nothing`](#axiom-a-missing-value-sets-nothing) — A missing value sets nothing: `null`, `undefined` and `false` leave nothing in the DOM.
-  - [`@rule an-attribute-follows-its-value-and-is-removed-on-nothing`](#rule-an-attribute-follows-its-value-and-is-removed-on-nothing) — A prop with no prefix, or with the `attr:` prefix, sets the attribute of that name. A value of `null`, `undefined` or `false` removes the attribute, and a function value keeps the attribute following it.
+  - [`@rule an-attribute-is-removed-on-nothing`](#rule-an-attribute-is-removed-on-nothing) — An attribute prop whose value is, or becomes, `null`, `undefined` or `false` removes the attribute instead of setting it to a string.
 - [`@axiom the-compiler-touches-only-jsx`](#axiom-the-compiler-touches-only-jsx) — The compiler rewrites only JSX: code without JSX reaches the runtime exactly as written.
   - [`@rule the-vite-plugin-compiles-only-jsx-files`](#rule-the-vite-plugin-compiles-only-jsx-files) — The Vite plugin compiles a `.tsx` or `.jsx` file, ignoring any query string on its id, and leaves every other file alone. It applies the props-to-getters transform, then the automatic JSX runtime imported from `pulse`.
 <!-- toc:end -->
@@ -662,11 +670,15 @@ The write leaves the derivation following the same sources; what happens when on
 
 ### @rule a-write-abandons-the-run-in-progress
 
-> A write abandons every stage's run in progress — a fetch in flight, a paused generator, or a recompute queued in the same tick — and the abandoned run never publishes.
+> A write abandons every stage's run in progress, a fetch in flight or a paused generator, in whichever stage it is, and the abandoned run never publishes.
 
 This follows because a production started earlier never publishes over a later one: a run started before the write is the earlier production, so it is abandoned.
 
-A recompute that is withdrawn never starts, so it makes no request.
+### @rule a-write-withdraws-a-recompute-queued-in-the-same-tick
+
+> A recompute queued earlier in the same tick as a write is withdrawn before it starts, so it makes no request, also when the write is an update function.
+
+This follows because a production started earlier never publishes over a later one, and a recompute queued before the write would be the earlier production: withdrawing it before it starts is abandoning it at the cheapest point.
 
 ### @rule a-write-from-inside-the-derivation-abandons-its-own-run-without-raising
 
@@ -915,6 +927,12 @@ This follows because a read reports what is there, and failure is a separate que
 This follows because a tolerant read reports what is there and never raises: where nothing has resolved, there is nothing to report, so it returns what the caller said to use instead.
 
 A fallback given when `x` was constructed works the same way, as [the construction default](#rule-a-construction-default-seeds-only-the-tolerant-read) states.
+
+### @rule is-optimistic-is-true-while-a-prediction-is-live
+
+> The `isOptimistic` accessor returned by `optimistic` reads true while a prediction is live, and false before any prediction and once the action that wrote it has closed.
+
+Also derives from [`rule-a-prediction-expires-with-its-action`](#rule-a-prediction-expires-with-its-action). This follows because a read reports what is there, and whether what a reader sees is a prediction is a separate question asked through its own verb.
 
 ### @rule a-construction-default-removes-undefined-from-the-types
 
@@ -1858,11 +1876,27 @@ What `peek` returns is stated in [the rule on peek's value](#rule-peek-returns-t
 
 ### @rule settled-waits-until-every-input-is-fresh
 
-> `yield* settled([…])` suspends until every input's promise in flight has settled, then returns all the fresh values together. An input that has already settled, a raw promise included, is not waited on, and a rejected input throws.
+> `yield* settled([…])` suspends until every input's promise in flight has settled, then returns all the fresh values together, so a consumer never sees a frame where one input is new and another is stale.
 
 This follows because the verb decides what a reader waits for: `settled` is the verb that waits for every input together, so it returns only a combination in which no input is stale.
 
-A consumer therefore never sees a frame where one input is new and another is stale. For an input that is refetching, `settled` waits on its promise in flight, found through `promiseOf`, not on the stale value its accessor returns. A run with every input settled does not suspend, so a stage fed an already-settled raw promise converges instead of suspending on every run. When an input refetches later, the stage waits again before publishing the new combination.
+### @rule settled-does-not-wait-on-an-input-that-has-settled
+
+> `settled` does not suspend for an input that has already settled, a raw promise included. A run whose inputs have all settled returns at once, so a stage fed an already-settled raw promise converges instead of suspending on every run.
+
+This follows because `settled` waits only for an input that is not yet fresh, and a settled input is fresh, so there is nothing to wait for.
+
+### @rule settled-throws-a-rejected-input
+
+> When an input of `settled` has rejected, `yield* settled([…])` throws its reason instead of returning a value for it.
+
+This follows because `settled` returns only a combination of real values, and a rejected input has a reason in place of a value.
+
+### @rule settled-waits-again-when-an-input-refetches
+
+> When an input of `settled` refetches, the stage waits on that input's promise in flight, found through `promiseOf`, not on the stale value its accessor returns, and publishes the new combination only once it has settled.
+
+This follows because `settled` returns only a combination in which no input is stale, and during a refetch the value the accessor returns is the stale one.
 
 ### @rule use-enrols-the-binding-in-its-boundarys-gate
 
@@ -2110,9 +2144,15 @@ An effect pushes values out of the reactive graph: into the DOM, a log, the netw
 
 ### @rule a-prediction-expires-with-its-action
 
-> A prediction is dropped when the action that wrote it closes, whether it commits or is discarded. After a discard the prior value shows again. After a commit the prediction survives only as far as the action also wrote the source it stands in front of: when the action did not, the source's value shows again.
+> A prediction is dropped when the action that wrote it closes, whether it commits or is discarded. After a discard the prior value shows again.
 
-This follows because a speculation's tentative state lasts until it commits or is discarded: a prediction is tentative state of its action, so it goes when the action closes, and only what the action committed remains.
+This follows because a speculation's tentative state lasts until it commits or is discarded: a prediction is tentative state of its action, so it goes when the action closes.
+
+### @rule after-a-commit-only-what-the-action-wrote-to-the-source-remains
+
+> When the action that wrote a prediction commits, the prediction's reader shows the source's value: the action's own committed write when it wrote the source, and the source's earlier value when it did not. The prior value does not show in between.
+
+Also derives from [`rule-a-prediction-expires-with-its-action`](#rule-a-prediction-expires-with-its-action). This follows because a commit makes only the action's writes committed state, and the prediction is not one of them: once it is dropped, what remains is the source as the commit left it.
 
 ### @rule a-prediction-sits-in-front-of-its-derivation
 
@@ -2300,11 +2340,9 @@ This follows because JSX produces real DOM through direct DOM operations: `h` wi
 
 ### @rule a-static-child-is-inserted-by-its-kind
 
-> A static child is inserted according to its kind: a string or number as a text node, a DOM node as itself, an array by inserting each item in order, and `null`, `undefined` or a boolean as nothing.
+> A static child is inserted according to its kind: a string or number as a text node, a DOM node as itself, an array by inserting each item in order with nested arrays flattened to any depth, and `null`, `undefined` or a boolean as nothing. Children of mixed kinds keep their written order.
 
 This follows because JSX builds DOM directly with no intermediate tree: each kind of child is turned straight into the DOM it stands for, a text node, the node itself, its items, or nothing.
-
-Nested arrays flatten to any depth, and mixed children keep their written order.
 
 ### @rule a-fragment-is-its-children-as-an-array
 
@@ -2423,11 +2461,17 @@ Native object spread reads each property through its getter once and copies the 
 
 ### @rule a-dom-child-is-one-thunk-per-dynamic-child
 
-> On a DOM element or a Fragment, each dynamic child becomes its own thunk, never a getter. A literal, a function expression, or a nested JSX element stays as written.
+> On a DOM element or a Fragment, each dynamic child becomes its own thunk, never a getter.
 
 This follows because change lives in holes: a dynamic child on an element must be a function child to be a hole, and each is its own hole so that one changing leaves its siblings alone.
 
 The runtime receives a DOM element's children as values and treats a function value as reactive, so a getter would never be read there. Each child is wrapped on its own so that siblings update independently, not as one array. A nested JSX element is already constructed content; any dynamic value inside it is handled by that element's own props.
+
+### @rule a-static-dom-child-is-left-as-written
+
+> On a DOM element or a Fragment, a literal child, a function expression, and a nested JSX element are left as written, also beside a dynamic sibling that is wrapped.
+
+This follows because the compiler touches only JSX: a literal and a function expression are already what the runtime should receive, and a nested JSX element is already constructed content whose dynamic values are handled by its own props.
 
 ### @rule component-children-become-one-getter
 
@@ -2442,6 +2486,12 @@ A component reads `props.children` like any other prop, so the children are defe
 > How a prop reaches the DOM is written at the prop, by its prefix, and never inferred from its name or its value.
 
 The binding model follows Pota: explicit namespaced prefixes (`on:`, `prop:`, `attr:`, `class:`, `style:`) with no heuristics, as the [README](README.md) states.
+
+### @rule a-bare-or-attr-prop-sets-the-attribute
+
+> A prop with no prefix, or with the `attr:` prefix, sets the attribute of that name, and a function value keeps the attribute following it.
+
+This follows because a prop says how it reaches the DOM: with no prefix, or with `attr:`, it says "set the attribute", so the attribute is set.
 
 ### @rule a-prop-prefix-sets-the-dom-property
 
@@ -2486,11 +2536,11 @@ A row is its item: the same object in a new position is the same row, moved, wit
 
 No design document states this. It was accepted as a principle when the canon was reviewed.
 
-### @rule an-attribute-follows-its-value-and-is-removed-on-nothing
+### @rule an-attribute-is-removed-on-nothing
 
-> A prop with no prefix, or with the `attr:` prefix, sets the attribute of that name. A value of `null`, `undefined` or `false` removes the attribute, and a function value keeps the attribute following it.
+> An attribute prop whose value is, or becomes, `null`, `undefined` or `false` removes the attribute instead of setting it to a string.
 
-This follows because a missing value sets nothing: an attribute whose value becomes `null`, `undefined` or `false` is removed, not set to a string.
+This follows because a missing value sets nothing: an attribute whose value is missing is removed, not set to a string.
 
 ## @axiom the-compiler-touches-only-jsx
 

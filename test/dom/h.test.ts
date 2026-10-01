@@ -14,7 +14,7 @@ test('h creates an element with no children or props', () => {
 })
 
 /**
- * @canon rule-an-attribute-follows-its-value-and-is-removed-on-nothing
+ * @canon rule-a-bare-or-attr-prop-sets-the-attribute
  */
 test('h sets primitive props as attributes', () => {
   const el = h('div', { id: 'x', 'data-n': '5' }) as HTMLElement
@@ -23,7 +23,7 @@ test('h sets primitive props as attributes', () => {
 })
 
 /**
- * @canon rule-an-attribute-follows-its-value-and-is-removed-on-nothing
+ * @canon rule-an-attribute-is-removed-on-nothing
  */
 test('h skips null/undefined/false attribute values', () => {
   const el = h('div', { a: null, b: undefined, c: false }) as HTMLElement

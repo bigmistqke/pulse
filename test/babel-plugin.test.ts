@@ -143,7 +143,7 @@ test('DOM tag children: a single dynamic child is thunk-wrapped, not converted t
 })
 
 /**
- * @canon rule-a-dom-child-is-one-thunk-per-dynamic-child
+ * @canon rule-a-static-dom-child-is-left-as-written
  */
 test('DOM tag children: a literal or function-expression child is left untouched', () => {
   const code = transform('<div>{5}</div>;')
@@ -162,7 +162,7 @@ test('DOM tag children: multiple dynamic children are wrapped INDIVIDUALLY, not 
 })
 
 /**
- * @canon rule-a-dom-child-is-one-thunk-per-dynamic-child
+ * @canon rule-a-static-dom-child-is-left-as-written
  */
 test('DOM tag children: a nested static JSX element is never thunk-wrapped, even though it compiles to a CallExpression', () => {
   const code = transform('<div><span>hi</span></div>;')
