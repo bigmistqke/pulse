@@ -223,6 +223,19 @@ export function computedNode<T>(recipe: () => T): Node<T> {
   return { subs: new Set(), defaultRecipe: recipe, backing: r3Untrack(() => r3Computed(recipe)) }
 }
 
+/** The scope each derived slot belongs to. A slot moves to its parent scope
+ *  when a nested scope commits, so work that continues after a pause, such
+ *  as a generator stage, looks its scope up here each time it resumes. */
+const slotScopes = new WeakMap<Slot, Scope>()
+
+export function scopeOfSlot(slot: Slot): Scope | undefined {
+  return slotScopes.get(slot)
+}
+
+function slotMoved(slot: Slot, scope: Scope): void {
+  slotScopes.set(slot, scope)
+}
+
 export function readValue<T>(node: Node<T>): T {
   const scope = getCurrentScope()
   const slot = readSlot(node, scope)
@@ -239,6 +252,7 @@ export function readValue<T>(node: Node<T>): T {
     // speculative computed miss: run the recipe into a fresh S-slot
     const newSlot: Slot<T> = { recipe: node.defaultRecipe, cached: DIRTY, deps: [], node }
     scope.slots.set(node, newSlot)
+    slotScopes.set(newSlot, scope)
     newSlot.cached = runRecipe(node.defaultRecipe, scope, newSlot)
     scope.readSet.add(node)
     trackRead(node, scope)
@@ -398,6 +412,7 @@ export function commit(scope: Scope): void {
   // derivation may take it instead of running again. It is collected before
   // the slots are dropped, with what the speculation saw for each source.
   const adoptions = parent === ROOT_SCOPE ? collectAdoptions(scope) : []
+  const handedToParent = parent === ROOT_SCOPE ? [] : detachCleanDerived(scope)
   closeScopeEdges(scope)
   if (parent === ROOT_SCOPE) {
     for (const { node, value } of promotions) {
@@ -411,6 +426,9 @@ export function commit(scope: Scope): void {
     for (const { node, value } of promotions) {
       writeSpeculative(node, parent, value)
     }
+    // Attached after the writes are promoted: they were derived from those
+    // writes already, so the promotion must not mark them dirty.
+    for (const slot of handedToParent) attachDerived(slot, parent)
     fireSettle(scope, 'committed')
   }
   scope.status = 'committed'
@@ -431,6 +449,40 @@ function collectAdoptions(scope: Scope): Array<{ node: Node; result: AdoptedResu
     adoptions.push({ node, result: { slot, sources } })
   }
   return adoptions
+}
+
+/** Take the clean derived slots out of a nested scope that is committing, with
+ *  their links, so closing the scope does not drop them. They were derived
+ *  from exactly what the parent holds once the scope's writes are promoted. */
+function detachCleanDerived(scope: Scope): Slot[] {
+  const detached: Slot[] = []
+  for (const node of scope.readSet) {
+    const slot = scope.slots.get(node)
+    if (slot === undefined || slot.cached === DIRTY) continue
+    for (const edge of slot.deps) {
+      edge.source.subs.delete(edge)
+      scope.edges.delete(edge)
+    }
+    scope.slots.delete(node)
+    detached.push(slot)
+  }
+  for (const slot of detached) scope.readSet.delete(slot.node)
+  return detached
+}
+
+/** Make a derived slot taken from a committed child one of the parent's own,
+ *  replacing any slot the parent held for the node. */
+function attachDerived(slot: Slot, parent: Scope): void {
+  const previous = parent.slots.get(slot.node)
+  if (previous !== undefined) resetSlotDeps(previous)
+  parent.slots.set(slot.node, slot)
+  parent.readSet.add(slot.node)
+  for (const edge of slot.deps) {
+    edge.targetScope = parent
+    edge.source.subs.add(edge)
+    parent.edges.add(edge)
+  }
+  slotMoved(slot, parent)
 }
 
 /** Discard a scope: tear down edges + drop slots (no promotion), then fire

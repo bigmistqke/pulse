@@ -1,11 +1,11 @@
 import { cancelRecompute, computed as r3Computed, getContext as r3GetContext, isRecomputeQueued, pull as r3Pull, read as r3Read, requeueRecompute as r3RequeueRecompute, setSignal as r3SetSignal, untrack as r3Untrack, unwatched, type Computed as R3Computed, type Signal as R3Signal } from 'r3'
 import { isGeneratorFunction, NotReadyYet, resolvedPromise, track, type PromiseState, type PipelineRead, type Resolved } from './async'
-import { runStage, resumeStage, takeGeneratorCleanups, type StageOutcome } from './driver'
+import { runStage, resumeStage, takeGeneratorCleanups, type Resumption, type StageOutcome } from './driver'
 import { depsChanged, replayDeps, snapshotDeps, type DepRecord } from './dep-replay'
 import { isPromise } from './is-promise'
 import { sameValueZero } from './same-value-zero'
 import { getOwner, routeError, registerWithOwner } from './owner'
-import { getCurrentTracker, peekValue, writeValue, type AdoptedResult, type Node as ScopeNode, type Slot } from './scope'
+import { getCurrentTracker, peekValue, ROOT_SCOPE, runInScope, scopeOfSlot, writeValue, type AdoptedResult, type Node as ScopeNode, type Slot } from './scope'
 import { makeAccessor, NODE, signal, signalWithNode, type Accessor, type Signal } from './signal'
 import { registerPending, lookupPending } from './pending'
 import { registerError, lookupError } from './error'
@@ -160,6 +160,84 @@ function detachedComputed<T>(fn: () => T): R3Computed<T> {
   return r3Untrack(() => r3Computed(fn))
 }
 
+/** A generator stage that paused inside a speculation, driven on to its end
+ *  there. `result` is the promise of the value it returns. A committing
+ *  speculation can hand the generator to the committed stage while it is
+ *  paused, after which this driver no longer moves it. */
+interface SpeculativeGenerator {
+  gen: Generator<unknown, unknown, unknown>
+  paused: Promise<unknown>
+  result: Promise<unknown>
+  done: boolean
+  takenOver: boolean
+}
+
+/** Drive a generator that paused inside a speculation on to its end. Each
+ *  resumption runs in the scope its slot belongs to at that moment, so what it
+ *  reads after a pause is read inside the speculation and links to the slot.
+ *  Once that scope has committed, it runs against committed state; once it has
+ *  been discarded, the generator is closed instead. */
+function driveSpeculatively(
+  gen: Generator<unknown, unknown, unknown>,
+  paused: Promise<unknown>,
+  slot: Slot,
+): SpeculativeGenerator {
+  let settle!: { resolve: (value: unknown) => void; reject: (reason: unknown) => void }
+  const result = new Promise<unknown>((resolve, reject) => {
+    settle = { resolve, reject }
+  })
+  const run: SpeculativeGenerator = { gen, paused, result, done: false, takenOver: false }
+  track(result)
+  const finish = (fn: () => void): void => {
+    run.done = true
+    fn()
+  }
+  const advance = (seed: Resumption): void => {
+    if (run.takenOver || run.done) return
+    const scope = scopeOfSlot(slot)
+    // A discarded speculation leaves no trace: its generator is closed, not
+    // driven on.
+    if (scope?.status === 'discarded') {
+      abandonSpeculativeGenerator(run)
+      return
+    }
+    const open = scope !== undefined && scope.status === 'open'
+    let next: StageOutcome
+    try {
+      next = open
+        ? runInScope(scope, slot, () => resumeStage(gen, seed))
+        : runInScope(ROOT_SCOPE, undefined, () => r3Untrack(() => resumeStage(gen, seed)))
+    } catch (reason) {
+      finish(() => settle.reject(reason))
+      return
+    }
+    if (!next.pending) finish(() => settle.resolve(next.value))
+    else if (next.gen === undefined) finish(() => next.promise.then(settle.resolve, settle.reject))
+    else wait(next.promise)
+  }
+  const wait = (promise: Promise<unknown>): void => {
+    run.paused = promise
+    promise.then(
+      (value) => advance({ throw: false, value }),
+      (reason) => advance({ throw: true, reason }),
+    )
+  }
+  wait(paused)
+  return run
+}
+
+/** Stop driving a speculative generator whose slot recomputed, and close it so
+ *  its `finally` blocks run. */
+function abandonSpeculativeGenerator(run: SpeculativeGenerator): void {
+  if (run.done || run.takenOver) return
+  run.done = true
+  try {
+    run.gen.return(undefined)
+  } catch {
+    // A throwing `finally` in an abandoned speculative run reaches nobody.
+  }
+}
+
 /** Two values are the same result: identical, or two promises fulfilled to the
  *  same value. A stage publishes a fresh promise object on every settle, so a
  *  speculation and committed state can hold different promises for one value. */
@@ -232,11 +310,16 @@ function makeStageNode(
   // The input each speculative run of this stage ran on, by the slot it ran
   // into. Only a run whose result is the stage's own result is recorded: one
   // that handed back a pending upstream, or a generator paused partway, is not.
-  const speculativeRuns = new WeakMap<Slot, { input: unknown }>()
+  const speculativeRuns = new WeakMap<Slot, { input: unknown; generator?: SpeculativeGenerator }>()
   // A result a committing speculation derived for this stage, held from the
   // commit until the commit's flush. The next fresh run takes it instead of
   // running the stage, when nothing it was derived from has changed since.
-  let adopted: { input: unknown; value: unknown; sources: DepRecord[] } | null = null
+  let adopted: {
+    input: unknown
+    value: unknown
+    sources: DepRecord[]
+    generator?: SpeculativeGenerator
+  } | null = null
   let resumeWith: StashedResolution | null = null
   // True exactly while `suspendedOn` holds the promise `retainedGen` itself
   // paused on (yielded, and the driver returned it pending). Discarding that
@@ -384,12 +467,30 @@ function makeStageNode(
         else return input
       }
     }
-    const outcome = runStage(stage, input)
     const slot = getCurrentTracker()
-    if (slot !== undefined && !(outcome.pending && outcome.gen !== undefined)) {
-      speculativeRuns.set(slot, { input })
+    // A recompute of the slot replaces the run before it. A generator that run
+    // left paused is abandoned, so it stops driving itself.
+    const previous = slot === undefined ? undefined : speculativeRuns.get(slot)
+    if (previous?.generator !== undefined) abandonSpeculativeGenerator(previous.generator)
+    let gen: Generator<unknown, unknown, unknown> | undefined
+    const outcome = runStage(stage, input, (created) => {
+      gen = created
+    })
+    if (!outcome.pending) {
+      if (slot !== undefined) speculativeRuns.set(slot, { input })
+      return outcome.value
     }
-    return outcome.pending ? outcome.promise : outcome.value
+    if (outcome.gen === undefined || gen === undefined || slot === undefined) {
+      // An async function's promise, or a promise a generator returned: the
+      // stage's own result. Without a slot, nothing can take it at commit.
+      if (slot !== undefined && outcome.gen === undefined) speculativeRuns.set(slot, { input })
+      return outcome.promise
+    }
+    // A generator paused partway. It runs on to its end inside the speculation,
+    // and the read gives the promise of the value it returns.
+    const generator = driveSpeculatively(gen, outcome.promise, slot)
+    speculativeRuns.set(slot, { input, generator })
+    return generator.result
   }
   ;(publishedNode as ScopeNode).adopt = (result: AdoptedResult | null): void => {
     if (result === null) {
@@ -401,6 +502,7 @@ function makeStageNode(
     adopted = {
       input: run.input,
       value: result.slot.cached,
+      generator: run.generator,
       sources: result.sources
         .filter(({ node }) => node.backing !== undefined)
         .map(({ node, value }) => ({ dep: node.backing!, value })),
@@ -419,6 +521,13 @@ function makeStageNode(
       if (!sameResolved(value, r3Pull(dep))) return null
     }
     for (const { dep } of result.sources) r3Read(dep)
+    const generator = result.generator
+    if (generator !== undefined && !generator.done) {
+      // Still paused: the committed stage takes the generator over, and
+      // resumes it from its pause when the promise it paused on settles.
+      generator.takenOver = true
+      return { pending: true, promise: generator.paused, gen: generator.gen }
+    }
     if (!isPromise(result.value)) return { pending: false, value: result.value }
     const state = track(result.value as Promise<unknown>)
     if (state.status === 'fulfilled') return { pending: false, value: state.value }
