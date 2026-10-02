@@ -289,11 +289,24 @@ export function writeValue<T>(node: Node<T>, value: T): void {
     // re-notifying. Dropping NaN over NaN here makes the whole comparison
     // SameValueZero without changing r3.
     if (Number.isNaN(backing.value) && Number.isNaN(value)) return
-    r3SetSignal(backing, value)
+    writeCommitted(node, value)
     return
   }
   // speculative — Task 4
   writeSpeculative(node, scope, value)
+}
+
+/** Committed write: set the r3 backing, then mark dirty what open speculations
+ *  derived from the node. Committed state is the root of every speculation's
+ *  chain, so a speculation reads this write directly, and its derived slots
+ *  must follow it. A speculation that wrote the node itself keeps its own
+ *  value, which `chainMatch` checks. An equal write changes nothing, so it
+ *  marks nothing dirty. */
+function writeCommitted(node: Node, value: unknown): void {
+  const backing = node.backing as R3Signal<unknown>
+  const changed = !sameValueZero(backing.value, value)
+  r3SetSignal(backing, value)
+  if (changed) invalidateDownstream(node, ROOT_SCOPE)
 }
 
 /** Speculative write: install a slot in `scope`, then mark every downstream
@@ -372,7 +385,7 @@ export function commit(scope: Scope): void {
   const parent = scope.parent ?? ROOT_SCOPE
   if (parent === ROOT_SCOPE) {
     for (const { node, value } of promotions) {
-      r3SetSignal(node.backing as R3Signal<unknown>, value)
+      writeCommitted(node, value)
     }
     fireSettle(scope, 'committed')
     stabilize()
