@@ -409,6 +409,7 @@ This document is the project. It holds the theory of pulse: why it is the way it
   - [`@spec a-commit-promotes-every-write-at-once`](#spec-a-commit-promotes-every-write-at-once) — When a speculation commits, all of its writes reach committed state together.
   - [`@spec a-commit-reaches-a-committed-consumer-as-one-change`](#spec-a-commit-reaches-a-committed-consumer-as-one-change) — A committed consumer sees a speculation's commit as one change, and re-runs once for it, where the same writes made outside a speculation reach it one by one.
   - [`@spec a-discard-leaves-no-trace`](#spec-a-discard-leaves-no-trace) — When a speculation is discarded, its writes vanish, and committed state is as if it never ran.
+    - [`@spec a-discard-closes-a-generator-the-speculation-was-driving`](#spec-a-discard-closes-a-generator-the-speculation-was-driving) — When a speculation is discarded, a generator stage it was driving past a pause is closed: its `finally` blocks run, and the code after its pause does not.
   - [`@spec a-discard-drops-what-was-derived-from-its-writes`](#spec-a-discard-drops-what-was-derived-from-its-writes) — When a speculation is discarded, every value derived from its writes vanishes with it, at any depth of derivation, and a read afterwards sees the value derived from committed state.
   - [`@spec a-failed-action-is-reported-not-thrown`](#spec-a-failed-action-is-reported-not-thrown) — An action whose body fails is discarded, and the error is reported through its handle. The caller never receives a throw or a rejection.
   - [`@spec a-speculation-announces-how-it-closed`](#spec-a-speculation-announces-how-it-closed) — A callback registered with `onSettled` fires once when its speculation closes, and is told whether the speculation committed or was discarded.
@@ -3351,6 +3352,10 @@ This follows because a speculation is discarded as one unit: everything it holds
 A write made after an `await` in an async action body is not one of the speculation's writes, so a discard does not remove it, as [the exception for such a write](#exception-a-write-after-an-await-escapes-the-speculation) states.
 
 A discard drops what the speculation holds. It never has to undo anything, because nothing reached committed state.
+
+#### @spec a-discard-closes-a-generator-the-speculation-was-driving
+
+> When a speculation is discarded, a generator stage it was driving past a pause is closed: its `finally` blocks run, and the code after its pause does not.
 
 ### @spec a-discard-drops-what-was-derived-from-its-writes
 

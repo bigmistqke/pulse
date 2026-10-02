@@ -238,7 +238,7 @@ test('sync, async and generator stages in one pipeline, committed from a nested 
     function* (n: number) {
       runs.generator.push(n)
       const label: string = yield* from(tick().then(() => `user ${n}`))
-      return label
+      return `${label}!` // differs from the value it paused on
     },
   )
   await ticks(4)
@@ -253,6 +253,37 @@ test('sync, async and generator stages in one pipeline, committed from a nested 
   await handle.settled
   await ticks(4)
 
-  expect(peek(user)).toBe('user 20')
+  expect(peek(user)).toBe('user 20!')
   expect(runs).toEqual({ sync: [1, 2], async: [1, 2], generator: [10, 20] })
+})
+
+/**
+ * @canon spec-a-discard-closes-a-generator-the-speculation-was-driving
+ */
+test('a discarded action closes the generator stage it was driving', async () => {
+  const [id, setId] = signal(1)
+  const log: string[] = []
+  const user = computed(function* () {
+    const current = id()
+    try {
+      const raw: string = yield* from(tick().then(() => `user ${current}`))
+      log.push(`after the pause ${current}`)
+      return raw
+    } finally {
+      log.push(`finally ${current}`)
+    }
+  })
+  await ticks(3)
+  log.length = 0
+
+  const handle = action(function* () {
+    setId(2)
+    user()
+    throw new Error('discarded')
+  })
+  await handle.settled
+  await ticks(3)
+
+  expect(log).toEqual(['finally 2'])
+  expect(peek(user)).toBe('user 1')
 })
