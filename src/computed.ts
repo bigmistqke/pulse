@@ -236,6 +236,17 @@ function makeStageNode(
   // attachment when the promise finally settles.
   let genOwnsSuspension = false
 
+  // A pipeline has one run in progress. While the stage before this one is
+  // running, this stage waits for it rather than running on the value that run
+  // is replacing. `waiting` is set while it does, and records whether this
+  // stage dropped a run of its own to wait. `lastRunDeps` are the dependencies,
+  // with their values, of the last run that went past the wait. When the
+  // upstream run lands, comparing them tells whether anything this stage reads
+  // changed, so a stage with nothing new to do does not run again.
+  let waiting: { dropped: boolean } | null = null
+  let lastRunDeps: DepRecord[] | null = null
+  let ranPastWait = false
+
   /**
    * End a generator: run its `finally` blocks if it has not already finished,
    * then its registered cleanups, most recently registered first. Untracked,
@@ -575,6 +586,44 @@ function makeStageNode(
         }
       }
 
+      // One run in progress: while the stage before this one is running, wait
+      // for it. A run of this stage now would be built from the value that run
+      // is replacing. A run of this stage already in flight is dropped, so it
+      // cannot publish once it lands.
+      const upstream = inputAccessor === null ? undefined : lookupPending(inputAccessor as Accessor<unknown>)
+      if (upstream !== undefined && upstream.pending()) {
+        if (waiting === null) {
+          waiting = {
+            dropped:
+              lastRunDeps === null ||
+              suspendedOn !== null ||
+              retainedGen !== null ||
+              stashedResolution !== null,
+          }
+        }
+        discardGen()
+        suspendedOn = null
+        suspendedInput = undefined
+        stashedResolution = null
+        // Keep what the stage read on its last run linked. A write can end the
+        // wait instead of the upstream run, and the stage must still hear a
+        // later change to its own dependencies.
+        if (lastRunDeps !== null) replayDeps(lastRunDeps)
+        setSuspended()
+        return null
+      }
+      if (waiting !== null) {
+        const { dropped } = waiting
+        waiting = null
+        // Nothing this stage reads changed while it waited, and it dropped no
+        // run of its own: the value it holds still answers its inputs.
+        if (!dropped && lastRunDeps !== null && !replayDeps(lastRunDeps)) {
+          setPendingSig(false)
+          return null
+        }
+      }
+      ranPastWait = true
+
       // Non-generator stages can stash a resolved value to consume on next
       // body invocation. (Generators have their own stash, `resumeWith` —
       // handled separately below, in the `retainedGen` branch — because a
@@ -844,6 +893,11 @@ function makeStageNode(
         failed(rethrown)
       }
       return null
+    } finally {
+      if (ranPastWait) {
+        ranPastWait = false
+        lastRunDeps = snapshotDeps(depTracker as R3Computed<unknown>, kickNode)
+      }
     }
   }, recordSourceReads) as null
 
@@ -1058,6 +1112,7 @@ function makeStageNode(
     suspendedOn = null
     suspendedInput = undefined
     stashedResolution = null
+    waiting = null
     setPendingSig(false)
     endRefresh()
   }

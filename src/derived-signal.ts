@@ -208,6 +208,11 @@ function signalFromStages(
         built[i].abandonRun()
         built[i].clearError()
       }
+      // Abandoning clears each stage's pending flag, and a stage reads the
+      // flag of the stage before it to wait for that stage's run. That queues
+      // the tail again, though the write has just supplied its value, so the
+      // queued run is withdrawn once more.
+      tail.withdrawQueuedRun(true)
 
       // Last, so nothing written here is touched again. A written promise
       // sets up its own suspension in the same field abandonRun just cleared.
