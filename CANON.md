@@ -88,7 +88,6 @@ This document is the project. It holds the theory of pulse: why it is the way it
     - [`@spec an-effect-runs-at-creation-and-after-each-change`](#spec-an-effect-runs-at-creation-and-after-each-change) — An effect runs once when it is created, wherever it is created, inside a running computation included, and again after each change to a source it read.
     - [`@spec several-writes-in-one-tick-re-run-an-effect-once`](#spec-several-writes-in-one-tick-re-run-an-effect-once) — Under the default scheduler, an effect does not re-run between a write and the end of the tick. Several writes in one tick re-run it once, with the last value. A read made between the writes does not change that: it brings the value it reads up to date, and runs nothing else.
     - [`@spec an-async-computed-is-revised-when-a-source-changes`](#spec-an-async-computed-is-revised-when-a-source-changes) — An async stage keeps following the sources it read after its promise settles, and runs again when one of them changes. A consumer then receives the new resolved value.
-    - [`@spec a-settled-promise-is-used-at-once-the-next-time-a-stage-runs`](#spec-a-settled-promise-is-used-at-once-the-next-time-a-stage-runs) — A promise that a stage saw pending, and that has settled since, is used at once the next time the stage runs. It does not suspend the stage again.
     - [`@spec writes-in-one-tick-chain-their-update-functions`](#spec-writes-in-one-tick-chain-their-update-functions) — Two writes in the same tick chain: the second update function receives the value the first one produced, and the last write is what the derivation holds.
     - [`@spec an-abandoned-stage-restarts-when-the-pipeline-is-next-pulled`](#spec-an-abandoned-stage-restarts-when-the-pipeline-is-next-pulled) — A stage whose run a write abandoned is left needing recomputation, not clean. When anything next pulls the pipeline up to date, that stage runs again and makes a fresh request.
     - [`@spec abandoning-a-paused-stage-runs-its-cleanups-after-the-write`](#spec-abandoning-a-paused-stage-runs-its-cleanups-after-the-write) — When a write abandons a paused generator stage, the cleanups that stage registered run, and they already see the written value.
@@ -100,6 +99,13 @@ This document is the project. It holds the theory of pulse: why it is the way it
       - [`@spec a-slot-caches-undefined-like-any-value`](#spec-a-slot-caches-undefined-like-any-value) — `scope.ts` `DIRTY`.
       - [`@spec a-recompute-replaces-its-links`](#spec-a-recompute-replaces-its-links) — `scope.ts` `resetSlotDeps`.
     - [`@spec a-derivation-runs-when-it-is-created`](#spec-a-derivation-runs-when-it-is-created) — A [derivation](#term-derivation) runs when it is created, wherever it is created, inside a running computation included.
+  - [`@spec a-promise-is-settled-from-the-moment-pulse-records-its-settle`](#spec-a-promise-is-settled-from-the-moment-pulse-records-its-settle) — Every reader in pulse takes a promise's state from the state pulse has recorded for it, at the moment it reads. Once pulse has recorded the settle, every reader uses the value or the failure at once, without waiting a further microtask.
+    - [`@spec a-settled-promise-is-used-at-once-the-next-time-a-stage-runs`](#spec-a-settled-promise-is-used-at-once-the-next-time-a-stage-runs) — A promise that a stage saw pending, and that has settled since, is used at once the next time the stage runs. It does not suspend the stage again.
+      - [`@spec the-driver-reads-settledness-from-the-promise-map`](#spec-the-driver-reads-settledness-from-the-promise-map) — `driver.ts` `runStage`.
+    - [`@spec a-written-promise-pulse-has-seen-settle-applies-at-the-write`](#spec-a-written-promise-pulse-has-seen-settle-applies-at-the-write) — A written promise whose settle pulse has already recorded is applied at the write. The derivation takes its value, or parks its failure, and never reports pending for it.
+    - [`@spec use-returns-a-settled-promises-value-at-once`](#spec-use-returns-a-settled-promises-value-at-once) — Once pulse has recorded a promise's settle, `use(promise)` returns its value synchronously, or throws its rejection reason.
+    - [`@spec a-published-result-reads-fulfilled-at-once`](#spec-a-published-result-reads-fulfilled-at-once) — `async.ts` `resolvedPromise`.
+    - [`@exception a-promise-pulse-has-not-seen-settle-is-pending`](#exception-a-promise-pulse-has-not-seen-settle-is-pending) — A promise whose settle pulse has not recorded yet is pending to every reader, even when it has already settled. The first `use` of `Promise.resolve(7)` throws `NotReadyYet`, and a stage that returns it suspends. A write of it reports pending.
   - [`@spec an-update-function-receives-the-last-resolved-value`](#spec-an-update-function-receives-the-last-resolved-value) — An update function on a writable derivation receives the last value that actually resolved, never a promise, and `undefined` when nothing has resolved yet.
   - [`@spec an-update-function-sees-the-value-a-sync-derivation-produced-at-creation`](#spec-an-update-function-sees-the-value-a-sync-derivation-produced-at-creation) — An update function on a sync derivation receives the value the derivation produced when it was created, even before any write, wherever the derivation was created. An async derivation that suspended has produced nothing yet.
 - [`@axiom nothing-is-hidden-from-the-code-that-uses-it`](#axiom-nothing-is-hidden-from-the-code-that-uses-it) — What a value is, including that it is still pending or has failed, is visible to the code that reads it, rather than smoothed over by the framework.
@@ -135,9 +141,6 @@ This document is the project. It holds the theory of pulse: why it is the way it
     - [`@spec a-use-suspended-stage-reads-as-its-promise-until-it-settles`](#spec-a-use-suspended-stage-reads-as-its-promise-until-it-settles) — While a sync stage that suspended through `use` waits on a first load, the pipeline reads as the promise in flight. Once that promise settles, the sync stage publishes its bare value.
     - [`@spec a-promise-carries-its-state-in-one-weakmap`](#spec-a-promise-carries-its-state-in-one-weakmap) — The status, value, rejection reason and stale prior of a promise live in one `WeakMap` keyed on the promise. The promise itself carries nothing extra.
       - [`@spec track-seeds-the-stale-prior`](#spec-track-seeds-the-stale-prior) — `async.ts` `track`.
-      - [`@spec a-published-result-reads-fulfilled-at-once`](#spec-a-published-result-reads-fulfilled-at-once) — `async.ts` `resolvedPromise`.
-      - [`@spec the-driver-reads-settledness-from-the-promise-map`](#spec-the-driver-reads-settledness-from-the-promise-map) — `driver.ts` `runStage`.
-    - [`@spec use-treats-a-promise-it-has-not-seen-settle-as-pending`](#spec-use-treats-a-promise-it-has-not-seen-settle-as-pending) — A promise whose settle `use` has not yet recorded is pending to it, even when the promise has already settled: the first `use` of `Promise.resolve(7)` throws `NotReadyYet`. Once the settle is recorded, `use` returns the value synchronously.
     - [`@spec a-construction-default-leaves-the-raw-read-a-promise`](#spec-a-construction-default-leaves-the-raw-read-a-promise) — With `signal(fn, default)`, the raw read is still a pending promise until the derivation first resolves.
     - [`@spec pending-follows-where-a-value-came-from`](#spec-pending-follows-where-a-value-came-from) — A node is pending when any stage upstream of it is pending, or when a source its value was read from is. `promiseOf` returns the nearest promise in flight along the same path.
     - [`@spec is-pending-reports-an-unsettled-pipeline`](#spec-is-pending-reports-an-unsettled-pipeline) — `isPending(c)` is true while any stage of the pipeline is waiting on a promise, on the first load and during a revision, and `promiseOf(c)` returns that promise. A [refresh](#term-refresh) is not pending: it leaves `isPending(c)` false. Both clear when it settles.
@@ -275,7 +278,6 @@ This document is the project. It holds the theory of pulse: why it is the way it
     - [`@spec a-write-clears-a-parked-failure`](#spec-a-write-clears-a-parked-failure) — A write to a derivation holding a parked failure clears the failure, whichever stage of the pipeline it was parked on.
     - [`@spec an-update-function-that-throws-cancels-nothing`](#spec-an-update-function-that-throws-cancels-nothing) — If an update function throws, the write does not happen, and a recompute that was queued before it still runs.
     - [`@spec a-written-promise-is-published-like-a-produced-one`](#spec-a-written-promise-is-published-like-a-produced-one) — A promise written into a derivation is its value: pending until it settles, then the resolved value, or a parked failure if it rejects.
-      - [`@spec a-written-promise-pulse-has-seen-settle-applies-at-the-write`](#spec-a-written-promise-pulse-has-seen-settle-applies-at-the-write) — A written promise whose settle pulse has already recorded is applied at the write. The derivation takes its value, or parks its failure, and never reports pending for it. A promise whose settle pulse has not recorded yet is pending until the settle is recorded, even a fresh `Promise.resolve(7)`.
     - [`@spec the-handle-reports-its-newest-attempt`](#spec-the-handle-reports-its-newest-attempt) — An action's handle reports only its newest attempt: `settled` is a promise for that attempt, and an older attempt that settles after a newer one started changes nothing.
     - [`@spec retry-runs-the-action-again-as-a-new-speculation`](#spec-retry-runs-the-action-again-as-a-new-speculation) — `retry()` runs the action's body again from the start as a new speculation, and clears `error()` at once, before the new attempt has settled.
   - [`@axiom speculation-is-opt-in`](#axiom-speculation-is-opt-in) — A speculation exists only inside an explicit scope. Outside one, a write commits at once.
@@ -423,6 +425,7 @@ This document is the project. It holds the theory of pulse: why it is the way it
     - [`@spec a-write-records-its-node-for-promotion`](#spec-a-write-records-its-node-for-promotion) — `scope.ts` `writeSlot`.
     - [`@spec closing-a-scope-unlinks-it-from-its-sources`](#spec-closing-a-scope-unlinks-it-from-its-sources) — `scope.ts` `closeScopeEdges`.
     - [`@spec a-node-only-read-is-not-promoted`](#spec-a-node-only-read-is-not-promoted) — `scope.ts` `commit`.
+- [`@fact a-promise-reports-its-state-only-through-a-callback`](#fact-a-promise-reports-its-state-only-through-a-callback) — A JavaScript promise offers no synchronous way to read whether it has settled, or its value. Its state reaches other code only through a callback passed to `then`. That callback runs at least a microtask after it is attached, even for a promise that has already settled.
 - [`@fact no-context-survives-an-await`](#fact-no-context-survives-an-await) — In browsers, no context set around a call reaches the code that runs after an `await` inside it. The proposal [`AsyncContext`](https://github.com/tc39/proposal-async-context) would carry one across, but browsers do not ship it yet.
 - [`@fact only-a-generator-can-be-resumed`](#fact-only-a-generator-can-be-resumed) — In JavaScript, only a generator can pause and be resumed where it paused by the code that drives it. A function that throws has ended, and an async function resumes after an `await` on its own, later and outside the call that started it.
 - [`@fact javascript-has-no-context-scoped-to-a-call`](#fact-javascript-has-no-context-scoped-to-a-call) — JavaScript has no way to hand a value to everything one call runs, other than state shared by every call, set before the call and read during it.
@@ -981,14 +984,6 @@ Derives from: [`axiom-async-is-acknowledged-not-hidden`](#axiom-async-is-acknowl
 
 This follows because a read must be consistent with every write so far, and an async node is still a node of the graph: when a source of an async stage changes, the stage runs again, settled promise or not.
 
-#### @spec a-settled-promise-is-used-at-once-the-next-time-a-stage-runs
-
-> A promise that a stage saw pending, and that has settled since, is used at once the next time the stage runs. It does not suspend the stage again.
-
-Derives from: [`spec-a-promise-carries-its-state-in-one-weakmap`](#spec-a-promise-carries-its-state-in-one-weakmap)
-
-This follows because a promise's settled state is recorded where pulse can read it synchronously, and a read returns the current value synchronously: a settled promise's result is current, so the stage uses it at once.
-
 #### @spec writes-in-one-tick-chain-their-update-functions
 
 > Two writes in the same tick chain: the second update function receives the value the first one produced, and the last write is what the derivation holds.
@@ -1072,6 +1067,58 @@ Derives from: [`fact-r3-rebuilds-dependencies-each-run-and-ignores-an-equal-writ
 This follows because a read is current the moment it is made: a derivation that put off its first run would give a read made right after its creation nothing to return.
 
 r3 puts off the first run of a computed created inside a running computation that has already read something. Pulse creates its derivations with no computation running, so they run at once.
+
+### @spec a-promise-is-settled-from-the-moment-pulse-records-its-settle
+
+> Every reader in pulse takes a promise's state from the state pulse has recorded for it, at the moment it reads. Once pulse has recorded the settle, every reader uses the value or the failure at once, without waiting a further microtask.
+
+Derives from: [`spec-a-promise-carries-its-state-in-one-weakmap`](#spec-a-promise-carries-its-state-in-one-weakmap)
+
+This follows because code sees the present. Once pulse knows a promise has settled, its value is part of the present, and a reader that waited longer would see a past state.
+
+The readers are a stage that returns or yields the promise, a write of the promise, `use`, and the pending verbs. Each one refines this spec below, and a new reader follows the same rule.
+
+#### @spec a-settled-promise-is-used-at-once-the-next-time-a-stage-runs
+
+> A promise that a stage saw pending, and that has settled since, is used at once the next time the stage runs. It does not suspend the stage again.
+
+This follows because the stage reads the promise's recorded state when it runs, and that state is settled.
+
+##### @spec the-driver-reads-settledness-from-the-promise-map
+
+> `driver.ts` `runStage`.
+
+The driver decides whether a returned or yielded promise has settled by reading the same map. Read state and the driver's memory of settled promises are one mechanism: a promise the map records as fulfilled is used at once, even on the first run that sees it.
+
+#### @spec a-written-promise-pulse-has-seen-settle-applies-at-the-write
+
+> A written promise whose settle pulse has already recorded is applied at the write. The derivation takes its value, or parks its failure, and never reports pending for it.
+
+Derives from: [`spec-a-written-promise-is-published-like-a-produced-one`](#spec-a-written-promise-is-published-like-a-produced-one)
+
+This follows because the write reads the promise's recorded state at the write, and that state is settled.
+
+A refresh that an action waited for before it committed relies on this. Its answer is recorded by the commit, so the derivation takes it at the commit.
+
+#### @spec use-returns-a-settled-promises-value-at-once
+
+> Once pulse has recorded a promise's settle, `use(promise)` returns its value synchronously, or throws its rejection reason.
+
+This follows because `use` reads the promise's recorded state when it is called, and that state is settled.
+
+#### @spec a-published-result-reads-fulfilled-at-once
+
+> `async.ts` `resolvedPromise`.
+
+The promise pulse publishes when an async stage settles is recorded fulfilled the moment it is made, so a synchronous read reports its value without waiting a microtask. A promise pulse makes itself never falls under the exception below.
+
+#### @exception a-promise-pulse-has-not-seen-settle-is-pending
+
+> A promise whose settle pulse has not recorded yet is pending to every reader, even when it has already settled. The first `use` of `Promise.resolve(7)` throws `NotReadyYet`, and a stage that returns it suspends. A write of it reports pending.
+
+Derives from: [`fact-a-promise-reports-its-state-only-through-a-callback`](#fact-a-promise-reports-its-state-only-through-a-callback)
+
+Pulse records a settle in the callback it attaches to the promise. That callback runs a microtask after it is attached at the earliest. Until it runs, pulse cannot know the promise settled.
 
 ### @spec an-update-function-receives-the-last-resolved-value
 
@@ -1213,6 +1260,8 @@ This follows because code sees the present: an answer that went stale without th
 
 > A signal holding a plain value is never pending, and its `promiseOf` is `null`. A signal holding a promise is pending until that promise settles, and `promiseOf` returns it while it is.
 
+Derives from: [`spec-a-promise-is-settled-from-the-moment-pulse-records-its-settle`](#spec-a-promise-is-settled-from-the-moment-pulse-records-its-settle)
+
 This follows because pending is a question about what is there: a signal holding a plain value has nothing in flight, and one holding a promise is in flight until that promise settles.
 
 #### @spec a-read-through-latest-or-use-carries-loading-state-into-its-reader
@@ -1325,37 +1374,15 @@ This follows because a sync stage that suspends through `use` waits on a promise
 
 > The status, value, rejection reason and stale prior of a promise live in one `WeakMap` keyed on the promise. The promise itself carries nothing extra.
 
-Derives from: [`spec-an-async-node-reads-as-a-plain-promise`](#spec-an-async-node-reads-as-a-plain-promise)
+Derives from: [`spec-an-async-node-reads-as-a-plain-promise`](#spec-an-async-node-reads-as-a-plain-promise), [`fact-a-promise-reports-its-state-only-through-a-callback`](#fact-a-promise-reports-its-state-only-through-a-callback)
 
-This follows because an async node reads as a plain promise, and a value with a future must still say so: a plain promise has no fields for status or value, so that state lives outside it, keyed on it.
+This follows because an async node reads as a plain promise, and a value with a future must still say so. A promise exposes no state synchronously, so pulse records the state outside it, keyed on it.
 
 ##### @spec track-seeds-the-stale-prior
 
 > `async.ts` `track`.
 
 The first time a promise is seen, it is recorded as pending, carrying the prior value it replaces, so a tolerant read of a pending promise can still return that prior. A later `track` of the same promise returns the recorded state unchanged.
-
-##### @spec a-published-result-reads-fulfilled-at-once
-
-> `async.ts` `resolvedPromise`.
-
-The promise pulse publishes when an async stage settles is recorded fulfilled the moment it is made, so a synchronous read reports its value without waiting a microtask.
-
-##### @spec the-driver-reads-settledness-from-the-promise-map
-
-> `driver.ts` `runStage`.
-
-The driver decides whether a returned or yielded promise has settled by reading the same map. Read state and the driver's memory of settled promises are one mechanism: a promise the map records as fulfilled is used at once, even on the first run that sees it.
-
-#### @spec use-treats-a-promise-it-has-not-seen-settle-as-pending
-
-> A promise whose settle `use` has not yet recorded is pending to it, even when the promise has already settled: the first `use` of `Promise.resolve(7)` throws `NotReadyYet`. Once the settle is recorded, `use` returns the value synchronously.
-
-Derives from: [`spec-a-promise-carries-its-state-in-one-weakmap`](#spec-a-promise-carries-its-state-in-one-weakmap)
-
-This follows because an async value is read through its recorded state, and a promise carries its state only in pulse's map, which records it as pending when first seen: until the settle is recorded, `use` sees pending.
-
-A promise carries no readable state of its own. Its state is recorded when its settle callback runs, which is always at least a microtask after the promise is first seen.
 
 #### @spec a-construction-default-leaves-the-raw-read-a-promise
 
@@ -2347,16 +2374,6 @@ This follows because only a production cancels an earlier one: an update functio
 Derives from: [`axiom-async-is-acknowledged-not-hidden`](#axiom-async-is-acknowledged-not-hidden)
 
 This follows because a direct write and a dependency change are both productions of the derived value, and a value that has a future says so: a written promise is published exactly as a produced promise would be.
-
-##### @spec a-written-promise-pulse-has-seen-settle-applies-at-the-write
-
-> A written promise whose settle pulse has already recorded is applied at the write. The derivation takes its value, or parks its failure, and never reports pending for it. A promise whose settle pulse has not recorded yet is pending until the settle is recorded, even a fresh `Promise.resolve(7)`.
-
-Derives from: [`spec-a-promise-carries-its-state-in-one-weakmap`](#spec-a-promise-carries-its-state-in-one-weakmap)
-
-This follows because a written promise is published like a produced one, and settledness is the state pulse records for the promise. Once the settle is recorded, the value is here, and pending would say it is not.
-
-The same holds for a promise a stage reads ([`spec-a-settled-promise-is-used-at-once-the-next-time-a-stage-runs`](#spec-a-settled-promise-is-used-at-once-the-next-time-a-stage-runs)). A refresh that an action waited for before it committed relies on this. Its answer is recorded by the commit, so the derivation takes it at the commit.
 
 #### @spec the-handle-reports-its-newest-attempt
 
@@ -3439,6 +3456,12 @@ Closing a scope, on a commit or a discard, removes its links from the sources th
 > `scope.ts` `commit`.
 
 A computed that the speculation only read is not in its write set, so the commit leaves the computed alone, and it recomputes from the promoted values.
+
+## @fact a-promise-reports-its-state-only-through-a-callback
+
+> A JavaScript promise offers no synchronous way to read whether it has settled, or its value. Its state reaches other code only through a callback passed to `then`. That callback runs at least a microtask after it is attached, even for a promise that has already settled.
+
+This is a fact of the language, not a choice. It decides when pulse can know that a promise has settled, and why that state lives in a map pulse keeps.
 
 ## @fact no-context-survives-an-await
 

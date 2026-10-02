@@ -843,7 +843,7 @@ test('W6: a written promise pulse has seen settle applies at the write', async (
 })
 
 /**
- * @canon spec-a-written-promise-pulse-has-seen-settle-applies-at-the-write
+ * @canon exception-a-promise-pulse-has-not-seen-settle-is-pending
  */
 test('W6: a settled promise pulse has not seen settle is pending until its settle is recorded', async () => {
   const [todos, setTodos] = signal(function* () {

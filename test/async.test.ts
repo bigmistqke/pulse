@@ -5,6 +5,7 @@ import { effect } from '../src/effect'
 import { flush, microtaskScheduler, setScheduler, syncScheduler } from '../src/scheduler'
 import { computed } from '../src/computed'
 import { signal } from '../src/signal'
+import { signal as derivedSignal } from '../src/derived-signal'
 
 /** Resolve after all microtasks have drained (a macrotask boundary). */
 const tick = () => new Promise<void>((resolve) => setTimeout(resolve))
@@ -256,7 +257,33 @@ test('the thrown NotReadyYet carries the promise', () => {
 })
 
 /**
- * @canon spec-use-treats-a-promise-it-has-not-seen-settle-as-pending
+ * @canon spec-a-promise-is-settled-from-the-moment-pulse-records-its-settle
+ */
+test('every reader takes a promise whose settle pulse recorded at once, on first contact', async () => {
+  const [written, setWritten] = derivedSignal(function* () {
+    return yield* from(Promise.resolve(0))
+  })
+  const p = Promise.resolve(7)
+  track(p)
+  await tick() // pulse records the settle; no reader below has seen p yet
+
+  expect(use(p)).toBe(7)
+
+  const [held] = signal<unknown>(p)
+  expect(isPending(held)).toBe(false)
+
+  const returned = computed(() => p)
+  expect(isPending(returned)).toBe(false)
+  expect(use(returned)).toBe(7)
+
+  setWritten(p)
+  expect(isPending(written)).toBe(false)
+  expect(use(written)).toBe(7)
+})
+
+/**
+ * @canon spec-use-returns-a-settled-promises-value-at-once
+ * @canon exception-a-promise-pulse-has-not-seen-settle-is-pending
  */
 test('use resolves a promise synchronously once it has settled', async () => {
   const p = Promise.resolve(7)

@@ -213,8 +213,15 @@ test('a throwing listener does not stop the next one', () => {
 
 ## 16. Structure
 
-1. Change the canon's structure only for a defect that points to it, or for a claim that no unit states.
-2. Never reorganise the canon for its own sake. Nothing pushes back on a reorganisation, because no test cites an axiom or a fact.
+1. The canon is a living document. While the code is written, the project works towards its theory, and the canon's structure changes as that theory grows.
+2. Restructure the canon whenever a new structure makes the derivations flow more strongly. Signs of a stronger flow:
+   1. More units follow from fewer parents.
+   2. A missing fact or parent spec turns scattered units into refinements of one claim.
+   3. A unit that stood alone as a spec becomes an exception, and shows where a fact pinches.
+   4. A "This follows because" sentence gets shorter, because its parent now forces it.
+3. The canon is a program that you run when you make a decision. A stronger flow gives stronger guidance, in the canon and in the code that expresses it. Treat such a restructure as an optimisation, and look for one.
+4. A restructure removes no test. Each test that cites a moved or renamed unit cites its new id.
+5. A restructure changes no behaviour. If it shows a claim that the code breaks, follow section 5.
 
 ## 17. Scope
 

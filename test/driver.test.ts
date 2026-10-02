@@ -23,6 +23,7 @@ test('sync stage returning a pending promise -> suspended', () => {
 
 /**
  * @canon spec-a-settled-promise-is-used-at-once-the-next-time-a-stage-runs
+ * @canon exception-a-promise-pulse-has-not-seen-settle-is-pending
  */
 test('sync stage returning a settled promise -> resolved synchronously on second call', async () => {
   const p = Promise.resolve(7)
@@ -76,6 +77,7 @@ test('generator stage yielding a pending promise -> suspended', () => {
 
 /**
  * @canon spec-a-settled-promise-is-used-at-once-the-next-time-a-stage-runs
+ * @canon exception-a-promise-pulse-has-not-seen-settle-is-pending
  */
 test('generator stage: settled promise resolves synchronously on re-call', async () => {
   const p = Promise.resolve(42)
