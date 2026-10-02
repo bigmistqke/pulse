@@ -269,7 +269,10 @@ This document is the project. It holds the theory of pulse: why it is the way it
     - [`@spec a-promise-list-reads-as-empty`](#spec-a-promise-list-reads-as-empty) — A list that is a promise counts as an empty list, whether the promise is pending or settled: `mapArray` returns no entries, and `For` renders its fallback.
   - [`@axiom the-latest-production-wins`](#axiom-the-latest-production-wins) — A derived value shows whatever produced it last — a dependency change or a direct write — and a production that was started earlier never publishes over a later one.
     - [`@spec a-write-replaces-a-derived-value-without-rerunning-it`](#spec-a-write-replaces-a-derived-value-without-rerunning-it) — A write to a writable derivation replaces its value at once, and the body does not run again because of it.
-    - [`@spec a-write-abandons-the-run-in-progress`](#spec-a-write-abandons-the-run-in-progress) — A write abandons every stage's run in progress, a fetch in flight or a paused generator, in whichever stage it is, and the abandoned run never publishes.
+    - [`@spec a-pipeline-has-one-run-in-progress`](#spec-a-pipeline-has-one-run-in-progress) — Outside a speculation, a pipeline has at most one run in progress, and that run passes through the stages in order. No stage publishes a value built from an input that the run in progress is replacing.
+      - [`@spec a-change-ahead-of-the-run-is-taken-up-when-the-run-reaches-it`](#spec-a-change-ahead-of-the-run-is-taken-up-when-the-run-reaches-it) — A change to what a stage reads, made while the run in progress has not yet reached that stage, starts no run of its own. The stage reads the changed value when the run reaches it.
+      - [`@spec a-change-behind-the-run-restarts-the-run-from-that-stage`](#spec-a-change-behind-the-run-restarts-the-run-from-that-stage) — A change to what a stage reads, made after the run in progress has passed that stage, abandons the run from that stage on. The run starts again at that stage.
+      - [`@spec a-write-abandons-the-run-in-progress`](#spec-a-write-abandons-the-run-in-progress) — A write abandons every stage's run in progress, a fetch in flight or a paused generator, in whichever stage it is, and the abandoned run never publishes.
     - [`@spec a-write-withdraws-a-recompute-queued-in-the-same-tick`](#spec-a-write-withdraws-a-recompute-queued-in-the-same-tick) — A recompute queued earlier in the same tick as a write is withdrawn before it starts, so it makes no request, also when the write is an update function.
     - [`@spec a-write-from-inside-the-derivation-abandons-its-own-run-without-raising`](#spec-a-write-from-inside-the-derivation-abandons-its-own-run-without-raising) — A write made from inside the derivation's own body abandons that run without raising, and the cleanups the run registered still run.
     - [`@spec a-dependency-change-after-a-write-takes-over`](#spec-a-dependency-change-after-a-write-takes-over) — When a source the derivation reads changes after a write, the derivation runs again and its result replaces the written value. This holds when the change comes in the same tick as the write, and when the written value is a promise that has not settled.
@@ -2315,7 +2318,29 @@ This follows because a derived value shows whatever produced it last, and a dire
 
 The write leaves the derivation following the same sources; what happens when one of them changes is [the dependency spec](#spec-a-dependency-change-after-a-write-takes-over).
 
-#### @spec a-write-abandons-the-run-in-progress
+#### @spec a-pipeline-has-one-run-in-progress
+
+> Outside a speculation, a pipeline has at most one run in progress, and that run passes through the stages in order. No stage publishes a value built from an input that the run in progress is replacing.
+
+This follows because a production started earlier never publishes over a later one. A stage that ran on its own, beside the run in progress, would publish from an earlier production of its input.
+
+Inside an action, a read of the pipeline runs [in a slot of the action's scope](#spec-a-speculative-read-recomputes-into-a-slot-of-its-scope), beside the committed run.
+
+##### @spec a-change-ahead-of-the-run-is-taken-up-when-the-run-reaches-it
+
+> A change to what a stage reads, made while the run in progress has not yet reached that stage, starts no run of its own. The stage reads the changed value when the run reaches it.
+
+This follows because the run in progress reaches the stage anyway. A run of the stage before then would use the input that the run is replacing.
+
+So while a fetch in an early stage is in flight, a change read by a later stage waits for the fetch. The pipeline keeps its last value and reports pending until the run reaches the end.
+
+##### @spec a-change-behind-the-run-restarts-the-run-from-that-stage
+
+> A change to what a stage reads, made after the run in progress has passed that stage, abandons the run from that stage on. The run starts again at that stage.
+
+This follows because the run's work from that stage on rests on the value that the change replaces. That work is the earlier production.
+
+##### @spec a-write-abandons-the-run-in-progress
 
 > A write abandons every stage's run in progress, a fetch in flight or a paused generator, in whichever stage it is, and the abandoned run never publishes.
 
