@@ -84,7 +84,7 @@ Tests cannot tell an extension from a patch, because many implementations pass t
 2. Write the test that the defect breaks, and see it fail.
 3. Find the spec that covers the situation. If none does, a spec is missing or states too much.
 4. Find the axiom or fact that decides the spec. If none does, one is missing. Ask the owner of the design.
-5. Write what is missing from the top down: axiom or fact, then spec, then test.
+5. Write what is missing from the top down: axiom or fact, then spec. Make the test from step 2 cite the spec.
 6. Fix the code.
 
 ## 5. Exploring
