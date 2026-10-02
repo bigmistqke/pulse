@@ -2357,6 +2357,8 @@ This follows because the run's work from that stage on rests on the value that t
 
 This follows because a production started earlier never publishes over a later one: a run started before the write is the earlier production, so it is abandoned.
 
+So a write during a first load overrides the load: `setTodos(saved)` abandons the fetch, and the written value stays until something the pipeline reads changes. To show a saved value only until the load lands, give it to the read instead, as `latest(todos, saved)`, which [returns the fallback until a value resolves](#spec-peek-returns-a-given-fallback-until-a-value-resolves).
+
 #### @spec a-write-withdraws-a-recompute-queued-in-the-same-tick
 
 > A recompute queued earlier in the same tick as a write is withdrawn before it starts, so it makes no request, also when the write is an update function.
