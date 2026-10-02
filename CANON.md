@@ -97,6 +97,7 @@ This document is the project. It holds the theory of pulse: why it is the way it
     - [`@spec speculative-derivation-is-pulled-on-read`](#spec-speculative-derivation-is-pulled-on-read) — Under a speculation, a computed is recomputed when it is read, into a slot of that scope, and a write only marks the affected slots dirty.
       - [`@spec a-speculative-read-recomputes-into-a-slot-of-its-scope`](#spec-a-speculative-read-recomputes-into-a-slot-of-its-scope) — Reading a computed under a speculation runs its recipe into a slot of that scope, and links each source the recipe read to that slot.
       - [`@spec a-speculative-write-dirties-what-derives-from-it`](#spec-a-speculative-write-dirties-what-derives-from-it) — A write marks every speculative slot that derives from the written node dirty, directly or through other slots, so its next read recomputes.
+      - [`@spec a-committed-write-dirties-what-open-speculations-derived`](#spec-a-committed-write-dirties-what-open-speculations-derived) — A write that reaches committed state marks dirty every slot of an open speculation that derives from the written node. Code outside every speculation makes such a write, and so does a commit when it promotes a write. A slot is spared when a scope in its speculation's chain wrote the node itself. The speculation's next read recomputes the slot from the new committed value.
       - [`@spec a-slot-caches-undefined-like-any-value`](#spec-a-slot-caches-undefined-like-any-value) — A dirty slot is marked with its own symbol, not with `undefined`, so a recipe that returns `undefined` is cached and not run again on every read, and still recomputes once a write dirties it.
       - [`@spec a-recompute-replaces-its-links`](#spec-a-recompute-replaces-its-links) — Before a slot is recomputed, its existing links are removed from their sources, so links do not pile up across recomputes.
     - [`@spec a-derivation-runs-when-it-is-created`](#spec-a-derivation-runs-when-it-is-created) — A [derivation](#term-derivation) runs when it is created, wherever it is created, inside a running computation included.
@@ -1059,6 +1060,14 @@ Site: `scope.ts:readValue`
 > A write marks every speculative slot that derives from the written node dirty, directly or through other slots, so its next read recomputes.
 
 Site: `scope.ts:invalidateDownstream`
+
+##### @spec a-committed-write-dirties-what-open-speculations-derived
+
+> A write that reaches committed state marks dirty every slot of an open speculation that derives from the written node. Code outside every speculation makes such a write, and so does a commit when it promotes a write. A slot is spared when a scope in its speculation's chain wrote the node itself. The speculation's next read recomputes the slot from the new committed value.
+
+Derives from: [`spec-a-scope-reads-through-its-chain`](#spec-a-scope-reads-through-its-chain)
+
+This follows because committed state is the root of every speculation's chain, so a speculation reads a committed write directly. What it derived from the written node must follow that write too. Otherwise a read inside it would mix the new value with a result derived from the old one.
 
 ##### @spec a-slot-caches-undefined-like-any-value
 

@@ -646,3 +646,70 @@ test('action() moves a claim back to a nearer boundary once a retry fails with a
   expect(spy).toHaveBeenCalledTimes(1)
   spy.mockRestore()
 })
+
+/**
+ * @canon spec-a-committed-write-dirties-what-open-speculations-derived
+ */
+test('a write outside every action reaches what an open action derived from it', async () => {
+  // Inside the action, `lang` reads the committed write directly. A `user`
+  // still derived from the old `lang` would show a state no write produced.
+  const [id, setId] = signal(1)
+  const [lang, setLang] = signal('en')
+  const user = computed(() => `${id()}-${lang()}`)
+  const seen: string[] = []
+
+  const handle = action(function* () {
+    setId(2)
+    seen.push(user())
+    yield* from(tick())
+    seen.push(lang(), user())
+  })
+  setLang('nl') // outside every action, while the action is paused
+
+  await handle.settled
+  expect(seen).toEqual(['2-en', 'nl', '2-nl'])
+  expect(user()).toBe('2-nl')
+})
+
+/**
+ * @canon spec-a-committed-write-dirties-what-open-speculations-derived
+ */
+test('a sibling action committing reaches what an open action derived from what it wrote', async () => {
+  const [id, setId] = signal(1)
+  const [lang, setLang] = signal('en')
+  const user = computed(() => `${id()}-${lang()}`)
+  const seen: string[] = []
+
+  const handle = action(function* () {
+    setId(2)
+    seen.push(user())
+    yield* from(tick())
+    seen.push(user())
+  })
+  action(() => {
+    setLang('nl') // a sibling that commits while the first action is paused
+  })
+
+  await handle.settled
+  expect(seen).toEqual(['2-en', '2-nl'])
+})
+
+/**
+ * @canon spec-a-committed-write-dirties-what-open-speculations-derived
+ */
+test('a committed write leaves an open action its own write to the same node', async () => {
+  const [lang, setLang] = signal('en')
+  const shout = computed(() => lang().toUpperCase())
+  const seen: string[] = []
+
+  const handle = action(function* () {
+    setLang('de')
+    seen.push(shout())
+    yield* from(tick())
+    seen.push(shout())
+  })
+  setLang('nl') // outside, to a node the action wrote itself
+
+  await handle.settled
+  expect(seen).toEqual(['DE', 'DE'])
+})
