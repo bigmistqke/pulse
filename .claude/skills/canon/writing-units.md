@@ -69,10 +69,12 @@ This follows because a missing value sets nothing: …
 2. If a nested axiom can only say "this follows because", its parent forces it. Make it a spec.
 3. A root axiom must decide at least one real choice between two designs that both work.
 4. A nested spec refines its parent: it states one part of the parent more concretely.
-5. A spec that follows from another spec without refining it sits under its axiom. It names the other spec on its `Derives from:` line.
-6. A parent spec owes a test of its own. Its nested specs do not cover it.
-7. Use these heading levels: a root `##`, a nested axiom `###`, a spec `####`, its refinements and exceptions `#####`, one level more `######`.
-8. A unit that would sit deeper than six levels names its parent on its `Derives from:` line instead.
+5. A leaf spec makes one claim, about one case. A spec that claims over several cases, with "every", "any", "each", "always" or a list of cases, is a parent. It names its cases, and holds one nested spec for each. Each nested spec states its case as a single claim, with a test of its own.
+6. A test of one case says nothing about the others. A spec that claims over cases and has tests for only some of them is a claim that nothing checks.
+7. A spec that follows from another spec without refining it sits under its axiom. It names the other spec on its `Derives from:` line.
+8. A parent spec owes a test of its own. Its nested specs do not cover it. For a spec that claims over cases, that test makes its cases meet in one scenario, and checks that they do not interfere.
+9. Use these heading levels: a root `##`, a nested axiom `###`, a spec `####`, its refinements and exceptions `#####`, one level more `######`.
+10. A unit that would sit deeper than six levels names its parent on its `Derives from:` line instead.
 
 ## 5. Facts and exceptions
 
