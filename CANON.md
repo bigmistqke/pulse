@@ -404,6 +404,7 @@ This document is the project. It holds the theory of pulse: why it is the way it
   - [`@spec a-speculative-write-stays-out-of-committed-state`](#spec-a-speculative-write-stays-out-of-committed-state) — A write inside a speculation is invisible to committed state until the speculation commits: a reader outside the speculation, and `committed(x)` called anywhere, inside the speculation included, keep seeing the committed value.
     - [`@spec a-prediction-shows-outside-its-action`](#spec-a-prediction-shows-outside-its-action) — A write through an optimistic setter is shown to readers outside every action while its action is open. While several actions have predictions live, readers outside every action see the most recent one.
   - [`@spec a-speculation-reads-its-own-writes`](#spec-a-speculation-reads-its-own-writes) — Inside a speculation, every read sees the speculation's writes, directly and through any number of derivations, chains of computeds and pipeline stages included.
+    - [`@spec a-generator-stage-read-in-a-speculation-gives-its-result`](#spec-a-generator-stage-read-in-a-speculation-gives-its-result) — Inside a speculation, a generator stage that pauses runs on to its end within the speculation, and a read of it gives the value it returns, not a value it paused on. What it reads after a pause is read inside the speculation.
   - [`@spec an-update-function-inside-a-speculation-sees-its-earlier-writes`](#spec-an-update-function-inside-a-speculation-sees-its-earlier-writes) — An update function called inside a speculation receives as its previous value the speculation's own latest write, or the committed value when the speculation has not written yet.
   - [`@spec a-commit-promotes-every-write-at-once`](#spec-a-commit-promotes-every-write-at-once) — When a speculation commits, all of its writes reach committed state together.
   - [`@spec a-commit-reaches-a-committed-consumer-as-one-change`](#spec-a-commit-reaches-a-committed-consumer-as-one-change) — A committed consumer sees a speculation's commit as one change, and re-runs once for it, where the same writes made outside a speculation reach it one by one.
@@ -426,12 +427,19 @@ This document is the project. It holds the theory of pulse: why it is the way it
     - [`@spec a-scope-chain-runs-from-the-scope-to-the-root`](#spec-a-scope-chain-runs-from-the-scope-to-the-root) — The chain lists the scope itself first, then each parent in turn, and ends at the root.
     - [`@spec a-read-takes-the-nearest-slot-in-the-chain`](#spec-a-read-takes-the-nearest-slot-in-the-chain) — The first scope in the chain with a slot for the node answers, so a slot in a more specific scope shadows the same node's slot further up. With no slot anywhere in the chain, the read finds nothing and falls through.
     - [`@spec entering-a-scope-restores-the-previous-one-even-on-a-throw`](#spec-entering-a-scope-restores-the-previous-one-even-on-a-throw) — The ambient scope is the root until a scope is entered. Entering a scope sets it, and the scope that was ambient before is restored when the call returns or throws.
-  - [`@spec a-commit-promotes-what-the-speculation-derived`](#spec-a-commit-promotes-what-the-speculation-derived) — A commit promotes the speculation's writes and every derived result it holds that is still clean. A committed derivation takes such a result and does not run again for the commit. A derived result that a later write left dirty is dropped, and its derivation runs from committed state.
+  - [`@spec a-commit-promotes-what-the-speculation-derived`](#spec-a-commit-promotes-what-the-speculation-derived) — A commit promotes the speculation's writes and the derived results it holds that are still clean, to committed state or, for a nested speculation, to its parent. A derived result that a later write left dirty is dropped, and its derivation runs again.
     - [`@spec a-write-records-its-node-for-promotion`](#spec-a-write-records-its-node-for-promotion) — Writing a slot records the node in the scope's write set, which is what a commit promotes.
     - [`@spec closing-a-scope-unlinks-it-from-its-sources`](#spec-closing-a-scope-unlinks-it-from-its-sources) — Closing a scope, on a commit or a discard, removes its links from the sources they listened to, drops its slots, clears its write and read sets, and detaches it from its parent.
     - [`@spec a-dirty-derived-result-is-dropped-at-commit`](#spec-a-dirty-derived-result-is-dropped-at-commit) — A derived result that is dirty when its speculation commits is not promoted, and its derivation recomputes from the promoted values.
-    - [`@spec a-committed-derivation-takes-a-clean-result-without-running`](#spec-a-committed-derivation-takes-a-clean-result-without-running) — When a speculation commits, a derivation whose result it holds clean takes that result as its committed value, and runs no stage for the commit. An action that wrote `id` and read `user` derived from it makes one request for `user`, not one inside the action and another after the commit.
-    - [`@spec a-result-in-flight-at-commit-is-taken-over`](#spec-a-result-in-flight-at-commit-is-taken-over) — A derived result that is still a promise in flight when its speculation commits becomes the committed derivation's run in progress. The derivation is pending until that promise settles, publishes its value then, and starts no request of its own for the commit.
+    - [`@spec a-committed-derivation-takes-a-clean-result-without-running`](#spec-a-committed-derivation-takes-a-clean-result-without-running) — When a speculation commits to committed state, a derivation whose result it holds clean takes that result and runs no stage for the commit. This holds for each kind of stage and each state of the result.
+      - [`@spec a-sync-stage-takes-its-result-at-commit`](#spec-a-sync-stage-takes-its-result-at-commit) — A sync stage whose result a committing speculation holds clean takes that value, and does not run for the commit.
+      - [`@spec an-async-function-stage-takes-its-settled-result-at-commit`](#spec-an-async-function-stage-takes-its-settled-result-at-commit) — An async function stage whose result a committing speculation holds clean and settled takes that value, and does not run for the commit.
+      - [`@spec a-generator-stage-takes-its-finished-result-at-commit`](#spec-a-generator-stage-takes-its-finished-result-at-commit) — A generator stage that ran to its end inside a committing speculation takes the value it returned, and does not run for the commit.
+      - [`@spec a-result-in-flight-at-commit-is-taken-over`](#spec-a-result-in-flight-at-commit-is-taken-over) — An async function stage whose result is still a promise in flight when its speculation commits takes that promise as its run in progress. The stage is pending until the promise settles, publishes its value then, and starts no request of its own for the commit.
+      - [`@spec a-paused-generator-at-commit-is-taken-over`](#spec-a-paused-generator-at-commit-is-taken-over) — A generator stage still paused inside a speculation when it commits takes over that generator. The committed stage resumes it when its promise settles, follows what it reads from then on, and does not run the code before its pause again.
+      - [`@spec a-later-stage-takes-its-result-at-commit`](#spec-a-later-stage-takes-its-result-at-commit) — A later stage of a pipeline takes the result a committing speculation holds clean for it. It takes it once the stage before it has taken its own.
+    - [`@spec a-nested-commit-promotes-what-it-derived-to-its-parent`](#spec-a-nested-commit-promotes-what-it-derived-to-its-parent) — When a nested speculation commits, each derived result it holds clean becomes a slot of its parent, and the parent does not run that derivation again. When the parent commits, those results are taken as its own.
+  - [`@spec a-result-in-flight-at-commit-is-taken-over`](#spec-a-result-in-flight-at-commit-is-taken-over) — A derived result that is still a promise in flight when its speculation commits becomes the committed derivation's run in progress. The derivation is pending until that promise settles, publishes its value then, and starts no request of its own for the commit.
 - [`@fact a-promise-reports-its-state-only-through-a-callback`](#fact-a-promise-reports-its-state-only-through-a-callback) — A JavaScript promise offers no synchronous way to read whether it has settled, or its value. Its state reaches other code only through a callback passed to `then`. That callback runs at least a microtask after it is attached, even for a promise that has already settled.
 - [`@fact no-context-survives-an-await`](#fact-no-context-survives-an-await) — In browsers, no context set around a call reaches the code that runs after an `await` inside it. The proposal [`AsyncContext`](https://github.com/tc39/proposal-async-context) would carry one across, but browsers do not ship it yet.
 - [`@fact only-a-generator-can-be-resumed`](#fact-only-a-generator-can-be-resumed) — In JavaScript, only a generator can pause and be resumed where it paused by the code that drives it. A function that throws has ended, and an async function resumes after an `await` on its own, later and outside the call that started it.
@@ -3308,6 +3316,10 @@ An optimistic value exists to put a prediction on screen before the action finis
 
 This follows because a speculation holds its writes over committed state: a read inside it sees committed state with the speculation's writes on top, and everything derived inside it is derived from that.
 
+#### @spec a-generator-stage-read-in-a-speculation-gives-its-result
+
+> Inside a speculation, a generator stage that pauses runs on to its end within the speculation, and a read of it gives the value it returns, not a value it paused on. What it reads after a pause is read inside the speculation.
+
 ### @spec an-update-function-inside-a-speculation-sees-its-earlier-writes
 
 > An update function called inside a speculation receives as its previous value the speculation's own latest write, or the committed value when the speculation has not written yet.
@@ -3480,7 +3492,7 @@ Site: `scope.ts:runInScope`
 
 ### @spec a-commit-promotes-what-the-speculation-derived
 
-> A commit promotes the speculation's writes and every derived result it holds that is still clean. A committed derivation takes such a result and does not run again for the commit. A derived result that a later write left dirty is dropped, and its derivation runs from committed state.
+> A commit promotes the speculation's writes and the derived results it holds that are still clean, to committed state or, for a nested speculation, to its parent. A derived result that a later write left dirty is dropped, and its derivation runs again.
 
 Derives from: [`axiom-only-what-changed-runs-again`](#axiom-only-what-changed-runs-again), [`spec-a-committed-write-dirties-what-open-speculations-derived`](#spec-a-committed-write-dirties-what-open-speculations-derived)
 
@@ -3508,9 +3520,39 @@ Site: `scope.ts:commit`
 
 #### @spec a-committed-derivation-takes-a-clean-result-without-running
 
-> When a speculation commits, a derivation whose result it holds clean takes that result as its committed value, and runs no stage for the commit. An action that wrote `id` and read `user` derived from it makes one request for `user`, not one inside the action and another after the commit.
+> When a speculation commits to committed state, a derivation whose result it holds clean takes that result and runs no stage for the commit. This holds for each kind of stage and each state of the result.
 
-#### @spec a-result-in-flight-at-commit-is-taken-over
+So an action that wrote `id` and read `user`, derived from it, makes one request for `user`, not one inside the action and another after the commit.
+
+##### @spec a-sync-stage-takes-its-result-at-commit
+
+> A sync stage whose result a committing speculation holds clean takes that value, and does not run for the commit.
+
+##### @spec an-async-function-stage-takes-its-settled-result-at-commit
+
+> An async function stage whose result a committing speculation holds clean and settled takes that value, and does not run for the commit.
+
+##### @spec a-generator-stage-takes-its-finished-result-at-commit
+
+> A generator stage that ran to its end inside a committing speculation takes the value it returned, and does not run for the commit.
+
+##### @spec a-result-in-flight-at-commit-is-taken-over
+
+> An async function stage whose result is still a promise in flight when its speculation commits takes that promise as its run in progress. The stage is pending until the promise settles, publishes its value then, and starts no request of its own for the commit.
+
+##### @spec a-paused-generator-at-commit-is-taken-over
+
+> A generator stage still paused inside a speculation when it commits takes over that generator. The committed stage resumes it when its promise settles, follows what it reads from then on, and does not run the code before its pause again.
+
+##### @spec a-later-stage-takes-its-result-at-commit
+
+> A later stage of a pipeline takes the result a committing speculation holds clean for it. It takes it once the stage before it has taken its own.
+
+#### @spec a-nested-commit-promotes-what-it-derived-to-its-parent
+
+> When a nested speculation commits, each derived result it holds clean becomes a slot of its parent, and the parent does not run that derivation again. When the parent commits, those results are taken as its own.
+
+### @spec a-result-in-flight-at-commit-is-taken-over
 
 > A derived result that is still a promise in flight when its speculation commits becomes the committed derivation's run in progress. The derivation is pending until that promise settles, publishes its value then, and starts no request of its own for the commit.
 
