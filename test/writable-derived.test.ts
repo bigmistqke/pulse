@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest'
 import { signal } from '../src/derived-signal'
-import { peek, from, use } from '../src/async'
+import { peek, from, use, track } from '../src/async'
 import { isPending } from '../src/pending'
 import { createRoot, onCleanup } from '../src/owner'
 import { error } from '../src/error'
@@ -814,6 +814,50 @@ test('W6: a rejected written promise parks as an error', async () => {
   await tick()
   expect(error(todos)).toBeInstanceOf(Error)
   expect(peek(todos)).toEqual(['a'])
+})
+
+/**
+ * @canon spec-a-written-promise-pulse-has-seen-settle-applies-at-the-write
+ */
+test('W6: a written promise pulse has seen settle applies at the write', async () => {
+  const [todos, setTodos] = signal(function* () {
+    return yield* from(Promise.resolve(['a']))
+  })
+  await tick()
+
+  const fulfils = Promise.resolve(['a', 'saved'])
+  const failure = new Error('save failed')
+  const rejects = Promise.reject(failure)
+  rejects.catch(() => {})
+  track(fulfils)
+  track(rejects)
+  await tick() // pulse records both settles
+
+  setTodos(fulfils)
+  expect(isPending(todos)).toBe(false)
+  expect(use(todos)).toEqual(['a', 'saved'])
+
+  setTodos(rejects)
+  expect(isPending(todos)).toBe(false)
+  expect(error(todos)).toBe(failure)
+})
+
+/**
+ * @canon spec-a-written-promise-pulse-has-seen-settle-applies-at-the-write
+ */
+test('W6: a settled promise pulse has not seen settle is pending until its settle is recorded', async () => {
+  const [todos, setTodos] = signal(function* () {
+    return yield* from(Promise.resolve(['a']))
+  })
+  await tick()
+
+  setTodos(Promise.resolve(['a', 'saved']))
+  expect(isPending(todos)).toBe(true)
+  expect(peek(todos)).toEqual(['a'])
+
+  await tick()
+  expect(isPending(todos)).toBe(false)
+  expect(use(todos)).toEqual(['a', 'saved'])
 })
 
 /**

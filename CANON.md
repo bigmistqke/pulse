@@ -275,6 +275,7 @@ This document is the project. It holds the theory of pulse: why it is the way it
     - [`@spec a-write-clears-a-parked-failure`](#spec-a-write-clears-a-parked-failure) — A write to a derivation holding a parked failure clears the failure, whichever stage of the pipeline it was parked on.
     - [`@spec an-update-function-that-throws-cancels-nothing`](#spec-an-update-function-that-throws-cancels-nothing) — If an update function throws, the write does not happen, and a recompute that was queued before it still runs.
     - [`@spec a-written-promise-is-published-like-a-produced-one`](#spec-a-written-promise-is-published-like-a-produced-one) — A promise written into a derivation is its value: pending until it settles, then the resolved value, or a parked failure if it rejects.
+      - [`@spec a-written-promise-pulse-has-seen-settle-applies-at-the-write`](#spec-a-written-promise-pulse-has-seen-settle-applies-at-the-write) — A written promise whose settle pulse has already recorded is applied at the write. The derivation takes its value, or parks its failure, and never reports pending for it. A promise whose settle pulse has not recorded yet is pending until the settle is recorded, even a fresh `Promise.resolve(7)`.
     - [`@spec the-handle-reports-its-newest-attempt`](#spec-the-handle-reports-its-newest-attempt) — An action's handle reports only its newest attempt: `settled` is a promise for that attempt, and an older attempt that settles after a newer one started changes nothing.
     - [`@spec retry-runs-the-action-again-as-a-new-speculation`](#spec-retry-runs-the-action-again-as-a-new-speculation) — `retry()` runs the action's body again from the start as a new speculation, and clears `error()` at once, before the new attempt has settled.
   - [`@axiom speculation-is-opt-in`](#axiom-speculation-is-opt-in) — A speculation exists only inside an explicit scope. Outside one, a write commits at once.
@@ -2346,6 +2347,16 @@ This follows because only a production cancels an earlier one: an update functio
 Derives from: [`axiom-async-is-acknowledged-not-hidden`](#axiom-async-is-acknowledged-not-hidden)
 
 This follows because a direct write and a dependency change are both productions of the derived value, and a value that has a future says so: a written promise is published exactly as a produced promise would be.
+
+##### @spec a-written-promise-pulse-has-seen-settle-applies-at-the-write
+
+> A written promise whose settle pulse has already recorded is applied at the write. The derivation takes its value, or parks its failure, and never reports pending for it. A promise whose settle pulse has not recorded yet is pending until the settle is recorded, even a fresh `Promise.resolve(7)`.
+
+Derives from: [`spec-a-promise-carries-its-state-in-one-weakmap`](#spec-a-promise-carries-its-state-in-one-weakmap)
+
+This follows because a written promise is published like a produced one, and settledness is the state pulse records for the promise. Once the settle is recorded, the value is here, and pending would say it is not.
+
+The same holds for a promise a stage reads ([`spec-a-settled-promise-is-used-at-once-the-next-time-a-stage-runs`](#spec-a-settled-promise-is-used-at-once-the-next-time-a-stage-runs)). A refresh that an action waited for before it committed relies on this. Its answer is recorded by the commit, so the derivation takes it at the commit.
 
 #### @spec the-handle-reports-its-newest-attempt
 
