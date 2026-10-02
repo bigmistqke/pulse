@@ -16,7 +16,7 @@ description: The methodology that governs all work on a project with a CANON.md 
 
   The canon works in both directions, and the protocol below spells out each one. Downwards, the theory decides the tests and the code ([section 3](#3-adding-or-changing-behaviour)). Upwards, the code tests the theory ([section 4](#4-fixing-a-defect)): you trace a defect up to the spec, axiom or fact that is missing. A more exact theory may also call for a stronger structure of the canon ([structure](writing-units.md#10-structure)).
 - Canon: the documents, `CANON.md` by default, that state the theory as units, linked into a derivation graph that tests cite and a checker holds closed.
-- Unit: one claim of the canon, with a kind, a stem and a statement. [The kinds](writing-units.md#1-kinds) lists them.
+- Unit: one entry of the canon, with a kind, a stem and a statement. [The kinds](writing-units.md#1-kinds) lists them.
 - Derivation: the edge from a unit to the unit it follows from, by nesting or on a `Derives from:` line. Together, the derivations answer the second of the three things above: why each part is the way it is.
 - Flow: how directly the units follow from their parents. In a strong flow, few axioms and facts force many specs, and each "This follows because" sentence is short.
 - Owner of the design: the person who decides the project's values. You propose, and the owner judges.
@@ -30,7 +30,7 @@ This protocol governs all work on the project. Follow it in every session, for e
 
 Every session starts without the theory. It does not know why the code is the way it is, and the code cannot tell it. The canon holds the theory. Each session rebuilds the theory from the canon, works under it, and writes back what it decided. The canon is how the project keeps its knowledge from one session to the next.
 
-Documentation goes out of date because nothing checks it. The canon cannot go out of date without the checker failing. Every claim has a test, and the checker reports every claim, test or link that goes stale.
+Documentation goes out of date because nothing checks it. The canon cannot go out of date without the checker failing. Every spec and exception has a test, and the checker reports every claim, test or link that goes stale.
 
 This file holds what every session needs. Two files beside it hold the rest:
 
@@ -45,7 +45,7 @@ This file holds what every session needs. Two files beside it hold the rest:
 4. The owner changes the project through the canon too. When the owner asks for something the canon forbids, do not carry it out. Name the conflict and the units involved.
 5. When the code contradicts the canon, the code has a defect. Follow [section 4](#4-fixing-a-defect).
 6. When a test asserts something other than the spec it cites, the spec decides. Correct the test, unless the owner rules that the spec is wrong.
-7. When two units contradict each other, the canon is wrong. Ask the owner which claim holds.
+7. When two units contradict each other, the canon is wrong. Ask the owner which one holds.
 8. Change the project in one order: the canon first, then the tests, then the code. This holds when the owner confirms a change, and when you correct a canon that is wrong.
 9. No change enters the project unless the canon accounts for it.
 

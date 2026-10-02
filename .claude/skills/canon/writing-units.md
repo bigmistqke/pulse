@@ -16,10 +16,10 @@ How to write, place and test the units of the canon. [`SKILL.md`](SKILL.md) hold
 
 Tell the kinds apart with two questions:
 
-1. Does the claim still hold if someone rebuilt the system with different internals? Then it is an axiom.
-2. Does the claim still hold if nobody had built the system? Then it is a fact.
-3. A claim that fails both questions is a decision or a behaviour: a spec.
-4. A definition of a word makes no claim. It is a term.
+1. Does the statement still hold if someone rebuilt the system with different internals? Then it is an axiom.
+2. Does the statement still hold if nobody had built the system? Then it is a fact.
+3. A statement that fails both questions is a decision or a behaviour: a spec.
+4. A statement that defines a word is a term.
 
 Axioms state how the world should be. Facts state how the platform is. A spec, together with the facts it cites, must make its axiom hold. The split follows [Zave and Jackson](http://www.pamelazave.com/4dc.pdf).
 
