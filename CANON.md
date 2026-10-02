@@ -426,10 +426,12 @@ This document is the project. It holds the theory of pulse: why it is the way it
     - [`@spec a-scope-chain-runs-from-the-scope-to-the-root`](#spec-a-scope-chain-runs-from-the-scope-to-the-root) — The chain lists the scope itself first, then each parent in turn, and ends at the root.
     - [`@spec a-read-takes-the-nearest-slot-in-the-chain`](#spec-a-read-takes-the-nearest-slot-in-the-chain) — The first scope in the chain with a slot for the node answers, so a slot in a more specific scope shadows the same node's slot further up. With no slot anywhere in the chain, the read finds nothing and falls through.
     - [`@spec entering-a-scope-restores-the-previous-one-even-on-a-throw`](#spec-entering-a-scope-restores-the-previous-one-even-on-a-throw) — The ambient scope is the root until a scope is entered. Entering a scope sets it, and the scope that was ambient before is restored when the call returns or throws.
-  - [`@spec only-written-nodes-are-promoted-at-commit`](#spec-only-written-nodes-are-promoted-at-commit) — A commit promotes the nodes the speculation wrote, and drops everything else it holds.
+  - [`@spec a-commit-promotes-what-the-speculation-derived`](#spec-a-commit-promotes-what-the-speculation-derived) — A commit promotes the speculation's writes and every derived result it holds that is still clean. A committed derivation takes such a result and does not run again for the commit. A derived result that a later write left dirty is dropped, and its derivation runs from committed state.
     - [`@spec a-write-records-its-node-for-promotion`](#spec-a-write-records-its-node-for-promotion) — Writing a slot records the node in the scope's write set, which is what a commit promotes.
     - [`@spec closing-a-scope-unlinks-it-from-its-sources`](#spec-closing-a-scope-unlinks-it-from-its-sources) — Closing a scope, on a commit or a discard, removes its links from the sources they listened to, drops its slots, clears its write and read sets, and detaches it from its parent.
-    - [`@spec a-node-only-read-is-not-promoted`](#spec-a-node-only-read-is-not-promoted) — A computed that the speculation only read is not in its write set, so the commit leaves the computed alone, and it recomputes from the promoted values.
+    - [`@spec a-dirty-derived-result-is-dropped-at-commit`](#spec-a-dirty-derived-result-is-dropped-at-commit) — A derived result that is dirty when its speculation commits is not promoted, and its derivation recomputes from the promoted values.
+    - [`@spec a-committed-derivation-takes-a-clean-result-without-running`](#spec-a-committed-derivation-takes-a-clean-result-without-running) — When a speculation commits, a derivation whose result it holds clean takes that result as its committed value, and runs no stage for the commit. An action that wrote `id` and read `user` derived from it makes one request for `user`, not one inside the action and another after the commit.
+    - [`@spec a-result-in-flight-at-commit-is-taken-over`](#spec-a-result-in-flight-at-commit-is-taken-over) — A derived result that is still a promise in flight when its speculation commits becomes the committed derivation's run in progress. The derivation is pending until that promise settles, publishes its value then, and starts no request of its own for the commit.
 - [`@fact a-promise-reports-its-state-only-through-a-callback`](#fact-a-promise-reports-its-state-only-through-a-callback) — A JavaScript promise offers no synchronous way to read whether it has settled, or its value. Its state reaches other code only through a callback passed to `then`. That callback runs at least a microtask after it is attached, even for a promise that has already settled.
 - [`@fact no-context-survives-an-await`](#fact-no-context-survives-an-await) — In browsers, no context set around a call reaches the code that runs after an `await` inside it. The proposal [`AsyncContext`](https://github.com/tc39/proposal-async-context) would carry one across, but browsers do not ship it yet.
 - [`@fact only-a-generator-can-be-resumed`](#fact-only-a-generator-can-be-resumed) — In JavaScript, only a generator can pause and be resumed where it paused by the code that drives it. A function that throws has ended, and an async function resumes after an `await` on its own, later and outside the call that started it.
@@ -3476,15 +3478,15 @@ Site: `scope.ts:readSlot`
 
 Site: `scope.ts:runInScope`
 
-### @spec only-written-nodes-are-promoted-at-commit
+### @spec a-commit-promotes-what-the-speculation-derived
 
-> A commit promotes the nodes the speculation wrote, and drops everything else it holds.
+> A commit promotes the speculation's writes and every derived result it holds that is still clean. A committed derivation takes such a result and does not run again for the commit. A derived result that a later write left dirty is dropped, and its derivation runs from committed state.
 
-Derives from: [`axiom-build-on-r3-rather-than-change-it`](#axiom-build-on-r3-rather-than-change-it)
+Derives from: [`axiom-only-what-changed-runs-again`](#axiom-only-what-changed-runs-again), [`spec-a-committed-write-dirties-what-open-speculations-derived`](#spec-a-committed-write-dirties-what-open-speculations-derived)
 
-This follows because a commit makes a speculation's tentative writes committed, and r3 derives its own computeds: a value the speculation only derived was never a write, and promoting it would overwrite what r3 derives.
+This follows because what a speculation derived is part of the speculation, which commits as one unit. A clean result was derived from exactly the state the commit produces, so running its derivation again would redo work already done.
 
-A computed the speculation only read keeps a committed value derived from committed state.
+A clean result is what r3 would derive from the committed state, so taking it overwrites nothing r3 derives. A dirty result was derived from a state that a later write replaced, so it is not a result of the committed state.
 
 #### @spec a-write-records-its-node-for-promotion
 
@@ -3498,11 +3500,19 @@ Site: `scope.ts:writeSlot`
 
 Site: `scope.ts:closeScopeEdges`
 
-#### @spec a-node-only-read-is-not-promoted
+#### @spec a-dirty-derived-result-is-dropped-at-commit
 
-> A computed that the speculation only read is not in its write set, so the commit leaves the computed alone, and it recomputes from the promoted values.
+> A derived result that is dirty when its speculation commits is not promoted, and its derivation recomputes from the promoted values.
 
 Site: `scope.ts:commit`
+
+#### @spec a-committed-derivation-takes-a-clean-result-without-running
+
+> When a speculation commits, a derivation whose result it holds clean takes that result as its committed value, and runs no stage for the commit. An action that wrote `id` and read `user` derived from it makes one request for `user`, not one inside the action and another after the commit.
+
+#### @spec a-result-in-flight-at-commit-is-taken-over
+
+> A derived result that is still a promise in flight when its speculation commits becomes the committed derivation's run in progress. The derivation is pending until that promise settles, publishes its value then, and starts no request of its own for the commit.
 
 ## @fact a-promise-reports-its-state-only-through-a-callback
 

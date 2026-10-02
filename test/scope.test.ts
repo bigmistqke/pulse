@@ -577,7 +577,7 @@ test('G4: inner discards, outer continues and commits', () => {
 })
 
 /**
- * @canon spec-a-node-only-read-is-not-promoted
+ * @canon spec-a-dirty-derived-result-is-dropped-at-commit
  */
 test('committing a scope where a computed was only read does not promote/corrupt the computed', () => {
   const name = signalNode('foo')
@@ -596,7 +596,7 @@ test('committing a scope where a computed was only read does not promote/corrupt
 })
 
 /**
- * @canon spec-only-written-nodes-are-promoted-at-commit
+ * @canon spec-a-commit-promotes-what-the-speculation-derived
  */
 test('a commit promotes what the speculation wrote and drops what it only read', () => {
   const written = signalNode(0)
