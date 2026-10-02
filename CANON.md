@@ -42,9 +42,9 @@ This document is the project. It holds the theory of pulse: why it is the way it
 - [`@axiom each-job-is-done-by-one-mechanism`](#axiom-each-job-is-done-by-one-mechanism) — Each job is done by one mechanism, reused wherever the job comes back, rather than a mechanism for each use.
   - [`@axiom build-on-r3-rather-than-change-it`](#axiom-build-on-r3-rather-than-change-it) — Pulse uses r3 as it is. What r3 does not do is built in a layer above it, not patched into it.
     - [`@spec r3-holds-only-committed-values`](#spec-r3-holds-only-committed-values) — r3 holds one committed value per node. A read or write with no speculation open goes straight through r3.
-      - [`@spec a-signal-node-is-backed-by-an-r3-signal`](#spec-a-signal-node-is-backed-by-an-r3-signal) — `scope.ts` `signalNode`.
-      - [`@spec a-computed-node-carries-its-recipe-on-an-r3-computed`](#spec-a-computed-node-carries-its-recipe-on-an-r3-computed) — `scope.ts` `computedNode`.
-      - [`@spec a-committed-read-and-write-go-through-r3`](#spec-a-committed-read-and-write-go-through-r3) — `scope.ts` `writeValue`.
+      - [`@spec a-signal-node-is-backed-by-an-r3-signal`](#spec-a-signal-node-is-backed-by-an-r3-signal) — A signal node holds its committed value in an r3 signal, and starts with no speculative subscribers.
+      - [`@spec a-computed-node-carries-its-recipe-on-an-r3-computed`](#spec-a-computed-node-carries-its-recipe-on-an-r3-computed) — A computed node keeps its recipe, so a speculation can run it again into a slot, and is backed by an r3 computed that runs the same recipe for the committed value.
+      - [`@spec a-committed-read-and-write-go-through-r3`](#spec-a-committed-read-and-write-go-through-r3) — With the root as the ambient scope, a write sets the r3 signal and a read returns the r3 value.
     - [`@spec pulse-reaches-r3-only-through-its-exports`](#spec-pulse-reaches-r3-only-through-its-exports) — Pulse uses r3 through the functions r3 exports. Where pulse needs more, the fork gains an export instead of pulse reaching into r3's internals.
     - [`@spec a-run-replaces-its-dependencies-with-what-it-read`](#spec-a-run-replaces-its-dependencies-with-what-it-read) — A run of a computation leaves it depending on exactly the sources that run read. A source it read before but not in its latest run no longer re-runs it.
       - [`@exception a-throwing-run-keeps-dependencies-it-did-not-reread`](#exception-a-throwing-run-keeps-dependencies-it-did-not-reread) — A computed whose run throws partway stays subscribed to sources it read in an earlier run but not in the throwing one. A later change to such a source re-runs it.
@@ -94,17 +94,17 @@ This document is the project. It holds the theory of pulse: why it is the way it
     - [`@spec use-keeps-the-binding-subscribed-while-suspended`](#spec-use-keeps-the-binding-subscribed-while-suspended) — `use(x)` reads its source before checking whether it is pending, so a suspended binding stays subscribed and sees every later value, through every stage of a pipeline.
     - [`@spec a-computed-reading-through-peek-still-follows-its-source`](#spec-a-computed-reading-through-peek-still-follows-its-source) — A [computed](#term-computed) that reads a source through `peek` still re-runs when the source changes or settles, and converges to the source's value. `peek` suppresses only the loading report, not the dependency.
     - [`@spec speculative-derivation-is-pulled-on-read`](#spec-speculative-derivation-is-pulled-on-read) — Under a speculation, a computed is recomputed when it is read, into a slot of that scope, and a write only marks the affected slots dirty.
-      - [`@spec a-speculative-read-recomputes-into-a-slot-of-its-scope`](#spec-a-speculative-read-recomputes-into-a-slot-of-its-scope) — `scope.ts` `readValue`.
-      - [`@spec a-speculative-write-dirties-what-derives-from-it`](#spec-a-speculative-write-dirties-what-derives-from-it) — `scope.ts` `invalidateDownstream`.
-      - [`@spec a-slot-caches-undefined-like-any-value`](#spec-a-slot-caches-undefined-like-any-value) — `scope.ts` `DIRTY`.
-      - [`@spec a-recompute-replaces-its-links`](#spec-a-recompute-replaces-its-links) — `scope.ts` `resetSlotDeps`.
+      - [`@spec a-speculative-read-recomputes-into-a-slot-of-its-scope`](#spec-a-speculative-read-recomputes-into-a-slot-of-its-scope) — Reading a computed under a speculation runs its recipe into a slot of that scope, and links each source the recipe read to that slot.
+      - [`@spec a-speculative-write-dirties-what-derives-from-it`](#spec-a-speculative-write-dirties-what-derives-from-it) — A write marks every speculative slot that derives from the written node dirty, directly or through other slots, so its next read recomputes.
+      - [`@spec a-slot-caches-undefined-like-any-value`](#spec-a-slot-caches-undefined-like-any-value) — A dirty slot is marked with its own symbol, not with `undefined`, so a recipe that returns `undefined` is cached and not run again on every read, and still recomputes once a write dirties it.
+      - [`@spec a-recompute-replaces-its-links`](#spec-a-recompute-replaces-its-links) — Before a slot is recomputed, its existing links are removed from their sources, so links do not pile up across recomputes.
     - [`@spec a-derivation-runs-when-it-is-created`](#spec-a-derivation-runs-when-it-is-created) — A [derivation](#term-derivation) runs when it is created, wherever it is created, inside a running computation included.
   - [`@spec a-promise-is-settled-from-the-moment-pulse-records-its-settle`](#spec-a-promise-is-settled-from-the-moment-pulse-records-its-settle) — Every reader in pulse takes a promise's state from the state pulse has recorded for it, at the moment it reads. Once pulse has recorded the settle, every reader uses the value or the failure at once, without waiting a further microtask.
     - [`@spec a-settled-promise-is-used-at-once-the-next-time-a-stage-runs`](#spec-a-settled-promise-is-used-at-once-the-next-time-a-stage-runs) — A promise that a stage saw pending, and that has settled since, is used at once the next time the stage runs. It does not suspend the stage again.
-      - [`@spec the-driver-reads-settledness-from-the-promise-map`](#spec-the-driver-reads-settledness-from-the-promise-map) — `driver.ts` `runStage`.
+      - [`@spec the-driver-reads-settledness-from-the-promise-map`](#spec-the-driver-reads-settledness-from-the-promise-map) — The driver decides whether a returned or yielded promise has settled by reading the same map. Read state and the driver's memory of settled promises are one mechanism: a promise the map records as fulfilled is used at once, even on the first run that sees it.
     - [`@spec a-written-promise-pulse-has-seen-settle-applies-at-the-write`](#spec-a-written-promise-pulse-has-seen-settle-applies-at-the-write) — A written promise whose settle pulse has already recorded is applied at the write. The derivation takes its value, or parks its failure, and never reports pending for it.
     - [`@spec use-returns-a-settled-promises-value-at-once`](#spec-use-returns-a-settled-promises-value-at-once) — Once pulse has recorded a promise's settle, `use(promise)` returns its value synchronously, or throws its rejection reason.
-    - [`@spec a-published-result-reads-fulfilled-at-once`](#spec-a-published-result-reads-fulfilled-at-once) — `async.ts` `resolvedPromise`.
+    - [`@spec a-published-result-reads-fulfilled-at-once`](#spec-a-published-result-reads-fulfilled-at-once) — The promise pulse publishes when an async stage settles is recorded fulfilled the moment it is made, so a synchronous read reports its value without waiting a microtask. A promise pulse makes itself never falls under the exception below.
     - [`@exception a-promise-pulse-has-not-seen-settle-is-pending`](#exception-a-promise-pulse-has-not-seen-settle-is-pending) — A promise whose settle pulse has not recorded yet is pending to every reader, even when it has already settled. The first `use` of `Promise.resolve(7)` throws `NotReadyYet`, and a stage that returns it suspends. A write of it reports pending.
   - [`@spec an-update-function-receives-the-last-resolved-value`](#spec-an-update-function-receives-the-last-resolved-value) — An update function on a writable derivation receives the last value that actually resolved, never a promise, and `undefined` when nothing has resolved yet.
   - [`@spec an-update-function-sees-the-value-a-sync-derivation-produced-at-creation`](#spec-an-update-function-sees-the-value-a-sync-derivation-produced-at-creation) — An update function on a sync derivation receives the value the derivation produced when it was created, even before any write, wherever the derivation was created. An async derivation that suspended has produced nothing yet.
@@ -132,39 +132,39 @@ This document is the project. It holds the theory of pulse: why it is the way it
   - [`@axiom async-is-acknowledged-not-hidden`](#axiom-async-is-acknowledged-not-hidden) — A value that has a future says so: an async node reads as a promise, in its type and in what a read returns.
     - [`@spec an-async-node-reads-as-a-plain-promise`](#spec-an-async-node-reads-as-a-plain-promise) — An async signal or computed reads as a plain `Promise`, before it settles and after. It never turns into its bare value on settle.
     - [`@spec the-read-type-carries-the-async-colour`](#spec-the-read-type-carries-the-async-colour) — A computed's read type is a `Promise` exactly where a stage can make it one, and a stage's input type is its upstream's value with the colour removed.
-      - [`@spec pipeline-read-colours-by-the-stages-that-can-be-async`](#spec-pipeline-read-colours-by-the-stages-that-can-be-async) — `async.ts` `PipelineRead`.
-      - [`@spec a-generator-stage-is-coloured-by-what-it-reads`](#spec-a-generator-stage-is-coloured-by-what-it-reads) — `async.ts` `PipelineRead`.
-      - [`@spec resolved-unwraps-what-a-stage-receives`](#spec-resolved-unwraps-what-a-stage-receives) — `async.ts` `Resolved`.
+      - [`@spec pipeline-read-colours-by-the-stages-that-can-be-async`](#spec-pipeline-read-colours-by-the-stages-that-can-be-async) — An async upstream stage makes the whole read a `Promise`. A stage that may or may not return a promise makes the read a union of both.
+      - [`@spec a-generator-stage-is-coloured-by-what-it-reads`](#spec-a-generator-stage-is-coloured-by-what-it-reads) — A generator stage is coloured by what its `yield* from(…)` calls read, not by being a generator. One that reads only settled values reads bare.
+      - [`@spec resolved-unwraps-what-a-stage-receives`](#spec-resolved-unwraps-what-a-stage-receives) — `Resolved<T>` removes the colour from what a stage receives: a signal gives its value, a promise what it fulfils to, and a generator what it returns.
     - [`@spec a-pipeline-reads-as-a-promise-while-its-value-came-through-async`](#spec-a-pipeline-reads-as-a-promise-while-its-value-came-through-async) — The raw read of a pipeline is a promise when its current value was produced through an asynchronous stage, and bare otherwise. A sync last stage fed by an async stage still reads as a promise, and a stage that is async on one evaluation and sync on the next flips its read shape each time, even when the value is the same.
     - [`@spec a-write-keeps-a-pipelines-colour`](#spec-a-write-keeps-a-pipelines-colour) — A write into a pipeline stage keeps the colour the stage already has: a bare write into an asynchronously coloured stage still reads as a promise, and a write into a synchronously coloured stage does not introduce one.
     - [`@spec a-generator-stage-is-asynchronous-only-when-it-suspends`](#spec-a-generator-stage-is-asynchronous-only-when-it-suspends) — A generator stage counts as an asynchronous stage only when it actually suspended on a pending promise. One that ran to completion without suspending publishes its value bare.
     - [`@spec a-use-suspended-stage-reads-as-its-promise-until-it-settles`](#spec-a-use-suspended-stage-reads-as-its-promise-until-it-settles) — While a sync stage that suspended through `use` waits on a first load, the pipeline reads as the promise in flight. Once that promise settles, the sync stage publishes its bare value.
     - [`@spec a-promise-carries-its-state-in-one-weakmap`](#spec-a-promise-carries-its-state-in-one-weakmap) — The status, value, rejection reason and stale prior of a promise live in one `WeakMap` keyed on the promise. The promise itself carries nothing extra.
-      - [`@spec track-seeds-the-stale-prior`](#spec-track-seeds-the-stale-prior) — `async.ts` `track`.
+      - [`@spec track-seeds-the-stale-prior`](#spec-track-seeds-the-stale-prior) — The first time a promise is seen, it is recorded as pending, carrying the prior value it replaces, so a tolerant read of a pending promise can still return that prior. A later `track` of the same promise returns the recorded state unchanged.
     - [`@spec a-construction-default-leaves-the-raw-read-a-promise`](#spec-a-construction-default-leaves-the-raw-read-a-promise) — With `signal(fn, default)`, the raw read is still a pending promise until the derivation first resolves.
     - [`@spec pending-follows-where-a-value-came-from`](#spec-pending-follows-where-a-value-came-from) — A node is pending when any stage upstream of it is pending, or when a source its value was read from is. `promiseOf` returns the nearest promise in flight along the same path.
     - [`@spec is-pending-reports-an-unsettled-pipeline`](#spec-is-pending-reports-an-unsettled-pipeline) — `isPending(c)` is true while any stage of the pipeline is waiting on a promise, on the first load and during a revision, and `promiseOf(c)` returns that promise. A [refresh](#term-refresh) is not pending: it leaves `isPending(c)` false. Both clear when it settles.
 - [`@axiom only-what-changed-runs-again`](#axiom-only-what-changed-runs-again) — When something changes, only the work that depends on the change runs again, and only from the point where it depends on it.
   - [`@spec an-equal-value-does-not-propagate`](#spec-an-equal-value-does-not-propagate) — A value equal to the one a node already holds does not reach the node's consumers: nothing re-runs. Two values are equal when they are SameValueZero-equal: `===`, except that `NaN` equals `NaN`. So `0` and `-0` are equal.
-    - [`@spec a-computed-publishes-only-a-changed-value`](#spec-a-computed-publishes-only-a-changed-value) — `computed.ts` `makeStageNode`.
-    - [`@spec an-equal-committed-signal-write-is-dropped`](#spec-an-equal-committed-signal-write-is-dropped) — `scope.ts` `writeValue`.
-    - [`@spec an-equal-speculative-write-dirties-nothing`](#spec-an-equal-speculative-write-dirties-nothing) — `scope.ts` `writeSpeculative`.
+    - [`@spec a-computed-publishes-only-a-changed-value`](#spec-a-computed-publishes-only-a-changed-value) — A stage whose new value is equal to the one it last published does not publish it again, so its consumers do not re-run. This holds wherever the value comes from: a run of the stage, a promise the stage returned, a promise a `use` in the stage suspended on, or a promise written into the stage.
+    - [`@spec an-equal-committed-signal-write-is-dropped`](#spec-an-equal-committed-signal-write-is-dropped) — A committed write to a signal that equals its current value is dropped. r3 drops a write `===` to the current value, and pulse drops `NaN` over `NaN` before the write reaches r3.
+    - [`@spec an-equal-speculative-write-dirties-nothing`](#spec-an-equal-speculative-write-dirties-nothing) — A write inside a speculation of a value equal to the one the speculation reads for the node marks nothing derived from it dirty, so nothing read inside the speculation recomputes. The write is still recorded for the commit, so it decides the committed value when its speculation commits last, as [the spec on commit order](#spec-overlapping-writes-resolve-by-commit-order) states.
   - [`@spec reading-a-computed-again-without-a-change-re-runs-nothing`](#spec-reading-a-computed-again-without-a-change-re-runs-nothing) — Reading a computed a second time, when nothing it read has changed since the first read, returns the same value and runs no stage.
   - [`@spec a-staged-effect-skips-a-commit-equal-to-its-last`](#spec-a-staged-effect-skips-a-commit-equal-to-its-last) — A staged effect does not call `commit` with a value equal to the one it last committed, equal in the SameValueZero sense that [the spec on equal values](#spec-an-equal-value-does-not-propagate) states.
   - [`@spec creating-a-derivation-is-not-reading-it`](#spec-creating-a-derivation-is-not-reading-it) — A computation that creates a derivation or an effect does not depend on it unless it reads it, so the new node's first run does not run the computation again.
   - [`@spec a-paused-computation-is-re-entered-at-its-pause`](#spec-a-paused-computation-is-re-entered-at-its-pause) — Pulse re-enters a paused computation at the finest point it can: a stage boundary with a new input, a generator stage at its pause, and anything else from the top of its body. Work done before that point runs again only when an input it read has changed.
     - [`@spec a-resumed-generator-does-not-rerun-code-before-its-pause`](#spec-a-resumed-generator-does-not-rerun-code-before-its-pause) — A generator stage that paused on a pending value is resumed with that value when it settles. The code before the pause does not run again.
-      - [`@spec a-paused-generator-is-handed-back-to-its-caller`](#spec-a-paused-generator-is-handed-back-to-its-caller) — `driver.ts` `runStage`.
-      - [`@spec a-retained-generator-is-driven-from-its-pause`](#spec-a-retained-generator-is-driven-from-its-pause) — `driver.ts` `resumeStage`.
-      - [`@spec a-stage-node-resumes-its-paused-generator`](#spec-a-stage-node-resumes-its-paused-generator) — `computed.ts` `makeStageNode`.
+      - [`@spec a-paused-generator-is-handed-back-to-its-caller`](#spec-a-paused-generator-is-handed-back-to-its-caller) — A generator stage that pauses hands the paused generator back with its outcome, and the same generator at every later pause. A sync stage's outcome carries no generator, because it has none to retain.
+      - [`@spec a-retained-generator-is-driven-from-its-pause`](#spec-a-retained-generator-is-driven-from-its-pause) — Resuming drives the retained generator forward from its pause with the settled value. The code before the pause does not run again.
+      - [`@spec a-stage-node-resumes-its-paused-generator`](#spec-a-stage-node-resumes-its-paused-generator) — When the promise a generator stage paused on settles, the stage resumes the generator it retained instead of building a new one. A promise built inside the body is therefore built once, and the stage converges.
     - [`@spec dependencies-read-before-a-pause-stay-linked`](#spec-dependencies-read-before-a-pause-stay-linked) — Before a paused generator is resumed, the dependencies recorded before its pause are read again, so a change to any of them still re-runs the stage.
-      - [`@spec a-run-records-every-dependency-it-read`](#spec-a-run-records-every-dependency-it-read) — `dep-replay.ts` `snapshotDeps`.
-      - [`@spec replay-reads-every-record`](#spec-replay-reads-every-record) — `dep-replay.ts` `replayDeps`.
-      - [`@spec a-resumed-stage-replays-its-recorded-dependencies`](#spec-a-resumed-stage-replays-its-recorded-dependencies) — `computed.ts` `makeStageNode`.
+      - [`@spec a-run-records-every-dependency-it-read`](#spec-a-run-records-every-dependency-it-read) — The record is taken from r3's own dependency list up to the run's cursor, with each dependency's value, so it includes every read however it was made. A run that read nothing records nothing, also when stale entries remain behind a null cursor.
+      - [`@spec replay-reads-every-record`](#spec-replay-reads-every-record) — Replay reads every record, even after it has found a change, so none of them drops out of the next dependency list.
+      - [`@spec a-resumed-stage-replays-its-recorded-dependencies`](#spec-a-resumed-stage-replays-its-recorded-dependencies) — Before resuming, the stage replays the dependencies it recorded at the pause, so a signal read before the pause is still a dependency after the resume.
     - [`@spec a-changed-input-replaces-the-paused-generator`](#spec-a-changed-input-replaces-the-paused-generator) — When a dependency read before the pause has changed, the paused generator is discarded and a fresh one runs from the top.
-      - [`@spec replay-reports-a-changed-dependency`](#spec-replay-reports-a-changed-dependency) — `dep-replay.ts` `replayDeps`.
-      - [`@spec the-wake-signal-is-not-an-input`](#spec-the-wake-signal-is-not-an-input) — `dep-replay.ts` `snapshotDeps`.
-      - [`@spec a-stage-node-discards-a-generator-whose-input-changed`](#spec-a-stage-node-discards-a-generator-whose-input-changed) — `computed.ts` `makeStageNode`.
+      - [`@spec replay-reports-a-changed-dependency`](#spec-replay-reports-a-changed-dependency) — Replay compares each recorded value with the current one, and reports whether any of them changed.
+      - [`@spec the-wake-signal-is-not-an-input`](#spec-the-wake-signal-is-not-an-input) — The control signal pulse writes to wake a paused stage is left out of the record, so waking the stage never counts as a changed input.
+      - [`@spec a-stage-node-discards-a-generator-whose-input-changed`](#spec-a-stage-node-discards-a-generator-whose-input-changed) — On a changed input the stage discards the paused generator and runs a fresh one from the top. The discarded generator's promise can no longer re-run the stage when it settles.
     - [`@spec a-reset-discards-a-paused-generator`](#spec-a-reset-discards-a-paused-generator) — When a boundary resets the error a stage parked, a generator that the stage has paused since is discarded, and the stage runs a fresh one.
     - [`@spec oncleanup-in-a-generator-stage-belongs-to-the-generator`](#spec-oncleanup-in-a-generator-stage-belongs-to-the-generator) — An `onCleanup` called inside a generator stage registers on the generator, not on the run. It fires when the generator ends: by completing, by throwing, or by being discarded.
     - [`@spec a-rejected-yield-is-thrown-into-the-generator`](#spec-a-rejected-yield-is-thrown-into-the-generator) — A yielded promise that rejects is thrown into the generator at its yield, where a `try`/`catch` can handle it. Uncaught, it leaves the stage as an error.
@@ -200,8 +200,8 @@ This document is the project. It holds the theory of pulse: why it is the way it
     - [`@spec a-static-dom-child-is-left-as-written`](#spec-a-static-dom-child-is-left-as-written) — On a DOM element or a Fragment, a literal child, a function expression, and a nested JSX element are left as written, also beside a dynamic sibling that is wrapped.
     - [`@spec component-children-become-one-getter`](#spec-component-children-become-one-getter) — On a component, the children become one getter over the whole value, and are not wrapped child by child. A component is any tag that is neither a string nor `Fragment`, a member expression such as `Foo.Bar` included, and a bare JSX-element child compiles exactly like the braced form.
     - [`@spec a-branch-is-rebuilt-only-when-the-choice-changes`](#spec-a-branch-is-rebuilt-only-when-the-choice-changes) — A control-flow component keeps the branch it built while the same branch keeps winning, and builds another only when a different one wins.
-      - [`@spec show-rebuilds-only-when-truthiness-flips`](#spec-show-rebuilds-only-when-truthiness-flips) — `show.ts` `Show`.
-      - [`@spec switch-rebuilds-only-when-the-winning-match-changes`](#spec-switch-rebuilds-only-when-the-winning-match-changes) — `switch.ts` `Switch`.
+      - [`@spec show-rebuilds-only-when-truthiness-flips`](#spec-show-rebuilds-only-when-truthiness-flips) — A re-run that stays on the same side, truthy or falsy, returns the branch already built and does not call the children function again. Only a flip between truthy and falsy disposes the old branch's sub-owner and builds the other side under a new one.
+      - [`@spec switch-rebuilds-only-when-the-winning-match-changes`](#spec-switch-rebuilds-only-when-the-winning-match-changes) — The winning `Match`'s position among the `Switch`'s children is the key, not the `Match` object. The compiler turns component children into a getter, so each re-evaluation reads fresh `Match` objects; their positions stay put. While the same position wins, the built branch is reused. When another position wins, or none does, the old branch's sub-owner is disposed before the new branch is built.
   - [`@spec jsx-builds-real-dom-directly`](#spec-jsx-builds-real-dom-directly) — JSX produces real DOM nodes through direct DOM operations. There is no virtual tree and nothing is diffed.
     - [`@spec h-creates-the-element-directly`](#spec-h-creates-the-element-directly) — `h` with a string tag creates that element with `document.createElement`, and gives it only the attributes and children it was passed.
     - [`@spec a-static-child-is-inserted-by-its-kind`](#spec-a-static-child-is-inserted-by-its-kind) — A static child is inserted according to its kind: a string or number as a text node, a DOM node as itself, an array by inserting each item in order with nested arrays flattened to any depth, and `null`, `undefined` or a boolean as nothing. Children of mixed kinds keep their written order.
@@ -240,9 +240,9 @@ This document is the project. It holds the theory of pulse: why it is the way it
     - [`@spec a-tolerant-read-reports-a-failure-to-the-boundary`](#spec-a-tolerant-read-reports-a-failure-to-the-boundary) — A binding that reads a failed node through `latest` reports the failure to the nearest accepting error boundary, though nothing throws, and reports its recovery when a later run sees no error.
     - [`@spec peek-reports-nothing`](#spec-peek-reports-nothing) — `peek(x)` returns the last resolved value and reports nothing to any boundary, neither a first load nor a revision.
     - [`@spec use-enrols-the-binding-in-its-boundarys-gate`](#spec-use-enrols-the-binding-in-its-boundarys-gate) — A binding that called `use(x)` during its run commits through its boundary's [gate](#term-gate). While any binding of the boundary is suspended, its commit waits, and it lands in the same pass as the others.
-      - [`@spec a-reactive-child-that-called-use-waits-for-the-gate`](#spec-a-reactive-child-that-called-use-waits-for-the-gate) — `bindings.ts` `insertChild`.
-      - [`@spec a-reactive-prop-that-called-use-waits-for-the-gate`](#spec-a-reactive-prop-that-called-use-waits-for-the-gate) — `bindings.ts` `bindProp`.
-      - [`@spec a-queued-commit-is-checked-again-at-the-end-of-the-microtask`](#spec-a-queued-commit-is-checked-again-at-the-end-of-the-microtask) — `loading.ts` `deferOrCommit`.
+      - [`@spec a-reactive-child-that-called-use-waits-for-the-gate`](#spec-a-reactive-child-that-called-use-waits-for-the-gate) — A reactive child that called `use` reports its commit to the boundary instead of writing the DOM, and its text changes only when the gate opens.
+      - [`@spec a-reactive-prop-that-called-use-waits-for-the-gate`](#spec-a-reactive-prop-that-called-use-waits-for-the-gate) — A reactive property, such as a `class:` binding, routes its commit through the gate the same way as a reactive child.
+      - [`@spec a-queued-commit-is-checked-again-at-the-end-of-the-microtask`](#spec-a-queued-commit-is-checked-again-at-the-end-of-the-microtask) — A commit from a binding that called `use` but did not suspend is queued, not applied, even when nothing in the boundary is suspended at that moment. It is checked again at the end of the microtask. A sibling that suspends later in the same flush therefore still holds it, and the two land together.
     - [`@spec a-read-without-use-commits-at-once`](#spec-a-read-without-use-commits-at-once) — A binding that did not call `use` commits as soon as it runs, whatever state its boundary is in.
   - [`@axiom a-boundary-coordinates-only-what-a-component-returns`](#axiom-a-boundary-coordinates-only-what-a-component-returns) — A boundary coordinates the bindings of the region placed inside it. An [effect](#term-effect) created in that region is its own: no boundary waits on it, and no boundary shows its failure.
     - [`@spec an-effect-is-not-coordinated-by-a-loading-boundary`](#spec-an-effect-is-not-coordinated-by-a-loading-boundary) — An effect that suspends reports to no loading boundary. No boundary waits on it or shows a placeholder for it, and its commits never wait at the gate. It runs again on its own once its source settles.
@@ -257,11 +257,11 @@ This document is the project. It holds the theory of pulse: why it is the way it
     - [`@spec loading-is-false-outside-any-boundary`](#spec-loading-is-false-outside-any-boundary) — Outside any loading boundary, `isLoading()` returns false, and `useLoading()` returns an accessor that always returns false.
     - [`@spec a-suspension-is-reported-to-the-nearest-boundary`](#spec-a-suspension-is-reported-to-the-nearest-boundary) — A [binding](#term-binding) that suspends reports to the nearest enclosing [loading boundary](#term-loading-boundary) and to no other. It reports again when it settles. One that never suspends never reports.
     - [`@spec a-structural-commit-waits-for-the-content-it-brings`](#spec-a-structural-commit-waits-for-the-content-it-brings) — A reactive child whose new content contains a suspended reactive child of the same boundary commits through that boundary's gate. The new structure lands in the same pass as that content, and the structure it replaces stays on screen until then.
-      - [`@spec a-hole-holds-new-content-that-is-not-ready`](#spec-a-hole-holds-new-content-that-is-not-ready) — `bindings.ts` `insertChild`.
-      - [`@spec a-held-commit-places-its-nodes-only-when-it-lands`](#spec-a-held-commit-places-its-nodes-only-when-it-lands) — `bindings.ts` `insertChild`.
-      - [`@spec a-replaced-held-commit-releases-the-gate`](#spec-a-replaced-held-commit-releases-the-gate) — `bindings.ts` `insertChild`.
-      - [`@spec a-hole-under-a-nested-boundary-does-not-hold`](#spec-a-hole-under-a-nested-boundary-does-not-hold) — `bindings.ts` `holdsSuspendedHole`.
-      - [`@spec a-suspended-prop-does-not-hold-the-structure`](#spec-a-suspended-prop-does-not-hold-the-structure) — `bindings.ts` `holdsSuspendedHole`.
+      - [`@spec a-hole-holds-new-content-that-is-not-ready`](#spec-a-hole-holds-new-content-that-is-not-ready) — Before committing, a reactive child looks in the nodes it is about to insert for the marker of a suspended reactive child of its own boundary. The DOM is what is checked, so it does not matter how or when those nodes were built: a `For` row built by its own computation during the flush counts the same as a `Show` branch built during the run. When such a marker is there, the commit is handed to the gate as this binding's ready commit, and the nodes on screen stay.
+      - [`@spec a-held-commit-places-its-nodes-only-when-it-lands`](#spec-a-held-commit-places-its-nodes-only-when-it-lands) — While a commit is held, its nodes are not moved into a fragment. They are placed when the commit lands. A row that `For` reuses is a live node already on screen, so it stays on screen, with its content, for as long as the new list is held.
+      - [`@spec a-replaced-held-commit-releases-the-gate`](#spec-a-replaced-held-commit-releases-the-gate) — When a later run of the same reactive child replaces a held commit, it first withdraws that commit from the gate, and then disposes the subtree built for it. The subtree's suspended bindings unregister with it, so they no longer hold the gate for a commit that will never land, and withdrawing first means the gate opening cannot apply the stale commit.
+      - [`@spec a-hole-under-a-nested-boundary-does-not-hold`](#spec-a-hole-under-a-nested-boundary-does-not-hold) — A suspended hole's marker records the boundary the hole is suspended in, and only a marker of the checking hole's own boundary counts. Content under a nested `<Loading>` is suspended in that boundary, so the outer structure mounts at once and the inner boundary shows its own placeholder.
+      - [`@spec a-suspended-prop-does-not-hold-the-structure`](#spec-a-suspended-prop-does-not-hold-the-structure) — Only the markers of reactive children are looked for. A reactive prop that suspends, such as `class={use(x)}`, leaves no marker, so the element that carries it mounts at once, and the prop's own value waits at the gate.
     - [`@spec boundary-state-is-looked-up-past-a-catch-error`](#spec-boundary-state-is-looked-up-past-a-catch-error) — `useErrored()`, `isErrored()` and `<Errored.Error>` find the nearest `<Errored>` by its position above them, and a `catchError` between them and it does not stop the lookup.
     - [`@spec a-predicate-narrows-what-a-reader-sees-not-which-boundary-it-reads`](#spec-a-predicate-narrows-what-a-reader-sees-not-which-boundary-it-reads) — A predicate given to `useErrored`, `isErrored` or `<Errored.Error for>` narrows the reports a reader sees and retries to those that match. It does not change which boundary is read.
   - [`@spec control-flow-bakes-in-no-async-policy`](#spec-control-flow-bakes-in-no-async-policy) — `Show`, `Switch` and `For` are ordinary components: the [control flow](#term-control-flow). They read a promise input, pending or settled, as its empty form, and decide nothing else about async.
@@ -293,9 +293,9 @@ This document is the project. It holds the theory of pulse: why it is the way it
     - [`@spec nesting-makes-actions-share-fate`](#spec-nesting-makes-actions-share-fate) — A nested action commits into its parent, not into committed state. Its writes reach committed state only if the parent commits, and its discard does not discard the parent.
     - [`@spec overlapping-writes-resolve-by-commit-order`](#spec-overlapping-writes-resolve-by-commit-order) — When two sibling actions write the same node, the one that commits last decides its committed value.
     - [`@spec a-speculative-write-reaches-only-consumers-in-its-chain`](#spec-a-speculative-write-reaches-only-consumers-in-its-chain) — A write in a scope invalidates only the consumers whose scope has the writing scope in its chain, and only where no nearer scope has its own slot for the written node.
-      - [`@spec chain-match-decides-whether-a-write-reaches-a-link`](#spec-chain-match-decides-whether-a-write-reaches-a-link) — `scope.ts` `chainMatch`.
-      - [`@spec a-link-is-indexed-on-its-source-and-held-by-its-scope`](#spec-a-link-is-indexed-on-its-source-and-held-by-its-scope) — `scope.ts` `linkEdge`.
-      - [`@spec a-write-fires-only-the-links-that-match`](#spec-a-write-fires-only-the-links-that-match) — `scope.ts` `edgesToFire`.
+      - [`@spec chain-match-decides-whether-a-write-reaches-a-link`](#spec-chain-match-decides-whether-a-write-reaches-a-link) — A link fires for a write when the writing scope is in the chain of the link's scope, and no scope nearer than the writing one has its own slot for the node.
+      - [`@spec a-link-is-indexed-on-its-source-and-held-by-its-scope`](#spec-a-link-is-indexed-on-its-source-and-held-by-its-scope) — A new link is added to its source's subscribers, to the links its scope holds, and to the dependencies of the slot it feeds.
+      - [`@spec a-write-fires-only-the-links-that-match`](#spec-a-write-fires-only-the-links-that-match) — Of a node's links, a write fires exactly those that the chain match accepts, and none whose scope lies outside the writing scope's reach.
   - [`@spec a-prop-says-how-it-reaches-the-dom`](#spec-a-prop-says-how-it-reaches-the-dom) — How a prop reaches the DOM is written at the prop, by its prefix, and never inferred from its name or its value.
     - [`@spec a-bare-or-attr-prop-sets-the-attribute`](#spec-a-bare-or-attr-prop-sets-the-attribute) — A prop with no prefix, or with the `attr:` prefix, sets the attribute of that name, and a function value keeps the attribute following it.
     - [`@spec a-prop-prefix-sets-the-dom-property`](#spec-a-prop-prefix-sets-the-dom-property) — A `prop:name` prop assigns the element's DOM property `name` instead of an attribute, and a function value keeps the property following it.
@@ -326,16 +326,16 @@ This document is the project. It holds the theory of pulse: why it is the way it
     - [`@spec render-dispose-tears-down-everything-the-component-created`](#spec-render-dispose-tears-down-everything-the-component-created) — Disposing what `render` returned stops every binding the component created and disposes every owner created under it, nested `catchError` owners included.
     - [`@spec a-component-that-throws-during-render-leaves-nothing-behind`](#spec-a-component-that-throws-during-render-leaves-nothing-behind) — When the component throws while `render` is running it, `render` disposes the root it opened before the error escapes.
     - [`@spec what-a-hole-builds-lives-under-its-own-owner-until-it-leaves`](#spec-what-a-hole-builds-lives-under-its-own-owner-until-it-leaves) — Content that a [hole](#term-hole), a branch or a list row builds is built under a sub-owner of its own. That sub-owner is disposed when the content leaves, or when the surrounding owner is disposed.
-      - [`@spec each-run-of-a-reactive-child-owns-what-it-creates`](#spec-each-run-of-a-reactive-child-owns-what-it-creates) — `bindings.ts` `insertChild`.
-      - [`@spec map-array-builds-each-item-once-under-its-own-owner`](#spec-map-array-builds-each-item-once-under-its-own-owner) — `map-array.ts` `mapArray`.
+      - [`@spec each-run-of-a-reactive-child-owns-what-it-creates`](#spec-each-run-of-a-reactive-child-owns-what-it-creates) — Every run of a reactive child builds its result under a fresh sub-owner. When the new result is committed, the previous run's sub-owner is disposed, so a nested binding from an earlier run never stays subscribed.
+      - [`@spec map-array-builds-each-item-once-under-its-own-owner`](#spec-map-array-builds-each-item-once-under-its-own-owner) — The mapper runs once per new item, under a sub-owner for that item. An item still present on the next run keeps its entry and its sub-owner. An item that is gone has its sub-owner disposed, and disposing the owner around the list disposes every row.
     - [`@spec a-fragment-child-belongs-to-the-owner-the-fragment-was-built-in`](#spec-a-fragment-child-belongs-to-the-owner-the-fragment-was-built-in) — A function child of a `Fragment` belongs wholly to the owner that was ambient when the `Fragment` was built, wherever the array is inserted later: the binding itself, each run of it, and everything a run creates. Disposing that owner stops the binding, and disposing the owner where the array was inserted does not.
     - [`@spec a-fragment-child-inserted-after-its-owner-was-disposed-binds-nothing`](#spec-a-fragment-child-inserted-after-its-owner-was-disposed-binds-nothing) — A function child of a `Fragment` that is inserted after the owner the `Fragment` was built in has been disposed binds nothing: it renders nothing and follows no source.
     - [`@spec an-event-prop-adds-a-listener-until-its-owner-is-disposed`](#spec-an-event-prop-adds-a-listener-until-its-owner-is-disposed) — An `on:name` prop adds its function as a listener for the event `name`, and removes it when the owner ambient at binding time is disposed.
   - [`@spec teardown-unwinds`](#spec-teardown-unwinds) — What runs when something closes runs in reverse order of registration, and a callback that throws stops neither the others nor the close. Whatever ends runs its own teardown, also when it ends early.
     - [`@spec closing-runs-callbacks-newest-first`](#spec-closing-runs-callbacks-newest-first) — Callbacks registered to run when something closes run in reverse order of registration, at every place where pulse runs them.
-      - [`@spec settle-callbacks-run-newest-first-and-in-isolation`](#spec-settle-callbacks-run-newest-first-and-in-isolation) — `scope.ts` `fireSettle`.
-      - [`@spec owner-cleanups-run-newest-first-and-in-isolation`](#spec-owner-cleanups-run-newest-first-and-in-isolation) — `owner.ts` `disposeOwner`.
-      - [`@spec generator-cleanups-run-newest-first-after-its-finally-blocks`](#spec-generator-cleanups-run-newest-first-after-its-finally-blocks) — `computed.ts` `endGen`.
+      - [`@spec settle-callbacks-run-newest-first-and-in-isolation`](#spec-settle-callbacks-run-newest-first-and-in-isolation) — The `onSettled` callbacks of a speculation fire in reverse order of registration when it commits or is discarded. One that throws is isolated: the others still fire, and the speculation still closes.
+      - [`@spec owner-cleanups-run-newest-first-and-in-isolation`](#spec-owner-cleanups-run-newest-first-and-in-isolation) — When an owner is disposed, its `onCleanup` callbacks run in reverse order of registration. One that throws is swallowed: the others still run, and the dispose does not throw.
+      - [`@spec generator-cleanups-run-newest-first-after-its-finally-blocks`](#spec-generator-cleanups-run-newest-first-after-its-finally-blocks) — When a generator stage's generator ends or is discarded, its `onCleanup` callbacks run most recently registered first, after its `finally` blocks. One that throws is isolated: the others still run, and the error goes to the stage's error handling. The `finally` blocks are lexically inside the generator, so `gen.return()` runs them first, and the cleanups registered on the generator follow.
     - [`@spec a-discarded-generator-is-closed-with-return`](#spec-a-discarded-generator-is-closed-with-return) — A generator that is discarded is closed with `gen.return()`, so its `finally` blocks run. Reads made in those blocks are not tracked.
 - [`@axiom a-failure-reaches-code-that-can-act-on-it`](#axiom-a-failure-reaches-code-that-can-act-on-it) — A failure, or a call pulse cannot honour, reaches the code or the developer that can act on it, at the place where it can be acted on. It is never lost, and never raised where it does not belong.
   - [`@spec error-boundaries-are-sub-owners`](#spec-error-boundaries-are-sub-owners) — An [error boundary](#term-error-boundary) and an error handler are both owners in the owner tree. A binding's error goes to the nearest of them above the owner it happened under that accepts it.
@@ -366,8 +366,8 @@ This document is the project. It holds the theory of pulse: why it is the way it
   - [`@spec the-roots-boundary-logs-every-failed-report`](#spec-the-roots-boundary-logs-every-failed-report) — The root's error boundary logs each failed report it receives to the console with `console.error`, a repeated report of the same error included.
   - [`@axiom a-missing-owner-is-reported-where-it-leaks-the-page`](#axiom-a-missing-owner-is-reported-where-it-leaks-the-page) — A missing owner is reported where it keeps part of the page alive, and only there.
     - [`@spec a-dom-binding-without-an-owner-warns`](#spec-a-dom-binding-without-an-owner-warns) — A reactive DOM binding or an event listener created with no owner still works, but warns once that it will never be disposed. Inside an owner, nothing warns.
-      - [`@spec a-reactive-child-without-an-owner-warns`](#spec-a-reactive-child-without-an-owner-warns) — `bindings.ts` `insertChild`.
-      - [`@spec a-prop-binding-or-listener-without-an-owner-warns`](#spec-a-prop-binding-or-listener-without-an-owner-warns) — `bindings.ts` `bindProp`.
+      - [`@spec a-reactive-child-without-an-owner-warns`](#spec-a-reactive-child-without-an-owner-warns) — A function child with no owner warns as a "reactive child". The owner checked is the one a `Fragment` tagged the child with, when there is one, and otherwise the ambient owner, so a child built inside an owner by a `Fragment` does not warn wherever its array is inserted.
+      - [`@spec a-prop-binding-or-listener-without-an-owner-warns`](#spec-a-prop-binding-or-listener-without-an-owner-warns) — Every property kind except `ref` warns: `on:` as an event listener, `attr:` and a bare name as an attribute binding, `prop:`, `class:` and `style:` under their own names. An attribute with a static value warns too, because every one of these kinds is wrapped in an effect whatever its value turns out to be. A `ref` is called once and never wrapped, so it does not warn.
     - [`@spec a-bare-effect-or-computed-without-an-owner-does-not-warn`](#spec-a-bare-effect-or-computed-without-an-owner-does-not-warn) — An effect or a computed created outside every owner works, lives forever, and warns about nothing.
   - [`@axiom a-call-that-only-means-something-in-a-scope-refuses-to-run-outside-it`](#axiom-a-call-that-only-means-something-in-a-scope-refuses-to-run-outside-it) — A call whose only effect lives in a scope refuses to run outside one, instead of doing nothing.
     - [`@spec speculation-only-calls-refuse-to-run-outside-one`](#spec-speculation-only-calls-refuse-to-run-outside-one) — `onSettled` and an optimistic setter only have meaning inside a speculation, and each throws when there is none.
@@ -377,16 +377,16 @@ This document is the project. It holds the theory of pulse: why it is the way it
     - [`@spec a-recovery-clears-the-error`](#spec-a-recovery-clears-the-error) — When a failed node computes successfully again, its error is cleared and its new value is published.
     - [`@spec suspension-is-not-a-failure`](#spec-suspension-is-not-a-failure) — A pending read, `use(x)` included, reaches `<Loading>` and never an error boundary or an error handler.
     - [`@spec a-failed-binding-leaves-the-pending-set`](#spec-a-failed-binding-leaves-the-pending-set) — A binding that suspended and then fails for real reports itself as no longer pending to its `<Loading>`, so the boundary's gate can open and its fallback can clear.
-      - [`@spec a-child-binding-leaves-the-pending-set-when-it-fails`](#spec-a-child-binding-leaves-the-pending-set-when-it-fails) — `bindings.ts` `insertChild`.
-      - [`@spec a-reactive-prop-leaves-the-pending-set-when-it-fails`](#spec-a-reactive-prop-leaves-the-pending-set-when-it-fails) — `bindings.ts` `reactiveCommit`.
+      - [`@spec a-child-binding-leaves-the-pending-set-when-it-fails`](#spec-a-child-binding-leaves-the-pending-set-when-it-fails) — A reactive child that fails reports idle before re-throwing to the error routing.
+      - [`@spec a-reactive-prop-leaves-the-pending-set-when-it-fails`](#spec-a-reactive-prop-leaves-the-pending-set-when-it-fails) — A reactive property, attribute, class or style binding that fails reports idle before re-throwing.
     - [`@spec a-boundary-shows-its-fallback-exactly-while-something-under-it-is-failed`](#spec-a-boundary-shows-its-fallback-exactly-while-something-under-it-is-failed) — An `<Errored>` with a fallback shows it while at least one binding under it is failed, and shows its children again as soon as none is, with no reset. One rejection renders the fallback once, however many times the failing binding re-runs.
     - [`@spec a-boundary-without-a-fallback-swaps-nothing`](#spec-a-boundary-without-a-fallback-swaps-nothing) — An `<Errored>` without a fallback keeps its children mounted through an error. Its state is still readable from below.
     - [`@spec a-boundary-holds-one-report-per-failed-binding`](#spec-a-boundary-holds-one-report-per-failed-binding) — An error boundary holds one report per currently failed binding, in the order the bindings first failed. A binding that reports again replaces its own entry, and a binding that recovers or goes away removes it.
     - [`@spec an-identical-report-publishes-nothing-new`](#spec-an-identical-report-publishes-nothing-new) — A binding that reports the identical error again does not make the boundary publish a new collection of reports.
     - [`@spec a-boundarys-state-can-be-read-without-swapping`](#spec-a-boundarys-state-can-be-read-without-swapping) — The nearest boundary's state is readable from below without swapping anything.
-      - [`@spec use-errored-returns-accessors-to-the-nearest-boundary`](#spec-use-errored-returns-accessors-to-the-nearest-boundary) — `dom/error.ts` `useErrored`.
-      - [`@spec is-errored-returns-the-current-state-or-undefined`](#spec-is-errored-returns-the-current-state-or-undefined) — `dom/error.ts` `isErrored`.
-      - [`@spec errored-error-renders-only-while-the-boundary-is-failed`](#spec-errored-error-renders-only-while-the-boundary-is-failed) — `dom/error.ts` `Errored.Error`.
+      - [`@spec use-errored-returns-accessors-to-the-nearest-boundary`](#spec-use-errored-returns-accessors-to-the-nearest-boundary) — `useErrored()` returns accessors that follow the nearest boundary's state reactively, and nothing is swapped.
+      - [`@spec is-errored-returns-the-current-state-or-undefined`](#spec-is-errored-returns-the-current-state-or-undefined) — `isErrored()` returns the nearest boundary's state at the moment of the call, read afresh each time, or `undefined` while it is healthy.
+      - [`@spec errored-error-renders-only-while-the-boundary-is-failed`](#spec-errored-error-renders-only-while-the-boundary-is-failed) — `<Errored.Error>` renders nothing while the boundary is healthy, and its content once the boundary fails.
   - [`@axiom a-reset-re-attempts-the-work-where-it-failed`](#axiom-a-reset-re-attempts-the-work-where-it-failed) — Resetting a boundary re-attempts the work behind each failure it holds, at the point where that failure started.
     - [`@spec reset-uses-the-latest-retry-a-binding-reported`](#spec-reset-uses-the-latest-retry-a-binding-reported) — A boundary's reset calls the retry from each binding's most recent report, even when that report did not change the published collection.
     - [`@spec reset-recomputes-the-failed-source-at-the-root-of-its-chain`](#spec-reset-recomputes-the-failed-source-at-the-root-of-its-chain) — When a failed binding read a failed node, reset clears the error at the deepest failed stage of that node's chain and recomputes it, even with unchanged inputs. This holds whether the binding read the node with `use`, which threw, or through a tolerant read, which reported the failure.
@@ -394,9 +394,9 @@ This document is the project. It holds the theory of pulse: why it is the way it
     - [`@spec reset-reruns-a-binding-that-threw-a-plain-error`](#spec-reset-reruns-a-binding-that-threw-a-plain-error) — When a binding threw an error that no failed node stands behind, reset re-runs that binding.
     - [`@spec an-errored-reset-retries-a-failed-action`](#spec-an-errored-reset-retries-a-failed-action) — An `<Errored>` boundary holding a failed action's report retries that action when it resets: its reset calls the action's own `retry()`.
     - [`@spec every-retry-affordance-performs-the-boundarys-reset`](#spec-every-retry-affordance-performs-the-boundarys-reset) — Every `retry` that reads a boundary's state from below performs the same operation as the fallback's `reset`: it retries every failed report the boundary holds.
-      - [`@spec use-errored-retry-performs-the-boundarys-reset`](#spec-use-errored-retry-performs-the-boundarys-reset) — `dom/error.ts` `useErrored`.
-      - [`@spec is-errored-retry-performs-the-boundarys-reset`](#spec-is-errored-retry-performs-the-boundarys-reset) — `dom/error.ts` `isErrored`.
-      - [`@spec errored-error-retry-performs-the-boundarys-reset`](#spec-errored-error-retry-performs-the-boundarys-reset) — `dom/error.ts` `Errored.Error`.
+      - [`@spec use-errored-retry-performs-the-boundarys-reset`](#spec-use-errored-retry-performs-the-boundarys-reset) — The `retry` on the object `useErrored()` returns calls the boundary's `reset`, or `resetMatching` when a predicate narrows it.
+      - [`@spec is-errored-retry-performs-the-boundarys-reset`](#spec-is-errored-retry-performs-the-boundarys-reset) — The `retry` on the state `isErrored()` returns calls the boundary's `reset`, or `resetMatching` when a predicate narrows it.
+      - [`@spec errored-error-retry-performs-the-boundarys-reset`](#spec-errored-error-retry-performs-the-boundarys-reset) — The `retry` passed to `<Errored.Error>`'s children is the one `isErrored()` returns, so it clears the boundary's error the same way.
     - [`@spec a-report-names-only-a-source-its-own-binding-read`](#spec-a-report-names-only-a-source-its-own-binding-read) — A binding's report names a failed node as its source only if that binding read it. A source left behind by an unrelated binding never reaches another boundary's reset.
 - [`@axiom a-speculation-commits-or-is-discarded-whole`](#axiom-a-speculation-commits-or-is-discarded-whole) — A speculation holds tentative writes over committed state until it either commits or is discarded, and it does either as one unit. Both outcomes are ordinary.
   - [`@spec a-speculative-write-stays-out-of-committed-state`](#spec-a-speculative-write-stays-out-of-committed-state) — A write inside a speculation is invisible to committed state until the speculation commits: a reader outside the speculation, and `committed(x)` called anywhere, inside the speculation included, keep seeing the committed value.
@@ -420,14 +420,14 @@ This document is the project. It holds the theory of pulse: why it is the way it
     - [`@spec a-write-to-a-derivation-moves-its-change-detection-only-once-committed`](#spec-a-write-to-a-derivation-moves-its-change-detection-only-once-committed) — A write to a derivation made inside an action updates the record the derivation compares its next result against only when the write reaches committed state. After a discard, the derivation compares against the value it last committed.
     - [`@spec a-promise-written-inside-an-action-starts-no-recompute`](#spec-a-promise-written-inside-an-action-starts-no-recompute) — Writing a promise to a derivation inside an action does not start a fresh recompute of the derivation.
   - [`@spec a-scope-reads-through-its-chain`](#spec-a-scope-reads-through-its-chain) — A read in a scope takes the nearest slot up its chain of scopes, and falls through to committed state when no scope in the chain has one.
-    - [`@spec a-new-scope-starts-open-and-empty`](#spec-a-new-scope-starts-open-and-empty) — `scope.ts` `createScope`.
-    - [`@spec a-scope-chain-runs-from-the-scope-to-the-root`](#spec-a-scope-chain-runs-from-the-scope-to-the-root) — `scope.ts` `chainFor`.
-    - [`@spec a-read-takes-the-nearest-slot-in-the-chain`](#spec-a-read-takes-the-nearest-slot-in-the-chain) — `scope.ts` `readSlot`.
-    - [`@spec entering-a-scope-restores-the-previous-one-even-on-a-throw`](#spec-entering-a-scope-restores-the-previous-one-even-on-a-throw) — `scope.ts` `runInScope`.
+    - [`@spec a-new-scope-starts-open-and-empty`](#spec-a-new-scope-starts-open-and-empty) — A new scope is open, holds no slots, links, writes or reads, and is registered as a child of its parent.
+    - [`@spec a-scope-chain-runs-from-the-scope-to-the-root`](#spec-a-scope-chain-runs-from-the-scope-to-the-root) — The chain lists the scope itself first, then each parent in turn, and ends at the root.
+    - [`@spec a-read-takes-the-nearest-slot-in-the-chain`](#spec-a-read-takes-the-nearest-slot-in-the-chain) — The first scope in the chain with a slot for the node answers, so a slot in a more specific scope shadows the same node's slot further up. With no slot anywhere in the chain, the read finds nothing and falls through.
+    - [`@spec entering-a-scope-restores-the-previous-one-even-on-a-throw`](#spec-entering-a-scope-restores-the-previous-one-even-on-a-throw) — The ambient scope is the root until a scope is entered. Entering a scope sets it, and the scope that was ambient before is restored when the call returns or throws.
   - [`@spec only-written-nodes-are-promoted-at-commit`](#spec-only-written-nodes-are-promoted-at-commit) — A commit promotes the nodes the speculation wrote, and drops everything else it holds.
-    - [`@spec a-write-records-its-node-for-promotion`](#spec-a-write-records-its-node-for-promotion) — `scope.ts` `writeSlot`.
-    - [`@spec closing-a-scope-unlinks-it-from-its-sources`](#spec-closing-a-scope-unlinks-it-from-its-sources) — `scope.ts` `closeScopeEdges`.
-    - [`@spec a-node-only-read-is-not-promoted`](#spec-a-node-only-read-is-not-promoted) — `scope.ts` `commit`.
+    - [`@spec a-write-records-its-node-for-promotion`](#spec-a-write-records-its-node-for-promotion) — Writing a slot records the node in the scope's write set, which is what a commit promotes.
+    - [`@spec closing-a-scope-unlinks-it-from-its-sources`](#spec-closing-a-scope-unlinks-it-from-its-sources) — Closing a scope, on a commit or a discard, removes its links from the sources they listened to, drops its slots, clears its write and read sets, and detaches it from its parent.
+    - [`@spec a-node-only-read-is-not-promoted`](#spec-a-node-only-read-is-not-promoted) — A computed that the speculation only read is not in its write set, so the commit leaves the computed alone, and it recomputes from the promoted values.
 - [`@fact a-promise-reports-its-state-only-through-a-callback`](#fact-a-promise-reports-its-state-only-through-a-callback) — A JavaScript promise offers no synchronous way to read whether it has settled, or its value. Its state reaches other code only through a callback passed to `then`. That callback runs at least a microtask after it is attached, even for a promise that has already settled.
 - [`@fact no-context-survives-an-await`](#fact-no-context-survives-an-await) — In browsers, no context set around a call reaches the code that runs after an `await` inside it. The proposal [`AsyncContext`](https://github.com/tc39/proposal-async-context) would carry one across, but browsers do not ship it yet.
 - [`@fact only-a-generator-can-be-resumed`](#fact-only-a-generator-can-be-resumed) — In JavaScript, only a generator can pause and be resumed where it paused by the code that drives it. A function that throws has ended, and an async function resumes after an `await` on its own, later and outside the call that started it.
@@ -627,21 +627,21 @@ This follows because pulse uses r3 as it is, which holds one value per node, and
 
 ##### @spec a-signal-node-is-backed-by-an-r3-signal
 
-> `scope.ts` `signalNode`.
+> A signal node holds its committed value in an r3 signal, and starts with no speculative subscribers.
 
-A signal node holds its committed value in an r3 signal, and starts with no speculative subscribers.
+Site: `scope.ts:signalNode`
 
 ##### @spec a-computed-node-carries-its-recipe-on-an-r3-computed
 
-> `scope.ts` `computedNode`.
+> A computed node keeps its recipe, so a speculation can run it again into a slot, and is backed by an r3 computed that runs the same recipe for the committed value.
 
-A computed node keeps its recipe, so a speculation can run it again into a slot, and is backed by an r3 computed that runs the same recipe for the committed value.
+Site: `scope.ts:computedNode`
 
 ##### @spec a-committed-read-and-write-go-through-r3
 
-> `scope.ts` `writeValue`.
+> With the root as the ambient scope, a write sets the r3 signal and a read returns the r3 value.
 
-With the root as the ambient scope, a write sets the r3 signal and a read returns the r3 value.
+Site: `scope.ts:writeValue`
 
 #### @spec pulse-reaches-r3-only-through-its-exports
 
@@ -1039,27 +1039,27 @@ Speculative consumers are recomputed on read, so r3's scheduler is not involved 
 
 ##### @spec a-speculative-read-recomputes-into-a-slot-of-its-scope
 
-> `scope.ts` `readValue`.
+> Reading a computed under a speculation runs its recipe into a slot of that scope, and links each source the recipe read to that slot.
 
-Reading a computed under a speculation runs its recipe into a slot of that scope, and links each source the recipe read to that slot.
+Site: `scope.ts:readValue`
 
 ##### @spec a-speculative-write-dirties-what-derives-from-it
 
-> `scope.ts` `invalidateDownstream`.
+> A write marks every speculative slot that derives from the written node dirty, directly or through other slots, so its next read recomputes.
 
-A write marks every speculative slot that derives from the written node dirty, directly or through other slots, so its next read recomputes.
+Site: `scope.ts:invalidateDownstream`
 
 ##### @spec a-slot-caches-undefined-like-any-value
 
-> `scope.ts` `DIRTY`.
+> A dirty slot is marked with its own symbol, not with `undefined`, so a recipe that returns `undefined` is cached and not run again on every read, and still recomputes once a write dirties it.
 
-A dirty slot is marked with its own symbol, not with `undefined`, so a recipe that returns `undefined` is cached and not run again on every read, and still recomputes once a write dirties it.
+Site: `scope.ts:DIRTY`
 
 ##### @spec a-recompute-replaces-its-links
 
-> `scope.ts` `resetSlotDeps`.
+> Before a slot is recomputed, its existing links are removed from their sources, so links do not pile up across recomputes.
 
-Before a slot is recomputed, its existing links are removed from their sources, so links do not pile up across recomputes.
+Site: `scope.ts:resetSlotDeps`
 
 #### @spec a-derivation-runs-when-it-is-created
 
@@ -1089,9 +1089,9 @@ This follows because the stage reads the promise's recorded state when it runs, 
 
 ##### @spec the-driver-reads-settledness-from-the-promise-map
 
-> `driver.ts` `runStage`.
+> The driver decides whether a returned or yielded promise has settled by reading the same map. Read state and the driver's memory of settled promises are one mechanism: a promise the map records as fulfilled is used at once, even on the first run that sees it.
 
-The driver decides whether a returned or yielded promise has settled by reading the same map. Read state and the driver's memory of settled promises are one mechanism: a promise the map records as fulfilled is used at once, even on the first run that sees it.
+Site: `driver.ts:runStage`
 
 #### @spec a-written-promise-pulse-has-seen-settle-applies-at-the-write
 
@@ -1111,9 +1111,9 @@ This follows because `use` reads the promise's recorded state when it is called,
 
 #### @spec a-published-result-reads-fulfilled-at-once
 
-> `async.ts` `resolvedPromise`.
+> The promise pulse publishes when an async stage settles is recorded fulfilled the moment it is made, so a synchronous read reports its value without waiting a microtask. A promise pulse makes itself never falls under the exception below.
 
-The promise pulse publishes when an async stage settles is recorded fulfilled the moment it is made, so a synchronous read reports its value without waiting a microtask. A promise pulse makes itself never falls under the exception below.
+Site: `async.ts:resolvedPromise`
 
 #### @exception a-promise-pulse-has-not-seen-settle-is-pending
 
@@ -1329,21 +1329,21 @@ This follows because a value that has a future says so in its type: a stage that
 
 ##### @spec pipeline-read-colours-by-the-stages-that-can-be-async
 
-> `async.ts` `PipelineRead`.
+> An async upstream stage makes the whole read a `Promise`. A stage that may or may not return a promise makes the read a union of both.
 
-An async upstream stage makes the whole read a `Promise`. A stage that may or may not return a promise makes the read a union of both.
+Site: `async.ts:PipelineRead`
 
 ##### @spec a-generator-stage-is-coloured-by-what-it-reads
 
-> `async.ts` `PipelineRead`.
+> A generator stage is coloured by what its `yield* from(…)` calls read, not by being a generator. One that reads only settled values reads bare.
 
-A generator stage is coloured by what its `yield* from(…)` calls read, not by being a generator. One that reads only settled values reads bare.
+Site: `async.ts:PipelineRead`
 
 ##### @spec resolved-unwraps-what-a-stage-receives
 
-> `async.ts` `Resolved`.
+> `Resolved<T>` removes the colour from what a stage receives: a signal gives its value, a promise what it fulfils to, and a generator what it returns.
 
-`Resolved<T>` removes the colour from what a stage receives: a signal gives its value, a promise what it fulfils to, and a generator what it returns.
+Site: `async.ts:Resolved`
 
 #### @spec a-pipeline-reads-as-a-promise-while-its-value-came-through-async
 
@@ -1383,9 +1383,9 @@ This follows because an async node reads as a plain promise, and a value with a 
 
 ##### @spec track-seeds-the-stale-prior
 
-> `async.ts` `track`.
+> The first time a promise is seen, it is recorded as pending, carrying the prior value it replaces, so a tolerant read of a pending promise can still return that prior. A later `track` of the same promise returns the recorded state unchanged.
 
-The first time a promise is seen, it is recorded as pending, carrying the prior value it replaces, so a tolerant read of a pending promise can still return that prior. A later `track` of the same promise returns the recorded state unchanged.
+Site: `async.ts:track`
 
 #### @spec a-construction-default-leaves-the-raw-read-a-promise
 
@@ -1433,21 +1433,21 @@ SameValueZero is the equality `Map`, `Set` and `Array.prototype.includes` use. A
 
 #### @spec a-computed-publishes-only-a-changed-value
 
-> `computed.ts` `makeStageNode`.
+> A stage whose new value is equal to the one it last published does not publish it again, so its consumers do not re-run. This holds wherever the value comes from: a run of the stage, a promise the stage returned, a promise a `use` in the stage suspended on, or a promise written into the stage.
 
-A stage whose new value is equal to the one it last published does not publish it again, so its consumers do not re-run. This holds wherever the value comes from: a run of the stage, a promise the stage returned, a promise a `use` in the stage suspended on, or a promise written into the stage.
+Site: `computed.ts:makeStageNode`
 
 #### @spec an-equal-committed-signal-write-is-dropped
 
-> `scope.ts` `writeValue`.
+> A committed write to a signal that equals its current value is dropped. r3 drops a write `===` to the current value, and pulse drops `NaN` over `NaN` before the write reaches r3.
 
-A committed write to a signal that equals its current value is dropped. r3 drops a write `===` to the current value, and pulse drops `NaN` over `NaN` before the write reaches r3.
+Site: `scope.ts:writeValue`
 
 #### @spec an-equal-speculative-write-dirties-nothing
 
-> `scope.ts` `writeSpeculative`.
+> A write inside a speculation of a value equal to the one the speculation reads for the node marks nothing derived from it dirty, so nothing read inside the speculation recomputes. The write is still recorded for the commit, so it decides the committed value when its speculation commits last, as [the spec on commit order](#spec-overlapping-writes-resolve-by-commit-order) states.
 
-A write inside a speculation of a value equal to the one the speculation reads for the node marks nothing derived from it dirty, so nothing read inside the speculation recomputes. The write is still recorded for the commit, so it decides the committed value when its speculation commits last, as [the spec on commit order](#spec-overlapping-writes-resolve-by-commit-order) states.
+Site: `scope.ts:writeSpeculative`
 
 ### @spec reading-a-computed-again-without-a-change-re-runs-nothing
 
@@ -1495,21 +1495,21 @@ This follows because a paused computation is re-entered at its pause, and work b
 
 ##### @spec a-paused-generator-is-handed-back-to-its-caller
 
-> `driver.ts` `runStage`.
+> A generator stage that pauses hands the paused generator back with its outcome, and the same generator at every later pause. A sync stage's outcome carries no generator, because it has none to retain.
 
-A generator stage that pauses hands the paused generator back with its outcome, and the same generator at every later pause. A sync stage's outcome carries no generator, because it has none to retain.
+Site: `driver.ts:runStage`
 
 ##### @spec a-retained-generator-is-driven-from-its-pause
 
-> `driver.ts` `resumeStage`.
+> Resuming drives the retained generator forward from its pause with the settled value. The code before the pause does not run again.
 
-Resuming drives the retained generator forward from its pause with the settled value. The code before the pause does not run again.
+Site: `driver.ts:resumeStage`
 
 ##### @spec a-stage-node-resumes-its-paused-generator
 
-> `computed.ts` `makeStageNode`.
+> When the promise a generator stage paused on settles, the stage resumes the generator it retained instead of building a new one. A promise built inside the body is therefore built once, and the stage converges.
 
-When the promise a generator stage paused on settles, the stage resumes the generator it retained instead of building a new one. A promise built inside the body is therefore built once, and the stage converges.
+Site: `computed.ts:makeStageNode`
 
 #### @spec dependencies-read-before-a-pause-stay-linked
 
@@ -1521,21 +1521,21 @@ This follows because work before the pause runs again only when an input it read
 
 ##### @spec a-run-records-every-dependency-it-read
 
-> `dep-replay.ts` `snapshotDeps`.
+> The record is taken from r3's own dependency list up to the run's cursor, with each dependency's value, so it includes every read however it was made. A run that read nothing records nothing, also when stale entries remain behind a null cursor.
 
-The record is taken from r3's own dependency list up to the run's cursor, with each dependency's value, so it includes every read however it was made. A run that read nothing records nothing, also when stale entries remain behind a null cursor.
+Site: `dep-replay.ts:snapshotDeps`
 
 ##### @spec replay-reads-every-record
 
-> `dep-replay.ts` `replayDeps`.
+> Replay reads every record, even after it has found a change, so none of them drops out of the next dependency list.
 
-Replay reads every record, even after it has found a change, so none of them drops out of the next dependency list.
+Site: `dep-replay.ts:replayDeps`
 
 ##### @spec a-resumed-stage-replays-its-recorded-dependencies
 
-> `computed.ts` `makeStageNode`.
+> Before resuming, the stage replays the dependencies it recorded at the pause, so a signal read before the pause is still a dependency after the resume.
 
-Before resuming, the stage replays the dependencies it recorded at the pause, so a signal read before the pause is still a dependency after the resume.
+Site: `computed.ts:makeStageNode`
 
 #### @spec a-changed-input-replaces-the-paused-generator
 
@@ -1545,21 +1545,21 @@ This follows because work before the pause runs again when an input it read chan
 
 ##### @spec replay-reports-a-changed-dependency
 
-> `dep-replay.ts` `replayDeps`.
+> Replay compares each recorded value with the current one, and reports whether any of them changed.
 
-Replay compares each recorded value with the current one, and reports whether any of them changed.
+Site: `dep-replay.ts:replayDeps`
 
 ##### @spec the-wake-signal-is-not-an-input
 
-> `dep-replay.ts` `snapshotDeps`.
+> The control signal pulse writes to wake a paused stage is left out of the record, so waking the stage never counts as a changed input.
 
-The control signal pulse writes to wake a paused stage is left out of the record, so waking the stage never counts as a changed input.
+Site: `dep-replay.ts:snapshotDeps`
 
 ##### @spec a-stage-node-discards-a-generator-whose-input-changed
 
-> `computed.ts` `makeStageNode`.
+> On a changed input the stage discards the paused generator and runs a fresh one from the top. The discarded generator's promise can no longer re-run the stage when it settles.
 
-On a changed input the stage discards the paused generator and runs a fresh one from the top. The discarded generator's promise can no longer re-run the stage when it settles.
+Site: `computed.ts:makeStageNode`
 
 #### @spec a-reset-discards-a-paused-generator
 
@@ -1819,15 +1819,15 @@ This follows because only the work that depends on a change runs again: a branch
 
 ###### @spec show-rebuilds-only-when-truthiness-flips
 
-> `show.ts` `Show`.
+> A re-run that stays on the same side, truthy or falsy, returns the branch already built and does not call the children function again. Only a flip between truthy and falsy disposes the old branch's sub-owner and builds the other side under a new one.
 
-A re-run that stays on the same side, truthy or falsy, returns the branch already built and does not call the children function again. Only a flip between truthy and falsy disposes the old branch's sub-owner and builds the other side under a new one.
+Site: `show.ts:Show`
 
 ###### @spec switch-rebuilds-only-when-the-winning-match-changes
 
-> `switch.ts` `Switch`.
+> The winning `Match`'s position among the `Switch`'s children is the key, not the `Match` object. The compiler turns component children into a getter, so each re-evaluation reads fresh `Match` objects; their positions stay put. While the same position wins, the built branch is reused. When another position wins, or none does, the old branch's sub-owner is disposed before the new branch is built.
 
-The winning `Match`'s position among the `Switch`'s children is the key, not the `Match` object. The compiler turns component children into a getter, so each re-evaluation reads fresh `Match` objects; their positions stay put. While the same position wins, the built branch is reused. When another position wins, or none does, the old branch's sub-owner is disposed before the new branch is built.
+Site: `switch.ts:Switch`
 
 ### @spec jsx-builds-real-dom-directly
 
@@ -2118,21 +2118,21 @@ A page label and a list show how this makes a transition:
 
 ##### @spec a-reactive-child-that-called-use-waits-for-the-gate
 
-> `bindings.ts` `insertChild`.
+> A reactive child that called `use` reports its commit to the boundary instead of writing the DOM, and its text changes only when the gate opens.
 
-A reactive child that called `use` reports its commit to the boundary instead of writing the DOM, and its text changes only when the gate opens.
+Site: `bindings.ts:insertChild`
 
 ##### @spec a-reactive-prop-that-called-use-waits-for-the-gate
 
-> `bindings.ts` `bindProp`.
+> A reactive property, such as a `class:` binding, routes its commit through the gate the same way as a reactive child.
 
-A reactive property, such as a `class:` binding, routes its commit through the gate the same way as a reactive child.
+Site: `bindings.ts:bindProp`
 
 ##### @spec a-queued-commit-is-checked-again-at-the-end-of-the-microtask
 
-> `loading.ts` `deferOrCommit`.
+> A commit from a binding that called `use` but did not suspend is queued, not applied, even when nothing in the boundary is suspended at that moment. It is checked again at the end of the microtask. A sibling that suspends later in the same flush therefore still holds it, and the two land together.
 
-A commit from a binding that called `use` but did not suspend is queued, not applied, even when nothing in the boundary is suspended at that moment. It is checked again at the end of the microtask. A sibling that suspends later in the same flush therefore still holds it, and the two land together.
+Site: `loading.ts:deferOrCommit`
 
 #### @spec a-read-without-use-commits-at-once
 
@@ -2238,33 +2238,33 @@ This is how `Show`, `Switch` and `For` hold a branch or a row that is not ready:
 
 ##### @spec a-hole-holds-new-content-that-is-not-ready
 
-> `bindings.ts` `insertChild`.
+> Before committing, a reactive child looks in the nodes it is about to insert for the marker of a suspended reactive child of its own boundary. The DOM is what is checked, so it does not matter how or when those nodes were built: a `For` row built by its own computation during the flush counts the same as a `Show` branch built during the run. When such a marker is there, the commit is handed to the gate as this binding's ready commit, and the nodes on screen stay.
 
-Before committing, a reactive child looks in the nodes it is about to insert for the marker of a suspended reactive child of its own boundary. The DOM is what is checked, so it does not matter how or when those nodes were built: a `For` row built by its own computation during the flush counts the same as a `Show` branch built during the run. When such a marker is there, the commit is handed to the gate as this binding's ready commit, and the nodes on screen stay.
+Site: `bindings.ts:insertChild`
 
 ##### @spec a-held-commit-places-its-nodes-only-when-it-lands
 
-> `bindings.ts` `insertChild`.
+> While a commit is held, its nodes are not moved into a fragment. They are placed when the commit lands. A row that `For` reuses is a live node already on screen, so it stays on screen, with its content, for as long as the new list is held.
 
-While a commit is held, its nodes are not moved into a fragment. They are placed when the commit lands. A row that `For` reuses is a live node already on screen, so it stays on screen, with its content, for as long as the new list is held.
+Site: `bindings.ts:insertChild`
 
 ##### @spec a-replaced-held-commit-releases-the-gate
 
-> `bindings.ts` `insertChild`.
+> When a later run of the same reactive child replaces a held commit, it first withdraws that commit from the gate, and then disposes the subtree built for it. The subtree's suspended bindings unregister with it, so they no longer hold the gate for a commit that will never land, and withdrawing first means the gate opening cannot apply the stale commit.
 
-When a later run of the same reactive child replaces a held commit, it first withdraws that commit from the gate, and then disposes the subtree built for it. The subtree's suspended bindings unregister with it, so they no longer hold the gate for a commit that will never land, and withdrawing first means the gate opening cannot apply the stale commit.
+Site: `bindings.ts:insertChild`
 
 ##### @spec a-hole-under-a-nested-boundary-does-not-hold
 
-> `bindings.ts` `holdsSuspendedHole`.
+> A suspended hole's marker records the boundary the hole is suspended in, and only a marker of the checking hole's own boundary counts. Content under a nested `<Loading>` is suspended in that boundary, so the outer structure mounts at once and the inner boundary shows its own placeholder.
 
-A suspended hole's marker records the boundary the hole is suspended in, and only a marker of the checking hole's own boundary counts. Content under a nested `<Loading>` is suspended in that boundary, so the outer structure mounts at once and the inner boundary shows its own placeholder.
+Site: `bindings.ts:holdsSuspendedHole`
 
 ##### @spec a-suspended-prop-does-not-hold-the-structure
 
-> `bindings.ts` `holdsSuspendedHole`.
+> Only the markers of reactive children are looked for. A reactive prop that suspends, such as `class={use(x)}`, leaves no marker, so the element that carries it mounts at once, and the prop's own value waits at the gate.
 
-Only the markers of reactive children are looked for. A reactive prop that suspends, such as `class={use(x)}`, leaves no marker, so the element that carries it mounts at once, and the prop's own value waits at the gate.
+Site: `bindings.ts:holdsSuspendedHole`
 
 #### @spec boundary-state-is-looked-up-past-a-catch-error
 
@@ -2496,21 +2496,21 @@ This predicate is the whole of what the overlay adds to r3's way of propagating 
 
 ##### @spec chain-match-decides-whether-a-write-reaches-a-link
 
-> `scope.ts` `chainMatch`.
+> A link fires for a write when the writing scope is in the chain of the link's scope, and no scope nearer than the writing one has its own slot for the node.
 
-A link fires for a write when the writing scope is in the chain of the link's scope, and no scope nearer than the writing one has its own slot for the node.
+Site: `scope.ts:chainMatch`
 
 ##### @spec a-link-is-indexed-on-its-source-and-held-by-its-scope
 
-> `scope.ts` `linkEdge`.
+> A new link is added to its source's subscribers, to the links its scope holds, and to the dependencies of the slot it feeds.
 
-A new link is added to its source's subscribers, to the links its scope holds, and to the dependencies of the slot it feeds.
+Site: `scope.ts:linkEdge`
 
 ##### @spec a-write-fires-only-the-links-that-match
 
-> `scope.ts` `edgesToFire`.
+> Of a node's links, a write fires exactly those that the chain match accepts, and none whose scope lies outside the writing scope's reach.
 
-Of a node's links, a write fires exactly those that the chain match accepts, and none whose scope lies outside the writing scope's reach.
+Site: `scope.ts:edgesToFire`
 
 ### @spec a-prop-says-how-it-reaches-the-dom
 
@@ -2732,15 +2732,15 @@ Everything the content created — effects, nested bindings, `onCleanup` callbac
 
 ##### @spec each-run-of-a-reactive-child-owns-what-it-creates
 
-> `bindings.ts` `insertChild`.
+> Every run of a reactive child builds its result under a fresh sub-owner. When the new result is committed, the previous run's sub-owner is disposed, so a nested binding from an earlier run never stays subscribed.
 
-Every run of a reactive child builds its result under a fresh sub-owner. When the new result is committed, the previous run's sub-owner is disposed, so a nested binding from an earlier run never stays subscribed.
+Site: `bindings.ts:insertChild`
 
 ##### @spec map-array-builds-each-item-once-under-its-own-owner
 
-> `map-array.ts` `mapArray`.
+> The mapper runs once per new item, under a sub-owner for that item. An item still present on the next run keeps its entry and its sub-owner. An item that is gone has its sub-owner disposed, and disposing the owner around the list disposes every row.
 
-The mapper runs once per new item, under a sub-owner for that item. An item still present on the next run keeps its entry and its sub-owner. An item that is gone has its sub-owner disposed, and disposing the owner around the list disposes every row.
+Site: `map-array.ts:mapArray`
 
 #### @spec a-fragment-child-belongs-to-the-owner-the-fragment-was-built-in
 
@@ -2786,21 +2786,21 @@ This follows because [`spec-teardown-unwinds`](#spec-teardown-unwinds) says what
 
 ##### @spec settle-callbacks-run-newest-first-and-in-isolation
 
-> `scope.ts` `fireSettle`.
+> The `onSettled` callbacks of a speculation fire in reverse order of registration when it commits or is discarded. One that throws is isolated: the others still fire, and the speculation still closes.
 
-The `onSettled` callbacks of a speculation fire in reverse order of registration when it commits or is discarded. One that throws is isolated: the others still fire, and the speculation still closes.
+Site: `scope.ts:fireSettle`
 
 ##### @spec owner-cleanups-run-newest-first-and-in-isolation
 
-> `owner.ts` `disposeOwner`.
+> When an owner is disposed, its `onCleanup` callbacks run in reverse order of registration. One that throws is swallowed: the others still run, and the dispose does not throw.
 
-When an owner is disposed, its `onCleanup` callbacks run in reverse order of registration. One that throws is swallowed: the others still run, and the dispose does not throw.
+Site: `owner.ts:disposeOwner`
 
 ##### @spec generator-cleanups-run-newest-first-after-its-finally-blocks
 
-> `computed.ts` `endGen`.
+> When a generator stage's generator ends or is discarded, its `onCleanup` callbacks run most recently registered first, after its `finally` blocks. One that throws is isolated: the others still run, and the error goes to the stage's error handling. The `finally` blocks are lexically inside the generator, so `gen.return()` runs them first, and the cleanups registered on the generator follow.
 
-When a generator stage's generator ends or is discarded, its `onCleanup` callbacks run most recently registered first, after its `finally` blocks. One that throws is isolated: the others still run, and the error goes to the stage's error handling. The `finally` blocks are lexically inside the generator, so `gen.return()` runs them first, and the cleanups registered on the generator follow.
+Site: `computed.ts:endGen`
 
 #### @spec a-discarded-generator-is-closed-with-return
 
@@ -3034,15 +3034,15 @@ This follows because a missing owner is reported where it keeps part of the page
 
 ##### @spec a-reactive-child-without-an-owner-warns
 
-> `bindings.ts` `insertChild`.
+> A function child with no owner warns as a "reactive child". The owner checked is the one a `Fragment` tagged the child with, when there is one, and otherwise the ambient owner, so a child built inside an owner by a `Fragment` does not warn wherever its array is inserted.
 
-A function child with no owner warns as a "reactive child". The owner checked is the one a `Fragment` tagged the child with, when there is one, and otherwise the ambient owner, so a child built inside an owner by a `Fragment` does not warn wherever its array is inserted.
+Site: `bindings.ts:insertChild`
 
 ##### @spec a-prop-binding-or-listener-without-an-owner-warns
 
-> `bindings.ts` `bindProp`.
+> Every property kind except `ref` warns: `on:` as an event listener, `attr:` and a bare name as an attribute binding, `prop:`, `class:` and `style:` under their own names. An attribute with a static value warns too, because every one of these kinds is wrapped in an effect whatever its value turns out to be. A `ref` is called once and never wrapped, so it does not warn.
 
-Every property kind except `ref` warns: `on:` as an event listener, `attr:` and a bare name as an attribute binding, `prop:`, `class:` and `style:` under their own names. An attribute with a static value warns too, because every one of these kinds is wrapped in an effect whatever its value turns out to be. A `ref` is called once and never wrapped, so it does not warn.
+Site: `bindings.ts:bindProp`
 
 #### @spec a-bare-effect-or-computed-without-an-owner-does-not-warn
 
@@ -3116,15 +3116,15 @@ A failed binding left in the pending set would hold the gate shut forever, stran
 
 ##### @spec a-child-binding-leaves-the-pending-set-when-it-fails
 
-> `bindings.ts` `insertChild`.
+> A reactive child that fails reports idle before re-throwing to the error routing.
 
-A reactive child that fails reports idle before re-throwing to the error routing.
+Site: `bindings.ts:insertChild`
 
 ##### @spec a-reactive-prop-leaves-the-pending-set-when-it-fails
 
-> `bindings.ts` `reactiveCommit`.
+> A reactive property, attribute, class or style binding that fails reports idle before re-throwing.
 
-A reactive property, attribute, class or style binding that fails reports idle before re-throwing.
+Site: `bindings.ts:reactiveCommit`
 
 #### @spec a-boundary-shows-its-fallback-exactly-while-something-under-it-is-failed
 
@@ -3162,21 +3162,21 @@ This follows because [`spec-an-error-is-graph-state-not-an-event`](#spec-an-erro
 
 ##### @spec use-errored-returns-accessors-to-the-nearest-boundary
 
-> `dom/error.ts` `useErrored`.
+> `useErrored()` returns accessors that follow the nearest boundary's state reactively, and nothing is swapped.
 
-`useErrored()` returns accessors that follow the nearest boundary's state reactively, and nothing is swapped.
+Site: `dom/error.ts:useErrored`
 
 ##### @spec is-errored-returns-the-current-state-or-undefined
 
-> `dom/error.ts` `isErrored`.
+> `isErrored()` returns the nearest boundary's state at the moment of the call, read afresh each time, or `undefined` while it is healthy.
 
-`isErrored()` returns the nearest boundary's state at the moment of the call, read afresh each time, or `undefined` while it is healthy.
+Site: `dom/error.ts:isErrored`
 
 ##### @spec errored-error-renders-only-while-the-boundary-is-failed
 
-> `dom/error.ts` `Errored.Error`.
+> `<Errored.Error>` renders nothing while the boundary is healthy, and its content once the boundary fails.
 
-`<Errored.Error>` renders nothing while the boundary is healthy, and its content once the boundary fails.
+Site: `dom/error.ts:Errored.Error`
 
 ### @axiom a-reset-re-attempts-the-work-where-it-failed
 
@@ -3230,21 +3230,21 @@ This follows because a reset re-attempts the work behind each failure the bounda
 
 ##### @spec use-errored-retry-performs-the-boundarys-reset
 
-> `dom/error.ts` `useErrored`.
+> The `retry` on the object `useErrored()` returns calls the boundary's `reset`, or `resetMatching` when a predicate narrows it.
 
-The `retry` on the object `useErrored()` returns calls the boundary's `reset`, or `resetMatching` when a predicate narrows it.
+Site: `dom/error.ts:useErrored`
 
 ##### @spec is-errored-retry-performs-the-boundarys-reset
 
-> `dom/error.ts` `isErrored`.
+> The `retry` on the state `isErrored()` returns calls the boundary's `reset`, or `resetMatching` when a predicate narrows it.
 
-The `retry` on the state `isErrored()` returns calls the boundary's `reset`, or `resetMatching` when a predicate narrows it.
+Site: `dom/error.ts:isErrored`
 
 ##### @spec errored-error-retry-performs-the-boundarys-reset
 
-> `dom/error.ts` `Errored.Error`.
+> The `retry` passed to `<Errored.Error>`'s children is the one `isErrored()` returns, so it clears the boundary's error the same way.
 
-The `retry` passed to `<Errored.Error>`'s children is the one `isErrored()` returns, so it clears the boundary's error the same way.
+Site: `dom/error.ts:Errored.Error`
 
 #### @spec a-report-names-only-a-source-its-own-binding-read
 
@@ -3432,27 +3432,27 @@ Entering a scope and restoring the previous one on the way out is the same patte
 
 #### @spec a-new-scope-starts-open-and-empty
 
-> `scope.ts` `createScope`.
+> A new scope is open, holds no slots, links, writes or reads, and is registered as a child of its parent.
 
-A new scope is open, holds no slots, links, writes or reads, and is registered as a child of its parent.
+Site: `scope.ts:createScope`
 
 #### @spec a-scope-chain-runs-from-the-scope-to-the-root
 
-> `scope.ts` `chainFor`.
+> The chain lists the scope itself first, then each parent in turn, and ends at the root.
 
-The chain lists the scope itself first, then each parent in turn, and ends at the root.
+Site: `scope.ts:chainFor`
 
 #### @spec a-read-takes-the-nearest-slot-in-the-chain
 
-> `scope.ts` `readSlot`.
+> The first scope in the chain with a slot for the node answers, so a slot in a more specific scope shadows the same node's slot further up. With no slot anywhere in the chain, the read finds nothing and falls through.
 
-The first scope in the chain with a slot for the node answers, so a slot in a more specific scope shadows the same node's slot further up. With no slot anywhere in the chain, the read finds nothing and falls through.
+Site: `scope.ts:readSlot`
 
 #### @spec entering-a-scope-restores-the-previous-one-even-on-a-throw
 
-> `scope.ts` `runInScope`.
+> The ambient scope is the root until a scope is entered. Entering a scope sets it, and the scope that was ambient before is restored when the call returns or throws.
 
-The ambient scope is the root until a scope is entered. Entering a scope sets it, and the scope that was ambient before is restored when the call returns or throws.
+Site: `scope.ts:runInScope`
 
 ### @spec only-written-nodes-are-promoted-at-commit
 
@@ -3466,21 +3466,21 @@ A computed the speculation only read keeps a committed value derived from commit
 
 #### @spec a-write-records-its-node-for-promotion
 
-> `scope.ts` `writeSlot`.
+> Writing a slot records the node in the scope's write set, which is what a commit promotes.
 
-Writing a slot records the node in the scope's write set, which is what a commit promotes.
+Site: `scope.ts:writeSlot`
 
 #### @spec closing-a-scope-unlinks-it-from-its-sources
 
-> `scope.ts` `closeScopeEdges`.
+> Closing a scope, on a commit or a discard, removes its links from the sources they listened to, drops its slots, clears its write and read sets, and detaches it from its parent.
 
-Closing a scope, on a commit or a discard, removes its links from the sources they listened to, drops its slots, clears its write and read sets, and detaches it from its parent.
+Site: `scope.ts:closeScopeEdges`
 
 #### @spec a-node-only-read-is-not-promoted
 
-> `scope.ts` `commit`.
+> A computed that the speculation only read is not in its write set, so the commit leaves the computed alone, and it recomputes from the promoted values.
 
-A computed that the speculation only read is not in its write set, so the commit leaves the computed alone, and it recomputes from the promoted values.
+Site: `scope.ts:commit`
 
 ## @fact a-promise-reports-its-state-only-through-a-callback
 

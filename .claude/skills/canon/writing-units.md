@@ -103,7 +103,7 @@ _Avoid_: current state, now
 
 ## 7. Places in the code
 
-1. When one place in the code does what a spec states, the spec opens its statement with that place: `` `queue.ts` `drain`. `` The checker confirms the place exists (`stale-site`).
+1. When one place in the code does what a spec states, the spec names that place on a `Site:` line of its own, such as `` Site: `queue.ts:drain` ``. The line follows the statement, and follows the `Derives from:` line if the spec has one. The statement holds only the claim. The checker confirms the place exists, and reports a statement that names a place (`stale-site`).
 2. Where two modules share a name, give a path that ends in the file, such as `dom/error.ts`.
 3. A place that answers for several specs gets one spec under each. The stem states the claim, not the place.
 4. Run `tree --suspect`. It lists specs with many tests and no nested specs. Such a spec probably states several claims. Split it into nested specs.

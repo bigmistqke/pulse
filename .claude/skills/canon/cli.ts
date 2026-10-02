@@ -198,6 +198,8 @@ interface Element {
   parent?: string;
   label?: string;
   statement?: string;
+  /** The place in the code its "Site:" line names. */
+  site?: string;
 }
 
 interface Anchor {
@@ -311,6 +313,12 @@ const OVERFULL_HEADING = /^#{1,6}[ \t]+@[a-z]+[ \t]+\S+[ \t]+\S.*$/gm;
  * marking a term inside it changes nothing about what is read out.
  */
 const STATEMENT = /^> (.+)$/m;
+/**
+ * A spec's site — the one place in the code that does what it states, on a
+ * line of its own in the body. The statement stays the claim alone, so a tree
+ * shows what the system does rather than where.
+ */
+const SITE = /^Site: (.+)$/m;
 /** Any heading, including a plain section one — it ends the unit above it. */
 const ANY_HEADING = /^(#{1,6})[ \t]+/gm;
 /** A `<tr>`/`<td>` unit in an HTML table the document kept. */
@@ -353,6 +361,9 @@ function scanMarkdown(src: string): { withId: Element[]; anchors: Anchor[] } {
   for (const unit of units) {
     const body = md.slice(unit.start, unit.end).split('\n').slice(1).join('\n');
     unit.statement = STATEMENT.exec(body)?.[1]?.trim();
+    // Only the unit's own text, before its first nested heading, names its site.
+    const own = body.split(/^#{1,6}[ \t]/m)[0];
+    unit.site = SITE.exec(own)?.[1]?.trim();
   }
   withId.push(...units);
 
@@ -848,7 +859,7 @@ const MEANING: Record<FindingName, string> = {
   unreachable:
     'heading whose rendered anchor is not the id cited — a dead link',
   untested: 'spec or exception no test pins — cited, but only from prose',
-  'stale-site': 'unit naming a code site that is not there'
+  'stale-site': 'unit naming a code site that is not there, or naming it in its statement'
 };
 
 interface Unit {
@@ -857,8 +868,9 @@ interface Unit {
   kind: Kind;
   /** The kinds this unit cites — not which units, since only the kind is owed. */
   cites: Set<Kind>;
-  /** Its statement, which is where a spec names its site. */
   statement?: string;
+  /** The place in the code its "Site:" line names. */
+  site?: string;
 }
 
 interface Analysis {
@@ -970,7 +982,8 @@ function analyse(write: boolean): Analysis {
           id: el.id,
           kind,
           cites: new Set(),
-          statement: el.statement
+          statement: el.statement,
+          site: el.site
         });
     }
 
@@ -1396,8 +1409,8 @@ function analyse(write: boolean): Analysis {
 
   // stale-site — a unit naming a code site that is not there.
   //
-  // A spec that answers for one place opens by naming it:
-  // `` `queue.ts` `drain` ``. That is a claim about the code, and the only one
+  // A spec that answers for one place names it on a line of its own:
+  // `` Site: `queue.ts:drain` ``. That is a claim about the code, and the only one
   // in these documents a machine can check against the code itself — whether
   // every place has a spec cannot be, so this is the half that can.
   //
@@ -1409,7 +1422,10 @@ function analyse(write: boolean): Analysis {
   // `dom/queue.ts`. Two modules can share a name, so a bare name finds every
   // module called that, and the symbol has to be in one of them; a path
   // narrows the search to the modules whose path ends in it.
-  const NAMES_A_SITE = /^`([\w./-]+\.tsx?)`\s+`([^`]+)`/;
+  const NAMES_A_SITE = /^`([\w./-]+\.tsx?):([^`\s]+)`$/;
+  // A statement opening with a file in either form, `queue.ts:drain` or
+  // `queue.ts` `drain`, is a site written where the claim belongs.
+  const OPENS_WITH_A_SITE = /^`[\w./-]+\.tsx?(:|`\s+`)/;
   const modules: string[] = [];
   for (const root of SOURCES) {
     const abs = join(ROOT, root);
@@ -1417,9 +1433,21 @@ function analyse(write: boolean): Analysis {
     modules.push(...allModules(abs));
   }
   for (const [key, unit] of units) {
-    if (!CLAIMS.includes(unit.kind) || !unit.statement) continue;
-    const named = NAMES_A_SITE.exec(unit.statement);
-    if (!named) continue;
+    if (!CLAIMS.includes(unit.kind)) continue;
+    // A site in the statement hides the claim behind where it is made.
+    if (unit.statement && OPENS_WITH_A_SITE.test(unit.statement)) {
+      findings['stale-site'].push(
+        `${key} names its site in its statement; move it to a "Site:" line`
+      );
+    }
+    if (!unit.site) continue;
+    const named = NAMES_A_SITE.exec(unit.site);
+    if (!named) {
+      findings['stale-site'].push(
+        `${key} has a "Site:" line that is not \`file.ts:symbol\`: ${unit.site}`
+      );
+      continue;
+    }
     const [, file, symbol] = named;
     const paths = modules.filter((m) => m === file || m.endsWith(`/${file}`));
     if (paths.length === 0) {
