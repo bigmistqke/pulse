@@ -1,7 +1,7 @@
 import { cancelRecompute, computed as r3Computed, getContext as r3GetContext, isRecomputeQueued, pull as r3Pull, read as r3Read, requeueRecompute as r3RequeueRecompute, setSignal as r3SetSignal, untrack as r3Untrack, unwatched, type Computed as R3Computed, type Signal as R3Signal } from 'r3'
 import { isGeneratorFunction, NotReadyYet, resolvedPromise, track, type PromiseState, type PipelineRead, type Resolved } from './async'
 import { runStage, resumeStage, takeGeneratorCleanups, type StageOutcome } from './driver'
-import { replayDeps, snapshotDeps, type DepRecord } from './dep-replay'
+import { depsChanged, replayDeps, snapshotDeps, type DepRecord } from './dep-replay'
 import { isPromise } from './is-promise'
 import { sameValueZero } from './same-value-zero'
 import { getOwner, routeError, registerWithOwner } from './owner'
@@ -616,8 +616,11 @@ function makeStageNode(
         const { dropped } = waiting
         waiting = null
         // Nothing this stage reads changed while it waited, and it dropped no
-        // run of its own: the value it holds still answers its inputs.
-        if (!dropped && lastRunDeps !== null && !replayDeps(lastRunDeps)) {
+        // run of its own: the value it holds still answers its inputs. The
+        // check links nothing, so a run that follows depends only on what it
+        // reads; the replay links the old dependencies only when the stage
+        // stays as it is.
+        if (!dropped && lastRunDeps !== null && !depsChanged(lastRunDeps) && !replayDeps(lastRunDeps)) {
           setPendingSig(false)
           return null
         }
@@ -663,9 +666,12 @@ function makeStageNode(
       let resumedFromSuspension = false
       let outcome: StageOutcome
       if (retainedGen !== null) {
-        // A generator is paused. Replaying the recorded dependencies keeps them
-        // linked for this run and reports whether any of them changed.
-        const changed = replayDeps(depRecords) || !Object.is(input, suspendedInput)
+        // A generator is paused. The check links nothing, so a fresh generator
+        // that replaces this one depends only on what it reads. Only when the
+        // generator stays does the replay link the recorded dependencies for
+        // this run.
+        const changed =
+          !Object.is(input, suspendedInput) || depsChanged(depRecords) || replayDeps(depRecords)
         const resumption = resumeWith
         resumeWith = null
         if (changed) {

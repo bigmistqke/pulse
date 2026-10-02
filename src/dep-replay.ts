@@ -1,5 +1,6 @@
 // src/dep-replay.ts
 import {
+  pull as r3Pull,
   read as r3Read,
   type Computed as R3Computed,
   type Link,
@@ -63,4 +64,23 @@ export function replayDeps(records: readonly DepRecord[]): boolean {
     if (!Object.is(r3Read(record.dep), record.value)) changed = true
   }
   return changed
+}
+
+/**
+ * Report whether any recorded dependency changed, without linking any of them.
+ *
+ * A caller that may run its body afresh asks this first. Replaying would link
+ * the old dependencies into the run, and a fresh body that no longer reads one
+ * of them would stay subscribed to it. `pull` brings a computed dependency up
+ * to date without linking it, so the comparison sees its current value.
+ *
+ * A dependency that only a tracked read brings up to date still holds its old
+ * value here. The caller replays when this reports no change, and the replay's
+ * own comparison catches that case.
+ */
+export function depsChanged(records: readonly DepRecord[]): boolean {
+  for (const record of records) {
+    if (!Object.is(r3Pull(record.dep), record.value)) return true
+  }
+  return false
 }
