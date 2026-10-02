@@ -5,11 +5,30 @@ description: The methodology that governs all work on a project with a CANON.md 
 
 # Canon
 
+## Terms
+
+- Theory: the knowledge, held by the people who build a program, of how the program meets the world it serves. Peter Naur names it in [Programming as Theory Building](https://gwern.net/doc/cs/algorithm/1985-naur.pdf). Whoever holds the theory can do three things:
+  1. Explain how each part of the program matches some affair of the world of the people using it.
+  2. Explain why each part is the way it is, and what it would cost to make it otherwise.
+  3. Answer a request for change by seeing how it fits what is already there, rather than patching where the request lands.
+
+  Naur argues that the program text cannot carry the theory. A program whose builders have left is dead, even while it runs, because nobody can still change it well. The canon is a best effort to write the theory down, and the project works towards it with every change.
+
+  The canon works in both directions, and the protocol below spells out each one. Downwards, the theory decides the tests and the code ([section 4](#4-adding-or-changing-behaviour)). Upwards, the code tests the theory ([section 5](#5-fixing-a-defect)): a defect climbs to the spec, axiom or fact that is missing. A sharper theory may also call for a stronger structure ([section 16](#16-structure)).
+- Canon: the documents, `CANON.md` by default, that state the theory as units, linked into a derivation graph that tests cite and a checker holds closed.
+- Unit: one claim of the canon, with a kind, a stem and a statement. The kinds are listed in section 2.
+- Derivation: the edge from a unit to the unit it follows from, by nesting or on a `Derives from:` line. The derivations together answer Naur's second question, why each part is the way it is.
+- Flow: how directly the units follow from their parents. In a strong flow, few axioms and facts force many specs, and each "This follows because" sentence is short.
+- Owner of the design: the person who decides the project's values. You propose, and the owner judges.
+- Session: one run of work by an agent, which starts without the theory and must rebuild it from the canon.
+
+## Protocol
+
 This protocol governs all work on the project. Follow it in every session, for every change and every choice.
 
 `CANON.md` is the project. It states what the system does and why, as claims that tests cite. The code and the tests express the canon and follow from it. The canon is not documentation of the code.
 
-Every session starts without knowing why the code is the way it is. Peter Naur calls that knowledge the theory of a program, and says the program text alone cannot carry it ([Programming as Theory Building](https://gwern.net/doc/cs/algorithm/1985-naur.pdf)). The canon holds the theory. Each session rebuilds the theory from the canon, works under it, and writes back what it decided. The canon is how the project remembers across sessions.
+Every session starts without the theory: it does not know why the code is the way it is, and the code cannot tell it. The canon holds the theory. Each session rebuilds the theory from the canon, works under it, and writes back what it decided. The canon is how the project remembers across sessions.
 
 Documentation rots because nothing checks it. The canon cannot rot without the checker failing: every claim has a test, and the checker reports every claim, test or link that goes stale.
 
@@ -61,7 +80,7 @@ Axioms state how the world should be. Facts state how the platform is. A spec, t
 ## 3. Before you change code
 
 1. Read the units that cover the area you will change.
-2. Answer three questions from them:
+2. Answer three questions from them. They are the three things that whoever holds the [theory](#terms) can do:
    1. What does this code match in the world of the people using the system?
    2. Why is each part the way it is? The derivation lines answer this.
    3. How does the requested change fit what is already there?
