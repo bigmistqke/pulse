@@ -127,3 +127,44 @@ test('a change to an earlier stage abandons the later stage it has already reach
   expect(peek(list)).toBe('details of b')
   expect(shown.filter((v) => v !== undefined)).toEqual(['details of b'])
 })
+
+/**
+ * @canon spec-a-stage-run-afresh-depends-only-on-what-the-new-run-read
+ */
+test('a stage that waited for the stage before it does not re-run on a source its fresh run did not read', async () => {
+  // Stage 2 reads `side` only while `flag` is true. While stage 1 fetches,
+  // `flag` turns false; when the fetch lands, stage 2 runs again without
+  // reading `side`, so a change to `side` afterwards must leave it alone.
+  const lists = deferredFetches<number, string>()
+  const [version, setVersion] = signal(1)
+  const [flag, setFlag] = signal(true)
+  const [side, setSide] = signal(0)
+  let laterRuns = 0
+
+  const c = computed(
+    () => lists.fetch(version()),
+    (value: string) => {
+      laterRuns++
+      if (flag()) side()
+      return value
+    },
+  )
+  effect(() => c())
+
+  lists.answer(1, 'one')
+  await tick()
+  expect(peek(c)).toBe('one')
+
+  setVersion(2)
+  await tick() // stage 1 is fetching version 2, and stage 2 waits for it
+  setFlag(false)
+  await tick()
+  lists.answer(2, 'two')
+  await tick()
+  expect(peek(c)).toBe('two')
+  const runsAfterLanding = laterRuns
+
+  setSide(1)
+  await tick()
+  expect(laterRuns).toBe(runsAfterLanding)
+})

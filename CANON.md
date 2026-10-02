@@ -47,6 +47,7 @@ This document is the project. It holds the theory of pulse: why it is the way it
       - [`@spec a-committed-read-and-write-go-through-r3`](#spec-a-committed-read-and-write-go-through-r3) — With the root as the ambient scope, a write sets the r3 signal and a read returns the r3 value.
     - [`@spec pulse-reaches-r3-only-through-its-exports`](#spec-pulse-reaches-r3-only-through-its-exports) — Pulse uses r3 through the functions r3 exports. Where pulse needs more, the fork gains an export instead of pulse reaching into r3's internals.
     - [`@spec a-run-replaces-its-dependencies-with-what-it-read`](#spec-a-run-replaces-its-dependencies-with-what-it-read) — A run of a computation leaves it depending on exactly the sources that run read. A source it read before but not in its latest run no longer re-runs it.
+      - [`@spec a-stage-run-afresh-depends-only-on-what-the-new-run-read`](#spec-a-stage-run-afresh-depends-only-on-what-the-new-run-read) — A stage that runs afresh in place of an earlier run depends only on what the new run read. Comparing the earlier run's recorded inputs, to decide whether to run afresh, subscribes the stage to none of them.
       - [`@exception a-throwing-run-keeps-dependencies-it-did-not-reread`](#exception-a-throwing-run-keeps-dependencies-it-did-not-reread) — A computed whose run throws partway stays subscribed to sources it read in an earlier run but not in the throwing one. A later change to such a source re-runs it.
   - [`@spec one-scheduler-flushes-every-consumer`](#spec-one-scheduler-flushes-every-consumer) — Every write asks one injectable [scheduler](#term-scheduler) for a flush. The default scheduler batches every request made in one tick into a single flush on a microtask; the synchronous scheduler flushes on each request.
     - [`@spec a-promise-settling-requests-a-flush-from-the-active-scheduler`](#spec-a-promise-settling-requests-a-flush-from-the-active-scheduler) — When a promise a node is waiting on settles, pulse asks the active scheduler for a flush, the same way a write does. The readers re-run in that flush.
@@ -660,6 +661,16 @@ Derives from: [`fact-r3-rebuilds-dependencies-each-run-and-ignores-an-equal-writ
 This follows because pulse uses r3 as it is, and r3 rebuilds a node's dependency list on every run: pulse inherits that tracking rather than keeping dependencies a run no longer read.
 
 r3 rebuilds a node's dependency list on every run, so a dependency that is read only under a condition comes and goes with that condition.
+
+##### @spec a-stage-run-afresh-depends-only-on-what-the-new-run-read
+
+> A stage that runs afresh in place of an earlier run depends only on what the new run read. Comparing the earlier run's recorded inputs, to decide whether to run afresh, subscribes the stage to none of them.
+
+Derives from: [`spec-a-changed-input-replaces-the-paused-generator`](#spec-a-changed-input-replaces-the-paused-generator)
+
+This follows because a run leaves its stage depending on exactly what that run read, and the comparison is not part of the new run.
+
+A stage runs afresh in place of an earlier run in two cases. A changed input replaces a paused generator, or a stage that waited for the stage before it runs again. In `computed(function* () { if (flag()) side(); yield* from(request) })`, a change to `flag` replaces the paused generator with one that does not read `side`, and a later change to `side` no longer runs the stage.
 
 ##### @exception a-throwing-run-keeps-dependencies-it-did-not-reread
 

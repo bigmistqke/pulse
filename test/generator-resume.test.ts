@@ -738,3 +738,47 @@ test('a generator stage returning a pending promise stays reactive to its depend
 
   expect(peek(c)).toBe(50)
 })
+
+/**
+ * @canon spec-a-stage-run-afresh-depends-only-on-what-the-new-run-read
+ */
+test('a generator that replaced a paused one does not re-run on a source only the paused one read', async () => {
+  // The first generator reads `side` while `flag` is true. A change to `flag`
+  // replaces it with one that does not read `side`, so a change to `side`
+  // afterwards must leave the stage alone. The fresh generator still reads
+  // `flag`, so a change to `flag` must still restart it.
+  const [flag, setFlag] = signal(true)
+  const [side, setSide] = signal(0)
+  let bodyRuns = 0
+
+  const c = computed(function* () {
+    bodyRuns++
+    if (flag()) side()
+    const first: number = yield* from(new Promise<number>((resolve) => setTimeout(() => resolve(1), 50)))
+    const second: number = yield* from(new Promise<number>((resolve) => setTimeout(() => resolve(2), 50)))
+    return first + second
+  })
+
+  c()
+  await tick() // the first generator is paused on its first promise
+  setFlag(false) // replaces it with a generator that does not read `side`
+  c()
+  await tick()
+  expect(bodyRuns).toBe(2)
+
+  setSide(1)
+  c()
+  await tick()
+  expect(bodyRuns).toBe(2)
+
+  await ticks(8) // the fresh generator has passed its first pause and holds at its second
+  setSide(2)
+  c()
+  await tick()
+  expect(bodyRuns).toBe(2)
+
+  setFlag(true)
+  c()
+  await tick()
+  expect(bodyRuns).toBe(3)
+})
