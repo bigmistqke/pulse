@@ -5,7 +5,7 @@ import { depsChanged, replayDeps, snapshotDeps, type DepRecord } from './dep-rep
 import { isPromise } from './is-promise'
 import { sameValueZero } from './same-value-zero'
 import { getOwner, routeError, registerWithOwner } from './owner'
-import { peekValue, writeValue } from './scope'
+import { getCurrentTracker, peekValue, writeValue, type AdoptedResult, type Node as ScopeNode, type Slot } from './scope'
 import { makeAccessor, NODE, signal, signalWithNode, type Accessor, type Signal } from './signal'
 import { registerPending, lookupPending } from './pending'
 import { registerError, lookupError } from './error'
@@ -160,6 +160,17 @@ function detachedComputed<T>(fn: () => T): R3Computed<T> {
   return r3Untrack(() => r3Computed(fn))
 }
 
+/** Two values are the same result: identical, or two promises fulfilled to the
+ *  same value. A stage publishes a fresh promise object on every settle, so a
+ *  speculation and committed state can hold different promises for one value. */
+function sameResolved(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true
+  if (!isPromise(a) || !isPromise(b)) return false
+  const left = track(a as Promise<unknown>)
+  const right = track(b as Promise<unknown>)
+  return left.status === 'fulfilled' && right.status === 'fulfilled' && Object.is(left.value, right.value)
+}
+
 /**
  * Wrap a single stage in an r3 computed that handles suspension propagation.
  * If `inputAccessor` is null, the stage has no input (it is stage 0). Otherwise
@@ -218,6 +229,14 @@ function makeStageNode(
   // because the handler clears `suspendedOn` before it kicks.
   let retainedGen: Generator<unknown, unknown, unknown> | null = null
   let depRecords: DepRecord[] = []
+  // The input each speculative run of this stage ran on, by the slot it ran
+  // into. Only a run whose result is the stage's own result is recorded: one
+  // that handed back a pending upstream, or a generator paused partway, is not.
+  const speculativeRuns = new WeakMap<Slot, { input: unknown }>()
+  // A result a committing speculation derived for this stage, held from the
+  // commit until the commit's flush. The next fresh run takes it instead of
+  // running the stage, when nothing it was derived from has changed since.
+  let adopted: { input: unknown; value: unknown; sources: DepRecord[] } | null = null
   let resumeWith: StashedResolution | null = null
   // True exactly while `suspendedOn` holds the promise `retainedGen` itself
   // paused on (yielded, and the driver returned it pending). Discarding that
@@ -366,7 +385,45 @@ function makeStageNode(
       }
     }
     const outcome = runStage(stage, input)
+    const slot = getCurrentTracker()
+    if (slot !== undefined && !(outcome.pending && outcome.gen !== undefined)) {
+      speculativeRuns.set(slot, { input })
+    }
     return outcome.pending ? outcome.promise : outcome.value
+  }
+  ;(publishedNode as ScopeNode).adopt = (result: AdoptedResult | null): void => {
+    if (result === null) {
+      adopted = null
+      return
+    }
+    const run = speculativeRuns.get(result.slot)
+    if (run === undefined) return
+    adopted = {
+      input: run.input,
+      value: result.slot.cached,
+      sources: result.sources
+        .filter(({ node }) => node.backing !== undefined)
+        .map(({ node, value }) => ({ dep: node.backing!, value })),
+    }
+  }
+
+  /** Take the result a committing speculation derived for this stage, when it
+   *  was derived from the same input and every source still holds what the
+   *  speculation saw. The comparison links nothing; only a result that is
+   *  taken links its sources, as the run it replaces would have. */
+  const takeAdopted = (input: unknown): StageOutcome | null => {
+    const result = adopted
+    adopted = null
+    if (result === null || !sameResolved(result.input, input)) return null
+    for (const { dep, value } of result.sources) {
+      if (!sameResolved(value, r3Pull(dep))) return null
+    }
+    for (const { dep } of result.sources) r3Read(dep)
+    if (!isPromise(result.value)) return { pending: false, value: result.value }
+    const state = track(result.value as Promise<unknown>)
+    if (state.status === 'fulfilled') return { pending: false, value: state.value }
+    if (state.status === 'rejected') throw state.reason
+    return { pending: true, promise: result.value as Promise<unknown> }
   }
 
   // Publish a fresh fulfilled promise straight to the r3 backing node. This runs
@@ -679,9 +736,11 @@ function makeStageNode(
           // computation is stale. A generator cannot be rewound, only resumed
           // forward or replaced — so replace it.
           discardGen()
-          outcome = runStage(stage, input, (gen) => {
-            retainedGen = gen
-          })
+          outcome =
+            takeAdopted(input) ??
+            runStage(stage, input, (gen) => {
+              retainedGen = gen
+            })
         } else if (resumption === null) {
           // The body re-ran while the generator is still waiting and nothing
           // has settled. Stay paused; the dependencies were re-read above, so
@@ -708,9 +767,11 @@ function makeStageNode(
         // (`resumeWith` is non-null only while the retained generator is the
         // one it belongs to) holds even if something upstream left it set.
         resumeWith = null
-        outcome = runStage(stage, input, (gen) => {
-          retainedGen = gen
-        })
+        outcome =
+          takeAdopted(input) ??
+          runStage(stage, input, (gen) => {
+            retainedGen = gen
+          })
       }
 
       // A generator that did not pause has run to completion — whether it was

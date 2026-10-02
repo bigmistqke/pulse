@@ -36,6 +36,17 @@ export interface Node<T = unknown> {
   /** Committed state lives in this r3 node (ADR 0010). Absent = pure-overlay
    *  node (test-only until the public API is rewired in Plan 4). */
   backing?: R3Signal<T> | R3Computed<T>
+  /** Hands a committed derivation the result a speculation derived for it, at
+   *  commit, with the value the speculation saw for each source the slot read.
+   *  Called with null after the commit's flush, to drop a result the
+   *  derivation did not take. Absent on a node no speculation can derive. */
+  adopt?: (result: AdoptedResult | null) => void
+}
+
+/** A derived result a commit hands to its committed derivation. */
+export interface AdoptedResult {
+  slot: Slot
+  sources: Array<{ node: Node; value: unknown }>
 }
 
 /** Marks a slot whose cached value is stale (or not yet computed) and must be
@@ -381,14 +392,21 @@ export function commit(scope: Scope): void {
   for (const node of scope.writeSet) {
     promotions.push({ node, value: scope.slots.get(node)!.cached })
   }
-  closeScopeEdges(scope)
   const parent = scope.parent ?? ROOT_SCOPE
+  // What the speculation derived is part of it. A clean derived result was
+  // derived from exactly the state this commit produces, so its committed
+  // derivation may take it instead of running again. It is collected before
+  // the slots are dropped, with what the speculation saw for each source.
+  const adoptions = parent === ROOT_SCOPE ? collectAdoptions(scope) : []
+  closeScopeEdges(scope)
   if (parent === ROOT_SCOPE) {
     for (const { node, value } of promotions) {
       writeCommitted(node, value)
     }
+    for (const { node, result } of adoptions) node.adopt!(result)
     fireSettle(scope, 'committed')
     stabilize()
+    for (const { node } of adoptions) node.adopt!(null)
   } else {
     for (const { node, value } of promotions) {
       writeSpeculative(node, parent, value)
@@ -396,6 +414,23 @@ export function commit(scope: Scope): void {
     fireSettle(scope, 'committed')
   }
   scope.status = 'committed'
+}
+
+/** The clean derived results a committing scope holds, for each derivation
+ *  that can take one, with the value the scope saw for every source each
+ *  result read. */
+function collectAdoptions(scope: Scope): Array<{ node: Node; result: AdoptedResult }> {
+  const adoptions: Array<{ node: Node; result: AdoptedResult }> = []
+  for (const node of scope.readSet) {
+    const slot = scope.slots.get(node)
+    if (slot === undefined || slot.cached === DIRTY || node.adopt === undefined) continue
+    const sources = slot.deps.map((edge) => ({
+      node: edge.source,
+      value: runInScope(scope, undefined, () => peekValue(edge.source)),
+    }))
+    adoptions.push({ node, result: { slot, sources } })
+  }
+  return adoptions
 }
 
 /** Discard a scope: tear down edges + drop slots (no promotion), then fire
