@@ -91,10 +91,10 @@ const REFERENCES = CONFIG.references ?? [];
 const COMMAND = CONFIG.command ?? 'pnpm canon';
 
 /**
- * The protocol document, which carries the generated table of kinds. It sits
+ * The protocol document that carries the generated table of kinds. It sits
  * beside this file, so the table follows the tool rather than the project.
  */
-const PROTOCOL = join(dirname(fileURLToPath(import.meta.url)), 'SKILL.md');
+const PROTOCOL = join(dirname(fileURLToPath(import.meta.url)), 'writing-units.md');
 
 // ---------------------------------------------------------------------------
 // The ruleset is driven entirely by the id prefix.
@@ -109,7 +109,7 @@ const PROTOCOL = join(dirname(fileURLToPath(import.meta.url)), 'SKILL.md');
 type Kind = 'axiom-' | 'fact-' | 'spec-' | 'exception-' | 'term-';
 
 /**
- * kind → what a reader reaches for it for. Generated into `SKILL.md` beside
+ * kind → what a reader reaches for it for. Generated into `writing-units.md` beside
  * `OWES`, so the table there is this table and cannot drift from it.
  */
 const MEANS: Record<Kind, string> = {
