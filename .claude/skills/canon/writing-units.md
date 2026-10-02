@@ -103,10 +103,15 @@ _Avoid_: current state, now
 
 ## 7. Places in the code
 
-1. When one place in the code does what a spec states, the spec names that place on a `Site:` line of its own, such as `` Site: `queue.ts:drain` ``. The line follows the statement, and follows the `Derives from:` line if the spec has one. The statement holds only the claim. The checker confirms the place exists, and reports a statement that names a place (`stale-site`).
-2. Where two modules share a name, give a path that ends in the file, such as `dom/error.ts`.
-3. A place that answers for several specs gets one spec under each. The stem states the claim, not the place.
-4. Run `tree --suspect`. It lists specs with many tests and no nested specs. Such a spec probably states several claims. Split it into nested specs.
+1. A site is optional. Give a spec a site only when one place in the code does what it states, and one of these holds:
+   1. The claim does not name the place, and a reader could not find it from the claim. "A dirty slot is marked with its own symbol" does not say where that happens, so it names `scope.ts:DIRTY`.
+   2. A parent spec holds at several places, and each nested spec pins one of them. "Closing runs callbacks newest first" holds in three places, and each nested spec names one, such as `owner.ts:disposeOwner`.
+
+   Outside the second case, a claim that already names its place needs no site. "`peek(x)` returns the last resolved value" points to `peek`, and a site would only repeat it.
+2. Write the site on a `Site:` line of its own, such as `` Site: `queue.ts:drain` ``. The line follows the statement, and follows the `Derives from:` line if the spec has one. The statement holds only the claim. The checker confirms the place exists, and reports a statement that names a place (`stale-site`).
+3. Where two modules share a name, give a path that ends in the file, such as `dom/error.ts`.
+4. A place that answers for several specs gets one spec under each. The stem states the claim, not the place.
+5. Run `tree --suspect`. It lists specs with many tests and no nested specs. Such a spec probably states several claims. Split it into nested specs.
 
 ## 8. Tests
 
